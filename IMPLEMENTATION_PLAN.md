@@ -18,7 +18,7 @@ Spec: `docs/superpowers/specs/2026-07-03-transcript-chunking-design.md`
 **Goal**: parse edited transcript into blocks; resolve each to a word-index range + content time span using stable IDs (+ constrained intra-line fuzzy trim).
 **Success**: repeated-phrase transcript disambiguates correctly; deletes/splits/intra-line trims map right; missing-tag fallback warns.
 **Tests**: the failure cases from the spec.
-**Status**: Not Started
+**Status**: Complete
 
 ## Stage 4: Boundary snapping + edit-plan.json (`editplan.py`, part 2)
 **Goal**: snap each block's boundaries outward to silence edges; emit versioned edit-plan.json with statuses/candidates.
