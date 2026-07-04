@@ -22,6 +22,8 @@ class TranscriptPageModel: ViewModel {
   var words: IdentifiedArrayOf<WordViewState> = []
   var runTogetherMaxGapMs: Double = 30
   var isLoading = false
+  var selectionAnchorID: Word.ID?
+  var selectionFocusID: Word.ID?
 
   // MARK: - Display Text
   let transcriptCaption = "TRANSCRIPT"
@@ -30,6 +32,25 @@ class TranscriptPageModel: ViewModel {
   let sensitivityLabel = "Run-together sensitivity"
   let sensitivityMinMs = 10.0
   let sensitivityMaxMs = 80.0
+  let clearButtonLabel = "Clear"
+
+  // MARK: - View Helpers
+  var hasSelection: Bool { selectionAnchorID != nil }
+  var selectionSummary: String {
+    guard let range = selectedIDRange else { return "No selection" }
+    let n = range.count
+    return "\(n) word\(n == 1 ? "" : "s") selected"
+  }
+  var selectedSampleRange: Range<Int>? {
+    guard let range = selectedIDRange, let plan = editPlan,
+          let first = plan.words.first(where: { $0.id == range.lowerBound }),
+          let last = plan.words.first(where: { $0.id == range.upperBound })
+    else { return nil }
+    let sr = Double(plan.source.sampleRate)
+    let s = first.startSample ?? Int(first.start * sr)
+    let e = last.endSample ?? Int((last.end ?? last.start) * sr)
+    return s..<e
+  }
 
   // MARK: - User Actions
   func viewAppeared() async {
@@ -37,6 +58,22 @@ class TranscriptPageModel: ViewModel {
     isLoading = true
     defer { isLoading = false }
     editPlan = try? await engine.loadPlan(planURL)
+    recomputeWords()
+  }
+
+  func wordTapped(_ id: Word.ID) {
+    if selectionAnchorID == nil {
+      selectionAnchorID = id; selectionFocusID = id            // first click
+    } else if selectionAnchorID == selectionFocusID {
+      selectionFocusID = id                                     // second click extends
+    } else {
+      selectionAnchorID = id; selectionFocusID = id             // third click resets
+    }
+    recomputeWords()
+  }
+
+  func clearSelectionTapped() {
+    selectionAnchorID = nil; selectionFocusID = nil
     recomputeWords()
   }
 
@@ -48,9 +85,14 @@ class TranscriptPageModel: ViewModel {
       WordViewState(
         id: w.id, text: w.text,
         startSample: w.startSample, endSample: w.endSample,
-        isSelected: false,
+        isSelected: selectedIDRange?.contains(w.id) ?? false,
         isRunTogether: red.contains(w.id)
       )
     })
+  }
+
+  private var selectedIDRange: ClosedRange<Word.ID>? {
+    guard let a = selectionAnchorID, let f = selectionFocusID else { return nil }
+    return min(a, f)...max(a, f)
   }
 }
