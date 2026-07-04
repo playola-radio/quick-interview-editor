@@ -15,7 +15,6 @@ import tempfile
 from pathlib import Path
 
 from . import aiff_markers
-from .aiff_markers import Marker
 from .audio import convert_to_aiff, read_aiff_mono
 from .boundaries import snap_boundaries
 from .editplan import (
@@ -176,11 +175,10 @@ def run_cut(source: Path, edit_path: Path):
     total_samples = len(mono)
     silences = detect_silences(mono, sr, **SILENCE_PARAMS)
 
-    # Every word is a marker candidate; the slicer keeps those inside each slice.
-    all_markers = [
-        Marker(id=w.id, position=round(w.start * sr), name=w.text)
-        for w in transcript.words
-    ]
+    # Every word is a marker candidate; the slicer keeps those inside each
+    # slice. build_markers enforces strictly-increasing positions so colliding
+    # timestamps can't stack or reorder inside a slice.
+    all_markers = build_markers(transcript.words, sr)
 
     resolved = []
     for b in blocks:

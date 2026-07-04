@@ -79,6 +79,28 @@ def test_slice_clamps_out_of_range_bounds():
     assert len(_read_frames(out)) == 50  # clamped to available frames
 
 
+def test_cut_markers_stay_distinct_through_the_slicer():
+    # colliding timestamps must not stack in a slice (regression via build_markers)
+    from logic_markers.cli import build_markers
+    from logic_markers.transcribe import Word as W
+
+    words = [W("a", 0.001), W("b", 0.001), W("c", 0.001)]
+    markers = build_markers(words, 44100)
+    out = slice_aiff(_ramp_aiff(1000), 0, 1000, markers)
+    _, chunks = aiff_markers.parse_chunks(out)
+    md = dict(chunks)[b"MARK"]
+    count = struct.unpack(">H", md[0:2])[0]
+    positions, pos = [], 2
+    for _ in range(count):
+        positions.append(struct.unpack(">I", md[pos + 2 : pos + 6])[0])
+        nlen = md[pos + 6]
+        adv = 6 + 1 + nlen
+        adv += adv & 1
+        pos += adv
+    assert positions == sorted(positions)
+    assert len(set(positions)) == len(positions)  # all distinct
+
+
 def test_read_aiff_mono_downmixes_and_reports_rate():
     from logic_markers.audio import read_aiff_mono
 
