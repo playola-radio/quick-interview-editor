@@ -51,6 +51,8 @@ class TranscriptPageModel: ViewModel {
     let e = last.endSample ?? Int((last.end ?? last.start) * sr)
     return s..<e
   }
+  var runTogetherCount: Int { words.filter(\.isRunTogether).count }
+  var runTogetherCountLabel: String { "\(runTogetherCount) run-together" }
 
   // MARK: - User Actions
   func viewAppeared() async {
@@ -74,6 +76,11 @@ class TranscriptPageModel: ViewModel {
 
   func clearSelectionTapped() {
     selectionAnchorID = nil; selectionFocusID = nil
+    recomputeWords()
+  }
+
+  func sensitivityChanged(_ ms: Double) {
+    runTogetherMaxGapMs = ms
     recomputeWords()
   }
 
