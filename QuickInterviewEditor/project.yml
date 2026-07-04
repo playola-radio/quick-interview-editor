@@ -46,6 +46,8 @@ targets:
     platform: macOS
     sources:
       - path: QuickInterviewEditorTests
+      - path: Resources/Fixtures/edit-plan.json
+        buildPhase: resources
     settings:
       base:
         SWIFT_VERSION: "6.0"
