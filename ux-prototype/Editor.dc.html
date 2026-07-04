@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="_ds/playola-ios-7aa719b6-89db-4245-bc89-edf8e7ed2a45/styles.css">
+  <script src="_ds/playola-ios-7aa719b6-89db-4245-bc89-edf8e7ed2a45/_ds_bundle.js"></script>
+  <style>
+    *{box-sizing:border-box;}
+    .pw-scroll::-webkit-scrollbar{height:8px;width:8px;}
+    .pw-scroll::-webkit-scrollbar-thumb{background:#333;border-radius:6px;}
+    .pw-scroll::-webkit-scrollbar-track{background:transparent;}
+  </style>
+</helmet>
+<div style="width:{{winW}};background:#0c0c0c;border:1px solid #262626;border-radius:14px;overflow:hidden;box-shadow:0 30px 90px rgba(0,0,0,.65);font-family:Inter,system-ui,sans-serif;">
+  <div style="display:flex;align-items:center;gap:8px;padding:12px 16px;background:linear-gradient(#1c1c1c,#151515);border-bottom:1px solid #242424;">
+    <div style="display:flex;gap:8px;">
+      <span style="width:12px;height:12px;border-radius:50%;background:#ff5f57;"></span>
+      <span style="width:12px;height:12px;border-radius:50%;background:#febc2e;"></span>
+      <span style="width:12px;height:12px;border-radius:50%;background:#28c840;"></span>
+    </div>
+    <div style="flex:1;text-align:center;font-size:13px;color:#9a9a9a;font-weight:500;letter-spacing:.01em;">{{title}}</div>
+    <div style="width:52px;"></div>
+  </div>
+
+  <div style="display:flex;align-items:center;gap:9px;padding:9px 14px;background:#111;border-bottom:1px solid #222;">
+    <button onClick="{{onPlay}}" style="width:34px;height:34px;border-radius:9px;border:none;background:#cc6666;color:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer;">{{playIcon}}</button>
+    <div style="font-variant-numeric:tabular-nums;font-size:13px;color:#d4d4d4;min-width:104px;">{{curTime}} <span style="color:#565656;">/ {{totTime}}</span></div>
+    <button onClick="{{onSpeed}}" style="height:30px;padding:0 11px;border-radius:8px;border:1px solid #2f2f2f;background:#191919;color:#cfcfcf;font-size:12px;cursor:pointer;font-variant-numeric:tabular-nums;">{{speedLabel}}</button>
+    <div style="flex:1;"></div>
+    <button onClick="{{onUndo}}" style="height:30px;padding:0 12px;border-radius:8px;border:1px solid #2f2f2f;background:#181818;color:#cfcfcf;font-size:12px;cursor:pointer;">Undo</button>
+    <button onClick="{{onRedo}}" style="height:30px;padding:0 12px;border-radius:8px;border:1px solid #2f2f2f;background:#181818;color:#cfcfcf;font-size:12px;cursor:pointer;">Redo</button>
+    <div style="width:1px;height:20px;background:#2a2a2a;"></div>
+    <button onClick="{{onMarker}}" style="height:30px;padding:0 12px;border-radius:8px;border:1px solid #2f2f2f;background:#181818;color:#cfcfcf;font-size:12px;cursor:pointer;">+ Marker</button>
+    <div style="width:1px;height:20px;background:#2a2a2a;"></div>
+    <button onClick="{{onZoomOut}}" style="width:32px;height:30px;border-radius:8px;border:1px solid #2f2f2f;background:#181818;color:#cfcfcf;font-size:15px;cursor:pointer;">&minus;</button>
+    <div style="font-size:12px;color:#9a9a9a;min-width:44px;text-align:center;font-variant-numeric:tabular-nums;">{{zoomPct}}</div>
+    <button onClick="{{onZoomIn}}" style="width:32px;height:30px;border-radius:8px;border:1px solid #2f2f2f;background:#181818;color:#cfcfcf;font-size:15px;cursor:pointer;">+</button>
+    <button onClick="{{onFit}}" style="height:30px;padding:0 12px;border-radius:8px;border:1px solid #2f2f2f;background:#181818;color:#cfcfcf;font-size:12px;cursor:pointer;">Fit</button>
+    <sc-if value="{{isSidebar}}" hint-placeholder-val="{{true}}">
+      <div style="width:1px;height:20px;background:#2a2a2a;"></div>
+      <button onClick="{{onToggleSidebar}}" style="height:30px;padding:0 12px;border-radius:8px;border:1px solid #2f2f2f;background:#181818;color:#cfcfcf;font-size:12px;cursor:pointer;">{{sidebarLabel}}</button>
+    </sc-if>
+  </div>
+
+  <sc-if value="{{isSidebar}}" hint-placeholder-val="{{true}}">
+  <div style="display:flex;height:580px;">
+    <div style="flex:1;min-width:0;display:flex;flex-direction:column;border-right:1px solid #1e1e1e;">
+      <div style="padding:16px 18px 6px;">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px;">
+          <div style="font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:#6f6f6f;">Waveform</div>
+          <div style="font-size:11px;color:#565656;">click to scrub &middot; amber ticks = silence detected</div>
+        </div>
+        <div style="background:#090909;border:1px solid #1d1d1d;border-radius:10px;padding:12px 10px;">{{waveform}}</div>
+      </div>
+      <sc-if value="{{hasSelection}}" hint-placeholder-val="{{true}}">
+        <div style="padding:2px 18px 8px;">{{selectionPanel}}</div>
+      </sc-if>
+      <div style="flex:1;min-height:0;padding:8px 18px 18px;display:flex;flex-direction:column;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:9px;">
+          <div style="font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:#6f6f6f;">Transcript</div>
+          <div style="display:flex;align-items:center;gap:7px;font-size:11px;color:#7a7a7a;"><span style="width:9px;height:9px;border-radius:2px;background:#cc6666;display:inline-block;"></span> words that run together</div>
+        </div>
+        <div class="pw-scroll" style="flex:1;overflow:auto;background:#0e0e0e;border:1px solid #1d1d1d;border-radius:10px;padding:16px 18px;font-size:17px;line-height:2.05;color:#8f8f8f;">
+          <sc-for list="{{words}}" as="word" hint-placeholder-count="40"><span onClick="{{word.onClick}}" style="{{word.style}}">{{word.w}}</span></sc-for>
+        </div>
+      </div>
+    </div>
+    <sc-if value="{{sidebarOpen}}" hint-placeholder-val="{{true}}">
+    <div style="width:302px;flex-shrink:0;display:flex;flex-direction:column;background:#0a0a0a;">
+      <div style="padding:16px 16px 10px;display:flex;justify-content:space-between;align-items:center;">
+        <div style="font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:#6f6f6f;">Slices</div>
+        <div style="font-size:11px;color:#565656;">{{sliceCount}}</div>
+      </div>
+      <div class="pw-scroll" style="flex:1;overflow:auto;padding:0 14px;">
+        <sc-for list="{{slices}}" as="slice" hint-placeholder-count="2">
+          <div style="padding:12px 13px;border:1px solid #232323;border-radius:11px;background:#151515;margin-bottom:10px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+              <div style="font-weight:600;font-size:14px;color:#eee;">{{slice.name}}</div>
+              <div style="font-size:11px;color:#8a8a8a;font-variant-numeric:tabular-nums;">{{slice.dur}}</div>
+            </div>
+            <div style="font-size:11px;color:#6f6f6f;margin:3px 0 8px;font-variant-numeric:tabular-nums;">{{slice.range}}</div>
+            <div style="font-size:12.5px;color:#9a9a9a;line-height:1.45;margin-bottom:11px;">{{slice.snippet}}</div>
+            <div style="display:flex;gap:6px;">
+              <button onClick="{{slice.onPlay}}" style="flex:1;height:29px;border-radius:7px;border:1px solid #2f2f2f;background:#1c1c1c;color:#cfcfcf;font-size:12px;cursor:pointer;">Play</button>
+              <button onClick="{{slice.onExport}}" style="flex:1;height:29px;border-radius:7px;border:none;background:#2a2020;color:#e39393;font-size:12px;cursor:pointer;">Export</button>
+              <button onClick="{{slice.onDelete}}" style="width:29px;height:29px;border-radius:7px;border:1px solid #2f2f2f;background:#1c1c1c;color:#8a8a8a;font-size:13px;cursor:pointer;">&times;</button>
+            </div>
+          </div>
+        </sc-for>
+      </div>
+      <div style="padding:12px 16px 16px;border-top:1px solid #1c1c1c;">
+        <x-import component-from-global-scope="PlayolaUI.Button" size="sm" class="w-full" onClick="{{onExportAll}}" hint-size="100%,36px">Export all slices</x-import>
+      </div>
+    </div>
+    </sc-if>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{isStacked}}" hint-placeholder-val="{{true}}">
+  <div style="display:flex;flex-direction:column;">
+    <div style="padding:16px 20px 6px;">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px;">
+        <div style="font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:#6f6f6f;">Waveform</div>
+        <div style="font-size:11px;color:#565656;">click to scrub &middot; amber ticks = silence detected</div>
+      </div>
+      <div style="background:#090909;border:1px solid #1d1d1d;border-radius:10px;padding:12px 10px;">{{waveform}}</div>
+    </div>
+    <sc-if value="{{hasSelection}}" hint-placeholder-val="{{true}}">
+      <div style="padding:2px 20px 8px;">{{selectionPanel}}</div>
+    </sc-if>
+    <div style="padding:8px 20px 12px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:9px;">
+        <div style="font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:#6f6f6f;">Transcript</div>
+        <div style="display:flex;align-items:center;gap:7px;font-size:11px;color:#7a7a7a;"><span style="width:9px;height:9px;border-radius:2px;background:#cc6666;display:inline-block;"></span> words that run together</div>
+      </div>
+      <div class="pw-scroll" style="height:190px;overflow:auto;background:#0e0e0e;border:1px solid #1d1d1d;border-radius:10px;padding:16px 20px;font-size:18px;line-height:2.05;color:#8f8f8f;">
+        <sc-for list="{{words}}" as="word" hint-placeholder-count="40"><span onClick="{{word.onClick}}" style="{{word.style}}">{{word.w}}</span></sc-for>
+      </div>
+    </div>
+    <div style="border-top:1px solid #1e1e1e;background:#0a0a0a;padding:14px 20px 18px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:11px;">
+        <div style="display:flex;align-items:baseline;gap:10px;"><div style="font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:#6f6f6f;">Slices</div><div style="font-size:11px;color:#565656;">{{sliceCount}}</div></div>
+        <div style="width:180px;"><x-import component-from-global-scope="PlayolaUI.Button" size="sm" class="w-full" onClick="{{onExportAll}}" hint-size="100%,34px">Export all slices</x-import></div>
+      </div>
+      <div class="pw-scroll" style="display:flex;gap:12px;overflow-x:auto;padding-bottom:6px;">
+        <sc-for list="{{slices}}" as="slice" hint-placeholder-count="3">
+          <div style="flex:0 0 258px;padding:12px 13px;border:1px solid #232323;border-radius:11px;background:#151515;">
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+              <div style="font-weight:600;font-size:14px;color:#eee;">{{slice.name}}</div>
+              <div style="font-size:11px;color:#8a8a8a;font-variant-numeric:tabular-nums;">{{slice.dur}}</div>
+            </div>
+            <div style="font-size:11px;color:#6f6f6f;margin:3px 0 8px;font-variant-numeric:tabular-nums;">{{slice.range}}</div>
+            <div style="font-size:12.5px;color:#9a9a9a;line-height:1.45;margin-bottom:11px;height:36px;overflow:hidden;">{{slice.snippet}}</div>
+            <div style="display:flex;gap:6px;">
+              <button onClick="{{slice.onPlay}}" style="flex:1;height:29px;border-radius:7px;border:1px solid #2f2f2f;background:#1c1c1c;color:#cfcfcf;font-size:12px;cursor:pointer;">Play</button>
+              <button onClick="{{slice.onExport}}" style="flex:1;height:29px;border-radius:7px;border:none;background:#2a2020;color:#e39393;font-size:12px;cursor:pointer;">Export</button>
+              <button onClick="{{slice.onDelete}}" style="width:29px;height:29px;border-radius:7px;border:1px solid #2f2f2f;background:#1c1c1c;color:#8a8a8a;font-size:13px;cursor:pointer;">&times;</button>
+            </div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </div>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1160,&quot;height&quot;:700},&quot;layout&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;sidebar&quot;,&quot;stacked&quot;],&quot;default&quot;:&quot;sidebar&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
+const RED = '#cc6666';
+const h = React.createElement;
+
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    const P = [["So",0],["when",0],["I",0],["first",0],["started",0],["out,",0],["I",0],["honestly",0],["had",0],["no",0],["idea",0],["what",0],["I",0],["was",0],["doing.",0],
+      ["I",0],["kind",1],["of",1],["just",0],["followed",0],["my",0],["gut,",0],["you",1],["know,",1],["and",0],["hoped",0],["that",0],["things",0],["would",0],["work",0],["out.",0],
+      ["There",0],["were",0],["a",1],["lot",1],["of",1],["late",0],["nights,",0],["a",0],["ton",0],["of",0],["second-guessing,",0],["and",0],["I",0],["wanted",1],["to",1],["quit",0],["more",0],["times",0],["than",0],["I",0],["can",0],["count.",0],
+      ["But",0],["looking",0],["back,",0],["I",0],["think",0],["that",0],["struggle",0],["is",0],["sort",1],["of",1],["the",0],["whole",0],["point.",0],["You",0],["have",0],["to",0],["want",0],["it.",0]];
+    let t = 0;
+    this.words = P.map(([w, run], i) => {
+      const clean = w.replace(/[^A-Za-z0-9]/g, '');
+      const dur = 0.16 + clean.length * 0.052;
+      const gap = /[.,]$/.test(w) ? 0.13 : 0.02;
+      const wd = { w: w + ' ', run: !!run, t, dur, i };
+      t += dur + gap;
+      return wd;
+    });
+    this.total = t;
+    this.bars = this.genBars(520);
+    this.done = false;
+    this.INSET_SPAN = 1.0;
+    this.BASE_W = 920;
+    this.hist = [];
+    this.future = [];
+    const a = 15, b = 21;
+    const seed = { id: 1, name: 'Slice 1', s: this.words[a].t, e: this.words[b].t + this.words[b].dur, a, b, snippet: this.snip(a, b) };
+    this.state = { selStart: null, selEnd: null, playing: false, playhead: 0, zoom: 1, speed: 1, slices: [seed], markers: [], startFine: 0, endFine: 0, sidebarOpen: true };
+  }
+
+  componentWillUnmount() { if (this._raf) cancelAnimationFrame(this._raf); }
+
+  genBars(n) {
+    let s = 20240704;
+    const rnd = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; };
+    // Build a speech-like envelope: quiet flat baseline with rounded syllable bumps,
+    // grouped into phrases separated by silence gaps (like a real voice recording).
+    const env = new Array(n).fill(0.035);
+    let p = 0.015;
+    while (p < 0.985) {
+      const phraseEnd = Math.min(0.985, p + 0.05 + rnd() * 0.11);
+      let q = p;
+      while (q < phraseEnd) {
+        const w = 0.0045 + rnd() * 0.009;          // syllable width
+        const amp = 0.32 + rnd() * 0.62;           // syllable loudness
+        const c = q + w;
+        const lo = Math.max(0, Math.floor((c - w * 4) * n));
+        const hi = Math.min(n, Math.ceil((c + w * 4) * n));
+        for (let i = lo; i < hi; i++) { const d = (i / n - c) / w; env[i] += amp * Math.exp(-d * d * 0.5); }
+        q += w * (1.5 + rnd() * 1.3);               // spacing between syllables
+      }
+      p = phraseEnd + 0.02 + rnd() * 0.07;          // silence gap before next phrase
+    }
+    let max = 0;
+    for (let i = 0; i < n; i++) max = Math.max(max, env[i]);
+    const scale = 0.94 / max;
+    const R = 3, a = [];
+    for (let i = 0; i < n; i++) {
+      let acc = 0, c = 0;
+      for (let j = -R; j <= R; j++) { const k = i + j; if (k >= 0 && k < n) { acc += env[k] * scale; c++; } }
+      const hv = acc / c;
+      a.push({ h: hv, silence: hv < 0.085, t: i / n * this.total });
+    }
+    return a;
+  }
+  ampAtNorm(u) {
+    const n = this.bars.length; let x = Math.max(0, Math.min(n - 1, u * (n - 1)));
+    const i = Math.floor(x), f = x - i;
+    const a = this.bars[i].h, b = this.bars[Math.min(n - 1, i + 1)].h;
+    return a + (b - a) * f;
+  }
+  silhouetteD(N, W, H, famp) {
+    const cy = H / 2, pts = [];
+    for (let i = 0; i <= N; i++) { const x = i / N * W; const a = Math.max(0.5, famp(i / N) * (H / 2 - 2)); pts.push([x, cy - a]); }
+    for (let i = N; i >= 0; i--) { const x = i / N * W; const a = Math.max(0.5, famp(i / N) * (H / 2 - 2)); pts.push([x, cy + a]); }
+    const f = v => v.toFixed(1);
+    let d = 'M' + f(pts[0][0]) + ' ' + f(pts[0][1]);
+    for (let i = 0; i < pts.length; i++) {
+      const cur = pts[i], nxt = pts[(i + 1) % pts.length];
+      d += ' Q' + f(cur[0]) + ' ' + f(cur[1]) + ' ' + f((cur[0] + nxt[0]) / 2) + ' ' + f((cur[1] + nxt[1]) / 2);
+    }
+    return d + ' Z';
+  }
+
+  fmt(s) { const m = Math.floor(s / 60); const r = s - m * 60; return m + ':' + (r < 10 ? '0' : '') + r.toFixed(1); }
+  fmtShort(s) { const m = Math.floor(s / 60); const r = Math.round(s % 60); return m + ':' + String(r).padStart(2, '0'); }
+  snip(a, b) { let s = this.words.slice(a, b + 1).map(w => w.w).join('').trim(); if (s.length > 70) s = s.slice(0, 68) + '…'; return '“' + s + '”'; }
+
+  regionSel() { const { selStart, selEnd } = this.state; if (selStart == null || selEnd == null) return null; return { a: Math.min(selStart, selEnd), b: Math.max(selStart, selEnd) }; }
+  regionTimes() { const r = this.regionSel(); if (!r) return null; const s = Math.max(0, this.words[r.a].t + this.state.startFine); const e = Math.min(this.total, this.words[r.b].t + this.words[r.b].dur + this.state.endFine); return { s, e, a: r.a, b: r.b }; }
+
+  onWord(i) {
+    this.setState(() => {
+      if (this.state.selStart == null || this.done) { this.done = false; return { selStart: i, selEnd: i, startFine: 0, endFine: 0 }; }
+      this.done = true; return { selEnd: i };
+    });
+  }
+  clearSel() { this.done = false; this.setState({ selStart: null, selEnd: null, startFine: 0, endFine: 0 }); }
+  nudge(edge, d) { const k = edge === 'start' ? 'startFine' : 'endFine'; const v = Math.max(-0.6, Math.min(0.6, this.state[k] + d)); this.setState({ [k]: v }); }
+
+  pushHist() { this.hist.push(JSON.stringify(this.state.slices)); if (this.hist.length > 30) this.hist.shift(); this.future = []; }
+  onUndo() { if (!this.hist.length) return; this.future.push(JSON.stringify(this.state.slices)); this.setState({ slices: JSON.parse(this.hist.pop()) }); }
+  onRedo() { if (!this.future.length) return; this.hist.push(JSON.stringify(this.state.slices)); this.setState({ slices: JSON.parse(this.future.pop()) }); }
+
+  addSlice() {
+    const r = this.regionTimes(); if (!r) return;
+    this.pushHist();
+    const sl = { id: Date.now(), name: 'Slice ' + (this.state.slices.length + 1), s: r.s, e: r.e, a: r.a, b: r.b, snippet: this.snip(r.a, r.b) };
+    this.setState(st => ({ slices: [...st.slices, sl] }));
+  }
+  delSlice(id) { this.pushHist(); this.setState(st => ({ slices: st.slices.filter(x => x.id !== id) })); }
+  playSlice(sl) { this.done = true; this.setState({ selStart: sl.a, selEnd: sl.b, startFine: 0, endFine: 0, playhead: sl.s / this.total }); }
+
+  onPlay() {
+    this.setState(s => ({ playing: !s.playing }), () => {
+      if (this.state.playing) { this._last = null; this.tick(); }
+      else if (this._raf) cancelAnimationFrame(this._raf);
+    });
+  }
+  tick() {
+    if (!this.state.playing) return;
+    const now = performance.now();
+    if (this._last == null) this._last = now;
+    const dt = (now - this._last) / 1000; this._last = now;
+    let p = this.state.playhead + dt * this.state.speed / this.total;
+    if (p >= 1) { this.setState({ playhead: 1, playing: false }); return; }
+    this.setState({ playhead: p });
+    this._raf = requestAnimationFrame(() => this.tick());
+  }
+  onSpeed() { const arr = [0.5, 1, 1.5, 2]; const i = (arr.indexOf(this.state.speed) + 1) % arr.length; this.setState({ speed: arr[i] }); }
+  onMarker() { this.setState(s => ({ markers: [...s.markers, s.playhead * this.total] })); }
+  onToggleSidebar() { this.setState(s => ({ sidebarOpen: !s.sidebarOpen })); }
+
+  onZoomIn() { this.setState(s => ({ zoom: Math.min(6, s.zoom + 1) })); }
+  onZoomOut() { this.setState(s => ({ zoom: Math.max(1, s.zoom - 1) })); }
+  onFit() {
+    const r = this.regionTimes();
+    if (!r) { this.setState({ zoom: 1 }, () => { if (this.scrollEl) this.scrollEl.scrollLeft = 0; }); return; }
+    const z = Math.max(1, Math.min(6, Math.round((this.total / (r.e - r.s)) * 0.32)));
+    this.setState({ zoom: z }, () => {
+      if (!this.scrollEl) return;
+      const inner = this.BASE_W * z;
+      const c = ((r.s + r.e) / 2) / this.total * inner;
+      this.scrollEl.scrollLeft = c - this.scrollEl.clientWidth / 2;
+    });
+  }
+  scrub(e) {
+    const el = e.currentTarget; const rect = el.getBoundingClientRect();
+    const x = (e.clientX - rect.left) / el.offsetWidth;
+    if (this._raf) cancelAnimationFrame(this._raf);
+    this.setState({ playhead: Math.max(0, Math.min(1, x)), playing: false });
+  }
+
+  buildWave() {
+    const inner = this.BASE_W * this.state.zoom; const H = 138;
+    const region = this.regionTimes();
+    const N = Math.max(220, Math.min(1600, Math.floor(inner / 2.2)));
+    const d = this.silhouetteD(N, inner, H, u => this.ampAtNorm(u));
+    const cid = 'wv_' + (this.props.layout || 's');
+    const svgKids = [h('path', { key: 'base', d, fill: '#6f6f6f' })];
+    if (region) {
+      const l = (region.s / this.total) * inner, w = ((region.e - region.s) / this.total) * inner;
+      svgKids.push(h('defs', { key: 'df' }, h('clipPath', { id: cid }, h('rect', { x: l, y: 0, width: w, height: H }))));
+      svgKids.push(h('path', { key: 'sel', d, fill: RED, clipPath: 'url(#' + cid + ')' }));
+    }
+    const svg = h('svg', { key: 'svg', width: inner, height: H, viewBox: '0 0 ' + inner + ' ' + H, preserveAspectRatio: 'none', style: { display: 'block' } }, svgKids);
+    const children = [svg];
+    if (region) {
+      const l = (region.s / this.total) * inner, w = ((region.e - region.s) / this.total) * inner;
+      children.push(h('div', { key: 'mq', style: { position: 'absolute', top: 0, bottom: 0, left: l + 'px', width: w + 'px', background: 'rgba(204,102,102,.10)', borderLeft: '2px solid ' + RED, borderRight: '2px solid ' + RED, pointerEvents: 'none' } }));
+    }
+    this.state.markers.forEach((m, k) => {
+      const mx = (m / this.total) * inner;
+      children.push(h('div', { key: 'mk' + k, style: { position: 'absolute', top: '-3px', bottom: '-3px', left: mx + 'px', width: '2px', background: '#febc2e', opacity: .85, pointerEvents: 'none' } }));
+    });
+    const px = this.state.playhead * inner;
+    children.push(h('div', { key: 'ph', style: { position: 'absolute', top: '-6px', bottom: '-6px', left: px + 'px', width: '2px', background: '#fff', pointerEvents: 'none', boxShadow: '0 0 3px rgba(0,0,0,.7)' } },
+      h('div', { style: { position: 'absolute', top: '-5px', left: '-4px', width: '10px', height: '10px', borderRadius: '50%', background: '#fff' } })));
+    const innerDiv = h('div', { style: { position: 'relative', width: inner + 'px', height: H + 'px', cursor: 'text' }, onMouseDown: e => this.scrub(e) }, children);
+    return h('div', { className: 'pw-scroll', ref: el => this.scrollEl = el, style: { overflowX: 'auto', overflowY: 'hidden', paddingBottom: '4px' } }, innerDiv);
+  }
+
+  sampleAmp(t) {
+    const n = this.bars.length; let x = t / this.total * n;
+    x = Math.max(0, Math.min(n - 1, x));
+    const i = Math.floor(x), f = x - i;
+    const a = this.bars[i] || { h: 0, silence: true };
+    const b = this.bars[Math.min(n - 1, i + 1)] || a;
+    return { h: a.h + (b.h - a.h) * f, silence: a.silence && b.silence, oob: t < 0 || t > this.total };
+  }
+  buildInset(edge) {
+    const region = this.regionTimes(); if (!region) return null;
+    const base = edge === 'start' ? this.words[region.a].t : (this.words[region.b].t + this.words[region.b].dur);
+    const span = this.INSET_SPAN, t0 = base - span / 2;
+    const fine = edge === 'start' ? this.state.startFine : this.state.endFine;
+    const W = 252, H = 86, cy = H / 2;
+    const cutX = (0.5 + fine / span) * W;
+    const N = 200;
+    const d = this.silhouetteD(N, W, H, u => this.sampleAmp(t0 + u * span).h);
+    const cid = 'in_' + edge + '_' + (this.props.layout || 's');
+    const keptX = edge === 'start' ? cutX : 0;
+    const keptW = edge === 'start' ? (W - cutX) : cutX;
+    const svg = h('svg', { key: 'svg', width: W, height: H, viewBox: '0 0 ' + W + ' ' + H, preserveAspectRatio: 'none', style: { display: 'block' } }, [
+      h('path', { key: 'b', d, fill: '#4d4d4d' }),
+      h('defs', { key: 'df' }, h('clipPath', { id: cid }, h('rect', { x: keptX, y: 0, width: keptW, height: H }))),
+      h('path', { key: 'k', d, fill: RED, clipPath: 'url(#' + cid + ')' })
+    ]);
+    const center = h('div', { key: 'c', style: { position: 'absolute', left: 0, right: 0, top: cy + 'px', height: '1px', background: '#262626', pointerEvents: 'none' } });
+    const shade = edge === 'start'
+      ? h('div', { key: 'sh', style: { position: 'absolute', top: 0, bottom: 0, left: 0, width: cutX + 'px', background: 'rgba(0,0,0,.45)', pointerEvents: 'none' } })
+      : h('div', { key: 'sh', style: { position: 'absolute', top: 0, bottom: 0, left: cutX + 'px', right: 0, background: 'rgba(0,0,0,.45)', pointerEvents: 'none' } });
+    const line = h('div', { key: 'ln', onMouseDown: e => this.startEdgeDrag(edge, e), style: { position: 'absolute', top: '-5px', bottom: '-5px', left: cutX + 'px', width: '2px', background: '#fff', cursor: 'ew-resize', zIndex: 3 } },
+      h('div', { style: { position: 'absolute', top: '-6px', left: '-5px', width: '12px', height: '12px', borderRadius: '50%', background: '#fff', boxShadow: '0 0 0 2px ' + RED } }));
+    return h('div', { style: { position: 'relative', width: W + 'px', height: H + 'px', margin: '0 auto', overflow: 'hidden', background: '#080808', borderRadius: '7px', border: '1px solid #1c1c1c' } }, [svg, center, shade, line]);
+  }
+  startEdgeDrag(edge, e) {
+    e.preventDefault(); e.stopPropagation();
+    const plot = e.currentTarget.parentNode; const rect = plot.getBoundingClientRect(); const span = this.INSET_SPAN;
+    const move = ev => { const px = (ev.clientX - rect.left) / rect.width; let f = (px - 0.5) * span; f = Math.max(-0.6, Math.min(0.6, f)); this.setState(edge === 'start' ? { startFine: f } : { endFine: f }); };
+    const up = () => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); };
+    document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
+  }
+  nbtn(label, fn) { return h('button', { key: label, onClick: fn, style: { height: '26px', padding: '0 10px', borderRadius: '7px', border: '1px solid #333', background: '#1b1b1b', color: '#bdbdbd', fontSize: '11px', cursor: 'pointer', fontVariantNumeric: 'tabular-nums' } }, label); }
+  tbtn(label, fn, primary) { return h('button', { key: label, onClick: fn, style: { height: '32px', padding: '0 15px', borderRadius: '8px', border: primary ? 'none' : '1px solid #333', background: primary ? RED : '#1b1b1b', color: primary ? '#fff' : '#cfcfcf', fontSize: '12.5px', fontWeight: 600, cursor: 'pointer', flex: '0 0 auto' } }, label); }
+
+  buildSelPanel() {
+    const region = this.regionTimes(); if (!region) return null;
+    const dur = (region.e - region.s).toFixed(1) + 's';
+    const insetCard = (edge, label, val) => h('div', { style: { flex: 1, background: '#0e0e0e', border: '1px solid #222', borderRadius: '10px', padding: '10px 12px' } }, [
+      h('div', { key: 't', style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' } }, [
+        h('div', { key: 'l', style: { fontSize: '10.5px', textTransform: 'uppercase', letterSpacing: '.07em', color: '#7a7a7a' } }, label),
+        h('div', { key: 'v', style: { fontSize: '12px', color: RED, fontVariantNumeric: 'tabular-nums' } }, val)
+      ]),
+      this.buildInset(edge),
+      h('div', { key: 'n', style: { display: 'flex', justifyContent: 'center', gap: '6px', marginTop: '8px' } }, [this.nbtn('−10ms', () => this.nudge(edge, -0.01)), this.nbtn('+10ms', () => this.nudge(edge, 0.01))])
+    ]);
+    return h('div', { style: { background: '#131313', border: '1px solid #262626', borderRadius: '12px', padding: '12px 14px' } }, [
+      h('div', { key: 'hd', style: { display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '11px' } }, [
+        h('div', { key: 's', style: { flex: 1, minWidth: 0 } }, [
+          h('div', { style: { fontSize: '10.5px', textTransform: 'uppercase', letterSpacing: '.07em', color: '#7a7a7a', marginBottom: '3px' } }, 'Selection · ' + dur),
+          h('div', { style: { fontSize: '13px', color: '#cfcfcf', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } }, this.snip(region.a, region.b))
+        ]),
+        this.tbtn('Clear', () => this.clearSel(), false),
+        this.tbtn('＋ Add slice', () => this.addSlice(), true)
+      ]),
+      h('div', { key: 'ft', style: { fontSize: '11px', color: '#6f6f6f', marginBottom: '9px' } }, 'Fine-tune the cut points — drag the red line or nudge in 10 ms steps'),
+      h('div', { key: 'ins', style: { display: 'flex', gap: '12px' } }, [insetCard('start', 'Cut in ▸', this.fmt(region.s)), insetCard('end', '◂ Cut out', this.fmt(region.e))])
+    ]);
+  }
+
+  wordStyle(w) {
+    const r = this.regionSel();
+    const sel = r && w.i >= r.a && w.i <= r.b;
+    const st = { cursor: 'pointer', padding: '2px 0', color: w.run ? '#e39393' : '#8f8f8f' };
+    if (sel) { st.background = 'rgba(204,102,102,.30)'; st.color = w.run ? '#ffdada' : '#fff'; }
+    if (sel && w.i === r.a) { st.borderTopLeftRadius = '4px'; st.borderBottomLeftRadius = '4px'; st.paddingLeft = '4px'; st.marginLeft = '-4px'; }
+    if (sel && w.i === r.b) { st.borderTopRightRadius = '4px'; st.borderBottomRightRadius = '4px'; }
+    return st;
+  }
+
+  renderVals() {
+    const layout = this.props.layout || 'sidebar';
+    const play = h('svg', { width: 15, height: 15, viewBox: '0 0 24 24', fill: '#fff' }, h('path', { d: 'M8 5v14l11-7z' }));
+    const pause = h('svg', { width: 14, height: 14, viewBox: '0 0 24 24', fill: '#fff' }, [h('rect', { key: 1, x: 6, y: 5, width: 4, height: 14 }), h('rect', { key: 2, x: 14, y: 5, width: 4, height: 14 })]);
+    return {
+      winW: layout === 'stacked' ? '1040px' : '1160px',
+      title: 'Interview_047_clip.wav — Waveform Editor',
+      isSidebar: layout === 'sidebar',
+      isStacked: layout === 'stacked',
+      playIcon: this.state.playing ? pause : play,
+      onPlay: () => this.onPlay(),
+      curTime: this.fmt(this.state.playhead * this.total),
+      totTime: this.fmtShort(this.total),
+      speedLabel: this.state.speed + '×',
+      onSpeed: () => this.onSpeed(),
+      onUndo: () => this.onUndo(),
+      onRedo: () => this.onRedo(),
+      onMarker: () => this.onMarker(),
+      sidebarOpen: this.state.sidebarOpen,
+      onToggleSidebar: () => this.onToggleSidebar(),
+      sidebarLabel: this.state.sidebarOpen ? 'Hide slices ›' : '‹ Slices',
+      onZoomIn: () => this.onZoomIn(),
+      onZoomOut: () => this.onZoomOut(),
+      onFit: () => this.onFit(),
+      zoomPct: (this.state.zoom * 100) + '%',
+      waveform: this.buildWave(),
+      hasSelection: this.state.selStart != null,
+      selectionPanel: this.buildSelPanel(),
+      words: this.words.map(w => ({ w: w.w, onClick: () => this.onWord(w.i), style: this.wordStyle(w) })),
+      slices: this.state.slices.map(sl => ({ name: sl.name, dur: (sl.e - sl.s).toFixed(1) + 's', range: this.fmt(sl.s) + ' – ' + this.fmt(sl.e), snippet: sl.snippet, onPlay: () => this.playSlice(sl), onExport: () => {}, onDelete: () => this.delSlice(sl.id) })),
+      sliceCount: this.state.slices.length + (this.state.slices.length === 1 ? ' clip' : ' clips'),
+      onExportAll: () => {}
+    };
+  }
+}
+</script>
+</body>
+</html>

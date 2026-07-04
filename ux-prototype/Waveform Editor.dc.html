@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <meta name="design_doc_mode" content="canvas">
+  <link rel="stylesheet" href="_ds/playola-ios-7aa719b6-89db-4245-bc89-edf8e7ed2a45/styles.css">
+  <script src="_ds/playola-ios-7aa719b6-89db-4245-bc89-edf8e7ed2a45/_ds_bundle.js"></script>
+  <style>body{background:#060606;margin:0;}</style>
+</helmet>
+<section style="padding:64px;font-family:Inter,system-ui,sans-serif;">
+  <div style="display:flex;gap:64px;flex-wrap:wrap;align-items:flex-start;">
+    <div id="1a" style="display:flex;flex-direction:column;gap:14px;">
+      <div style="display:flex;align-items:center;gap:12px;">
+        <span style="display:inline-flex;align-items:center;height:26px;padding:0 12px;border-radius:999px;background:#cc6666;color:#fff;font-size:12px;font-weight:700;letter-spacing:.03em;">1a</span>
+        <span style="color:#e6e6e6;font-size:15px;font-weight:600;">Sidebar studio</span>
+        <span style="color:#6f6f6f;font-size:13px;">Waveform + transcript stacked left, slices docked right</span>
+      </div>
+      <dc-import name="Editor" layout="sidebar" hint-size="1160px,660px"></dc-import>
+    </div>
+    <div id="1b" style="display:flex;flex-direction:column;gap:14px;">
+      <div style="display:flex;align-items:center;gap:12px;">
+        <span style="display:inline-flex;align-items:center;height:26px;padding:0 12px;border-radius:999px;background:#cc6666;color:#fff;font-size:12px;font-weight:700;letter-spacing:.03em;">1b</span>
+        <span style="color:#e6e6e6;font-size:15px;font-weight:600;">Stacked timeline</span>
+        <span style="color:#6f6f6f;font-size:13px;">Full-width waveform → transcript → slice tray along the bottom</span>
+      </div>
+      <dc-import name="Editor" layout="stacked" hint-size="1040px,780px"></dc-import>
+    </div>
+  </div>
+</section>
+</x-dc>
+</body>
+</html>
