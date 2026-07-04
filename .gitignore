@@ -49,6 +49,7 @@ DerivedData/
 *.xcresult
 QuickInterviewEditor/fastlane/test_output/
 QuickInterviewEditor/fastlane/report.xml
+QuickInterviewEditor/vendor/
 
 # --- Conductor / local scratch (portable ignore for main checkout + worktrees) ---
 .context/

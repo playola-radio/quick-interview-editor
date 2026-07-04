@@ -16,6 +16,9 @@ excluded:
   - DerivedData
   - fastlane
   - QuickInterviewEditor.xcodeproj
+  # CI vendors gems here (ruby/setup-ruby bundler-cache); the fastlane gem
+  # ships its own Swift assets that must not be linted as project sources.
+  - vendor
 
 # General configuration
 line_length:
