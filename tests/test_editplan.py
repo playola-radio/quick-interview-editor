@@ -143,6 +143,28 @@ def test_missing_end_time_uses_next_word_start_not_word_start():
     assert b.end == 0.5  # next word's start, not 0.0
 
 
+def test_corrected_word_is_kept_not_dropped():
+    # correcting a word (fox -> foxx) must retain that word, not drop its audio
+    blocks = parse_edit_file("[1] the quick brown foxx\n")
+    (b,) = resolve_blocks(blocks, _transcript())
+    assert b.word_ids == [1, 2, 3, 4]  # word 4 kept despite the edit
+    assert b.end == 0.7
+
+
+def test_correcting_the_first_word_keeps_the_span_start():
+    blocks = parse_edit_file("[1] teh quick brown fox\n")  # typo fix at the front
+    (b,) = resolve_blocks(blocks, _transcript())
+    assert b.word_ids[0] == 1
+    assert b.start == 0.0  # not shifted to word 2
+
+
+def test_last_word_missing_end_uses_duration_fallback():
+    words = (Word(1, "final", 2.0, None),)  # last word, no end, no successor
+    transcript = Transcript(words=words, segments=(Segment(1, (1,), "final"),))
+    (b,) = resolve_blocks(parse_edit_file("[1] final\n"), transcript)
+    assert b.end == 2.0 + 0.4  # start + fallback, not collapsed to start
+
+
 def test_build_edit_plan_has_versioned_shape_and_word_samples():
     seg = ResolvedSegment(
         index=0, output_name="song.1.aiff", word_ids=[1, 2],

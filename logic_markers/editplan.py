@@ -16,6 +16,7 @@ from .silence import Silence
 from .words import Transcript
 
 SCHEMA_VERSION = 1
+LAST_WORD_FALLBACK_SEC = 0.4  # assumed duration when the final word lacks an end
 
 
 @dataclass(frozen=True)
@@ -69,12 +70,13 @@ def parse_edit_file(text: str) -> list[list[ParsedLine]]:
 
 
 def _word_end(word, by_id: dict) -> float:
-    # WhisperX occasionally omits a word's end; the next word's start is a safe
-    # upper bound so we never shrink a span onto the word's own start.
+    # WhisperX occasionally omits a word's end. The next word's start is a safe
+    # upper bound; for the very last word (no successor) assume a short duration
+    # rather than collapsing onto its start, which would clip it.
     if word.end is not None:
         return word.end
     nxt = by_id.get(word.id + 1)
-    return nxt.start if nxt else word.start
+    return nxt.start if nxt else word.start + LAST_WORD_FALLBACK_SEC
 
 
 def boundary_limits(word_ids: list[int], transcript: Transcript, sr: int):
@@ -91,12 +93,26 @@ def boundary_limits(word_ids: list[int], transcript: Transcript, sr: int):
     return limit_start, limit_end
 
 
-def _match(original_ids: list[int], edited_tokens: list[str], transcript: Transcript) -> list[int]:
+def _match(
+    original_ids: list[int],
+    edited_tokens: list[str],
+    transcript: Transcript,
+    *,
+    allow_replace: bool = True,
+) -> list[int]:
+    """Map surviving edited tokens back to original word ids.
+
+    With `allow_replace` (segment-constrained matching), a word the user
+    *corrected* — e.g. "Hayes" -> "Haze" — is kept, not dropped. Global fallback
+    matching stays exact-only, since a loose replace there could grab the wrong
+    repeated word.
+    """
     original = [_norm(transcript.word(wid).text) for wid in original_ids]
     matcher = difflib.SequenceMatcher(None, original, edited_tokens, autojunk=False)
     kept: list[int] = []
-    for a, _b, size in matcher.get_matching_blocks():
-        kept.extend(original_ids[a : a + size])
+    for tag, i1, i2, _j1, _j2 in matcher.get_opcodes():
+        if tag == "equal" or (tag == "replace" and allow_replace):
+            kept.extend(original_ids[i1:i2])
     return kept
 
 
@@ -115,7 +131,7 @@ def resolve_blocks(parsed: list[list[ParsedLine]], transcript: Transcript) -> li
         for line in block:
             tokens = _tokens(line.text)
             if line.segment_id is None:
-                kept.extend(_match(all_ids, tokens, transcript))
+                kept.extend(_match(all_ids, tokens, transcript, allow_replace=False))
                 warnings.append(
                     f"line without [n] tag matched globally (may be ambiguous): {line.text!r}"
                 )
