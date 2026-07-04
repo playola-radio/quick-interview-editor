@@ -6,7 +6,7 @@ Spec: `docs/superpowers/specs/2026-07-03-transcript-chunking-design.md`
 **Goal**: `logic-markers transcript song.m4a` writes the `[n]`-tagged transcript and caches the full word list (with end times + segment/word ids).
 **Success**: transcript file matches the spec format; cache has per-word start/end/id and per-segment word ranges.
 **Tests**: transcript rendering from a synthetic segment list; cache round-trip.
-**Status**: Not Started
+**Status**: Complete
 
 ## Stage 2: Silence detection (`silence.py`)
 **Goal**: adaptive silence regions over a mono PCM array.

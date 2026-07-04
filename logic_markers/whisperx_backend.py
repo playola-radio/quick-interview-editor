@@ -16,6 +16,8 @@ import wave
 from pathlib import Path
 
 from .transcribe import Word
+from .words import Segment, Transcript
+from .words import Word as RichWord
 
 SAMPLE_RATE = 16000  # WhisperX / Whisper operate on 16 kHz mono
 
@@ -45,37 +47,67 @@ def _load_audio_16k_mono(source: Path):
     return np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32768.0
 
 
+def _aligned_segments(
+    source: Path, model_name: str, device: str, compute_type: str
+) -> list[dict]:
+    import whisperx  # imported lazily; heavy import
+
+    audio = _load_audio_16k_mono(source)
+    model = whisperx.load_model(model_name, device, compute_type=compute_type)
+    result = model.transcribe(audio, batch_size=16)
+    align_model, metadata = whisperx.load_align_model(
+        language_code=result["language"], device=device
+    )
+    aligned = whisperx.align(
+        result["segments"], align_model, metadata, audio, device,
+        return_char_alignments=False,
+    )
+    return aligned["segments"]
+
+
+def transcribe_transcript(
+    source: Path,
+    model_name: str = "large-v2",
+    device: str = "cpu",
+    compute_type: str = "int8",
+) -> Transcript:
+    """Full transcription with per-word start/end grouped into segments."""
+    segments_raw = _aligned_segments(source, model_name, device, compute_type)
+
+    words: list[RichWord] = []
+    segments: list[Segment] = []
+    for seg in segments_raw:
+        word_ids: list[int] = []
+        for w in seg.get("words", []):
+            text = w.get("word", "").strip()
+            start = w.get("start")
+            if not text or start is None:
+                continue  # alignment dropped this token; skip
+            wid = len(words) + 1
+            end = w.get("end")
+            words.append(
+                RichWord(
+                    id=wid,
+                    text=text,
+                    start=float(start),
+                    end=float(end) if end is not None else None,
+                )
+            )
+            word_ids.append(wid)
+        if word_ids:
+            seg_text = " ".join(words[i - 1].text for i in word_ids)
+            segments.append(
+                Segment(id=len(segments) + 1, word_ids=tuple(word_ids), text=seg_text)
+            )
+    return Transcript(words=tuple(words), segments=tuple(segments))
+
+
 def transcribe_words(
     source: Path,
     model_name: str = "large-v2",
     device: str = "cpu",
     compute_type: str = "int8",
 ) -> list[Word]:
-    import whisperx  # imported lazily; heavy import
-
-    audio = _load_audio_16k_mono(source)
-
-    model = whisperx.load_model(model_name, device, compute_type=compute_type)
-    result = model.transcribe(audio, batch_size=16)
-    language = result["language"]
-
-    align_model, metadata = whisperx.load_align_model(
-        language_code=language, device=device
-    )
-    aligned = whisperx.align(
-        result["segments"],
-        align_model,
-        metadata,
-        audio,
-        device,
-        return_char_alignments=False,
-    )
-
-    words: list[Word] = []
-    for segment in aligned["segments"]:
-        for w in segment.get("words", []):
-            text = w.get("word", "").strip()
-            start = w.get("start")
-            if text and start is not None:
-                words.append(Word(text=text, start=float(start)))
-    return words
+    """Flat word list (back-compat for the markers command)."""
+    transcript = transcribe_transcript(source, model_name, device, compute_type)
+    return [Word(text=w.text, start=w.start) for w in transcript.words]

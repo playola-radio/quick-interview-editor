@@ -15,6 +15,21 @@ from pathlib import Path
 from . import aiff_markers
 from .audio import convert_to_aiff
 from .transcribe import Word
+from .words import Transcript, render_transcript
+
+
+def _load_or_transcribe_transcript(source: Path, refresh: bool) -> Transcript:
+    """Full WhisperX transcript (words + segments), cached next to the source."""
+    from .whisperx_backend import transcribe_transcript
+
+    cache = source.with_suffix(source.suffix + ".transcript.json")
+    if cache.exists() and not refresh:
+        print(f"      using cached transcript ({cache.name}); pass --refresh to redo.")
+        return Transcript.from_dict(json.loads(cache.read_text()))
+
+    transcript = transcribe_transcript(source)
+    cache.write_text(json.dumps(transcript.to_dict(), indent=2))
+    return transcript
 
 
 def _transcribe(source: Path, engine: str, api_key: str | None) -> list[Word]:
@@ -104,46 +119,64 @@ def run(
     return dest
 
 
-def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(
-        prog="logic-markers",
-        description="Transcribe audio and embed word markers Logic Pro can import.",
-    )
-    parser.add_argument("input", type=Path, help="source audio (wav/mp3/m4a/aiff)")
-    parser.add_argument(
-        "--engine",
-        choices=["whisperx", "openai"],
-        default="whisperx",
-        help="whisperx = local forced alignment (accurate); openai = Whisper API",
-    )
-    parser.add_argument("--sample-rate", type=int, default=44100)
-    parser.add_argument("--refresh", action="store_true", help="ignore cached transcript")
-    parser.add_argument(
-        "--api-key",
-        default=os.environ.get("OPENAI_KEY") or os.environ.get("OPENAI_API_KEY"),
-        help="OpenAI API key for --engine openai (defaults to $OPENAI_KEY)",
-    )
-    args = parser.parse_args(argv)
-
-    if not args.input.exists():
-        print(f"error: no such file: {args.input}", file=sys.stderr)
-        return 2
+def _cmd_markers(args) -> int:
     if args.engine == "openai" and not args.api_key:
         print(
             "error: --engine openai needs a key. Pass --api-key or set OPENAI_KEY.",
             file=sys.stderr,
         )
         return 2
-
-    try:
-        dest = run(args.input, args.engine, args.api_key, args.sample_rate, args.refresh)
-    except Exception as exc:  # fail fast with a clear message
-        print(f"error: {exc}", file=sys.stderr)
-        return 1
-
+    dest = run(args.input, args.engine, args.api_key, args.sample_rate, args.refresh)
     print(f"\nDone -> {dest}")
     print("In Logic: Navigate > Other > Import Markers from Audio File, pick that AIFF.")
     return 0
+
+
+def _cmd_transcript(args) -> int:
+    print(f"Transcribing {args.input.name} (WhisperX)...")
+    transcript = _load_or_transcribe_transcript(args.input, args.refresh)
+    out = args.input.with_suffix(".txt")
+    out.write_text(render_transcript(transcript))
+    print(f"      {len(transcript.words)} words in {len(transcript.segments)} segments.")
+    print(f"\nEdit this, then run `logic-markers cut`:\n  {out}")
+    return 0
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="logic-markers",
+        description="Transcribe audio, embed Logic markers, and chunk by transcript.",
+    )
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    m = sub.add_parser("markers", help="embed word markers into an AIFF")
+    m.add_argument("input", type=Path, help="source audio (wav/mp3/m4a/aiff)")
+    m.add_argument("--engine", choices=["whisperx", "openai"], default="whisperx")
+    m.add_argument("--sample-rate", type=int, default=44100)
+    m.add_argument("--refresh", action="store_true", help="ignore cached transcript")
+    m.add_argument(
+        "--api-key",
+        default=os.environ.get("OPENAI_KEY") or os.environ.get("OPENAI_API_KEY"),
+        help="OpenAI API key for --engine openai (defaults to $OPENAI_KEY)",
+    )
+    m.set_defaults(func=_cmd_markers)
+
+    t = sub.add_parser("transcript", help="write an editable transcript for chunking")
+    t.add_argument("input", type=Path, help="source audio (wav/mp3/m4a/aiff)")
+    t.add_argument("--refresh", action="store_true", help="ignore cached transcript")
+    t.set_defaults(func=_cmd_transcript)
+
+    args = parser.parse_args(argv)
+
+    if not args.input.exists():
+        print(f"error: no such file: {args.input}", file=sys.stderr)
+        return 2
+
+    try:
+        return args.func(args)
+    except Exception as exc:  # fail fast with a clear message
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":
