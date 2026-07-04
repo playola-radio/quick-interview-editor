@@ -151,6 +151,22 @@ def test_corrected_word_is_kept_not_dropped():
     assert b.end == 0.7
 
 
+def test_delete_most_of_line_plus_correction_keeps_only_the_correction():
+    # "the quick brown fox" -> "foxx": a big trim AND a fix of the last word.
+    # Must keep only the corrected word, not re-add the deleted ones.
+    blocks = parse_edit_file("[1] foxx\n")
+    (b,) = resolve_blocks(blocks, _transcript())
+    assert b.word_ids == [4]
+    assert b.start == 0.6
+
+
+def test_auto_split_runs_report_their_own_segment_ids():
+    blocks = parse_edit_file("[1] the quick brown fox\n[3] the quick brown fox\n")
+    r = resolve_blocks(blocks, _transcript())
+    assert r[0].segment_ids == [1]
+    assert r[1].segment_ids == [3]
+
+
 def test_correcting_the_first_word_keeps_the_span_start():
     blocks = parse_edit_file("[1] teh quick brown fox\n")  # typo fix at the front
     (b,) = resolve_blocks(blocks, _transcript())

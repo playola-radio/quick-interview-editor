@@ -110,9 +110,22 @@ def _match(
     original = [_norm(transcript.word(wid).text) for wid in original_ids]
     matcher = difflib.SequenceMatcher(None, original, edited_tokens, autojunk=False)
     kept: list[int] = []
-    for tag, i1, i2, _j1, _j2 in matcher.get_opcodes():
-        if tag == "equal" or (tag == "replace" and allow_replace):
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == "equal":
             kept.extend(original_ids[i1:i2])
+        elif tag == "replace" and allow_replace:
+            edited_span = edited_tokens[j1:j2]
+            if (i2 - i1) == (j2 - j1):
+                kept.extend(original_ids[i1:i2])  # 1:1 corrections -> keep all
+            else:
+                # many<->few: keep only originals that closely match an edited
+                # token (a correction); the rest of the span is a deletion.
+                for k in range(i1, i2):
+                    if any(
+                        difflib.SequenceMatcher(None, original[k], e).ratio() >= 0.6
+                        for e in edited_span
+                    ):
+                        kept.append(original_ids[k])
     return kept
 
 
@@ -125,7 +138,6 @@ def resolve_blocks(parsed: list[list[ParsedLine]], transcript: Transcript) -> li
 
     for block in parsed:
         kept: list[int] = []
-        segment_ids: list[int] = []
         warnings: list[str] = []
 
         for line in block:
@@ -140,7 +152,6 @@ def resolve_blocks(parsed: list[list[ParsedLine]], transcript: Transcript) -> li
             if segment is None:
                 warnings.append(f"unknown segment [{line.segment_id}] ignored")
                 continue
-            segment_ids.append(segment.id)
             kept.extend(_match(list(segment.word_ids), tokens, transcript))
 
         if not kept:
@@ -160,6 +171,7 @@ def resolve_blocks(parsed: list[list[ParsedLine]], transcript: Transcript) -> li
 
         for run in runs:
             words = [by_id[wid] for wid in run]
+            run_segment_ids = list(dict.fromkeys(seg_of[wid] for wid in run if wid in seg_of))
             run_warnings = list(warnings)
             if len(runs) > 1:
                 run_warnings.append(
@@ -171,7 +183,7 @@ def resolve_blocks(parsed: list[list[ParsedLine]], transcript: Transcript) -> li
                     word_ids=run,
                     start=min(w.start for w in words),
                     end=max(_word_end(w, by_id) for w in words),
-                    segment_ids=segment_ids,
+                    segment_ids=run_segment_ids,
                     warnings=run_warnings,
                 )
             )
