@@ -1,10 +1,45 @@
-.venv/
-__pycache__/
-*.pyc
-.pytest_cache/
+# --- Secrets / local env ---
+.env
+.env.*
+!.env.example
 
-# generated artifacts / caches (live next to source audio)
+# --- Python ---
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+build/
+dist/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+
+# --- Generated artifacts / caches (live next to source audio) ---
 *.markers.aiff
 *.whisperx.json
 *.openai.json
 *.edit-plan.json
+
+# --- Editors / IDEs ---
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# --- macOS ---
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# --- Node (ux-prototype, if it grows a build step) ---
+node_modules/
