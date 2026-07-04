@@ -18,9 +18,22 @@ on the same marker layout.
 
 ## Requirements
 
-- macOS (uses the built-in `afconvert`)
-- Python 3 with `requests`
-- An OpenAI API key
+- macOS (uses the built-in `afconvert`; no ffmpeg needed)
+- Python 3.12, **built with `lzma`** (a Homebrew or python.org build — some
+  `pyenv` builds omit it, which breaks `transformers`/WhisperX)
+
+## Setup
+
+```bash
+git clone git@github.com:playola-radio/quick-interview-editor.git
+cd quick-interview-editor
+python3.12 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+```
+
+The first WhisperX run downloads the transcription + alignment models
+(~hundreds of MB); after that it's cached and fast. Run everything through
+`.venv/bin/python`.
 
 ## Usage
 
