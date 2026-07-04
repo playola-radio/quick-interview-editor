@@ -11,10 +11,15 @@ concurrency:
   # landing in quick succession must each keep their own pass/fail signal.
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
+# Both jobs only check out and run tests — no writes to the repo, releases, or PRs.
+permissions:
+  contents: read
+
 jobs:
   pytest:
     name: pytest (Python 3.12)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -31,3 +36,41 @@ jobs:
 
       - name: Run tests
         run: pytest -q
+
+  xcode:
+    name: Xcode app (macOS)
+    runs-on: macos-15
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: QuickInterviewEditor
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      # Installs Ruby, runs `bundle install`, and caches the gem bundle
+      # (the full fastlane graph) between runs.
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+          bundler-cache: true
+          working-directory: QuickInterviewEditor
+
+      - name: Install tooling (XcodeGen + SwiftLint)
+        run: brew install xcodegen swiftlint
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: swift-format check
+        run: bundle exec fastlane mac format_check
+
+      - name: SwiftLint
+        run: bundle exec fastlane mac lint_code
+
+      - name: Run tests
+        run: bundle exec fastlane mac test

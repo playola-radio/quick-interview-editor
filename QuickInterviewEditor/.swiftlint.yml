@@ -1,0 +1,42 @@
+# SwiftLint Configuration
+disabled_rules:
+  - trailing_whitespace
+  - trailing_comma
+  - opening_brace
+  - closure_parameter_position
+  - todo
+  # Length caps are intentionally not enforced yet; disable them explicitly
+  # rather than configure a threshold that never fires.
+  - type_body_length
+  - file_length
+
+# Don't lint generated or tooling output
+excluded:
+  - .build
+  - DerivedData
+  - fastlane
+  - QuickInterviewEditor.xcodeproj
+  # CI vendors gems here (ruby/setup-ruby bundler-cache); the fastlane gem
+  # ships its own Swift assets that must not be linted as project sources.
+  - vendor
+
+# General configuration
+line_length:
+  warning: 120
+  error: 200
+
+# Codable models namespace their `CodingKeys` inside nested value types
+# (e.g. EditPlan.Word.CodingKeys), which is two levels deep and idiomatic.
+nesting:
+  type_level:
+    warning: 2
+
+# Project-wide relaxation of the minimum identifier length: allow two-character
+# names anywhere (e.g. `id`, `sr`) while still forbidding single-character names
+# (error at length 1). This is a global override, not scoped to specific names.
+identifier_name:
+  min_length:
+    warning: 2
+    error: 1
+  allowed_symbols:
+    - "_"

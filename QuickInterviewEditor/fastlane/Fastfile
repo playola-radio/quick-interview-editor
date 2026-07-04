@@ -1,0 +1,76 @@
+# This file contains the fastlane.tools configuration
+# You can find the documentation at https://docs.fastlane.tools
+#
+# For a list of all available actions, check out
+#
+#     https://docs.fastlane.tools/actions
+#
+# For a list of all available plugins, check out
+#
+#     https://docs.fastlane.tools/plugins/available-plugins
+#
+
+default_platform(:mac)
+
+def print_failed_tests_summary(output_dir)
+  abs_dir = File.expand_path(output_dir)
+  xcresult = Dir[File.join(abs_dir, '*.xcresult')].max_by { |f| File.mtime(f) }
+  return unless xcresult
+
+  unless system("command -v xcresultparser > /dev/null 2>&1")
+    UI.important("xcresultparser not installed — skipping failure summary. Run: brew install xcresultparser")
+    return
+  end
+
+  UI.header("Failed tests")
+  begin
+    sh("xcresultparser -o cli --failed-tests-only #{xcresult.shellescape}")
+  rescue => e
+    UI.important("xcresultparser failed to produce a summary: #{e.message}")
+  end
+end
+
+platform :mac do
+  desc "Runs the Swift Testing suite (QuickInterviewEditorTests)"
+  lane :test do
+    # Local dev signs with the Playola team (Automatic) so the app stays a
+    # stable, TCC-friendly binary. CI runners have no signing certs, so disable
+    # code signing there — the unit tests don't need a signed, distributable app.
+    xcargs = "-allowProvisioningUpdates"
+    xcargs += " CODE_SIGNING_ALLOWED=NO" if ENV['CI']
+
+    test_error = nil
+    begin
+      scan(
+        project: "QuickInterviewEditor.xcodeproj",
+        scheme: "QuickInterviewEditor",
+        destination: "platform=macOS",
+        include_simulator_logs: false,
+        parallel_testing: false,
+        xcargs: xcargs,
+        xcodebuild_formatter: "xcbeautify",
+        output_directory: "./fastlane/test_output/xctest",
+        result_bundle: true
+      )
+    rescue => e
+      test_error = e
+    end
+    print_failed_tests_summary('./fastlane/test_output/xctest') if test_error
+    raise test_error if test_error
+  end
+
+  desc "Run SwiftLint (strict — fails on warnings)"
+  lane :lint_code do
+    swiftlint(
+      mode: :lint,
+      strict: true,
+      config_file: ".swiftlint.yml",
+      executable: "swiftlint"
+    )
+  end
+
+  desc "Check swift-format formatting (fails on issues)"
+  lane :format_check do
+    sh("cd .. && make format-check")
+  end
+end

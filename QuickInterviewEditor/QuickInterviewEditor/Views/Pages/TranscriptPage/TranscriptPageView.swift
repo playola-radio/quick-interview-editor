@@ -35,7 +35,9 @@ struct TranscriptPageView: View {
           .font(.system(size: 17))
           .foregroundStyle(color(for: word))
           .padding(.horizontal, 3).padding(.vertical, 1)
-          .background(word.isSelected ? Color(red: 0.80, green: 0.40, blue: 0.40).opacity(0.30) : .clear)
+          .background(
+            word.isSelected ? Color(red: 0.80, green: 0.40, blue: 0.40).opacity(0.30) : .clear
+          )
           .clipShape(RoundedRectangle(cornerRadius: 3))
           .onTapGesture { model.wordTapped(word.id) }
       }
@@ -76,24 +78,38 @@ struct FlowLayout: Layout {
 
   func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
     let maxWidth = proposal.width ?? .infinity
-    var x: CGFloat = 0, y: CGFloat = 0, lineHeight: CGFloat = 0
+    var cursorX: CGFloat = 0
+    var cursorY: CGFloat = 0
+    var lineHeight: CGFloat = 0
     for view in subviews {
-      let s = view.sizeThatFits(.unspecified)
-      if x + s.width > maxWidth, x > 0 { x = 0; y += lineHeight + lineSpacing; lineHeight = 0 }
-      x += s.width + spacing
-      lineHeight = max(lineHeight, s.height)
+      let size = view.sizeThatFits(.unspecified)
+      if cursorX + size.width > maxWidth, cursorX > 0 {
+        cursorX = 0
+        cursorY += lineHeight + lineSpacing
+        lineHeight = 0
+      }
+      cursorX += size.width + spacing
+      lineHeight = max(lineHeight, size.height)
     }
-    return CGSize(width: maxWidth == .infinity ? x : maxWidth, height: y + lineHeight)
+    return CGSize(width: maxWidth == .infinity ? cursorX : maxWidth, height: cursorY + lineHeight)
   }
 
-  func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-    var x = bounds.minX, y = bounds.minY, lineHeight: CGFloat = 0
+  func placeSubviews(
+    in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
+  ) {
+    var cursorX = bounds.minX
+    var cursorY = bounds.minY
+    var lineHeight: CGFloat = 0
     for view in subviews {
-      let s = view.sizeThatFits(.unspecified)
-      if x + s.width > bounds.maxX, x > bounds.minX { x = bounds.minX; y += lineHeight + lineSpacing; lineHeight = 0 }
-      view.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(s))
-      x += s.width + spacing
-      lineHeight = max(lineHeight, s.height)
+      let size = view.sizeThatFits(.unspecified)
+      if cursorX + size.width > bounds.maxX, cursorX > bounds.minX {
+        cursorX = bounds.minX
+        cursorY += lineHeight + lineSpacing
+        lineHeight = 0
+      }
+      view.place(at: CGPoint(x: cursorX, y: cursorY), proposal: ProposedViewSize(size))
+      cursorX += size.width + spacing
+      lineHeight = max(lineHeight, size.height)
     }
   }
 }
