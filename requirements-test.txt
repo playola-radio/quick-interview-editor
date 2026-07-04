@@ -1,0 +1,9 @@
+# Minimal dependencies to run the test suite.
+#
+# The full requirements.txt pulls torch/whisperx/faster-whisper for
+# transcription, but those are imported lazily and no test exercises them, so CI
+# installs only what the tests actually import (~seconds instead of a multi-GB
+# torch download). Keep pins here in sync with requirements.txt where they overlap.
+pytest==9.1.1
+requests==2.34.2
+numpy==2.5.1
