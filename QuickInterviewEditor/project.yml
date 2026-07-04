@@ -25,6 +25,8 @@ targets:
     platform: macOS
     sources:
       - path: QuickInterviewEditor
+      - path: Resources/Fixtures/edit-plan.json
+        buildPhase: resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: fm.playola.QuickInterviewEditor

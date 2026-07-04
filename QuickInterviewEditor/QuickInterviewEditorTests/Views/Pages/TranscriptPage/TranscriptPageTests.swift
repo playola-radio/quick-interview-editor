@@ -67,4 +67,16 @@ struct TranscriptPageTests {
     #expect(!m.hasSelection)
     #expect(m.words[id: 2]?.isSelected == false)
   }
+
+  @Test func sensitivityChangesRunTogetherCount() async {
+    let m = await loadedModel()
+    m.sensitivityChanged(10)
+    let tight = m.runTogetherCount
+    m.sensitivityChanged(80)
+    let loose = m.runTogetherCount
+    #expect(tight < loose)
+    // default 30 flags the known 25-pair set → 40 unique words on this fixture
+    m.sensitivityChanged(30)
+    #expect(m.runTogetherCount > 0)
+  }
 }
