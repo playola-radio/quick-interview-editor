@@ -1,0 +1,7 @@
+[tool.pytest.ini_options]
+# The tests import the top-level `logic_markers` package, but there is no
+# src/ layout or installed package. Adding the repo root to pytest's import
+# path lets `pytest` resolve `logic_markers` whether it is run as the bare
+# console script (as CI does) or via `python -m pytest`.
+pythonpath = ["."]
+testpaths = ["tests"]
