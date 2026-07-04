@@ -54,8 +54,6 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
     dependencies:
       - target: QuickInterviewEditor
-      - package: Dependencies
-        product: DependenciesTestSupport
       - package: CustomDump
         product: CustomDump
 schemes:
