@@ -16,7 +16,6 @@ from .silence import Silence
 from .words import Transcript
 
 SCHEMA_VERSION = 1
-DEFAULT_MAX_GAP_SEC = 1.0  # deletions longer than this split a block into files
 
 
 @dataclass(frozen=True)
@@ -69,6 +68,29 @@ def parse_edit_file(text: str) -> list[list[ParsedLine]]:
     return blocks
 
 
+def _word_end(word, by_id: dict) -> float:
+    # WhisperX occasionally omits a word's end; the next word's start is a safe
+    # upper bound so we never shrink a span onto the word's own start.
+    if word.end is not None:
+        return word.end
+    nxt = by_id.get(word.id + 1)
+    return nxt.start if nxt else word.start
+
+
+def boundary_limits(word_ids: list[int], transcript: Transcript, sr: int):
+    """Sample bounds a block's snap must not cross: the adjacent transcript words.
+
+    Prevents boundary snapping from reaching back over trimmed/previous words
+    (or forward over the next block's / deleted words) and re-exporting them.
+    """
+    by_id = {w.id: w for w in transcript.words}
+    prev_word = by_id.get(word_ids[0] - 1)
+    next_word = by_id.get(word_ids[-1] + 1)
+    limit_start = round(_word_end(prev_word, by_id) * sr) if prev_word else None
+    limit_end = round(next_word.start * sr) if next_word else None
+    return limit_start, limit_end
+
+
 def _match(original_ids: list[int], edited_tokens: list[str], transcript: Transcript) -> list[int]:
     original = [_norm(transcript.word(wid).text) for wid in original_ids]
     matcher = difflib.SequenceMatcher(None, original, edited_tokens, autojunk=False)
@@ -78,23 +100,12 @@ def _match(original_ids: list[int], edited_tokens: list[str], transcript: Transc
     return kept
 
 
-def resolve_blocks(
-    parsed: list[list[ParsedLine]],
-    transcript: Transcript,
-    max_gap_sec: float = DEFAULT_MAX_GAP_SEC,
-) -> list[Block]:
+def resolve_blocks(parsed: list[list[ParsedLine]], transcript: Transcript) -> list[Block]:
     seg_by_id = {seg.id: seg for seg in transcript.segments}
     by_id = {w.id: w for w in transcript.words}
+    seg_of = {wid: seg.id for seg in transcript.segments for wid in seg.word_ids}
     all_ids = [w.id for w in transcript.words]
     out: list[Block] = []
-
-    def word_end(word) -> float:
-        # WhisperX occasionally omits a word's end; the next word's start is a
-        # safe upper bound so we never shrink the span onto the word's start.
-        if word.end is not None:
-            return word.end
-        nxt = by_id.get(word.id + 1)
-        return nxt.start if nxt else word.start
 
     for block in parsed:
         kept: list[int] = []
@@ -119,29 +130,31 @@ def resolve_blocks(
         if not kept:
             continue  # whole block deleted / unresolvable
 
-        # Split at large deletions so removed audio is never re-exported.
+        # Split wherever a whole tagged line (segment) was deleted between two
+        # kept words, so removed chunks are never re-exported. Intra-segment
+        # word deletions stay contiguous (fine-tuning is a Logic job).
         runs: list[list[int]] = [[kept[0]]]
         for prev_id, cur_id in zip(kept, kept[1:]):
-            deleted_between = cur_id > prev_id + 1
-            gap = by_id[cur_id].start - word_end(by_id[prev_id])
-            if deleted_between and gap > max_gap_sec:
+            sp, sc = seg_of.get(prev_id), seg_of.get(cur_id)
+            segment_dropped = sp is not None and sc is not None and sc > sp + 1
+            if segment_dropped:
                 runs.append([cur_id])
             else:
                 runs[-1].append(cur_id)
 
-        for run_i, run in enumerate(runs):
+        for run in runs:
             words = [by_id[wid] for wid in run]
             run_warnings = list(warnings)
             if len(runs) > 1:
                 run_warnings.append(
-                    f"auto-split into {len(runs)} files at deletions > {max_gap_sec}s"
+                    f"auto-split into {len(runs)} files (a deleted line separates them)"
                 )
             out.append(
                 Block(
                     index=len(out),
                     word_ids=run,
                     start=min(w.start for w in words),
-                    end=max(word_end(w) for w in words),
+                    end=max(_word_end(w, by_id) for w in words),
                     segment_ids=segment_ids,
                     warnings=run_warnings,
                 )

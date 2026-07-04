@@ -1,5 +1,6 @@
 from logic_markers.editplan import (
     ResolvedSegment,
+    boundary_limits,
     build_edit_plan,
     parse_edit_file,
     resolve_blocks,
@@ -98,11 +99,36 @@ def test_large_internal_deletion_auto_splits_into_two_files():
 
 
 def test_small_internal_deletion_stays_contiguous():
-    # delete just "brown" from seg1 -> tiny gap -> single contiguous file
+    # delete just "brown" from seg1 -> intra-segment -> single contiguous file
     blocks = parse_edit_file("[1] the quick fox\n")
     (b,) = resolve_blocks(blocks, _transcript())
     assert b.word_ids == [1, 2, 4]
     assert b.start == 0.0 and b.end == 0.7
+
+
+def test_deleting_a_whole_short_line_still_splits():
+    # a short deleted segment (< 1s gap) must still split, not merge
+    words = (
+        Word(1, "keep", 0.00, 0.20), Word(2, "this", 0.20, 0.40),
+        Word(3, "um", 0.45, 0.55),  # whole segment 2, short
+        Word(4, "and", 0.60, 0.80), Word(5, "that", 0.80, 1.00),
+    )
+    segments = (Segment(1, (1, 2), "keep this"), Segment(2, (3,), "um"),
+                Segment(3, (4, 5), "and that"))
+    transcript = Transcript(words=words, segments=segments)
+    blocks = parse_edit_file("[1] keep this\n[3] and that\n")  # seg2 deleted
+    resolved = resolve_blocks(blocks, transcript)
+    assert len(resolved) == 2  # split despite the tiny gap
+    assert resolved[0].word_ids == [1, 2]
+    assert resolved[1].word_ids == [4, 5]
+
+
+def test_boundary_limits_bound_snapping_by_adjacent_words():
+    # keeping "brown fox" (ids 3,4) must not let the start reach back over
+    # the trimmed "the quick" -> lower limit is the end of word 2 ("quick").
+    ls, le = boundary_limits([3, 4], _transcript(), sr=1000)
+    assert ls == 300   # end of "quick" (0.3s) -> can't reach back over the trim
+    assert le == 1000  # start of word 5 (1.0s) -> can't reach forward past it
 
 
 def test_missing_end_time_uses_next_word_start_not_word_start():

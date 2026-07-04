@@ -20,6 +20,7 @@ from .audio import convert_to_aiff, read_aiff_mono
 from .boundaries import snap_boundaries
 from .editplan import (
     ResolvedSegment,
+    boundary_limits,
     build_edit_plan,
     parse_edit_file,
     resolve_blocks,
@@ -182,9 +183,8 @@ def run_cut(source: Path, edit_path: Path):
     ]
 
     resolved = []
-    for i, b in enumerate(blocks):
-        limit_start = round(blocks[i - 1].end * sr) if i > 0 else None
-        limit_end = round(blocks[i + 1].start * sr) if i < len(blocks) - 1 else None
+    for b in blocks:
+        limit_start, limit_end = boundary_limits(b.word_ids, transcript, sr)
         bnd = snap_boundaries(
             b.start, b.end, silences, sr, total_samples,
             limit_start_sample=limit_start, limit_end_sample=limit_end, **SNAP_PARAMS,
