@@ -7,7 +7,9 @@ on:
 
 concurrency:
   group: tests-${{ github.ref }}
-  cancel-in-progress: true
+  # Cancel stale in-progress PR runs, but never cancel a run on main: two commits
+  # landing in quick succession must each keep their own pass/fail signal.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   pytest:
