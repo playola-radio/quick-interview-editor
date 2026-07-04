@@ -39,7 +39,9 @@ _TAG = re.compile(r"^\[(\d+)\]\s*(.*)$")
 
 
 def _norm(token: str) -> str:
-    return re.sub(r"[^a-z0-9]", "", token.lower())
+    # Keep alphanumerics (Unicode-aware, so non-Latin words survive), drop
+    # punctuation/whitespace.
+    return "".join(c for c in token.lower() if c.isalnum())
 
 
 def _tokens(text: str) -> list[str]:

@@ -44,6 +44,14 @@ def test_no_silence_at_all_pads_both_sides():
     assert b.start_sample == 900 and b.end_sample == 1300
 
 
+def test_overlapping_neighbor_timestamp_never_clips_the_kept_word():
+    # prev word 0.90-1.10 overlaps kept word 1.00-1.20; limit must not clip it
+    b = snap_boundaries(1.000, 1.200, [], SR, 5000, limit_start_sample=1100)
+    assert b.start_sample <= 1000  # not pushed to 1100 (inside the word)
+    b2 = snap_boundaries(1.000, 1.200, [], SR, 5000, limit_end_sample=1100)
+    assert b2.end_sample >= 1200
+
+
 def test_neighbor_limits_stop_adjacent_chunks_stealing_words():
     # chunk A ends at 1.13s, chunk B starts at 1.17s, silence only far away (2.0s)
     silences = [Silence(2000, 2300)]

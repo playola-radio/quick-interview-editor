@@ -181,6 +181,13 @@ def test_last_word_missing_end_uses_duration_fallback():
     assert b.end == 2.0 + 0.4  # start + fallback, not collapsed to start
 
 
+def test_non_latin_words_resolve_and_do_not_vanish():
+    words = (Word(1, "你好", 0.0, 0.5), Word(2, "world", 0.6, 1.0))
+    transcript = Transcript(words=words, segments=(Segment(1, (1, 2), "你好 world"),))
+    (b,) = resolve_blocks(parse_edit_file("[1] 你好 world\n"), transcript)
+    assert b.word_ids == [1, 2]  # CJK word not stripped to empty
+
+
 def test_build_edit_plan_has_versioned_shape_and_word_samples():
     seg = ResolvedSegment(
         index=0, output_name="song.1.aiff", word_ids=[1, 2],

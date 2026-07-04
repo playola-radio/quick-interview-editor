@@ -45,6 +45,10 @@ def snap_boundaries(
     # past the next chunk's content start.
     lo = 0 if limit_start_sample is None else max(0, limit_start_sample)
     hi = total_samples if limit_end_sample is None else min(total_samples, limit_end_sample)
+    # A neighbor whose timestamp overlaps the kept word must never push the
+    # limit into the word itself (that would clip it).
+    lo = min(lo, cs)
+    hi = max(hi, ce)
 
     # ---- start: nearest silence that begins at/before the first word ----
     leading = [s for s in silences if s.start < cs and s.end > lo]
