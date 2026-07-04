@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# generated artifacts / caches (live next to source audio)
+*.markers.aiff
+*.whisperx.json
+*.openai.json
+*.edit-plan.json
