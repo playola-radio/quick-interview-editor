@@ -58,13 +58,13 @@ struct TranscriptPageView: View {
       Text(model.runTogetherCountLabel).foregroundStyle(Color(white: 0.6))
       Text(model.sensitivityLabel).foregroundStyle(Color(white: 0.6))
       Slider(
-        value: $model.runTogetherMaxGapMs,
+        value: Binding(
+          get: { model.runTogetherMaxGapMs },
+          set: { model.sensitivityChanged($0) }
+        ),
         in: model.sensitivityMinMs...model.sensitivityMaxMs
       )
       .frame(width: 180)
-      .onChange(of: model.runTogetherMaxGapMs) { _, newValue in
-        model.sensitivityChanged(newValue)
-      }
     }
     .font(.system(size: 12))
   }

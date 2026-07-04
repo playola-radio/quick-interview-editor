@@ -1,4 +1,5 @@
 import Foundation
+import IssueReporting
 
 struct EditPlan: Codable, Equatable {
   var schemaVersion: Int
@@ -44,7 +45,9 @@ struct EditPlan: Codable, Equatable {
     var end: Double
   }
 
-  // Decoded but unused in Step 1.
+  // Decoded but unused in Step 1. Only the fields Step 1 needs are modeled;
+  // every other key the engine emits (params, warnings, sample bounds, …) is
+  // ignored by Decodable, so a plan omitting them still decodes.
   struct Segment: Codable, Equatable, Identifiable {
     var index: Int
     var outputName: String
@@ -53,14 +56,12 @@ struct EditPlan: Codable, Equatable {
     var endStatus: String
     var id: Int { index }
     enum CodingKeys: String, CodingKey {
-      case index, warnings
+      case index
       case outputName = "output_name"
       case wordIDs = "word_ids"
       case startStatus = "start_status"
       case endStatus = "end_status"
     }
-    // Only decode the fields Step 1 needs; ignore the rest.
-    var warnings: [String] = []
   }
 }
 
@@ -71,8 +72,18 @@ extension EditPlan {
     try JSONDecoder().decode(EditPlan.self, from: Data(contentsOf: url))
   }
   /// App-runtime fixture (previews / default engine). Loads from the app bundle.
+  /// Degrades to an empty plan (and reports the issue) rather than trapping if the
+  /// bundled resource is ever missing or unreadable.
   static var fixture: EditPlan {
-    let url = Bundle.main.url(forResource: "edit-plan", withExtension: "json")!
-    return try! decoded(from: url)
+    guard let url = Bundle.main.url(forResource: "edit-plan", withExtension: "json"),
+          let plan = try? decoded(from: url)
+    else {
+      reportIssue("Bundled edit-plan.json fixture is missing or unreadable")
+      return EditPlan(
+        schemaVersion: 1,
+        source: Source(path: "", sampleRate: 44100, channels: 1, durationSamples: 0),
+        words: [], silences: [], segments: [])
+    }
+    return plan
   }
 }

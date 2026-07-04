@@ -1,6 +1,7 @@
 import Dependencies
 import Foundation
 import IdentifiedCollections
+import IssueReporting
 import Observation
 
 @MainActor
@@ -58,7 +59,11 @@ class TranscriptPageModel: ViewModel {
     guard editPlan == nil, let planURL else { return }
     isLoading = true
     defer { isLoading = false }
-    editPlan = try? await engine.loadPlan(planURL)
+    // Surface load failures (dev/test) instead of silently swallowing them; on a
+    // failure editPlan stays nil and the view shows the empty state.
+    await withErrorReporting {
+      editPlan = try await engine.loadPlan(planURL)
+    }
     recomputeWords()
   }
 
@@ -84,7 +89,7 @@ class TranscriptPageModel: ViewModel {
   }
 
   // MARK: - Private Helpers
-  func recomputeWords() {
+  private func recomputeWords() {
     guard let plan = editPlan else { words = []; return }
     let red = runTogetherWordIDs(plan.words, maxGapMs: runTogetherMaxGapMs)
     let selected = selectedWordIDs
