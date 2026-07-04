@@ -12,7 +12,7 @@ Spec: `docs/superpowers/specs/2026-07-03-transcript-chunking-design.md`
 **Goal**: adaptive silence regions over a mono PCM array.
 **Success**: on synthetic tone+gap signals at varied noise floors, detected regions match known gaps within tolerance.
 **Tests**: adaptive threshold from noise floor; window/hop; min-silence filtering; no-silence case.
-**Status**: Not Started
+**Status**: Complete
 
 ## Stage 3: Edit-file parse + alignment (`editplan.py`, part 1)
 **Goal**: parse edited transcript into blocks; resolve each to a word-index range + content time span using stable IDs (+ constrained intra-line fuzzy trim).
