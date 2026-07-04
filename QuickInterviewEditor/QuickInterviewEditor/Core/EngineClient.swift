@@ -10,7 +10,7 @@ struct EngineClient: Sendable {
 extension EngineClient: DependencyKey {
   static let liveValue = EngineClient(
     loadPlan: { url in try EditPlan.decoded(from: url) },
-    transcribe: { url in EngineClient.liveTranscribe(audio: url) }  // Task 5
+    transcribe: { url in LiveEngine.transcribe(audio: url) }
   )
 }
 
@@ -44,11 +44,5 @@ extension DependencyValues {
   var engine: EngineClient {
     get { self[EngineClient.self] }
     set { self[EngineClient.self] = newValue }
-  }
-}
-
-extension EngineClient {
-  static func liveTranscribe(audio: URL) -> AsyncThrowingStream<EngineEvent, Error> {
-    AsyncThrowingStream { $0.finish(throwing: EngineClientError.engineNotFound("live engine not implemented yet")) }
   }
 }
