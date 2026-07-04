@@ -85,6 +85,38 @@ def test_unknown_segment_id_is_warned_and_skipped():
     assert resolved == []  # nothing resolvable -> no output block
 
 
+def test_large_internal_deletion_auto_splits_into_two_files():
+    # keep [1] and [3] in ONE block (no blank line) after deleting [2].
+    # The 1.3s gap where seg2 was must not be exported -> auto-split.
+    blocks = parse_edit_file("[1] the quick brown fox\n[3] the quick brown fox\n")
+    resolved = resolve_blocks(blocks, _transcript())
+    assert len(resolved) == 2
+    assert resolved[0].word_ids == [1, 2, 3, 4]
+    assert resolved[1].word_ids == [7, 8, 9, 10]
+    assert resolved[0].end == 0.7 and resolved[1].start == 2.0
+    assert any("split" in w.lower() for w in resolved[0].warnings)
+
+
+def test_small_internal_deletion_stays_contiguous():
+    # delete just "brown" from seg1 -> tiny gap -> single contiguous file
+    blocks = parse_edit_file("[1] the quick fox\n")
+    (b,) = resolve_blocks(blocks, _transcript())
+    assert b.word_ids == [1, 2, 4]
+    assert b.start == 0.0 and b.end == 0.7
+
+
+def test_missing_end_time_uses_next_word_start_not_word_start():
+    words = (
+        Word(1, "hello", 0.0, None),  # end missing
+        Word(2, "world", 0.5, 0.9),
+    )
+    segments = (Segment(1, (1,), "hello"), Segment(2, (2,), "world"))
+    transcript = Transcript(words=words, segments=segments)
+    blocks = parse_edit_file("[1] hello\n")
+    (b,) = resolve_blocks(blocks, transcript)
+    assert b.end == 0.5  # next word's start, not 0.0
+
+
 def test_build_edit_plan_has_versioned_shape_and_word_samples():
     seg = ResolvedSegment(
         index=0, output_name="song.1.aiff", word_ids=[1, 2],

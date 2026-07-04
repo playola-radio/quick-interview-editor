@@ -16,6 +16,7 @@ from .silence import Silence
 from .words import Transcript
 
 SCHEMA_VERSION = 1
+DEFAULT_MAX_GAP_SEC = 1.0  # deletions longer than this split a block into files
 
 
 @dataclass(frozen=True)
@@ -77,10 +78,23 @@ def _match(original_ids: list[int], edited_tokens: list[str], transcript: Transc
     return kept
 
 
-def resolve_blocks(parsed: list[list[ParsedLine]], transcript: Transcript) -> list[Block]:
+def resolve_blocks(
+    parsed: list[list[ParsedLine]],
+    transcript: Transcript,
+    max_gap_sec: float = DEFAULT_MAX_GAP_SEC,
+) -> list[Block]:
     seg_by_id = {seg.id: seg for seg in transcript.segments}
+    by_id = {w.id: w for w in transcript.words}
     all_ids = [w.id for w in transcript.words]
     out: list[Block] = []
+
+    def word_end(word) -> float:
+        # WhisperX occasionally omits a word's end; the next word's start is a
+        # safe upper bound so we never shrink the span onto the word's start.
+        if word.end is not None:
+            return word.end
+        nxt = by_id.get(word.id + 1)
+        return nxt.start if nxt else word.start
 
     for block in parsed:
         kept: list[int] = []
@@ -105,19 +119,33 @@ def resolve_blocks(parsed: list[list[ParsedLine]], transcript: Transcript) -> li
         if not kept:
             continue  # whole block deleted / unresolvable
 
-        words = [transcript.word(wid) for wid in kept]
-        start = min(w.start for w in words)
-        end = max((w.end if w.end is not None else w.start) for w in words)
-        out.append(
-            Block(
-                index=len(out),
-                word_ids=kept,
-                start=start,
-                end=end,
-                segment_ids=segment_ids,
-                warnings=warnings,
+        # Split at large deletions so removed audio is never re-exported.
+        runs: list[list[int]] = [[kept[0]]]
+        for prev_id, cur_id in zip(kept, kept[1:]):
+            deleted_between = cur_id > prev_id + 1
+            gap = by_id[cur_id].start - word_end(by_id[prev_id])
+            if deleted_between and gap > max_gap_sec:
+                runs.append([cur_id])
+            else:
+                runs[-1].append(cur_id)
+
+        for run_i, run in enumerate(runs):
+            words = [by_id[wid] for wid in run]
+            run_warnings = list(warnings)
+            if len(runs) > 1:
+                run_warnings.append(
+                    f"auto-split into {len(runs)} files at deletions > {max_gap_sec}s"
+                )
+            out.append(
+                Block(
+                    index=len(out),
+                    word_ids=run,
+                    start=min(w.start for w in words),
+                    end=max(word_end(w) for w in words),
+                    segment_ids=segment_ids,
+                    warnings=run_warnings,
+                )
             )
-        )
     return out
 
 
