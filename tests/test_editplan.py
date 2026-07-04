@@ -1,4 +1,10 @@
-from logic_markers.editplan import parse_edit_file, resolve_blocks
+from logic_markers.editplan import (
+    ResolvedSegment,
+    build_edit_plan,
+    parse_edit_file,
+    resolve_blocks,
+)
+from logic_markers.silence import Silence
 from logic_markers.words import Segment, Transcript, Word
 
 
@@ -77,3 +83,26 @@ def test_unknown_segment_id_is_warned_and_skipped():
     blocks = parse_edit_file("[9] nonexistent segment\n")
     resolved = resolve_blocks(blocks, _transcript())
     assert resolved == []  # nothing resolvable -> no output block
+
+
+def test_build_edit_plan_has_versioned_shape_and_word_samples():
+    seg = ResolvedSegment(
+        index=0, output_name="song.1.aiff", word_ids=[1, 2],
+        content_start_sample=0, content_end_sample=30870,
+        start_sample=0, end_sample=33000, start_status="snapped",
+        end_status="padded", overlaps_previous=False, overlaps_next=False,
+        segment_ids=[1], warnings=[],
+    )
+    plan = build_edit_plan(
+        source_path="song.m4a", sample_rate=44100, channels=2,
+        total_samples=1_000_000, params={"roll_ms": 20},
+        transcript=_transcript(), silences=[Silence(0, 4410)], segments=[seg],
+    )
+    assert plan["schema_version"] == 1
+    assert plan["source"]["sample_rate"] == 44100
+    assert plan["segments"][0]["output_name"] == "song.1.aiff"
+    assert plan["segments"][0]["source_end_sample"] == 33000
+    # word carries both seconds and sample positions
+    w0 = plan["words"][0]
+    assert w0["start"] == 0.0 and w0["start_sample"] == 0
+    assert plan["words"][1]["start_sample"] == round(0.2 * 44100)

@@ -12,7 +12,10 @@ import difflib
 import re
 from dataclasses import dataclass, field
 
+from .silence import Silence
 from .words import Transcript
+
+SCHEMA_VERSION = 1
 
 
 @dataclass(frozen=True)
@@ -116,3 +119,78 @@ def resolve_blocks(parsed: list[list[ParsedLine]], transcript: Transcript) -> li
             )
         )
     return out
+
+
+@dataclass
+class ResolvedSegment:
+    index: int
+    output_name: str
+    word_ids: list[int]
+    content_start_sample: int
+    content_end_sample: int
+    start_sample: int
+    end_sample: int
+    start_status: str
+    end_status: str
+    overlaps_previous: bool
+    overlaps_next: bool
+    segment_ids: list[int]
+    warnings: list[str]
+
+
+def _sample(seconds: float | None, sr: int) -> int | None:
+    return None if seconds is None else round(seconds * sr)
+
+
+def build_edit_plan(
+    *,
+    source_path,
+    sample_rate: int,
+    channels: int,
+    total_samples: int,
+    params: dict,
+    transcript: Transcript,
+    silences: list[Silence],
+    segments: list[ResolvedSegment],
+) -> dict:
+    """Assemble the versioned, reproducible edit-plan the GUI will also consume."""
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "source": {
+            "path": str(source_path),
+            "sample_rate": sample_rate,
+            "channels": channels,
+            "duration_samples": total_samples,
+        },
+        "params": params,
+        "words": [
+            {
+                "id": w.id,
+                "text": w.text,
+                "start": w.start,
+                "end": w.end,
+                "start_sample": _sample(w.start, sample_rate),
+                "end_sample": _sample(w.end, sample_rate),
+            }
+            for w in transcript.words
+        ],
+        "silences": [{"start": s.start, "end": s.end} for s in silences],
+        "segments": [
+            {
+                "index": s.index,
+                "output_name": s.output_name,
+                "word_ids": s.word_ids,
+                "content_start_sample": s.content_start_sample,
+                "content_end_sample": s.content_end_sample,
+                "source_start_sample": s.start_sample,
+                "source_end_sample": s.end_sample,
+                "start_status": s.start_status,
+                "end_status": s.end_status,
+                "overlaps_previous": s.overlaps_previous,
+                "overlaps_next": s.overlaps_next,
+                "segment_ids": s.segment_ids,
+                "warnings": s.warnings,
+            }
+            for s in segments
+        ],
+    }

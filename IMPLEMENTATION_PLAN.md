@@ -24,7 +24,7 @@ Spec: `docs/superpowers/specs/2026-07-03-transcript-chunking-design.md`
 **Goal**: snap each block's boundaries outward to silence edges; emit versioned edit-plan.json with statuses/candidates.
 **Success**: outward snap, no-clip guarantee, no-silence fallback all hold; JSON validates against the documented shape.
 **Tests**: word spans vs synthetic silence maps.
-**Status**: Not Started
+**Status**: Complete
 
 ## Stage 5: Slicer + AIFF output (`slicer.py`)
 **Goal**: sample-accurate slice per segment; markers re-based to slice start; write `song.N.aiff`.
