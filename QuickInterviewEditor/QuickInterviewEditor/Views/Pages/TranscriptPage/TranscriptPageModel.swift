@@ -37,18 +37,17 @@ class TranscriptPageModel: ViewModel {
   // MARK: - View Helpers
   var hasSelection: Bool { selectionAnchorID != nil }
   var selectionSummary: String {
-    guard let range = selectedIDRange else { return "No selection" }
-    let n = range.count
+    let n = selectedWords.count
+    guard n > 0 else { return "No selection" }
     return "\(n) word\(n == 1 ? "" : "s") selected"
   }
   var selectedSampleRange: Range<Int>? {
-    guard let range = selectedIDRange, let plan = editPlan,
-          let first = plan.words.first(where: { $0.id == range.lowerBound }),
-          let last = plan.words.first(where: { $0.id == range.upperBound })
+    guard let plan = editPlan, let first = selectedWords.first, let last = selectedWords.last
     else { return nil }
     let sr = Double(plan.source.sampleRate)
     let s = first.startSample ?? Int(first.start * sr)
     let e = last.endSample ?? Int((last.end ?? last.start) * sr)
+    guard s < e else { return nil }  // non-monotonic samples must not build an inverted Range
     return s..<e
   }
   var runTogetherCount: Int { words.filter(\.isRunTogether).count }
@@ -88,18 +87,30 @@ class TranscriptPageModel: ViewModel {
   func recomputeWords() {
     guard let plan = editPlan else { words = []; return }
     let red = runTogetherWordIDs(plan.words, maxGapMs: runTogetherMaxGapMs)
-    words = IdentifiedArrayOf(uniqueElements: plan.words.map { w in
+    let selected = selectedWordIDs
+    let states = plan.words.map { w in
       WordViewState(
         id: w.id, text: w.text,
         startSample: w.startSample, endSample: w.endSample,
-        isSelected: selectedIDRange?.contains(w.id) ?? false,
+        isSelected: selected.contains(w.id),
         isRunTogether: red.contains(w.id)
       )
-    })
+    }
+    // A malformed plan with duplicate word IDs must not trap the app on load.
+    words = IdentifiedArray(states, uniquingIDsWith: { first, _ in first })
   }
 
-  private var selectedIDRange: ClosedRange<Word.ID>? {
-    guard let a = selectionAnchorID, let f = selectionFocusID else { return nil }
-    return min(a, f)...max(a, f)
+  /// The contiguous run of words between anchor and focus, by POSITION in the
+  /// transcript — not by ID arithmetic. Word IDs are not guaranteed dense,
+  /// unique, or monotonic with visual order, so `min(id)...max(id)` would
+  /// over-count and could invert; positions are the source of truth.
+  private var selectedWords: ArraySlice<Word> {
+    guard let a = selectionAnchorID, let f = selectionFocusID, let plan = editPlan,
+          let anchorIndex = plan.words.firstIndex(where: { $0.id == a }),
+          let focusIndex = plan.words.firstIndex(where: { $0.id == f })
+    else { return [] }
+    return plan.words[min(anchorIndex, focusIndex)...max(anchorIndex, focusIndex)]
   }
+
+  private var selectedWordIDs: Set<Word.ID> { Set(selectedWords.map(\.id)) }
 }

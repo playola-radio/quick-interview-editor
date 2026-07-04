@@ -79,4 +79,72 @@ struct TranscriptPageTests {
     m.sensitivityChanged(30)
     #expect(m.runTogetherCount > 0)
   }
+
+  // MARK: - Synthetic-plan regression tests
+
+  private func word(
+    _ id: Int, _ text: String, start: Double, end: Double
+  ) -> EditPlan.Word {
+    EditPlan.Word(
+      id: id, text: text, start: start, end: end,
+      startSample: Int(start * 44100), endSample: Int(end * 44100))
+  }
+
+  private func plan(_ words: [EditPlan.Word]) -> EditPlan {
+    EditPlan(
+      schemaVersion: 1,
+      source: EditPlan.Source(
+        path: "test", sampleRate: 44100, channels: 1, durationSamples: 1_000_000),
+      words: words, silences: [], segments: [])
+  }
+
+  private func modelLoaded(with words: [EditPlan.Word]) async -> TranscriptPageModel {
+    let m = TranscriptPageModel(planURL: URL(fileURLWithPath: "/unused"))
+    let synthetic = plan(words)
+    await withDependencies { $0.engine.loadPlan = { _ in synthetic } } operation: {
+      await m.viewAppeared()
+    }
+    return m
+  }
+
+  /// Proves the `engine.loadPlan` override is actually exercised: a 2-word
+  /// sentinel plan can never be the 122-word bundled fixture, so if injection
+  /// were bypassed (e.g. via testValue → .fixture) this would see 122 words.
+  @Test func viewAppearedUsesInjectedEngineNotBundle() async {
+    let m = await modelLoaded(with: [
+      word(1, "alpha", start: 0, end: 0.2),
+      word(2, "beta", start: 0.4, end: 0.6),
+    ])
+    expectNoDifference(m.words.map(\.text), ["alpha", "beta"])
+  }
+
+  /// Selection counts words by POSITION, not by ID span. With sparse IDs the
+  /// old `min(id)...max(id)` arithmetic reported the span (41) and could select
+  /// unrelated in-range words.
+  @Test func selectionCountsWordsByPositionNotIDSpan() async {
+    let words = [
+      word(10, "a", start: 0, end: 0.1),
+      word(50, "b", start: 0.2, end: 0.3),
+      word(90, "c", start: 0.4, end: 0.5),
+    ]
+    let m = await modelLoaded(with: words)
+    m.wordTapped(10)
+    m.wordTapped(50)
+    expectNoDifference(m.selectionSummary, "2 words selected")
+    #expect(m.words[id: 10]?.isSelected == true)
+    #expect(m.words[id: 50]?.isSelected == true)
+    #expect(m.words[id: 90]?.isSelected == false)
+    expectNoDifference(m.selectedSampleRange, words[0].startSample!..<words[1].endSample!)
+  }
+
+  /// A malformed plan with duplicate word IDs must not trap the app on load.
+  @Test func duplicateWordIDsDoNotTrap() async {
+    let m = await modelLoaded(with: [
+      word(1, "a", start: 0, end: 0.1),
+      word(1, "dup", start: 0.2, end: 0.3),
+      word(2, "b", start: 0.4, end: 0.5),
+    ])
+    expectNoDifference(m.words.count, 2)
+    expectNoDifference(m.words[id: 1]?.text, "a")
+  }
 }
