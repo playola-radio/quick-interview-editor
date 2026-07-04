@@ -196,7 +196,7 @@ Views/
 │   │   ├── RootModel.swift
 │   │   ├── RootView.swift
 │   │   └── RootTests.swift
-│   ├── ImportPage/          # empty-state drop zone + open panel + Load sample
+│   ├── ImportPage/          # empty-state drop zone + open panel
 │   │   ├── ImportPageModel.swift
 │   │   ├── ImportPageView.swift
 │   │   └── ImportPageTests.swift
@@ -214,9 +214,7 @@ Views/
 - **View helpers:** `showsEmptyState: Bool` (`tabs.isEmpty`), `tabTitles`, etc.
 - **User actions:** `fileDropped(_ urls: [URL])` / `filePicked(_ url:)` →
   `openSong(url:)` (append a `SongTabModel`, select it, start its transcription);
-  `loadSampleTapped()` (open a tab seeded directly with `EditPlan.fixture` in the
-  `.loaded` phase — no engine call, a zero-wait demo); `tabSelected(_:)`,
-  `tabClosed(_:)` (cancel that tab's job).
+  `tabSelected(_:)`, `tabClosed(_:)` (cancel that tab's job).
 - Dropping a file works whether the empty screen or an existing tab is showing.
 
 ### `SongTabModel`
@@ -275,7 +273,7 @@ no subprocess, no audio, no `Task.sleep`. Value comparisons via
 
 - **RootModel:** dropping a file opens a new tab and starts it; a second drop opens
   a second tab; closing a tab cancels its job and removes it; empty state shows when
-  no tabs; `loadSampleTapped` opens a tab with the fixture.
+  no tabs.
 - **SongTabModel:** consuming a stream of `.progress` then `.completed` walks
   `phase` `transcribing → loaded` and populates words (count matches fixture);
   a throwing stream → `phase == .failed` with the right message + alert;
