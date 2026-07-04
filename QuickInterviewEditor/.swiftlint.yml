@@ -24,7 +24,9 @@ nesting:
   type_level:
     warning: 2
 
-# Allow shorter variable names in specific contexts (e.g. `id`)
+# Project-wide relaxation of the minimum identifier length: allow two-character
+# names anywhere (e.g. `id`, `sr`) while still forbidding single-character names
+# (error at length 1). This is a global override, not scoped to specific names.
 identifier_name:
   min_length:
     warning: 2

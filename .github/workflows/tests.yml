@@ -11,10 +11,15 @@ concurrency:
   # landing in quick succession must each keep their own pass/fail signal.
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
+# Both jobs only check out and run tests — no writes to the repo, releases, or PRs.
+permissions:
+  contents: read
+
 jobs:
   pytest:
     name: pytest (Python 3.12)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -35,6 +40,7 @@ jobs:
   xcode:
     name: Xcode app (macOS)
     runs-on: macos-15
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: QuickInterviewEditor
