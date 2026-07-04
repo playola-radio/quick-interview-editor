@@ -5,6 +5,10 @@ disabled_rules:
   - opening_brace
   - closure_parameter_position
   - todo
+  # Length caps are intentionally not enforced yet; disable them explicitly
+  # rather than configure a threshold that never fires.
+  - type_body_length
+  - file_length
 
 # Don't lint generated or tooling output
 excluded:
@@ -33,11 +37,3 @@ identifier_name:
     error: 1
   allowed_symbols:
     - "_"
-
-type_body_length:
-  warning: 1000
-  error: 1000
-
-file_length:
-  warning: 1000
-  error: 1000

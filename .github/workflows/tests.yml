@@ -52,14 +52,19 @@ jobs:
       - name: Show Xcode version
         run: xcodebuild -version
 
+      # Installs Ruby, runs `bundle install`, and caches the gem bundle
+      # (the full fastlane graph) between runs.
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+          bundler-cache: true
+          working-directory: QuickInterviewEditor
+
       - name: Install tooling (XcodeGen + SwiftLint)
         run: brew install xcodegen swiftlint
 
       - name: Generate Xcode project
         run: xcodegen generate
-
-      - name: Install Ruby gems (fastlane)
-        run: bundle install
 
       - name: swift-format check
         run: bundle exec fastlane mac format_check
