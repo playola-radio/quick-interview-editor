@@ -36,4 +36,4 @@ Spec: `docs/superpowers/specs/2026-07-03-transcript-chunking-design.md`
 **Goal**: end-to-end `cut` on the real clip.
 **Success**: N valid AIFFs (afinfo), markers present/re-based, edit-plan.json written; manual Logic check.
 **Tests**: integration test.
-**Status**: Not Started
+**Status**: Complete

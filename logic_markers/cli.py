@@ -9,13 +9,28 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import struct
 import sys
+import tempfile
 from pathlib import Path
 
 from . import aiff_markers
-from .audio import convert_to_aiff
+from .aiff_markers import Marker
+from .audio import convert_to_aiff, read_aiff_mono
+from .boundaries import snap_boundaries
+from .editplan import (
+    ResolvedSegment,
+    build_edit_plan,
+    parse_edit_file,
+    resolve_blocks,
+)
+from .silence import detect_silences
+from .slicer import slice_aiff
 from .transcribe import Word
 from .words import Transcript, render_transcript
+
+SNAP_PARAMS = {"search_radius_ms": 800.0, "roll_ms": 20.0, "pad_ms": 100.0}
+SILENCE_PARAMS = {"min_silence_ms": 120.0, "margin_db": 8.0, "floor_percentile": 20.0}
 
 
 def _load_or_transcribe_transcript(source: Path, refresh: bool) -> Transcript:
@@ -132,6 +147,108 @@ def _cmd_markers(args) -> int:
     return 0
 
 
+def run_cut(source: Path, edit_path: Path):
+    """Cut the source into per-block AIFFs based on the edited transcript."""
+    cache = source.with_suffix(source.suffix + ".transcript.json")
+    if not cache.exists():
+        raise RuntimeError(
+            f"no transcript for {source.name}; run `logic-markers transcript` first"
+        )
+    transcript = Transcript.from_dict(json.loads(cache.read_text()))
+    blocks = resolve_blocks(parse_edit_file(edit_path.read_text()), transcript)
+    if not blocks:
+        raise RuntimeError("nothing to export — the edited transcript has no words left")
+
+    # Convert to a full linear-PCM AIFF once; slice it per block.
+    fd, tmp = tempfile.mkstemp(suffix=".aiff")
+    os.close(fd)
+    try:
+        convert_to_aiff(source, Path(tmp), 44100)
+        aiff_bytes = Path(tmp).read_bytes()
+    finally:
+        os.unlink(tmp)
+
+    sr = aiff_markers.read_sample_rate(aiff_bytes)
+    _, _chunks = aiff_markers.parse_chunks(aiff_bytes)
+    channels = struct.unpack(">h", dict(_chunks)[b"COMM"][0:2])[0]
+    mono, _ = read_aiff_mono(aiff_bytes)
+    total_samples = len(mono)
+    silences = detect_silences(mono, sr, **SILENCE_PARAMS)
+
+    # Every word is a marker candidate; the slicer keeps those inside each slice.
+    all_markers = [
+        Marker(id=w.id, position=round(w.start * sr), name=w.text)
+        for w in transcript.words
+    ]
+
+    resolved = []
+    for i, b in enumerate(blocks):
+        limit_start = round(blocks[i - 1].end * sr) if i > 0 else None
+        limit_end = round(blocks[i + 1].start * sr) if i < len(blocks) - 1 else None
+        bnd = snap_boundaries(
+            b.start, b.end, silences, sr, total_samples,
+            limit_start_sample=limit_start, limit_end_sample=limit_end, **SNAP_PARAMS,
+        )
+        resolved.append((b, bnd))
+
+    outputs: list[Path] = []
+    segments: list[ResolvedSegment] = []
+    for i, (block, bnd) in enumerate(resolved):
+        prev_end = resolved[i - 1][1].end_sample if i > 0 else None
+        next_start = resolved[i + 1][1].start_sample if i < len(resolved) - 1 else None
+        name = f"{source.stem}.{block.index + 1}.aiff"
+        out_path = source.parent / name
+        out_path.write_bytes(slice_aiff(aiff_bytes, bnd.start_sample, bnd.end_sample, all_markers))
+        outputs.append(out_path)
+        segments.append(
+            ResolvedSegment(
+                index=block.index,
+                output_name=name,
+                word_ids=block.word_ids,
+                content_start_sample=round(block.start * sr),
+                content_end_sample=round(block.end * sr),
+                start_sample=bnd.start_sample,
+                end_sample=bnd.end_sample,
+                start_status=bnd.start_status,
+                end_status=bnd.end_status,
+                overlaps_previous=prev_end is not None and bnd.start_sample < prev_end,
+                overlaps_next=next_start is not None and bnd.end_sample > next_start,
+                segment_ids=block.segment_ids,
+                warnings=block.warnings,
+            )
+        )
+
+    plan = build_edit_plan(
+        source_path=source, sample_rate=sr, channels=channels,
+        total_samples=total_samples, params={**SNAP_PARAMS, **SILENCE_PARAMS},
+        transcript=transcript, silences=silences, segments=segments,
+    )
+    plan_path = source.with_suffix(source.suffix + ".edit-plan.json")
+    plan_path.write_text(json.dumps(plan, indent=2))
+    return outputs, plan_path, segments
+
+
+def _cmd_cut(args) -> int:
+    if not args.edit.exists():
+        print(f"error: no such edit file: {args.edit}", file=sys.stderr)
+        return 2
+    outputs, plan_path, segments = run_cut(args.input, args.edit)
+    print(f"Wrote {len(outputs)} file(s):")
+    for out, seg in zip(outputs, segments):
+        flags = []
+        if seg.start_status != "snapped" or seg.end_status != "snapped":
+            flags.append("padded boundary (no nearby silence)")
+        if seg.overlaps_previous or seg.overlaps_next:
+            flags.append("overlaps neighbor")
+        note = f"  [{'; '.join(flags)}]" if flags else ""
+        print(f"  {out.name}{note}")
+        for w in seg.warnings:
+            print(f"      warning: {w}")
+    print(f"\nEdit plan: {plan_path.name}")
+    print("Drag the .aiff files into Logic (markers travel with each file).")
+    return 0
+
+
 def _cmd_transcript(args) -> int:
     print(f"Transcribing {args.input.name} (WhisperX)...")
     transcript = _load_or_transcribe_transcript(args.input, args.refresh)
@@ -165,6 +282,11 @@ def main(argv=None) -> int:
     t.add_argument("input", type=Path, help="source audio (wav/mp3/m4a/aiff)")
     t.add_argument("--refresh", action="store_true", help="ignore cached transcript")
     t.set_defaults(func=_cmd_transcript)
+
+    c = sub.add_parser("cut", help="split audio into AIFFs from an edited transcript")
+    c.add_argument("input", type=Path, help="source audio (must match the transcript)")
+    c.add_argument("edit", type=Path, help="the edited transcript .txt")
+    c.set_defaults(func=_cmd_cut)
 
     args = parser.parse_args(argv)
 

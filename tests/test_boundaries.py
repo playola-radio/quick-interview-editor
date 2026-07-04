@@ -42,3 +42,16 @@ def test_no_silence_at_all_pads_both_sides():
     b = snap_boundaries(1.000, 1.200, [], SR, total_samples=5000)
     assert isinstance(b, Boundaries)
     assert b.start_sample == 900 and b.end_sample == 1300
+
+
+def test_neighbor_limits_stop_adjacent_chunks_stealing_words():
+    # chunk A ends at 1.13s, chunk B starts at 1.17s, silence only far away (2.0s)
+    silences = [Silence(2000, 2300)]
+    # file A: its end must not reach past B's content start (1170)
+    a = snap_boundaries(0.500, 1.130, silences, SR, 5000, limit_end_sample=1170)
+    assert a.end_sample <= 1170
+    # file B: its start must not reach before A's content end (1130)
+    b = snap_boundaries(1.170, 1.500, silences, SR, 5000, limit_start_sample=1130)
+    assert b.start_sample >= 1130
+    # overlap is at most the tiny inter-chunk gap, not whole words
+    assert a.end_sample - b.start_sample <= 40

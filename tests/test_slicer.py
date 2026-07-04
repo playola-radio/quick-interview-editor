@@ -77,3 +77,13 @@ def test_markers_are_filtered_to_the_slice_and_rebased():
 def test_slice_clamps_out_of_range_bounds():
     out = slice_aiff(_ramp_aiff(100), 50, 5000, [])
     assert len(_read_frames(out)) == 50  # clamped to available frames
+
+
+def test_read_aiff_mono_downmixes_and_reports_rate():
+    from logic_markers.audio import read_aiff_mono
+
+    samples, sr = read_aiff_mono(_ramp_aiff(300, sr=44100))
+    assert sr == 44100
+    assert len(samples) == 300
+    # frame i held (i, i) -> mono i -> float i/32768
+    assert abs(samples[100] - 100 / 32768.0) < 1e-6
