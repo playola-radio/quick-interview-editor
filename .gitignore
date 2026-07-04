@@ -44,5 +44,11 @@ htmlcov/
 # --- Node (ux-prototype, if it grows a build step) ---
 node_modules/
 
+# --- Xcode / fastlane ---
+DerivedData/
+*.xcresult
+QuickInterviewEditor/fastlane/test_output/
+QuickInterviewEditor/fastlane/report.xml
+
 # --- Conductor / local scratch (portable ignore for main checkout + worktrees) ---
 .context/

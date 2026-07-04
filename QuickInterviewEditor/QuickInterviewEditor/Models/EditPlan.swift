@@ -76,7 +76,7 @@ extension EditPlan {
   /// bundled resource is ever missing or unreadable.
   static var fixture: EditPlan {
     guard let url = Bundle.main.url(forResource: "edit-plan", withExtension: "json"),
-          let plan = try? decoded(from: url)
+      let plan = try? decoded(from: url)
     else {
       reportIssue("Bundled edit-plan.json fixture is missing or unreadable")
       return EditPlan(

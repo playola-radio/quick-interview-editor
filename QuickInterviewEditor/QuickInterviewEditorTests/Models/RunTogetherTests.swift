@@ -1,5 +1,6 @@
 import CustomDump
 import Testing
+
 @testable import QuickInterviewEditor
 
 struct RunTogetherTests {
@@ -9,7 +10,7 @@ struct RunTogetherTests {
     // "want"(id) -> "to" is a known 20ms fused pair; find that pair by text.
     let idx = words.firstIndex { $0.text == "want" }!
     #expect(red.contains(words[idx].id))
-    #expect(red.contains(words[idx + 1].id)) // "to"
+    #expect(red.contains(words[idx + 1].id))  // "to"
   }
 
   @Test func sensitivityChangesCount() {

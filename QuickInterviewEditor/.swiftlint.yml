@@ -1,0 +1,41 @@
+# SwiftLint Configuration
+disabled_rules:
+  - trailing_whitespace
+  - trailing_comma
+  - opening_brace
+  - closure_parameter_position
+  - todo
+
+# Don't lint generated or tooling output
+excluded:
+  - .build
+  - DerivedData
+  - fastlane
+  - QuickInterviewEditor.xcodeproj
+
+# General configuration
+line_length:
+  warning: 120
+  error: 200
+
+# Codable models namespace their `CodingKeys` inside nested value types
+# (e.g. EditPlan.Word.CodingKeys), which is two levels deep and idiomatic.
+nesting:
+  type_level:
+    warning: 2
+
+# Allow shorter variable names in specific contexts (e.g. `id`)
+identifier_name:
+  min_length:
+    warning: 2
+    error: 1
+  allowed_symbols:
+    - "_"
+
+type_body_length:
+  warning: 1000
+  error: 1000
+
+file_length:
+  warning: 1000
+  error: 1000

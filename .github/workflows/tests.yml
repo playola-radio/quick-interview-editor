@@ -31,3 +31,35 @@ jobs:
 
       - name: Run tests
         run: pytest -q
+
+  xcode:
+    name: Xcode app (macOS)
+    runs-on: macos-15
+    defaults:
+      run:
+        working-directory: QuickInterviewEditor
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Install tooling (XcodeGen + SwiftLint)
+        run: brew install xcodegen swiftlint
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Install Ruby gems (fastlane)
+        run: bundle install
+
+      - name: swift-format check
+        run: bundle exec fastlane mac format_check
+
+      - name: SwiftLint
+        run: bundle exec fastlane mac lint_code
+
+      - name: Run tests
+        run: bundle exec fastlane mac test
