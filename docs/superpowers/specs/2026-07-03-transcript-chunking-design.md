@@ -82,10 +82,15 @@ For each block with content span `[first_word_start, last_word_end]`:
 - **End:** search forward from `last_word_end` for the nearest silence region;
   set boundary near that silence's START (`silence.start + 20 ms`), clamped
   strictly `> last_word_end`.
-- **No silence within the search radius:** don't invent one. Pad outward
-  (50–150 ms), optionally snap to a nearby zero-crossing / local RMS minimum,
-  and mark the boundary `no_silence_found`.
+- **No silence within the search radius (a "tight" join):** don't invent one.
+  Pad the start ~100 ms, and give the **end a ~250 ms fade tail** so it doesn't
+  sound abruptly cut off. The tail may bleed into the *next kept chunk* (desired
+  — it's the material a fade-out is drawn over) but **never into deleted audio**
+  (a separate hard limit enforces this). Mark the boundary `padded`.
 - **Never** move a boundary inside a kept word's bounds.
+- Each boundary's status (`snapped` = natural silence, `padded` = tight join) is
+  recorded per segment, so the GUI can **color the words at tight joins** — the
+  user's cue that those chunks stick together and need a fade in Logic.
 
 Boundary mode: **independent slices** (default). Adjacent blocks may overlap
 slightly in a shared gap — desirable for later editing. Record it, don't force

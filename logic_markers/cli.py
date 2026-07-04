@@ -29,7 +29,7 @@ from .slicer import slice_aiff
 from .transcribe import Word
 from .words import Transcript, render_transcript
 
-SNAP_PARAMS = {"search_radius_ms": 800.0, "roll_ms": 20.0, "pad_ms": 100.0}
+SNAP_PARAMS = {"search_radius_ms": 800.0, "roll_ms": 20.0, "pad_ms": 100.0, "tail_ms": 250.0}
 SILENCE_PARAMS = {"min_silence_ms": 120.0, "margin_db": 8.0, "floor_percentile": 20.0}
 
 
@@ -180,12 +180,23 @@ def run_cut(source: Path, edit_path: Path):
     # timestamps can't stack or reorder inside a slice.
     all_markers = build_markers(transcript.words, sr)
 
+    kept_ids = {wid for b in blocks for wid in b.word_ids}
+    by_id = {w.id: w for w in transcript.words}
     resolved = []
     for b in blocks:
         limit_start, limit_end = boundary_limits(b.word_ids, transcript, sr)
+        # A fade tail may bleed into the next KEPT chunk, but never into a
+        # deleted word (that would re-export removed audio).
+        next_word = by_id.get(b.word_ids[-1] + 1)
+        hard_end = (
+            round(next_word.start * sr)
+            if next_word is not None and next_word.id not in kept_ids
+            else None
+        )
         bnd = snap_boundaries(
             b.start, b.end, silences, sr, total_samples,
-            limit_start_sample=limit_start, limit_end_sample=limit_end, **SNAP_PARAMS,
+            limit_start_sample=limit_start, limit_end_sample=limit_end,
+            hard_end_sample=hard_end, **SNAP_PARAMS,
         )
         resolved.append((b, bnd))
 
@@ -234,11 +245,11 @@ def _cmd_cut(args) -> int:
     print(f"Wrote {len(outputs)} file(s):")
     for out, seg in zip(outputs, segments):
         flags = []
-        if seg.start_status != "snapped" or seg.end_status != "snapped":
-            flags.append("padded boundary (no nearby silence)")
-        if seg.overlaps_previous or seg.overlaps_next:
-            flags.append("overlaps neighbor")
-        note = f"  [{'; '.join(flags)}]" if flags else ""
+        if seg.end_status == "padded":
+            flags.append("tight end join (fade tail added)")
+        if seg.start_status == "padded":
+            flags.append("tight start")
+        note = f"  [{'; '.join(flags)}]" if flags else "  [clean silence boundaries]"
         print(f"  {out.name}{note}")
         for w in seg.warnings:
             print(f"      warning: {w}")
