@@ -30,7 +30,7 @@ Spec: `docs/superpowers/specs/2026-07-03-transcript-chunking-design.md`
 **Goal**: sample-accurate slice per segment; markers re-based to slice start; write `song.N.aiff`.
 **Success**: slice offsets and re-based marker positions correct on a synthetic AIFF.
 **Tests**: slicing + marker rebasing.
-**Status**: Not Started
+**Status**: Complete
 
 ## Stage 6: `cut` command wiring + real-file integration
 **Goal**: end-to-end `cut` on the real clip.
