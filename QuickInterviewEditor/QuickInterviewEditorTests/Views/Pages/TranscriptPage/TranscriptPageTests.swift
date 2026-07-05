@@ -2,6 +2,7 @@ import CustomDump
 import Dependencies
 import Foundation
 import Testing
+
 @testable import QuickInterviewEditor
 
 @MainActor
@@ -24,66 +25,72 @@ struct TranscriptPageTests {
   }
 
   private func loadedModel() async -> TranscriptPageModel {
-    let m = TranscriptPageModel(planURL: URL(fileURLWithPath: "/unused"))
-    await withDependencies { $0.engine.loadPlan = { _ in Fixtures.editPlan() } } operation: {
-      await m.viewAppeared()
+    let model = TranscriptPageModel(planURL: URL(fileURLWithPath: "/unused"))
+    await withDependencies {
+      $0.engine.loadPlan = { _ in Fixtures.editPlan() }
+    } operation: {
+      await model.viewAppeared()
     }
-    return m
+    return model
   }
 
   @Test func firstClickSelectsSingleWord() async {
-    let m = await loadedModel()
-    m.wordTapped(1)
-    #expect(m.words[id: 1]?.isSelected == true)
-    #expect(m.words[id: 2]?.isSelected == false)
-    expectNoDifference(m.selectionSummary, "1 word selected")
+    let model = await loadedModel()
+    model.wordTapped(1)
+    #expect(model.words[id: 1]?.isSelected == true)
+    #expect(model.words[id: 2]?.isSelected == false)
+    expectNoDifference(model.selectionSummary, "1 word selected")
   }
 
   @Test func secondClickExtendsInclusiveRange() async {
-    let m = await loadedModel()
-    m.wordTapped(1)
-    m.wordTapped(3)
-    #expect(m.words[id: 1]?.isSelected == true)
-    #expect(m.words[id: 2]?.isSelected == true)
-    #expect(m.words[id: 3]?.isSelected == true)
-    #expect(m.words[id: 4]?.isSelected == false)
-    expectNoDifference(m.selectionSummary, "3 words selected")
+    let model = await loadedModel()
+    model.wordTapped(1)
+    model.wordTapped(3)
+    #expect(model.words[id: 1]?.isSelected == true)
+    #expect(model.words[id: 2]?.isSelected == true)
+    #expect(model.words[id: 3]?.isSelected == true)
+    #expect(model.words[id: 4]?.isSelected == false)
+    expectNoDifference(model.selectionSummary, "3 words selected")
   }
 
   @Test func thirdClickResetsSelection() async {
-    let m = await loadedModel()
-    m.wordTapped(1); m.wordTapped(3); m.wordTapped(5)
-    #expect(m.words[id: 1]?.isSelected == false)
-    #expect(m.words[id: 5]?.isSelected == true)
-    expectNoDifference(m.selectionSummary, "1 word selected")
+    let model = await loadedModel()
+    model.wordTapped(1)
+    model.wordTapped(3)
+    model.wordTapped(5)
+    #expect(model.words[id: 1]?.isSelected == false)
+    #expect(model.words[id: 5]?.isSelected == true)
+    expectNoDifference(model.selectionSummary, "1 word selected")
   }
 
   @Test func selectedSampleRangeMatchesBoundaryWords() async {
-    let m = await loadedModel()
-    m.wordTapped(1); m.wordTapped(3)
-    let plan = m.editPlan!
+    let model = await loadedModel()
+    model.wordTapped(1)
+    model.wordTapped(3)
+    let plan = model.editPlan!
     let expected = plan.words[0].startSample!..<plan.words[2].endSample!
-    expectNoDifference(m.selectedSampleRange, expected)
+    expectNoDifference(model.selectedSampleRange, expected)
   }
 
   @Test func clearSelectionEmptiesIt() async {
-    let m = await loadedModel()
-    m.wordTapped(1); m.wordTapped(3)
-    m.clearSelectionTapped()
-    #expect(!m.hasSelection)
-    #expect(m.words[id: 2]?.isSelected == false)
+    let model = await loadedModel()
+    model.wordTapped(1)
+    model.wordTapped(3)
+    model.clearSelectionTapped()
+    #expect(!model.hasSelection)
+    #expect(model.words[id: 2]?.isSelected == false)
   }
 
   @Test func sensitivityChangesRunTogetherCount() async {
-    let m = await loadedModel()
-    m.sensitivityChanged(10)
-    let tight = m.runTogetherCount
-    m.sensitivityChanged(80)
-    let loose = m.runTogetherCount
+    let model = await loadedModel()
+    model.sensitivityChanged(10)
+    let tight = model.runTogetherCount
+    model.sensitivityChanged(80)
+    let loose = model.runTogetherCount
     #expect(tight < loose)
     // default 30 flags the known 25-pair set → 40 unique words on this fixture
-    m.sensitivityChanged(30)
-    #expect(m.runTogetherCount > 0)
+    model.sensitivityChanged(30)
+    #expect(model.runTogetherCount > 0)
   }
 
   // MARK: - Synthetic-plan regression tests
@@ -105,23 +112,25 @@ struct TranscriptPageTests {
   }
 
   private func modelLoaded(with words: [EditPlan.Word]) async -> TranscriptPageModel {
-    let m = TranscriptPageModel(planURL: URL(fileURLWithPath: "/unused"))
+    let model = TranscriptPageModel(planURL: URL(fileURLWithPath: "/unused"))
     let synthetic = plan(words)
-    await withDependencies { $0.engine.loadPlan = { _ in synthetic } } operation: {
-      await m.viewAppeared()
+    await withDependencies {
+      $0.engine.loadPlan = { _ in synthetic }
+    } operation: {
+      await model.viewAppeared()
     }
-    return m
+    return model
   }
 
   /// Proves the `engine.loadPlan` override is actually exercised: a 2-word
   /// sentinel plan can never be the 122-word bundled fixture, so if injection
   /// were bypassed (e.g. via testValue → .fixture) this would see 122 words.
   @Test func viewAppearedUsesInjectedEngineNotBundle() async {
-    let m = await modelLoaded(with: [
+    let model = await modelLoaded(with: [
       word(1, "alpha", start: 0, end: 0.2),
       word(2, "beta", start: 0.4, end: 0.6),
     ])
-    expectNoDifference(m.words.map(\.text), ["alpha", "beta"])
+    expectNoDifference(model.words.map(\.text), ["alpha", "beta"])
   }
 
   /// Selection counts words by POSITION, not by ID span. With sparse IDs the
@@ -133,24 +142,24 @@ struct TranscriptPageTests {
       word(50, "b", start: 0.2, end: 0.3),
       word(90, "c", start: 0.4, end: 0.5),
     ]
-    let m = await modelLoaded(with: words)
-    m.wordTapped(10)
-    m.wordTapped(50)
-    expectNoDifference(m.selectionSummary, "2 words selected")
-    #expect(m.words[id: 10]?.isSelected == true)
-    #expect(m.words[id: 50]?.isSelected == true)
-    #expect(m.words[id: 90]?.isSelected == false)
-    expectNoDifference(m.selectedSampleRange, words[0].startSample!..<words[1].endSample!)
+    let model = await modelLoaded(with: words)
+    model.wordTapped(10)
+    model.wordTapped(50)
+    expectNoDifference(model.selectionSummary, "2 words selected")
+    #expect(model.words[id: 10]?.isSelected == true)
+    #expect(model.words[id: 50]?.isSelected == true)
+    #expect(model.words[id: 90]?.isSelected == false)
+    expectNoDifference(model.selectedSampleRange, words[0].startSample!..<words[1].endSample!)
   }
 
   /// A malformed plan with duplicate word IDs must not trap the app on load.
   @Test func duplicateWordIDsDoNotTrap() async {
-    let m = await modelLoaded(with: [
+    let model = await modelLoaded(with: [
       word(1, "a", start: 0, end: 0.1),
       word(1, "dup", start: 0.2, end: 0.3),
       word(2, "b", start: 0.4, end: 0.5),
     ])
-    expectNoDifference(m.words.count, 2)
-    expectNoDifference(m.words[id: 1]?.text, "a")
+    expectNoDifference(model.words.count, 2)
+    expectNoDifference(model.words[id: 1]?.text, "a")
   }
 }

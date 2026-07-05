@@ -3,6 +3,7 @@ import Dependencies
 import Foundation
 import IssueReporting
 import Testing
+
 @testable import QuickInterviewEditor
 
 struct EngineClientTests {
