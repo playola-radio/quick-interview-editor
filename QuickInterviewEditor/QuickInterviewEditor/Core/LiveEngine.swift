@@ -180,6 +180,19 @@ final class SpawnedProcess: Sendable {
     let outReadFD = outFDs[0], outWriteFD = outFDs[1]
     let errReadFD = errFDs[0], errWriteFD = errFDs[1]
 
+    // The app can run multiple transcriptions concurrently (one per open tab), so
+    // two `posix_spawn` calls can race in the same process. These pipe fds are not
+    // close-on-exec by default, so a *different* tab's spawn could inherit our
+    // write ends and hold them open, and our reader would never see EOF. Setting
+    // FD_CLOEXEC here makes any other spawn/exec drop them automatically; our own
+    // intended child still gets working stdin/stdout/stderr because those are
+    // delivered via `posix_spawn_file_actions_adddup2` below, whose dup2'd target
+    // fd does not inherit FD_CLOEXEC.
+    fcntl(outReadFD, F_SETFD, FD_CLOEXEC)
+    fcntl(outWriteFD, F_SETFD, FD_CLOEXEC)
+    fcntl(errReadFD, F_SETFD, FD_CLOEXEC)
+    fcntl(errWriteFD, F_SETFD, FD_CLOEXEC)
+
     // These import into Swift as optional opaque pointers; init allocates. Every
     // configuration call's return code is checked: the cancellation-safety model
     // depends on POSIX_SPAWN_SETPGROUP actually taking effect (see class doc), so
