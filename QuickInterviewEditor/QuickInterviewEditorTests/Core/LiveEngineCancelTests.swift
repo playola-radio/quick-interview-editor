@@ -34,8 +34,9 @@ struct LiveEngineCancelTests {
       }
     }
 
-    // The grandchild should appear once the shim runs.
-    try await pollUntil(timeoutMs: 5000) { probeIsAlive(token) }
+    // The grandchild should appear once the shim runs. Generous timeout: spawning
+    // real processes (bash + sleep) can be slow when the machine is saturated.
+    try await pollUntil(timeoutMs: 20000) { probeIsAlive(token) }
     #expect(probeIsAlive(token), "grandchild should be running before cancel")
 
     consume.cancel()
