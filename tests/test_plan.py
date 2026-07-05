@@ -74,3 +74,39 @@ def test_plan_emits_progress_events_on_stderr(tmp_path):
     assert "writing_plan" in phases
     assert phases == sorted(phases, key=["transcribing", "converting",
             "analyzing_silence", "writing_plan"].index)  # in canonical order
+
+
+def _run_plan_seeded(tmp_path: Path, words):
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    src = src_dir / "clip.wav"
+    _write_wav(src)
+    work = tmp_path / "work"
+    work.mkdir()
+    transcript = Transcript(
+        words=tuple(words),
+        segments=(Segment(id=1, word_ids=tuple(w.id for w in words),
+                          text=" ".join(w.text for w in words)),),
+    )
+    (work / "clip.wav.transcript.json").write_text(json.dumps(transcript.to_dict()))
+    proc = subprocess.run(
+        [sys.executable, "-m", "logic_markers.cli", "plan",
+         str(src), "--work-dir", str(work)],
+        capture_output=True, text=True,
+    )
+    assert proc.returncode == 0, proc.stderr
+    return json.loads(proc.stdout)
+
+
+def test_plan_clamps_trailing_word_end_to_duration(tmp_path):
+    # Final word has no end and starts near EOF; the 0.4s fallback would run past
+    # the 0.5s clip. The emitted end_sample must not exceed duration_samples.
+    plan = _run_plan_seeded(tmp_path, [
+        Word(id=1, text="hello", start=0.05, end=0.15),
+        Word(id=2, text="world", start=0.35, end=None),
+    ])
+    duration = plan["source"]["duration_samples"]
+    last = plan["words"][-1]
+    assert last["end_sample"] is not None
+    assert last["end_sample"] <= duration
+    assert last["start_sample"] <= last["end_sample"]

@@ -297,16 +297,6 @@ def run_plan(source: Path, work_dir: Path, sample_rate: int, refresh: bool = Fal
     _progress("transcribing", "Transcribing with WhisperX (first run downloads models)")
     transcript = _load_or_transcribe_transcript_in(source, work_dir, refresh)
 
-    # WhisperX occasionally omits a word's end; fill it with the engine's own
-    # fallback so every word in the emitted plan has a non-null end_sample.
-    by_id = {w.id: w for w in transcript.words}
-    filled = tuple(
-        w if w.end is not None else RichWord(id=w.id, text=w.text, start=w.start,
-                                              end=_word_end(w, by_id))
-        for w in transcript.words
-    )
-    transcript = Transcript(words=filled, segments=transcript.segments)
-
     _progress("converting", "Converting audio")
     aiff_path = work_dir / (source.stem + ".plan.aiff")
     convert_to_aiff(source, aiff_path, sample_rate)
@@ -316,6 +306,21 @@ def run_plan(source: Path, work_dir: Path, sample_rate: int, refresh: bool = Fal
     channels = struct.unpack(">h", dict(chunks)[b"COMM"][0:2])[0]
     mono, _ = read_aiff_mono(aiff_bytes)
     total_samples = len(mono)
+
+    # WhisperX occasionally omits a word's end. Fill it with the engine's own
+    # fallback, clamped to the audio duration so a trailing word's assumed
+    # duration can't push end_sample past the end of the clip (which would poison
+    # later selection/export math). Done here, after conversion, so the clip
+    # duration is known.
+    duration_sec = total_samples / sr
+    by_id = {w.id: w for w in transcript.words}
+    filled = tuple(
+        w if w.end is not None
+        else RichWord(id=w.id, text=w.text, start=w.start,
+                      end=min(_word_end(w, by_id), duration_sec))
+        for w in transcript.words
+    )
+    transcript = Transcript(words=filled, segments=transcript.segments)
 
     _progress("analyzing_silence", "Finding silence")
     silences = detect_silences(mono, sr, **SILENCE_PARAMS)

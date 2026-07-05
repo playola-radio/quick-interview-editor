@@ -187,11 +187,16 @@ final class SpawnedProcess: Sendable {
     // FD_CLOEXEC here makes any other spawn/exec drop them automatically; our own
     // intended child still gets working stdin/stdout/stderr because those are
     // delivered via `posix_spawn_file_actions_adddup2` below, whose dup2'd target
-    // fd does not inherit FD_CLOEXEC.
-    fcntl(outReadFD, F_SETFD, FD_CLOEXEC)
-    fcntl(outWriteFD, F_SETFD, FD_CLOEXEC)
-    fcntl(errReadFD, F_SETFD, FD_CLOEXEC)
-    fcntl(errWriteFD, F_SETFD, FD_CLOEXEC)
+    // fd does not inherit FD_CLOEXEC. The whole concurrent-spawn safety story rests
+    // on this taking effect, so a failed fcntl must not slip through silently.
+    for fd in [outReadFD, outWriteFD, errReadFD, errWriteFD] {
+      guard fcntl(fd, F_SETFD, FD_CLOEXEC) != -1 else {
+        let err = errno
+        close(outReadFD); close(outWriteFD); close(errReadFD); close(errWriteFD)
+        throw EngineClientError.engineFailed(
+          "fcntl(F_SETFD, FD_CLOEXEC) failed (\(err): \(String(cString: strerror(err))))")
+      }
+    }
 
     // These import into Swift as optional opaque pointers; init allocates. Every
     // configuration call's return code is checked: the cancellation-safety model
