@@ -16,22 +16,22 @@ struct EditPlanDecodingTests {
   }
 
   @Test func decodesSilencesAsSampleIntegers() throws {
-    let json = """
-    {"schema_version":1,
-     "source":{"path":"a","sample_rate":44100,"channels":1,"duration_samples":100},
-     "words":[],"silences":[{"start":1000,"end":2000}],"segments":[]}
-    """.data(using: .utf8)!
-    let plan = try JSONDecoder().decode(EditPlan.self, from: json)
+    let jsonString = """
+      {"schema_version":1,
+       "source":{"path":"a","sample_rate":44100,"channels":1,"duration_samples":100},
+       "words":[],"silences":[{"start":1000,"end":2000}],"segments":[]}
+      """
+    let plan = try JSONDecoder().decode(EditPlan.self, from: Data(jsonString.utf8))
     expectNoDifference(plan.silences, [EditPlan.Silence(startSample: 1000, endSample: 2000)])
   }
 
   @Test func decodesEmptySegments() throws {
-    let json = """
-    {"schema_version":1,
-     "source":{"path":"a","sample_rate":44100,"channels":1,"duration_samples":100},
-     "words":[],"silences":[],"segments":[]}
-    """.data(using: .utf8)!
-    let plan = try JSONDecoder().decode(EditPlan.self, from: json)
+    let jsonString = """
+      {"schema_version":1,
+       "source":{"path":"a","sample_rate":44100,"channels":1,"duration_samples":100},
+       "words":[],"silences":[],"segments":[]}
+      """
+    let plan = try JSONDecoder().decode(EditPlan.self, from: Data(jsonString.utf8))
     expectNoDifference(plan.segments, [])
   }
 }

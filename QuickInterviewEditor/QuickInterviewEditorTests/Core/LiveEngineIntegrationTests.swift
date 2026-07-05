@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+
 @testable import QuickInterviewEditor
 
 /// Opt-in, real-subprocess integration coverage for the live engine.
@@ -40,7 +41,7 @@ struct LiveEngineIntegrationTests {
       switch event {
       case .progress:
         sawProgress = true
-      case let .completed(plan):
+      case .completed(let plan):
         completedPlan = plan
       }
     }

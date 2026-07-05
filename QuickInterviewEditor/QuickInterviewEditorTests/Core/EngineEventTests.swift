@@ -1,4 +1,5 @@
 import Testing
+
 @testable import QuickInterviewEditor
 
 struct EngineEventTests {
@@ -9,7 +10,7 @@ struct EngineEventTests {
   }
 
   @Test func errorHasUserFacingDescription() {
-    let e = EngineClientError.engineFailed("boom")
-    #expect(e.errorDescription?.contains("boom") == true)
+    let error = EngineClientError.engineFailed("boom")
+    #expect(error.errorDescription?.contains("boom") == true)
   }
 }

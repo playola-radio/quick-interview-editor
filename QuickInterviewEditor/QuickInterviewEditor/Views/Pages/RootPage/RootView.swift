@@ -12,11 +12,14 @@ struct RootView: View {
     .frame(minWidth: 900, minHeight: 600)
     .background(Color.black)
     .dropDestination(for: URL.self) { urls, _ in
-      model.fileDropped(urls.filter { $0.isFileURL }); return true
+      model.fileDropped(urls.filter { $0.isFileURL })
+      return true
     }
-    .fileImporter(isPresented: $model.isImporterPresented,
-                  allowedContentTypes: [.audio]) { result in
-      if case let .success(url) = result { model.filePicked(url) }
+    .fileImporter(
+      isPresented: $model.isImporterPresented,
+      allowedContentTypes: [.audio]
+    ) { result in
+      if case .success(let url) = result { model.filePicked(url) }
     }
   }
 
@@ -25,8 +28,12 @@ struct RootView: View {
       ForEach(model.tabs) { tab in
         HStack(spacing: 6) {
           Text(tab.title).lineLimit(1)
-          Button { model.closeTab(tab.id) } label: { Image(systemName: "xmark") }
-            .buttonStyle(.plain).accessibilityLabel(model.closeTabLabel)
+          Button {
+            model.closeTab(tab.id)
+          } label: {
+            Image(systemName: "xmark")
+          }
+          .buttonStyle(.plain).accessibilityLabel(model.closeTabLabel)
         }
         .padding(.horizontal, 10).padding(.vertical, 6)
         .background(model.selectedTabID == tab.id ? Color(white: 0.16) : Color(white: 0.09))

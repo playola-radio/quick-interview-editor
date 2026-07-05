@@ -2,13 +2,15 @@ import CustomDump
 import Dependencies
 import Foundation
 import Testing
+
 @testable import QuickInterviewEditor
 
 private func stream(_ events: [EngineEvent], throwing error: Error? = nil)
-  -> AsyncThrowingStream<EngineEvent, Error> {
-  AsyncThrowingStream { c in
-    for e in events { c.yield(e) }
-    c.finish(throwing: error)
+  -> AsyncThrowingStream<EngineEvent, Error>
+{
+  AsyncThrowingStream { continuation in
+    for event in events { continuation.yield(event) }
+    continuation.finish(throwing: error)
   }
 }
 
@@ -19,8 +21,10 @@ struct SongTabTests {
     let model = SongTabModel(sourceURL: URL(fileURLWithPath: "/clip.m4a"))
     await withDependencies {
       $0.engine.transcribe = { _ in
-        stream([.progress(.init(phase: .transcribing, message: "Transcribing")),
-                .completed(plan)])
+        stream([
+          .progress(.init(phase: .transcribing, message: "Transcribing")),
+          .completed(plan),
+        ])
       }
     } operation: {
       await model.startTranscription()
@@ -33,8 +37,9 @@ struct SongTabTests {
     let model = SongTabModel(sourceURL: URL(fileURLWithPath: "/clip.m4a"))
     await withDependencies {
       $0.engine.transcribe = { _ in
-        stream([.progress(.init(phase: .converting, message: "Converting audio"))],
-               throwing: CancellationError())
+        stream(
+          [.progress(.init(phase: .converting, message: "Converting audio"))],
+          throwing: CancellationError())
       }
     } operation: {
       await model.startTranscription()
@@ -85,7 +90,7 @@ struct SongTabTests {
     var readyCalled = false
     model.onReadyForNext = { readyCalled = true }
     model.retryTapped()
-    #expect(model.isQueued)   // re-enters the queue so the cap is respected
+    #expect(model.isQueued)  // re-enters the queue so the cap is respected
     #expect(readyCalled)
   }
 }

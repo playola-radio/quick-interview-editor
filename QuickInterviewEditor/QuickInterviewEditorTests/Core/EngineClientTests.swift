@@ -29,7 +29,7 @@ struct EngineClientTests {
   @Test func previewValueYieldsFixture() async throws {
     var got: EditPlan?
     for try await event in EngineClient.previewValue.transcribe(URL(fileURLWithPath: "/x")) {
-      if case let .completed(plan) = event { got = plan }
+      if case .completed(let plan) = event { got = plan }
     }
     expectNoDifference(got?.words.count, 122)
   }

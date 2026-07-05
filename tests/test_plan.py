@@ -1,10 +1,20 @@
 import json
+import shutil
 import subprocess
 import sys
 import wave
 from pathlib import Path
 
+import pytest
+
 from logic_markers.words import Segment, Transcript, Word
+
+# The `plan` pipeline converts audio via afconvert (macOS-only; the engine uses it
+# instead of ffmpeg). CI's pytest job runs on Linux, so skip there rather than fail.
+pytestmark = pytest.mark.skipif(
+    shutil.which("afconvert") is None,
+    reason="afconvert (macOS-only) is required for the plan/convert pipeline",
+)
 
 
 def _write_wav(path: Path, seconds=0.5, sr=16000):

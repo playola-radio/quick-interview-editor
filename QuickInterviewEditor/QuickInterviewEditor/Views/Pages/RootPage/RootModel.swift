@@ -52,7 +52,8 @@ final class RootModel: ViewModel {
   /// `.transcribing` synchronously, so `runningCount` updates within the loop.
   private func pumpQueue() {
     while runningCount < maxConcurrentTranscriptions,
-          let next = tabs.first(where: \.isQueued) {
+      let next = tabs.first(where: \.isQueued)
+    {
       next.start()
     }
   }

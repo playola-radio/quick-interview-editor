@@ -51,6 +51,7 @@ enum LiveEngine {
 
   // MARK: transcribe
 
+  // swiftlint:disable:next function_body_length
   static func transcribe(audio: URL) -> AsyncThrowingStream<EngineEvent, Error> {
     AsyncThrowingStream { continuation in
       // Published so `onTermination` can kill the process group directly; merely
@@ -164,21 +165,31 @@ final class SpawnedProcess: Sendable {
   /// delayed SIGKILL is scheduled.
   private let reaper: ChildReaper
 
+  // A posix_spawn wrapper is inherently a long, branchy linear sequence (pipe
+  // setup, CLOEXEC, attr/file-action config, per-step error cleanup). Splitting
+  // it hurts the fd-cleanup correctness that was carefully reviewed, so keep it
+  // whole and suppress the length/complexity rules here.
+  // swiftlint:disable:next cyclomatic_complexity function_body_length
   init(executable: URL, arguments: [String], currentDirectory: URL) throws {
     // Create pipes with raw fds so nothing crosses concurrency domains as a
     // non-Sendable FileHandle, and closing is a plain `close(fd)`.
     var outFDs: [Int32] = [-1, -1]  // [read, write]
     var errFDs: [Int32] = [-1, -1]
     guard pipe(&outFDs) == 0 else {
-      throw EngineClientError.engineFailed("pipe() failed (\(errno): \(String(cString: strerror(errno))))")
+      throw EngineClientError.engineFailed(
+        "pipe() failed (\(errno): \(String(cString: strerror(errno))))")
     }
     guard pipe(&errFDs) == 0 else {
       // Don't leak the first pipe if the second fails.
-      close(outFDs[0]); close(outFDs[1])
-      throw EngineClientError.engineFailed("pipe() failed (\(errno): \(String(cString: strerror(errno))))")
+      close(outFDs[0])
+      close(outFDs[1])
+      throw EngineClientError.engineFailed(
+        "pipe() failed (\(errno): \(String(cString: strerror(errno))))")
     }
-    let outReadFD = outFDs[0], outWriteFD = outFDs[1]
-    let errReadFD = errFDs[0], errWriteFD = errFDs[1]
+    let outReadFD = outFDs[0]
+    let outWriteFD = outFDs[1]
+    let errReadFD = errFDs[0]
+    let errWriteFD = errFDs[1]
 
     // The app can run multiple transcriptions concurrently (one per open tab), so
     // two `posix_spawn` calls can race in the same process. These pipe fds are not
@@ -192,7 +203,10 @@ final class SpawnedProcess: Sendable {
     for fd in [outReadFD, outWriteFD, errReadFD, errWriteFD] {
       guard fcntl(fd, F_SETFD, FD_CLOEXEC) != -1 else {
         let err = errno
-        close(outReadFD); close(outWriteFD); close(errReadFD); close(errWriteFD)
+        close(outReadFD)
+        close(outWriteFD)
+        close(errReadFD)
+        close(errWriteFD)
         throw EngineClientError.engineFailed(
           "fcntl(F_SETFD, FD_CLOEXEC) failed (\(err): \(String(cString: strerror(err))))")
       }
@@ -209,8 +223,10 @@ final class SpawnedProcess: Sendable {
     }
     var rc = posix_spawnattr_init(&attr)
     guard rc == 0 else {
-      close(outReadFD); close(outWriteFD)
-      close(errReadFD); close(errWriteFD)
+      close(outReadFD)
+      close(outWriteFD)
+      close(errReadFD)
+      close(errWriteFD)
       throw EngineClientError.engineFailed(
         "posix_spawnattr_init failed (\(rc): \(String(cString: strerror(rc))))")
     }
@@ -220,16 +236,20 @@ final class SpawnedProcess: Sendable {
     rc = posix_spawnattr_setpgroup(&attr, 0)
     guard rc == 0 else {
       destroyAttrIfNeeded()
-      close(outReadFD); close(outWriteFD)
-      close(errReadFD); close(errWriteFD)
+      close(outReadFD)
+      close(outWriteFD)
+      close(errReadFD)
+      close(errWriteFD)
       throw EngineClientError.engineFailed(
         "posix_spawnattr_setpgroup failed (\(rc): \(String(cString: strerror(rc))))")
     }
     rc = posix_spawnattr_setflags(&attr, Int16(POSIX_SPAWN_SETPGROUP))
     guard rc == 0 else {
       destroyAttrIfNeeded()
-      close(outReadFD); close(outWriteFD)
-      close(errReadFD); close(errWriteFD)
+      close(outReadFD)
+      close(outWriteFD)
+      close(errReadFD)
+      close(errWriteFD)
       throw EngineClientError.engineFailed(
         "posix_spawnattr_setflags failed (\(rc): \(String(cString: strerror(rc))))")
     }
@@ -242,8 +262,10 @@ final class SpawnedProcess: Sendable {
     rc = posix_spawn_file_actions_init(&fileActions)
     guard rc == 0 else {
       destroyAttrIfNeeded()
-      close(outReadFD); close(outWriteFD)
-      close(errReadFD); close(errWriteFD)
+      close(outReadFD)
+      close(outWriteFD)
+      close(errReadFD)
+      close(errWriteFD)
       throw EngineClientError.engineFailed(
         "posix_spawn_file_actions_init failed (\(rc): \(String(cString: strerror(rc))))")
     }
@@ -260,10 +282,13 @@ final class SpawnedProcess: Sendable {
         close(devNullFD)
         destroyFileActionsIfNeeded()
         destroyAttrIfNeeded()
-        close(outReadFD); close(outWriteFD)
-        close(errReadFD); close(errWriteFD)
+        close(outReadFD)
+        close(outWriteFD)
+        close(errReadFD)
+        close(errWriteFD)
         throw EngineClientError.engineFailed(
-          "posix_spawn_file_actions failed configuring stdin (\(rc): \(String(cString: strerror(rc))))")
+          "posix_spawn_file_actions failed configuring stdin (\(rc): \(String(cString: strerror(rc))))"
+        )
       }
     }
     rc = posix_spawn_file_actions_adddup2(&fileActions, outWriteFD, STDOUT_FILENO)
@@ -288,10 +313,13 @@ final class SpawnedProcess: Sendable {
       if devNullFD >= 0 { close(devNullFD) }
       destroyFileActionsIfNeeded()
       destroyAttrIfNeeded()
-      close(outReadFD); close(outWriteFD)
-      close(errReadFD); close(errWriteFD)
+      close(outReadFD)
+      close(outWriteFD)
+      close(errReadFD)
+      close(errWriteFD)
       throw EngineClientError.engineFailed(
-        "posix_spawn_file_actions failed configuring stdout/stderr (\(rc): \(String(cString: strerror(rc))))")
+        "posix_spawn_file_actions failed configuring stdout/stderr (\(rc): \(String(cString: strerror(rc))))"
+      )
     }
 
     // argv[0] is the executable path by convention.
@@ -324,7 +352,8 @@ final class SpawnedProcess: Sendable {
     guard rc == 0 else {
       close(outReadFD)
       close(errReadFD)
-      throw EngineClientError.engineFailed("posix_spawn failed (\(rc): \(String(cString: strerror(rc))))")
+      throw EngineClientError.engineFailed(
+        "posix_spawn failed (\(rc): \(String(cString: strerror(rc))))")
     }
 
     self.stdoutReadFD = outReadFD
@@ -372,20 +401,20 @@ final class SpawnedProcess: Sendable {
         var buffer = Data()
         var scratch = [UInt8](repeating: 0, count: 4096)
         while true {
-          let n = scratch.withUnsafeMutableBytes { read(fd, $0.baseAddress, $0.count) }
-          if n < 0 && errno == EINTR { continue }
-          if n <= 0 { break }
-          buffer.append(contentsOf: scratch[0..<n])
+          let count = scratch.withUnsafeMutableBytes { read(fd, $0.baseAddress, $0.count) }
+          if count < 0 && errno == EINTR { continue }
+          if count <= 0 { break }
+          buffer.append(contentsOf: scratch[0..<count])
           while let newlineIndex = buffer.firstIndex(of: UInt8(ascii: "\n")) {
             let lineData = buffer[buffer.startIndex..<newlineIndex]
             buffer.removeSubrange(buffer.startIndex...newlineIndex)
-            let line = String(decoding: lineData, as: UTF8.self)
+            let line = String(bytes: lineData, encoding: .utf8) ?? ""
             collector.append(line)
             continuation.yield(line)
           }
         }
         if !buffer.isEmpty {
-          let line = String(decoding: buffer, as: UTF8.self)
+          let line = String(bytes: buffer, encoding: .utf8) ?? ""
           collector.append(line)
           continuation.yield(line)
         }
@@ -399,10 +428,10 @@ final class SpawnedProcess: Sendable {
     var out = Data()
     var scratch = [UInt8](repeating: 0, count: 16_384)
     while true {
-      let n = scratch.withUnsafeMutableBytes { read(fd, $0.baseAddress, $0.count) }
-      if n < 0 && errno == EINTR { continue }
-      if n <= 0 { break }
-      out.append(contentsOf: scratch[0..<n])
+      let count = scratch.withUnsafeMutableBytes { read(fd, $0.baseAddress, $0.count) }
+      if count < 0 && errno == EINTR { continue }
+      if count <= 0 { break }
+      out.append(contentsOf: scratch[0..<count])
     }
     return out
   }
@@ -475,7 +504,10 @@ final class SpawnedProcess: Sendable {
 /// alive-check that guards `kill`. Reference-typed and `Sendable` so background
 /// closures capture *it* — never the `SpawnedProcess`, which may be mid-`deinit`.
 private final class ChildReaper: Sendable {
-  private enum State { case running, exited(Int32) }
+  private enum State {
+    case running
+    case exited(Int32)
+  }
   private let pid: pid_t
   private let state = Mutex<State>(.running)
 
@@ -486,7 +518,7 @@ private final class ChildReaper: Sendable {
   /// the state transition. Returns the exit code once reaped, else `nil`.
   func tryReap() -> Int32? {
     state.withLock { current in
-      if case let .exited(code) = current { return code }
+      if case .exited(let code) = current { return code }
       var status: Int32 = 0
       let result = waitpid(pid, &status, WNOHANG)
       if result == 0 { return nil }  // still running
@@ -496,9 +528,10 @@ private final class ChildReaper: Sendable {
         current = .exited(-1)
         return -1
       }
-      let code: Int32 = (status & 0x7f) == 0
-        ? (status >> 8) & 0xff        // WIFEXITED → WEXITSTATUS
-        : 128 + (status & 0x7f)       // signalled → 128 + WTERMSIG
+      let code: Int32 =
+        (status & 0x7f) == 0
+        ? (status >> 8) & 0xff  // WIFEXITED → WEXITSTATUS
+        : 128 + (status & 0x7f)  // signalled → 128 + WTERMSIG
       current = .exited(code)
       return code
     }

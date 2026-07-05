@@ -19,7 +19,7 @@ final class SongTabModel: ViewModel, Identifiable {
 
   // MARK: - Phase
   enum Phase: Equatable {
-    case queued                            // waiting for a transcription slot
+    case queued  // waiting for a transcription slot
     case transcribing(EngineProgress?)
     case loaded
     case failed(String)
@@ -42,19 +42,31 @@ final class SongTabModel: ViewModel, Identifiable {
 
   // MARK: - View Helpers
   var title: String { sourceURL.deletingPathExtension().lastPathComponent }
-  var isQueued: Bool { if case .queued = phase { return true }; return false }
-  var isTranscribing: Bool { if case .transcribing = phase { return true }; return false }
-  var isLoaded: Bool { if case .loaded = phase { return true }; return false }
+  var isQueued: Bool {
+    if case .queued = phase { return true }
+    return false
+  }
+  var isTranscribing: Bool {
+    if case .transcribing = phase { return true }
+    return false
+  }
+  var isLoaded: Bool {
+    if case .loaded = phase { return true }
+    return false
+  }
   var showsProgress: Bool { isQueued || isTranscribing }
   var showsCancel: Bool { isQueued || isTranscribing }
   var progressMessage: String {
     switch phase {
     case .queued: return queuedMessage
-    case let .transcribing(p): return p?.message ?? startingMessage
+    case .transcribing(let progress): return progress?.message ?? startingMessage
     case .loaded, .failed: return ""
     }
   }
-  var errorMessage: String? { if case let .failed(m) = phase { return m }; return nil }
+  var errorMessage: String? {
+    if case .failed(let message) = phase { return message }
+    return nil
+  }
 
   // MARK: - User Actions
   func start() {
@@ -69,8 +81,8 @@ final class SongTabModel: ViewModel, Identifiable {
     do {
       for try await event in engine.transcribe(sourceURL) {
         switch event {
-        case let .progress(p): phase = .transcribing(p)
-        case let .completed(plan):
+        case .progress(let progress): phase = .transcribing(progress)
+        case .completed(let plan):
           transcript = TranscriptPageModel(editPlan: plan)
           phase = .loaded
         }
@@ -88,7 +100,7 @@ final class SongTabModel: ViewModel, Identifiable {
 
   func retryTapped() {
     task?.cancel()
-    phase = .queued           // re-enter the queue so the cap is respected
+    phase = .queued  // re-enter the queue so the cap is respected
     onReadyForNext?()
   }
 }

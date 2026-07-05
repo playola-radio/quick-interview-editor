@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+
 @testable import QuickInterviewEditor
 
 /// Opt-in integration test for the live-engine cancellation path.
@@ -24,7 +25,10 @@ struct LiveEngineCancelTests {
 
     setenv("QIE_ENGINE_REPO", fakeRepo.path, 1)
     setenv("QIE_PROBE_TOKEN", token, 1)
-    defer { unsetenv("QIE_ENGINE_REPO"); unsetenv("QIE_PROBE_TOKEN") }
+    defer {
+      unsetenv("QIE_ENGINE_REPO")
+      unsetenv("QIE_PROBE_TOKEN")
+    }
 
     // Consume the stream until the first progress event, then cancel — mirroring
     // a user cancel (SongTabModel.cancel() -> task.cancel()).
@@ -44,7 +48,8 @@ struct LiveEngineCancelTests {
     // The process-group kill (SIGTERM, then SIGKILL after the grace period) must
     // reap the grandchild. Allow generous headroom over the 2s SIGKILL escalation.
     try await pollUntil(timeoutMs: 8000) { !probeIsAlive(token) }
-    #expect(!probeIsAlive(token), "grandchild must be gone after cancel — process group was not killed")
+    #expect(
+      !probeIsAlive(token), "grandchild must be gone after cancel — process group was not killed")
 
     _ = await consume.result
   }
@@ -62,11 +67,11 @@ struct LiveEngineCancelTests {
     // group, emits one progress event on stderr, then blocks so the stream never
     // completes on its own (only cancellation ends it).
     let shim = """
-    #!/bin/bash
-    /bin/bash -c "exec -a ${QIE_PROBE_TOKEN} sleep 600" &
-    echo 'QIE_EVENT {"type":"progress","phase":"transcribing","message":"probe"}' >&2
-    sleep 600
-    """
+      #!/bin/bash
+      /bin/bash -c "exec -a ${QIE_PROBE_TOKEN} sleep 600" &
+      echo 'QIE_EVENT {"type":"progress","phase":"transcribing","message":"probe"}' >&2
+      sleep 600
+      """
     let python = binDir.appendingPathComponent("python")
     try shim.write(to: python, atomically: true, encoding: .utf8)
     try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: python.path)

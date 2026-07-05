@@ -24,10 +24,10 @@ enum EngineClientError: Error, Equatable, LocalizedError {
 
   var errorDescription: String? {
     switch self {
-    case let .unimplemented(name): return "EngineClient.\(name) was called without a test override."
-    case let .engineNotFound(path): return "Transcription engine not found at \(path)."
-    case let .engineFailed(message): return "Transcription failed: \(message)"
-    case let .decodeFailed(message): return "Could not read the transcription result: \(message)"
+    case .unimplemented(let name): return "EngineClient.\(name) was called without a test override."
+    case .engineNotFound(let path): return "Transcription engine not found at \(path)."
+    case .engineFailed(let message): return "Transcription failed: \(message)"
+    case .decodeFailed(let message): return "Could not read the transcription result: \(message)"
     }
   }
 }
