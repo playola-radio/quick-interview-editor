@@ -53,4 +53,35 @@ struct RootTests {
       #expect(model.selectedTabID == model.tabs.first?.id)
     }
   }
+
+  @Test func dropsBeyondTheCapAreQueued() {
+    withDependencies {
+      $0.engine.transcribe = { _ in neverCompleting() }
+    } operation: {
+      let model = RootModel()
+      model.fileDropped([URL(fileURLWithPath: "/a.m4a"),
+                         URL(fileURLWithPath: "/b.m4a"),
+                         URL(fileURLWithPath: "/c.m4a")])
+      expectNoDifference(model.tabs.count, 3)
+      // Only `maxConcurrentTranscriptions` (2) run; the rest wait in .queued.
+      expectNoDifference(model.tabs.filter(\.isTranscribing).count, model.maxConcurrentTranscriptions)
+      expectNoDifference(model.tabs.filter(\.isQueued).count, 1)
+    }
+  }
+
+  @Test func closingARunningTabPromotesAQueuedOne() {
+    withDependencies {
+      $0.engine.transcribe = { _ in neverCompleting() }
+    } operation: {
+      let model = RootModel()
+      model.fileDropped([URL(fileURLWithPath: "/a.m4a"),
+                         URL(fileURLWithPath: "/b.m4a"),
+                         URL(fileURLWithPath: "/c.m4a")])
+      let running = model.tabs.first(where: \.isTranscribing)!.id
+      model.closeTab(running)
+      expectNoDifference(model.tabs.count, 2)
+      expectNoDifference(model.tabs.filter(\.isTranscribing).count, 2)  // queued one promoted
+      expectNoDifference(model.tabs.filter(\.isQueued).count, 0)
+    }
+  }
 }

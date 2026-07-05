@@ -6,7 +6,7 @@ struct SongTabView: View {
 
   var body: some View {
     switch model.phase {
-    case .transcribing:
+    case .queued, .transcribing:
       VStack(spacing: 14) {
         ProgressView()
         Text(model.progressMessage).foregroundStyle(Color(white: 0.7))
