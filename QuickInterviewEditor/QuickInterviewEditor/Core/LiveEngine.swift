@@ -180,32 +180,101 @@ final class SpawnedProcess: Sendable {
     let outReadFD = outFDs[0], outWriteFD = outFDs[1]
     let errReadFD = errFDs[0], errWriteFD = errFDs[1]
 
-    // These import into Swift as optional opaque pointers; init allocates.
+    // These import into Swift as optional opaque pointers; init allocates. Every
+    // configuration call's return code is checked: the cancellation-safety model
+    // depends on POSIX_SPAWN_SETPGROUP actually taking effect (see class doc), so
+    // a silently-ignored ENOMEM/EINVAL here must not be allowed to slip through.
     var attr: posix_spawnattr_t?
-    posix_spawnattr_init(&attr)
-    defer { posix_spawnattr_destroy(&attr) }
+    var attrInitialized = false
+    func destroyAttrIfNeeded() {
+      if attrInitialized { posix_spawnattr_destroy(&attr) }
+    }
+    var rc = posix_spawnattr_init(&attr)
+    guard rc == 0 else {
+      close(outReadFD); close(outWriteFD)
+      close(errReadFD); close(errWriteFD)
+      throw EngineClientError.engineFailed(
+        "posix_spawnattr_init failed (\(rc): \(String(cString: strerror(rc))))")
+    }
+    attrInitialized = true
+
     // Child becomes leader of a new process group (pgid 0 ⇒ pgid = child pid).
-    posix_spawnattr_setpgroup(&attr, 0)
-    posix_spawnattr_setflags(&attr, Int16(POSIX_SPAWN_SETPGROUP))
+    rc = posix_spawnattr_setpgroup(&attr, 0)
+    guard rc == 0 else {
+      destroyAttrIfNeeded()
+      close(outReadFD); close(outWriteFD)
+      close(errReadFD); close(errWriteFD)
+      throw EngineClientError.engineFailed(
+        "posix_spawnattr_setpgroup failed (\(rc): \(String(cString: strerror(rc))))")
+    }
+    rc = posix_spawnattr_setflags(&attr, Int16(POSIX_SPAWN_SETPGROUP))
+    guard rc == 0 else {
+      destroyAttrIfNeeded()
+      close(outReadFD); close(outWriteFD)
+      close(errReadFD); close(errWriteFD)
+      throw EngineClientError.engineFailed(
+        "posix_spawnattr_setflags failed (\(rc): \(String(cString: strerror(rc))))")
+    }
 
     var fileActions: posix_spawn_file_actions_t?
-    posix_spawn_file_actions_init(&fileActions)
-    defer { posix_spawn_file_actions_destroy(&fileActions) }
+    var fileActionsInitialized = false
+    func destroyFileActionsIfNeeded() {
+      if fileActionsInitialized { posix_spawn_file_actions_destroy(&fileActions) }
+    }
+    rc = posix_spawn_file_actions_init(&fileActions)
+    guard rc == 0 else {
+      destroyAttrIfNeeded()
+      close(outReadFD); close(outWriteFD)
+      close(errReadFD); close(errWriteFD)
+      throw EngineClientError.engineFailed(
+        "posix_spawn_file_actions_init failed (\(rc): \(String(cString: strerror(rc))))")
+    }
+    fileActionsInitialized = true
 
     let devNullFD = open("/dev/null", O_RDONLY)
     // stdin ← /dev/null so the child never blocks waiting on input.
     if devNullFD >= 0 {
-      posix_spawn_file_actions_adddup2(&fileActions, devNullFD, STDIN_FILENO)
-      posix_spawn_file_actions_addclose(&fileActions, devNullFD)
+      rc = posix_spawn_file_actions_adddup2(&fileActions, devNullFD, STDIN_FILENO)
+      if rc == 0 {
+        rc = posix_spawn_file_actions_addclose(&fileActions, devNullFD)
+      }
+      guard rc == 0 else {
+        close(devNullFD)
+        destroyFileActionsIfNeeded()
+        destroyAttrIfNeeded()
+        close(outReadFD); close(outWriteFD)
+        close(errReadFD); close(errWriteFD)
+        throw EngineClientError.engineFailed(
+          "posix_spawn_file_actions failed configuring stdin (\(rc): \(String(cString: strerror(rc))))")
+      }
     }
-    posix_spawn_file_actions_adddup2(&fileActions, outWriteFD, STDOUT_FILENO)
-    posix_spawn_file_actions_adddup2(&fileActions, errWriteFD, STDERR_FILENO)
+    rc = posix_spawn_file_actions_adddup2(&fileActions, outWriteFD, STDOUT_FILENO)
+    if rc == 0 {
+      rc = posix_spawn_file_actions_adddup2(&fileActions, errWriteFD, STDERR_FILENO)
+    }
     // The child inherits only the dup2'd descriptors; close every raw pipe fd it
     // would otherwise inherit (both read and write ends).
-    posix_spawn_file_actions_addclose(&fileActions, outWriteFD)
-    posix_spawn_file_actions_addclose(&fileActions, errWriteFD)
-    posix_spawn_file_actions_addclose(&fileActions, outReadFD)
-    posix_spawn_file_actions_addclose(&fileActions, errReadFD)
+    if rc == 0 {
+      rc = posix_spawn_file_actions_addclose(&fileActions, outWriteFD)
+    }
+    if rc == 0 {
+      rc = posix_spawn_file_actions_addclose(&fileActions, errWriteFD)
+    }
+    if rc == 0 {
+      rc = posix_spawn_file_actions_addclose(&fileActions, outReadFD)
+    }
+    if rc == 0 {
+      rc = posix_spawn_file_actions_addclose(&fileActions, errReadFD)
+    }
+    guard rc == 0 else {
+      if devNullFD >= 0 { close(devNullFD) }
+      destroyFileActionsIfNeeded()
+      destroyAttrIfNeeded()
+      close(outReadFD); close(outWriteFD)
+      close(errReadFD); close(errWriteFD)
+      throw EngineClientError.engineFailed(
+        "posix_spawn_file_actions failed configuring stdout/stderr (\(rc): \(String(cString: strerror(rc))))")
+    }
 
     // argv[0] is the executable path by convention.
     let argv = [executable.path] + arguments
@@ -221,7 +290,13 @@ final class SpawnedProcess: Sendable {
     defer { for ptr in cEnv where ptr != nil { free(ptr) } }
 
     var spawnedPID: pid_t = 0
-    let rc = posix_spawn(&spawnedPID, executable.path, &fileActions, &attr, cArgv, cEnv)
+    rc = posix_spawn(&spawnedPID, executable.path, &fileActions, &attr, cArgv, cEnv)
+
+    // posix_spawn has consumed attr/fileActions; free them on both paths. (The
+    // earlier configuration-failure guards already destroyed + threw, so no path
+    // reaching here has run these helpers yet — no double-free.)
+    destroyFileActionsIfNeeded()
+    destroyAttrIfNeeded()
 
     // The parent never writes the child's stdout/stderr, nor uses /dev/null.
     if devNullFD >= 0 { close(devNullFD) }
