@@ -45,7 +45,10 @@ final class SongTabModel: ViewModel, Identifiable {
   var errorMessage: String? { if case let .failed(m) = phase { return m }; return nil }
 
   // MARK: - User Actions
-  func start() { task = Task { await startTranscription() } }
+  func start() {
+    task?.cancel()  // never leak/overtake a still-running task (e.g. rapid retry)
+    task = Task { await startTranscription() }
+  }
 
   func startTranscription() async {
     phase = .transcribing(nil)
