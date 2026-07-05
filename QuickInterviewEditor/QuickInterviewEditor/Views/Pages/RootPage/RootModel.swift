@@ -2,6 +2,7 @@ import Dependencies
 import Foundation
 import IdentifiedCollections
 import Observation
+import UniformTypeIdentifiers
 
 @MainActor
 @Observable
@@ -32,7 +33,11 @@ final class RootModel: ViewModel {
   var selectedTab: SongTabModel? { selectedTabID.flatMap { tabs[id: $0] } }
 
   // MARK: - User Actions
-  func fileDropped(_ urls: [URL]) { for url in urls { openSong(url) } }
+  func fileDropped(_ urls: [URL]) {
+    // A drop can carry anything; open a tab only for audio files (the open panel
+    // is already restricted to `.audio`). Non-audio drops are ignored.
+    for url in urls where isAudioFile(url) { openSong(url) }
+  }
   func filePicked(_ url: URL) { openSong(url) }
   func importButtonTapped() { isImporterPresented = true }
   func tabSelected(_ id: SongTabModel.ID) { selectedTabID = id }
@@ -46,6 +51,11 @@ final class RootModel: ViewModel {
   }
 
   // MARK: - Private Helpers
+  private func isAudioFile(_ url: URL) -> Bool {
+    guard url.isFileURL else { return false }
+    return UTType(filenameExtension: url.pathExtension)?.conforms(to: .audio) ?? false
+  }
+
   private var runningCount: Int { tabs.filter(\.isTranscribing).count }
 
   /// Starts queued tabs until the concurrency cap is reached. `start()` marks a tab

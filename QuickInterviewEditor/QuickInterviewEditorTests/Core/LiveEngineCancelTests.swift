@@ -30,12 +30,13 @@ struct LiveEngineCancelTests {
       unsetenv("QIE_PROBE_TOKEN")
     }
 
-    // Consume the stream until the first progress event, then cancel — mirroring
-    // a user cancel (SongTabModel.cancel() -> task.cancel()).
+    // Keep consuming; the shim emits one progress event then blocks, so this task
+    // stays suspended in `for await` until we cancel it below. Cancelling the task
+    // (not breaking out of the loop) is the real user-cancel path —
+    // SongTabModel.cancel() -> task.cancel() -> stream throws CancellationError ->
+    // onTermination -> terminate().
     let consume = Task {
-      for try await event in LiveEngine.transcribe(audio: URL(fileURLWithPath: "/tmp/unused.m4a")) {
-        if case .progress = event { break }
-      }
+      for try await _ in LiveEngine.transcribe(audio: URL(fileURLWithPath: "/tmp/unused.m4a")) {}
     }
 
     // The grandchild should appear once the shim runs. Generous timeout: spawning

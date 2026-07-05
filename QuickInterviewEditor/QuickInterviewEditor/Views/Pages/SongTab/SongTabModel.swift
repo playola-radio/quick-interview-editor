@@ -76,7 +76,8 @@ final class SongTabModel: ViewModel, Identifiable {
   }
 
   func startTranscription() async {
-    phase = .transcribing(nil)
+    // `start()` already set `.transcribing(nil)` synchronously (so the queue pump
+    // counts this tab immediately); just clear any prior transcript here.
     transcript = nil
     do {
       for try await event in engine.transcribe(sourceURL) {

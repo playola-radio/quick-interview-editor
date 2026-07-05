@@ -12,7 +12,7 @@ struct RootView: View {
     .frame(minWidth: 900, minHeight: 600)
     .background(Color.black)
     .dropDestination(for: URL.self) { urls, _ in
-      model.fileDropped(urls.filter { $0.isFileURL })
+      model.fileDropped(urls)  // model filters to audio files
       return true
     }
     .fileImporter(
@@ -39,6 +39,7 @@ struct RootView: View {
         .background(model.selectedTabID == tab.id ? Color(white: 0.16) : Color(white: 0.09))
         .clipShape(RoundedRectangle(cornerRadius: 7))
         .onTapGesture { model.tabSelected(tab.id) }
+        .accessibilityAddTraits(.isButton)
       }
       Spacer()
     }

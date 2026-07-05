@@ -50,11 +50,29 @@ struct RootTests {
     } operation: {
       let model = RootModel()
       model.fileDropped([URL(fileURLWithPath: "/a.m4a"), URL(fileURLWithPath: "/b.m4a")])
-      let first = model.tabs[0].id
-      model.closeTab(first)
+      // The last-opened tab is the selected one; closing IT exercises the
+      // `if wasSelected { … }` re-selection branch.
+      let selected = model.selectedTabID!
+      model.closeTab(selected)
       expectNoDifference(model.tabs.count, 1)
-      #expect(model.tabs[id: first] == nil)
-      #expect(model.selectedTabID == model.tabs.first?.id)
+      #expect(model.tabs[id: selected] == nil)
+      #expect(model.selectedTabID != selected)
+      #expect(model.selectedTabID == model.tabs.last?.id)
+    }
+  }
+
+  @Test func nonAudioDropsAreIgnored() {
+    withDependencies {
+      $0.engine.transcribe = { _ in neverCompleting() }
+    } operation: {
+      let model = RootModel()
+      model.fileDropped([
+        URL(fileURLWithPath: "/doc.pdf"),
+        URL(fileURLWithPath: "/song.m4a"),
+        URL(fileURLWithPath: "/image.png"),
+      ])
+      expectNoDifference(model.tabs.count, 1)  // only the audio file opens a tab
+      expectNoDifference(model.tabs.first?.title, "song")
     }
   }
 

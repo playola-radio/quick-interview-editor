@@ -64,6 +64,9 @@ enum LiveEngine {
             throw EngineClientError.engineNotFound(pythonURL.path)
           }
           let work = try makeWorkDir()
+          // Remove the scratch dir (cached AIFF + transcript JSON, both derived
+          // from the user's audio) on every exit path — success, failure, cancel.
+          defer { try? FileManager.default.removeItem(at: work) }
           let proc = try SpawnedProcess(
             executable: pythonURL,
             arguments: [
