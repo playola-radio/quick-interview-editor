@@ -162,4 +162,22 @@ struct TranscriptPageTests {
     expectNoDifference(model.words.count, 2)
     expectNoDifference(model.words[id: 1]?.text, "a")
   }
+
+  @Test func orderedSelectionExposesIDsAndSnippet() {
+    let model = TranscriptPageModel(editPlan: Fixtures.editPlan())
+    let first = model.words[2].id
+    let last = model.words[4].id
+    model.wordTapped(first)
+    model.wordTapped(last)
+    expectNoDifference(
+      model.orderedSelectedWordIDs, [model.words[2].id, model.words[3].id, model.words[4].id])
+    #expect(!model.selectionSnippet.isEmpty)
+    #expect(model.selectionSnippet == model.selectionSnippet.trimmingCharacters(in: .whitespaces))
+  }
+
+  @Test func orderedSelectionEmptyWithoutSelection() {
+    let model = TranscriptPageModel(editPlan: Fixtures.editPlan())
+    expectNoDifference(model.orderedSelectedWordIDs, [])
+    expectNoDifference(model.selectionSnippet, "")
+  }
 }
