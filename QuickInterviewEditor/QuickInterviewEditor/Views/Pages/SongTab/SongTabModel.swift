@@ -27,7 +27,7 @@ final class SongTabModel: ViewModel, Identifiable {
 
   // MARK: - Properties
   var phase: Phase = .queued
-  var transcript: TranscriptPageModel?
+  var editor: EditorModel?
   @ObservationIgnored private var task: Task<Void, Never>?
   /// Fired when this tab frees or wants a transcription slot (finished, failed, or
   /// re-queued for retry). RootModel wires this to its queue pump so the concurrency
@@ -77,14 +77,16 @@ final class SongTabModel: ViewModel, Identifiable {
 
   func startTranscription() async {
     // `start()` already set `.transcribing(nil)` synchronously (so the queue pump
-    // counts this tab immediately); just clear any prior transcript here.
-    transcript = nil
+    // counts this tab immediately); just clear any prior editor here.
+    editor = nil
     do {
       for try await event in engine.transcribe(sourceURL) {
         switch event {
         case .progress(let progress): phase = .transcribing(progress)
         case .completed(let plan):
-          transcript = TranscriptPageModel(editPlan: plan)
+          editor = withDependencies(from: self) {
+            EditorModel(sourceURL: sourceURL, editPlan: plan)
+          }
           phase = .loaded
         }
       }
