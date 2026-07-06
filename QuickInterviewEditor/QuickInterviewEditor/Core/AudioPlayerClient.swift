@@ -47,104 +47,68 @@ extension AudioPlayerClient {
   }
 }
 
-private final class LivePlayerBox: @unchecked Sendable {
+/// `AVAudioEngine`/`AVAudioPlayerNode` are not thread-safe, so every engine
+/// operation is confined to this actor. The segment-completion callback fires on
+/// an AVFoundation render thread, so it hops back onto the actor (`Task { await
+/// … }`) before touching any state or the engine — which is what a play/stop
+/// race previously trapped on. `generation` lets a superseding `play()` or a
+/// `stop()` invalidate an in-flight segment's completion.
+private actor LivePlayerBox {
   private let engine = AVAudioEngine()
   private let node = AVAudioPlayerNode()
-  private let lock = NSLock()
   private var continuation: CheckedContinuation<Void, Never>?
   private var generation = 0
 
-  /// Returns when the scheduled segment finishes playing, or when `stop()` is called.
+  /// Returns when the scheduled segment finishes playing, or when `stop()` or
+  /// another `play()` supersedes it.
   func play(url: URL, range: Range<Int>, planSampleRate: Int) async throws {
     let file = try AVAudioFile(forReading: url)
     let nativeRate = file.processingFormat.sampleRate
     let ratio = nativeRate / Double(max(1, planSampleRate))
     let startFrame = AVAudioFramePosition((Double(max(0, range.lowerBound)) * ratio).rounded())
-    let endFrameRaw = AVAudioFramePosition((Double(max(0, range.upperBound)) * ratio).rounded())
+    let endFrame = AVAudioFramePosition((Double(max(0, range.upperBound)) * ratio).rounded())
     let clampedStart = min(startFrame, file.length)
-    let clampedEnd = min(endFrameRaw, file.length)
+    let clampedEnd = min(endFrame, file.length)
     let frameCount = AVAudioFrameCount(max(0, clampedEnd - clampedStart))
     // An empty range can't come from a valid selection; no-op without disturbing
     // any current playback.
     guard frameCount > 0 else { return }
-    let myGeneration = prepareToPlay(file: file)
+
+    supersede()  // resume + tear down any current playback
+    if node.engine == nil { engine.attach(node) }
+    engine.connect(node, to: engine.mainMixerNode, format: file.processingFormat)
     try engine.start()
+
+    let myGeneration = generation
     await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
-      scheduleSegment(
-        cont, file: file, startingFrame: clampedStart, frameCount: frameCount,
-        expectedGeneration: myGeneration)
-    }
-  }
-
-  func stop() {
-    let cont = withLock { () -> CheckedContinuation<Void, Never>? in
-      generation += 1
-      let existing = continuation
-      continuation = nil
-      return existing
-    }
-    stopNode()
-    cont?.resume()
-  }
-
-  private func prepareToPlay(file: AVAudioFile) -> Int {
-    let result = withLock { () -> (CheckedContinuation<Void, Never>?, Int) in
-      generation += 1
-      let existing = continuation
-      continuation = nil
-      return (existing, generation)
-    }
-    result.0?.resume()
-    stopNode()
-    withLock {
-      if node.engine == nil { engine.attach(node) }
-      engine.connect(node, to: engine.mainMixerNode, format: file.processingFormat)
-    }
-    return result.1
-  }
-
-  private func scheduleSegment(
-    _ cont: CheckedContinuation<Void, Never>, file: AVAudioFile,
-    startingFrame: AVAudioFramePosition, frameCount: AVAudioFrameCount,
-    expectedGeneration: Int
-  ) {
-    let installed = withLock { () -> Bool in
-      guard generation == expectedGeneration else { return false }
       continuation = cont
-      node.scheduleSegment(file, startingFrame: startingFrame, frameCount: frameCount, at: nil) {
-        [weak self] in self?.completeSegment(generation: expectedGeneration)
+      node.scheduleSegment(file, startingFrame: clampedStart, frameCount: frameCount, at: nil) {
+        [weak self] in
+        Task { await self?.complete(generation: myGeneration) }
       }
-      return true
-    }
-    guard installed else {
-      cont.resume()
-      return
-    }
-    // Recheck under the lock: `stop()` or another `play()` may have advanced
-    // `generation` in the gap between installing above and calling `node.play()`
-    // here, in which case this segment was already abandoned and must not start.
-    let stillCurrent = withLock { generation == expectedGeneration }
-    if stillCurrent {
       node.play()
     }
   }
 
-  private func completeSegment(generation completedGeneration: Int) {
-    let cont = withLock { () -> CheckedContinuation<Void, Never>? in
-      guard generation == completedGeneration else { return nil }
-      let existing = continuation
-      continuation = nil
-      return existing
-    }
-    guard let cont else { return }
-    stopNode()
-    cont.resume()
+  func stop() {
+    supersede()
   }
 
-  private func withLock<T>(_ body: () -> T) -> T {
-    lock.lock()
-    defer { lock.unlock() }
-    return body()
+  /// Invalidate the current segment: bump the generation, resume the waiter, and
+  /// stop the engine — all on the actor, so it can't race the render thread.
+  private func supersede() {
+    generation += 1
+    let waiter = continuation
+    continuation = nil
+    stopNode()
+    waiter?.resume()
+  }
+
+  private func complete(generation completedGeneration: Int) {
+    guard generation == completedGeneration, let waiter = continuation else { return }
+    continuation = nil
+    stopNode()
+    waiter.resume()
   }
 
   private func stopNode() {

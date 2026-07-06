@@ -49,6 +49,51 @@ enum LiveEngine {
     return base
   }
 
+  // MARK: Logging
+
+  /// Where per-run engine logs land (Application Support/…/Logs), for QA/inspection.
+  static var logsDirectory: URL? {
+    guard
+      let base = try? FileManager.default.url(
+        for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+    else { return nil }
+    let dir = base.appendingPathComponent("Quick Interview Editor/Logs")
+    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    return dir
+  }
+
+  /// Writes a per-run log (command, exit code, full stdout, stderr tail) and
+  /// returns its URL so error messages can point the user at it.
+  private static func writeJobLog(
+    audio: URL, exitCode: Int32, stdout: Data, stderr: String
+  ) -> URL? {
+    guard let dir = logsDirectory else { return nil }
+    let file = dir.appendingPathComponent("transcribe-\(logTimestamp()).log")
+    let body = """
+      audio: \(audio.path)
+      exit: \(exitCode)
+
+      ===== STDOUT (\(stdout.count) bytes) =====
+      \(String(bytes: stdout, encoding: .utf8) ?? "")
+
+      ===== STDERR (tail) =====
+      \(stderr)
+      """
+    try? body.write(to: file, atomically: true, encoding: .utf8)
+    return file
+  }
+
+  private static func logHint(_ url: URL?) -> String {
+    guard let url else { return "" }
+    return "\n\nFull engine log: \(url.path)"
+  }
+
+  private static func logTimestamp() -> String {
+    let formatter = DateFormatter()
+    formatter.dateFormat = "yyyy-MM-dd_HH-mm-ss"
+    return formatter.string(from: Date())
+  }
+
   // MARK: transcribe
 
   // swiftlint:disable:next function_body_length
@@ -105,19 +150,29 @@ enum LiveEngine {
           let out = await stdoutData
           let code = await exitCode
 
+          // Persist a per-run log (command, exit, full stdout, stderr tail) so any
+          // transcription is inspectable after the fact.
+          let logURL = writeJobLog(
+            audio: audio, exitCode: code, stdout: out, stderr: proc.stderrTail())
+
           if Task.isCancelled {
             continuation.finish()
             return
           }
           guard code == 0 else {
-            throw EngineClientError.engineFailed(proc.stderrTail())
+            throw EngineClientError.engineFailed(proc.stderrTail() + logHint(logURL))
           }
           do {
             let plan = try JSONDecoder().decode(EditPlan.self, from: out)
             continuation.yield(.completed(plan))
             continuation.finish()
           } catch {
-            throw EngineClientError.decodeFailed(String(describing: error))
+            // Include a preview of what the engine actually emitted — a decode
+            // failure almost always means non-JSON leaked onto stdout.
+            let preview = String(bytes: out.prefix(500), encoding: .utf8) ?? ""
+            throw EngineClientError.decodeFailed(
+              "\(error)\n\nEngine output was not valid JSON. It began with:\n\(preview)"
+                + logHint(logURL))
           }
         } catch is CancellationError {
           continuation.finish()
