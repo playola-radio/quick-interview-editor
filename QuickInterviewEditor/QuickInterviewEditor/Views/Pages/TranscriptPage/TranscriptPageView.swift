@@ -44,11 +44,12 @@ struct TranscriptPageView: View {
     }
   }
 
-  // Color is data on the model, not a view decision: selected > run-together > default.
   private func color(for word: WordViewState) -> Color {
-    if word.isSelected { return .white }
-    if word.isRunTogether { return Color(red: 0.89, green: 0.58, blue: 0.58) }
-    return Color(white: 0.56)
+    switch word.displayRole {
+    case .selected: return .white
+    case .runTogether: return Color(red: 0.89, green: 0.58, blue: 0.58)
+    case .normal: return Color(white: 0.56)
+    }
   }
 
   private var controls: some View {

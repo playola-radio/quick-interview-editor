@@ -9,6 +9,20 @@ struct WordViewState: Identifiable, Equatable {
   var isRunTogether: Bool
 }
 
+enum WordDisplayRole {
+  case selected
+  case runTogether
+  case normal
+}
+
+extension WordViewState {
+  var displayRole: WordDisplayRole {
+    if isSelected { return .selected }
+    if isRunTogether { return .runTogether }
+    return .normal
+  }
+}
+
 /// Word IDs that "run together" with a neighbor: any adjacent pair whose
 /// inter-word gap is below `maxGapMs` flags BOTH of its words.
 func runTogetherWordIDs(_ words: [Word], maxGapMs: Double) -> Set<Word.ID> {
