@@ -55,7 +55,8 @@ final class EditorModel: ViewModel {
           snippet: slice.snippet,
           isTight: !slice.warnings.isEmpty,
           warningLabel: slice.warnings.isEmpty ? "" : "Tight join — add a fade in Logic",
-          isPlaying: playingSliceID == slice.id
+          isPlaying: playingSliceID == slice.id,
+          playButtonLabel: playingSliceID == slice.id ? stopLabel : playLabel
         )
       })
   }
@@ -98,15 +99,26 @@ final class EditorModel: ViewModel {
   func playSliceTapped(_ id: Slice.ID) async {
     guard let slice = slices[id: id] else { return }
     playingSliceID = id
-    await withErrorReporting {
+    do {
       try await audioPlayer.play(
         sourceURL, slice.startSample..<slice.endSample, editPlan.source.sampleRate)
+    } catch {
+      playingSliceID = nil
+      reportIssue(error)
     }
   }
 
   func stopPlaybackTapped() async {
     playingSliceID = nil
     await audioPlayer.stop()
+  }
+
+  func playStopTapped(_ id: Slice.ID) async {
+    if playingSliceID == id {
+      await stopPlaybackTapped()
+    } else {
+      await playSliceTapped(id)
+    }
   }
 
   // MARK: - Private Helpers
@@ -125,4 +137,5 @@ struct SliceRowState: Identifiable, Equatable {
   var isTight: Bool
   var warningLabel: String
   var isPlaying: Bool
+  var playButtonLabel: String
 }

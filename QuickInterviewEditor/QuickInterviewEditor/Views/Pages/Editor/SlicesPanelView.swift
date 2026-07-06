@@ -62,14 +62,8 @@ private struct SliceCard: View {
           .foregroundStyle(Color(red: 0.89, green: 0.58, blue: 0.58))
       }
       HStack(spacing: 8) {
-        Button(row.isPlaying ? model.stopLabel : model.playLabel) {
-          Task {
-            if row.isPlaying {
-              await model.stopPlaybackTapped()
-            } else {
-              await model.playSliceTapped(row.id)
-            }
-          }
+        Button(row.playButtonLabel) {
+          Task { await model.playStopTapped(row.id) }
         }
         Button {
           model.deleteSlice(row.id)

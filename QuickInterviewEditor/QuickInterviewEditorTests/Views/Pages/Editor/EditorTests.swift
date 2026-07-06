@@ -114,4 +114,58 @@ struct EditorTests {
     }
     expectNoDifference(model.playingSliceID, nil)
   }
+
+  @Test func playStopTappedTogglesPlayback() async {
+    let model = editor()
+    model.transcript.wordTapped(model.transcript.words[0].id)
+    model.transcript.wordTapped(model.transcript.words[1].id)
+    model.addSliceTapped()
+    let slice = model.slices[0]
+    await withDependencies {
+      $0.audioPlayer.play = { _, _, _ in }
+      $0.audioPlayer.stop = {}
+    } operation: {
+      await model.playStopTapped(slice.id)
+      expectNoDifference(model.playingSliceID, slice.id)
+      await model.playStopTapped(slice.id)
+    }
+    expectNoDifference(model.playingSliceID, nil)
+  }
+
+  @Test func playSliceRollsBackPlayingIDOnError() async {
+    let model = editor()
+    model.transcript.wordTapped(model.transcript.words[0].id)
+    model.transcript.wordTapped(model.transcript.words[1].id)
+    model.addSliceTapped()
+    let slice = model.slices[0]
+    await withDependencies {
+      $0.audioPlayer.play = { _, _, _ in throw EngineClientError.engineFailed("boom") }
+    } operation: {
+      await withKnownIssue {
+        await model.playSliceTapped(slice.id)
+      }
+    }
+    expectNoDifference(model.playingSliceID, nil)
+  }
+
+  @Test func sliceRowPlayButtonLabelReflectsPlayingState() async {
+    let model = editor()
+    model.transcript.wordTapped(model.transcript.words[0].id)
+    model.transcript.wordTapped(model.transcript.words[1].id)
+    model.addSliceTapped()
+    model.transcript.wordTapped(model.transcript.words[2].id)
+    model.transcript.wordTapped(model.transcript.words[3].id)
+    model.addSliceTapped()
+    let firstSlice = model.slices[0]
+    let secondSlice = model.slices[1]
+    expectNoDifference(model.sliceRows[id: firstSlice.id]?.playButtonLabel, model.playLabel)
+    expectNoDifference(model.sliceRows[id: secondSlice.id]?.playButtonLabel, model.playLabel)
+    await withDependencies {
+      $0.audioPlayer.play = { _, _, _ in }
+    } operation: {
+      await model.playStopTapped(firstSlice.id)
+    }
+    expectNoDifference(model.sliceRows[id: firstSlice.id]?.playButtonLabel, model.stopLabel)
+    expectNoDifference(model.sliceRows[id: secondSlice.id]?.playButtonLabel, model.playLabel)
+  }
 }
