@@ -1,6 +1,7 @@
 import Dependencies
 import Foundation
 import IdentifiedCollections
+import IssueReporting
 import Observation
 import UniformTypeIdentifiers
 
@@ -39,6 +40,11 @@ final class RootModel: ViewModel {
     for url in urls where isAudioFile(url) { openSong(url) }
   }
   func filePicked(_ url: URL) { openSong(url) }
+  /// Surface (don't swallow) an open-panel failure. Step 2 has no user-facing alert
+  /// yet; a visible surface lands with the error-UX work.
+  func filePickFailed(_ error: Error) {
+    reportIssue("Audio import failed: \(error.localizedDescription)")
+  }
   func importButtonTapped() { isImporterPresented = true }
   func tabSelected(_ id: SongTabModel.ID) { selectedTabID = id }
 

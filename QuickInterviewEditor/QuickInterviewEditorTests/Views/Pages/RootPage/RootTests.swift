@@ -61,6 +61,18 @@ struct RootTests {
     }
   }
 
+  @Test func filePickFailureIsSurfacedNotSwallowed() {
+    let model = withDependencies {
+      $0.engine.transcribe = { _ in neverCompleting() }
+    } operation: {
+      RootModel()
+    }
+    withKnownIssue {
+      model.filePickFailed(NSError(domain: "test", code: 1))
+    }
+    #expect(model.tabs.isEmpty)  // no phantom tab created on a failed import
+  }
+
   @Test func nonAudioDropsAreIgnored() {
     withDependencies {
       $0.engine.transcribe = { _ in neverCompleting() }

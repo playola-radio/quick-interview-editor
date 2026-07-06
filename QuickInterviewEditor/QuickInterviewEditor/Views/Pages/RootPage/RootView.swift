@@ -19,7 +19,10 @@ struct RootView: View {
       isPresented: $model.isImporterPresented,
       allowedContentTypes: [.audio]
     ) { result in
-      if case .success(let url) = result { model.filePicked(url) }
+      switch result {
+      case .success(let url): model.filePicked(url)
+      case .failure(let error): model.filePickFailed(error)
+      }
     }
   }
 
