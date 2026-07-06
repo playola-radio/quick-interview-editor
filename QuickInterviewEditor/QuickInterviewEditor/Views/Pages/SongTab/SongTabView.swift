@@ -17,7 +17,7 @@ struct SongTabView: View {
       .frame(maxWidth: .infinity, maxHeight: .infinity)
       .background(Color.black)
     case .loaded:
-      if let transcript = model.transcript { TranscriptPageView(model: transcript) }
+      if let editor = model.editor { EditorView(model: editor) }
     case .failed:
       VStack(spacing: 14) {
         Text(model.errorMessage ?? "").foregroundStyle(Color(red: 0.89, green: 0.58, blue: 0.58))

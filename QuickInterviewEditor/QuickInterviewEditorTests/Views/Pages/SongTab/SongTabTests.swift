@@ -30,7 +30,7 @@ struct SongTabTests {
       await model.startTranscription()
     }
     #expect(model.isLoaded)
-    expectNoDifference(model.transcript?.words.count, 122)
+    expectNoDifference(model.editor?.transcript.words.count, 122)
   }
 
   @Test func progressUpdatesMessageBeforeCompletion() async {

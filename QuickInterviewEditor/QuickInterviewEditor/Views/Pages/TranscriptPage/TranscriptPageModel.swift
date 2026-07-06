@@ -60,6 +60,11 @@ class TranscriptPageModel: ViewModel {
   }
   var runTogetherCount: Int { words.filter(\.isRunTogether).count }
   var runTogetherCountLabel: String { "\(runTogetherCount) run-together" }
+  var orderedSelectedWordIDs: [Word.ID] { selectedWords.map(\.id) }
+  var selectionSnippet: String {
+    selectedWords.map(\.text).joined(separator: " ")
+      .trimmingCharacters(in: .whitespaces)
+  }
 
   // MARK: - User Actions
   func viewAppeared() async {

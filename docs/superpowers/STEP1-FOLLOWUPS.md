@@ -17,9 +17,10 @@ merge of Step 1; bundle the view-polish ones into one small PR, track the rest.
   compiles + 15 tests pass via the verified transitive `@testable` link.
 
 ## View polish (one cohesive follow-up PR)
-- **displayRole enum:** move the view's `color(for:)` boolean-mapping onto the model —
-  add `WordViewState.displayRole` (`.selected/.runTogether/.normal`) and `switch` in the
-  view (colors stay in the view). Removes the last seam where view logic could creep in.
+- **displayRole enum — DONE in Step 3a** (plan `plans/2026-07-06-step3a-slices-panel.md`, Task 4,
+  commit d7fad61). Moved the view's `color(for:)` boolean-mapping onto the model via
+  `WordViewState.displayRole` (`.selected/.runTogether/.normal`); the view now `switch`es on the
+  role (colors stay in the view). Regression test `displayRolePrioritisesSelectedThenRunTogether`.
 - **Slider binding:** revert `TranscriptPageView` slider to the plan's `Binding(get:set:)`
   funneling through `sensitivityChanged` (drop the raw `$model` binding + `.onChange`
   double-write). Pairs with the displayRole change.
@@ -40,6 +41,17 @@ merge of Step 1; bundle the view-polish ones into one small PR, track the rest.
 - **wordTapped repeat-tap edge case:** tapping the same word twice collapses
   `anchor==focus`, so the "third click resets" cycle can be bypassed. Fix + regression test
   when selection interaction is exercised harder.
+
+### Deferred from Step 3a (slices panel)
+- **Playback natural-end auto-clear:** `AudioPlayerClient.play` returns once playback *starts*;
+  `EditorModel.playingSliceID` only clears on explicit Stop (or delete), not when the slice
+  finishes on its own. Add a completion signal (or a "playing finished" callback) so the
+  Play/Stop button resets at the natural end. Pairs with Phase-4 transport.
+- **`playingSliceID` not rolled back on play error:** if `audioPlayer.play` throws inside
+  `withErrorReporting`, the row stays "Stop" though nothing is playing. Roll back on failure.
+- **Play/Stop button label is a view-side ternary:** `SlicesPanelView` chooses
+  `row.isPlaying ? stopLabel : playLabel`. Per strict MV, expose `SliceRowState.playButtonLabel`
+  on the model. (Batch with the next slices-panel touch or the 3b review.)
 
 ## Cosmetic
 - 2 residual `objc duplicate-class` warnings in test output (down from 6) from a Point-Free

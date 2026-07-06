@@ -21,4 +21,19 @@ struct RunTogetherTests {
     #expect(tight.count < mid.count)
     #expect(mid.count < loose.count)
   }
+
+  @Test func displayRolePrioritisesSelectedThenRunTogether() {
+    let selected = WordViewState(
+      id: 1, text: "a", startSample: 0, endSample: 1,
+      isSelected: true, isRunTogether: true)
+    let runTogether = WordViewState(
+      id: 2, text: "b", startSample: 0, endSample: 1,
+      isSelected: false, isRunTogether: true)
+    let normal = WordViewState(
+      id: 3, text: "c", startSample: 0, endSample: 1,
+      isSelected: false, isRunTogether: false)
+    #expect(selected.displayRole == .selected)
+    #expect(runTogether.displayRole == .runTogether)
+    #expect(normal.displayRole == .normal)
+  }
 }
