@@ -49,7 +49,11 @@ final class RootModel: ViewModel {
   func tabSelected(_ id: SongTabModel.ID) { selectedTabID = id }
 
   func closeTab(_ id: SongTabModel.ID) {
-    tabs[id: id]?.cancel()
+    let tab = tabs[id: id]
+    tab?.cancel()
+    if let editor = tab?.editor {
+      Task { await editor.stopPlaybackTapped() }
+    }
     let wasSelected = selectedTabID == id
     tabs.remove(id: id)
     if wasSelected { selectedTabID = tabs.last?.id }

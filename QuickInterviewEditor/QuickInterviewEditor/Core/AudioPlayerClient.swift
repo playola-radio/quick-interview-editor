@@ -4,8 +4,8 @@ import Foundation
 import IssueReporting
 
 struct AudioPlayerClient: Sendable {
-  /// Plays `url` from `range.lowerBound` to `range.upperBound` (samples) and
-  /// returns once playback has started (does not block until the range ends).
+  /// Plays url from range.lowerBound to range.upperBound (samples) and returns when playback
+  /// finishes or stop() is called.
   var play: @Sendable (URL, Range<Int>, Int) async throws -> Void
   var stop: @Sendable () async -> Void
 }
@@ -40,9 +40,9 @@ extension AudioPlayerClient {
     let box = LivePlayerBox()
     return AudioPlayerClient(
       play: { url, range, sampleRate in
-        try box.play(url: url, range: range, planSampleRate: sampleRate)
+        try await box.play(url: url, range: range, planSampleRate: sampleRate)
       },
-      stop: { box.stop() }
+      stop: { await box.stop() }
     )
   }
 }
@@ -51,10 +51,15 @@ private final class LivePlayerBox: @unchecked Sendable {
   private let engine = AVAudioEngine()
   private let node = AVAudioPlayerNode()
   private let lock = NSLock()
+  private var continuation: CheckedContinuation<Void, Never>?
+  /// Generation counter guards against a `stop()` landing in the gap between
+  /// `engine.start()` (which must run outside the lock) and the continuation
+  /// being installed: if the generation changed in that gap, scheduling is
+  /// abandoned instead of playing on a stopped engine or hanging forever.
+  private var generation = 0
 
-  func play(url: URL, range: Range<Int>, planSampleRate: Int) throws {
-    lock.lock()
-    defer { lock.unlock() }
+  /// Returns when the scheduled segment finishes playing, or when `stop()` is called.
+  func play(url: URL, range: Range<Int>, planSampleRate: Int) async throws {
     let file = try AVAudioFile(forReading: url)
     let nativeRate = file.processingFormat.sampleRate
     let ratio = nativeRate / Double(max(1, planSampleRate))
@@ -63,22 +68,77 @@ private final class LivePlayerBox: @unchecked Sendable {
     let clampedStart = min(startFrame, file.length)
     let clampedEnd = min(endFrameRaw, file.length)
     let frameCount = AVAudioFrameCount(max(0, clampedEnd - clampedStart))
-    guard frameCount > 0 else { return }
-    stopLocked()
-    if node.engine == nil { engine.attach(node) }
-    engine.connect(node, to: engine.mainMixerNode, format: file.processingFormat)
-    if !engine.isRunning { try engine.start() }
-    node.scheduleSegment(file, startingFrame: clampedStart, frameCount: frameCount, at: nil)
-    node.play()
+    guard frameCount > 0 else {
+      stop()
+      return
+    }
+    let myGeneration = prepareToPlay(file: file)
+    try engine.start()
+    await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+      scheduleSegment(
+        cont, file: file, startingFrame: clampedStart, frameCount: frameCount,
+        expectedGeneration: myGeneration)
+    }
   }
 
   func stop() {
-    lock.lock()
-    defer { lock.unlock() }
-    stopLocked()
+    withLock {
+      generation += 1
+      stopNodeLocked()
+      resumeLocked()
+    }
   }
 
-  private func stopLocked() {
+  private func prepareToPlay(file: AVAudioFile) -> Int {
+    withLock {
+      generation += 1
+      resumeLocked()
+      stopNodeLocked()
+      if node.engine == nil { engine.attach(node) }
+      engine.connect(node, to: engine.mainMixerNode, format: file.processingFormat)
+      return generation
+    }
+  }
+
+  private func scheduleSegment(
+    _ cont: CheckedContinuation<Void, Never>, file: AVAudioFile,
+    startingFrame: AVAudioFramePosition, frameCount: AVAudioFrameCount,
+    expectedGeneration: Int
+  ) {
+    withLock {
+      guard generation == expectedGeneration else {
+        cont.resume()
+        return
+      }
+      continuation = cont
+      node.scheduleSegment(file, startingFrame: startingFrame, frameCount: frameCount, at: nil) {
+        [weak self] in self?.completeSegment(generation: expectedGeneration)
+      }
+      node.play()
+    }
+  }
+
+  private func completeSegment(generation completedGeneration: Int) {
+    withLock {
+      guard generation == completedGeneration else { return }
+      stopNodeLocked()
+      resumeLocked()
+    }
+  }
+
+  private func withLock<T>(_ body: () -> T) -> T {
+    lock.lock()
+    defer { lock.unlock() }
+    return body()
+  }
+
+  private func resumeLocked() {
+    let cont = continuation
+    continuation = nil
+    cont?.resume()
+  }
+
+  private func stopNodeLocked() {
     node.stop()
     if engine.isRunning { engine.stop() }
   }

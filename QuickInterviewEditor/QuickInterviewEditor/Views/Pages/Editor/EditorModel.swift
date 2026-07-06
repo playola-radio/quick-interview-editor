@@ -105,9 +105,9 @@ final class EditorModel: ViewModel {
       try await audioPlayer.play(
         sourceURL, slice.startSample..<slice.endSample, editPlan.source.sampleRate)
     } catch {
-      playingSliceID = nil
       reportIssue(error)
     }
+    if playingSliceID == id { playingSliceID = nil }
   }
 
   func stopPlaybackTapped() async {
