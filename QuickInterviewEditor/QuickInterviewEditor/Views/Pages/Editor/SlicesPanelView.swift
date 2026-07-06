@@ -25,7 +25,8 @@ struct SlicesPanelView: View {
           }
           .onMove { model.moveSlices(fromOffsets: $0, toOffset: $1) }
           .onDelete { indexSet in
-            for index in indexSet { model.deleteSlice(model.sliceRows[index].id) }
+            let ids = indexSet.map { model.sliceRows[$0].id }
+            Task { for id in ids { await model.deleteSlice(id) } }
           }
         }
         .listStyle(.plain)
@@ -66,7 +67,7 @@ private struct SliceCard: View {
           Task { await model.playStopTapped(row.id) }
         }
         Button {
-          model.deleteSlice(row.id)
+          Task { await model.deleteSlice(row.id) }
         } label: {
           Image(systemName: "xmark")
         }

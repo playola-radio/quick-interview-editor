@@ -44,7 +44,7 @@ struct EditorTests {
     expectNoDifference(model.slices.map(\.name), ["Slice 1", "Slice 2"])
   }
 
-  @Test func renameReorderDeleteMutateSlices() {
+  @Test func renameReorderDeleteMutateSlices() async {
     let model = editor()
     for pair in [(0, 1), (2, 3), (4, 5)] {
       model.transcript.wordTapped(model.transcript.words[pair.0].id)
@@ -56,7 +56,7 @@ struct EditorTests {
     expectNoDifference(model.slices[id: firstID]?.name, "Intro")
     model.moveSlices(fromOffsets: IndexSet(integer: 0), toOffset: 3)
     expectNoDifference(model.slices.last?.id, firstID)
-    model.deleteSlice(firstID)
+    await model.deleteSlice(firstID)
     #expect(model.slices[id: firstID] == nil)
     expectNoDifference(model.slices.count, 2)
   }
@@ -167,5 +167,49 @@ struct EditorTests {
     }
     expectNoDifference(model.sliceRows[id: firstSlice.id]?.playButtonLabel, model.stopLabel)
     expectNoDifference(model.sliceRows[id: secondSlice.id]?.playButtonLabel, model.playLabel)
+  }
+
+  @Test func deletingPlayingSliceStopsPlayback() async {
+    let model = editor()
+    model.transcript.wordTapped(model.transcript.words[0].id)
+    model.transcript.wordTapped(model.transcript.words[1].id)
+    model.addSliceTapped()
+    let slice = model.slices[0]
+    let stopped = LockIsolated(false)
+    await withDependencies {
+      $0.audioPlayer.play = { _, _, _ in }
+      $0.audioPlayer.stop = { stopped.setValue(true) }
+    } operation: {
+      await model.playSliceTapped(slice.id)
+      await model.deleteSlice(slice.id)
+    }
+    expectNoDifference(model.playingSliceID, nil)
+    #expect(stopped.value)
+    #expect(model.slices[id: slice.id] == nil)
+  }
+
+  @Test func renameSlicePreservesInternalSpaces() {
+    let model = editor()
+    model.transcript.wordTapped(model.transcript.words[0].id)
+    model.transcript.wordTapped(model.transcript.words[1].id)
+    model.addSliceTapped()
+    let slice = model.slices[0]
+    model.renameSlice(slice.id, to: "My Clip")
+    expectNoDifference(model.slices[id: slice.id]?.name, "My Clip")
+    model.renameSlice(slice.id, to: "   ")
+    expectNoDifference(model.slices[id: slice.id]?.name, "My Clip")
+  }
+
+  @Test func multiRowDeleteRemovesExactlyTheSelectedRows() async {
+    let model = editor()
+    for pair in [(0, 1), (2, 3), (4, 5)] {
+      model.transcript.wordTapped(model.transcript.words[pair.0].id)
+      model.transcript.wordTapped(model.transcript.words[pair.1].id)
+      model.addSliceTapped()
+    }
+    let middleID = model.slices[1].id
+    let ids = [model.slices[0].id, model.slices[2].id]
+    for id in ids { await model.deleteSlice(id) }
+    expectNoDifference(model.slices.map(\.id), [middleID])
   }
 }

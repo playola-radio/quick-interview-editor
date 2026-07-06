@@ -82,17 +82,19 @@ final class EditorModel: ViewModel {
   }
 
   func renameSlice(_ id: Slice.ID, to name: String) {
-    let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !trimmed.isEmpty else { return }
-    slices[id: id]?.name = trimmed
+    guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+    slices[id: id]?.name = name
   }
 
   func moveSlices(fromOffsets source: IndexSet, toOffset destination: Int) {
     slices.move(fromOffsets: source, toOffset: destination)
   }
 
-  func deleteSlice(_ id: Slice.ID) {
-    if playingSliceID == id { playingSliceID = nil }
+  func deleteSlice(_ id: Slice.ID) async {
+    if playingSliceID == id {
+      playingSliceID = nil
+      await audioPlayer.stop()
+    }
     slices.remove(id: id)
   }
 
