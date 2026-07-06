@@ -20,7 +20,11 @@ struct SongTabView: View {
       if let editor = model.editor { EditorView(model: editor) }
     case .failed:
       VStack(spacing: 14) {
-        Text(model.errorMessage ?? "").foregroundStyle(Color(red: 0.89, green: 0.58, blue: 0.58))
+        Text(model.errorMessage ?? "")
+          .foregroundStyle(Color(red: 0.89, green: 0.58, blue: 0.58))
+          .multilineTextAlignment(.center)
+          .textSelection(.enabled)  // errors are copyable (select + Cmd-C)
+          .padding(.horizontal, 24)
         Button(model.retryButtonLabel) { model.retryTapped() }
       }
       .frame(maxWidth: .infinity, maxHeight: .infinity)
