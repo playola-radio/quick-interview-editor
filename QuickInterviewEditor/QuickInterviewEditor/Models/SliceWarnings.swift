@@ -22,9 +22,9 @@ private func silenceTouches(_ sample: Int, _ silences: [EditPlan.Silence]) -> Bo
 }
 
 func sampleTimecodeLabel(_ samples: Int, sampleRate: Int) -> String {
-  let totalSeconds = Double(max(0, samples)) / Double(sampleRate)
-  let minutes = Int(totalSeconds) / 60
-  let seconds = totalSeconds - Double(minutes * 60)
+  let tenths = Int((Double(max(0, samples)) / Double(sampleRate) * 10).rounded())
+  let minutes = tenths / 600
+  let seconds = Double(tenths % 600) / 10
   return String(format: "%d:%04.1f", minutes, seconds)
 }
 

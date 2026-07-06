@@ -56,4 +56,10 @@ struct SliceWarningsTests {
     expectNoDifference(sampleTimecodeLabel(44100 * 65, sampleRate: 44100), "1:05.0")
     expectNoDifference(sampleDurationLabel(44100 * 3 + 4410 * 2, sampleRate: 44100), "3.2s")
   }
+
+  @Test func timecodeCarriesRoundedSecondsIntoMinutes() {
+    // 59.95s must round up to 1:00.0, not 0:60.0
+    let samples = 44100 * 59 + 44100 * 95 / 100
+    expectNoDifference(sampleTimecodeLabel(samples, sampleRate: 44100), "1:00.0")
+  }
 }
