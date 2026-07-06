@@ -229,7 +229,7 @@ import IssueReporting
 
 struct AudioPlayerClient: Sendable {
   /// Plays `url` from `range.lowerBound` to `range.upperBound` (samples) and
-  /// returns once playback has started (does not block until the range ends).
+  /// returns when playback finishes or `stop()` is called.
   var play: @Sendable (URL, Range<Int>, Int) async throws -> Void
   var stop: @Sendable () async -> Void
 }

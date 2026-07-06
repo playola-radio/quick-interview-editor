@@ -266,7 +266,23 @@ struct EditorTests {
     model.renameSlice(slice.id, to: "My Clip")
     expectNoDifference(model.slices[id: slice.id]?.name, "My Clip")
     model.renameSlice(slice.id, to: "   ")
-    expectNoDifference(model.slices[id: slice.id]?.name, "My Clip")
+    expectNoDifference(model.slices[id: slice.id]?.name, "   ")
+  }
+
+  @Test func addSliceDoesNotReuseNumberAfterDeletion() async {
+    let model = editor()
+    for pair in [(0, 1), (2, 3), (4, 5)] {
+      model.transcript.wordTapped(model.transcript.words[pair.0].id)
+      model.transcript.wordTapped(model.transcript.words[pair.1].id)
+      model.addSliceTapped()
+    }
+    expectNoDifference(model.slices.map(\.name), ["Slice 1", "Slice 2", "Slice 3"])
+    let middleID = model.slices[1].id
+    await model.deleteSlice(middleID)
+    model.transcript.wordTapped(model.transcript.words[6].id)
+    model.transcript.wordTapped(model.transcript.words[7].id)
+    model.addSliceTapped()
+    expectNoDifference(model.slices.map(\.name), ["Slice 1", "Slice 3", "Slice 4"])
   }
 
   @Test func multiRowDeleteRemovesExactlyTheSelectedRows() async {

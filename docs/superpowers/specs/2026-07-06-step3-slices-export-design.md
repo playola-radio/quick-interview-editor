@@ -177,8 +177,9 @@ Play the **source** audio range (`[startSample, endSample)`), **not** a rendered
 AIFF — rendering just to preview is waste (Codex). `liveValue` uses AVFoundation
 (`AVAudioPlayerNode.scheduleSegment` over an `AVAudioFile`, or `AVAudioPlayer` with
 `currentTime` + a stop at the range end). **Play/stop only** — no scrub/speed
-(that's Phase 4). `testValue` records calls / no-ops. The model tracks
-`playingSliceID` for the panel's play/stop button state.
+(that's Phase 4). `testValue` fails cleanly (`reportIssue` + throw when not
+overridden). The model tracks `playingSliceID` for the panel's play/stop button
+state.
 
 ## Views (dumb)
 
@@ -226,7 +227,7 @@ delete-after-job model). `render` is deterministic from a written **request file
 (the `SpawnedProcess` stdin is hardwired to `/dev/null`, so stdin JSON is not free
 — a `--request` file is simpler, debuggable, and deadlock-free).
 
-```
+```bash
 .venv/bin/python -m logic_markers.cli render <audio> \
     --request <request.json> --work-dir <dir> [--sample-rate 44100]
 ```
@@ -312,7 +313,7 @@ relying on murky child-process TCC for a non-sandboxed direct-download app.
 - **Filename scheme (Swift model logic, tested):** default
   `"<source stem> - Slice 001.aiff"` (zero-padded index). **Sanitize** the slice
   name (strip path separators / illegal chars); never use a raw slice name as a
-  path component. **Resolve collisions** with ` 2`, ` 3`, … suffixes against the
+  path component. **Resolve collisions** with `2`, `3`, … suffixes against the
   destination folder.
 - **Copy** each rendered temp AIFF to `destination/<final name>`; **reveal** the
   set via `WorkspaceClient` (`NSWorkspace.activateFileViewerSelecting`).

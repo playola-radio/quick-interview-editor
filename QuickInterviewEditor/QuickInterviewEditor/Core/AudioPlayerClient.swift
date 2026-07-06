@@ -52,10 +52,6 @@ private final class LivePlayerBox: @unchecked Sendable {
   private let node = AVAudioPlayerNode()
   private let lock = NSLock()
   private var continuation: CheckedContinuation<Void, Never>?
-  /// Generation counter guards against a `stop()` landing in the gap between
-  /// `engine.start()` (which must run outside the lock) and the continuation
-  /// being installed: if the generation changed in that gap, scheduling is
-  /// abandoned instead of playing on a stopped engine or hanging forever.
   private var generation = 0
 
   /// Returns when the scheduled segment finishes playing, or when `stop()` is called.
@@ -68,10 +64,9 @@ private final class LivePlayerBox: @unchecked Sendable {
     let clampedStart = min(startFrame, file.length)
     let clampedEnd = min(endFrameRaw, file.length)
     let frameCount = AVAudioFrameCount(max(0, clampedEnd - clampedStart))
-    guard frameCount > 0 else {
-      stop()
-      return
-    }
+    // An empty range can't come from a valid selection; no-op without disturbing
+    // any current playback.
+    guard frameCount > 0 else { return }
     let myGeneration = prepareToPlay(file: file)
     try engine.start()
     await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
@@ -82,22 +77,30 @@ private final class LivePlayerBox: @unchecked Sendable {
   }
 
   func stop() {
-    withLock {
+    let cont = withLock { () -> CheckedContinuation<Void, Never>? in
       generation += 1
-      stopNodeLocked()
-      resumeLocked()
+      let existing = continuation
+      continuation = nil
+      return existing
     }
+    stopNode()
+    cont?.resume()
   }
 
   private func prepareToPlay(file: AVAudioFile) -> Int {
-    withLock {
+    let result = withLock { () -> (CheckedContinuation<Void, Never>?, Int) in
       generation += 1
-      resumeLocked()
-      stopNodeLocked()
+      let existing = continuation
+      continuation = nil
+      return (existing, generation)
+    }
+    result.0?.resume()
+    stopNode()
+    withLock {
       if node.engine == nil { engine.attach(node) }
       engine.connect(node, to: engine.mainMixerNode, format: file.processingFormat)
-      return generation
     }
+    return result.1
   }
 
   private func scheduleSegment(
@@ -105,25 +108,37 @@ private final class LivePlayerBox: @unchecked Sendable {
     startingFrame: AVAudioFramePosition, frameCount: AVAudioFrameCount,
     expectedGeneration: Int
   ) {
-    withLock {
-      guard generation == expectedGeneration else {
-        cont.resume()
-        return
-      }
+    let installed = withLock { () -> Bool in
+      guard generation == expectedGeneration else { return false }
       continuation = cont
       node.scheduleSegment(file, startingFrame: startingFrame, frameCount: frameCount, at: nil) {
         [weak self] in self?.completeSegment(generation: expectedGeneration)
       }
+      return true
+    }
+    guard installed else {
+      cont.resume()
+      return
+    }
+    // Recheck under the lock: `stop()` or another `play()` may have advanced
+    // `generation` in the gap between installing above and calling `node.play()`
+    // here, in which case this segment was already abandoned and must not start.
+    let stillCurrent = withLock { generation == expectedGeneration }
+    if stillCurrent {
       node.play()
     }
   }
 
   private func completeSegment(generation completedGeneration: Int) {
-    withLock {
-      guard generation == completedGeneration else { return }
-      stopNodeLocked()
-      resumeLocked()
+    let cont = withLock { () -> CheckedContinuation<Void, Never>? in
+      guard generation == completedGeneration else { return nil }
+      let existing = continuation
+      continuation = nil
+      return existing
     }
+    guard let cont else { return }
+    stopNode()
+    cont.resume()
   }
 
   private func withLock<T>(_ body: () -> T) -> T {
@@ -132,13 +147,7 @@ private final class LivePlayerBox: @unchecked Sendable {
     return body()
   }
 
-  private func resumeLocked() {
-    let cont = continuation
-    continuation = nil
-    cont?.resume()
-  }
-
-  private func stopNodeLocked() {
+  private func stopNode() {
     node.stop()
     if engine.isRunning { engine.stop() }
   }

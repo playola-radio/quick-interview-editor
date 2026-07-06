@@ -26,6 +26,7 @@ final class EditorModel: ViewModel {
   // MARK: - Properties
   var slices: IdentifiedArrayOf<Slice> = []
   var playingSliceID: Slice.ID?
+  private var nextSliceNumber = 1
 
   // MARK: - Display Text
   let addSliceLabel = "Add slice"
@@ -68,7 +69,7 @@ final class EditorModel: ViewModel {
     guard !wordIDs.isEmpty else { return }
     let slice = Slice(
       id: UUID(),
-      name: "Slice \(slices.count + 1)",
+      name: "Slice \(nextSliceNumber)",
       startSample: range.lowerBound,
       endSample: range.upperBound,
       wordIDs: wordIDs,
@@ -78,11 +79,11 @@ final class EditorModel: ViewModel {
         durationSamples: editPlan.source.durationSamples, silences: editPlan.silences)
     )
     slices.append(slice)
+    nextSliceNumber += 1
     transcript.clearSelectionTapped()
   }
 
   func renameSlice(_ id: Slice.ID, to name: String) {
-    guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
     slices[id: id]?.name = name
   }
 
@@ -91,11 +92,12 @@ final class EditorModel: ViewModel {
   }
 
   func deleteSlice(_ id: Slice.ID) async {
-    if playingSliceID == id {
+    let wasPlaying = playingSliceID == id
+    slices.remove(id: id)
+    if wasPlaying {
       playingSliceID = nil
       await audioPlayer.stop()
     }
-    slices.remove(id: id)
   }
 
   func playSliceTapped(_ id: Slice.ID) async {
