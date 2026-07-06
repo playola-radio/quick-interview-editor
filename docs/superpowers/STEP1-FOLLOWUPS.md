@@ -26,15 +26,20 @@ merge of Step 1; bundle the view-polish ones into one small PR, track the rest.
 - **Empty-state string assertions:** test `selectionSummary` == "No selection" and the
   exact `runTogetherCountLabel` string.
 
-## Track against Step 2 (latent, surface when the surface grows)
-- **testValue SIGTRAP hardening:** `EditPlan.fixture` force-unwraps `Bundle.main`, and
-  `EngineClient.testValue.loadPlan` routes to `.fixture`. A future test that forgets to
-  override `engine.loadPlan` would SIGTRAP instead of failing cleanly. When `EngineClient`
-  grows its `transcribe` surface in Step 2, make `testValue` use `reportIssue`/throw (or a
-  test-bundle loader) instead of a `Bundle.main` force-unwrap.
+## Resolved in Step 2 (plan: `plans/2026-07-04-step2-import-live-engine.md`)
+- **testValue SIGTRAP hardening — DONE (Task 4).** `EngineClient.testValue.loadPlan` and the
+  new `.transcribe` both now `reportIssue` + throw `EngineClientError.unimplemented(...)` when a
+  test forgets to override them, instead of routing to `.fixture`. A separate `previewValue`
+  keeps fixture convenience for SwiftUI previews. (`EditPlan.fixture` already degraded
+  gracefully via `reportIssue` rather than force-unwrapping.)
+- **`Silence` typed as sample indices — DONE (Task 2).** Retyped `EditPlan.Silence` from
+  `Double` (which read like seconds) to `startSample: Int`/`endSample: Int`, matching the
+  engine's actual sample-valued output. (Surfaced during the Step-2 Codex design pass.)
+
+## Track against Step 3+ (latent, surface when the surface grows)
 - **wordTapped repeat-tap edge case:** tapping the same word twice collapses
   `anchor==focus`, so the "third click resets" cycle can be bypassed. Fix + regression test
-  when selection interaction is exercised harder in Step 2.
+  when selection interaction is exercised harder.
 
 ## Cosmetic
 - 2 residual `objc duplicate-class` warnings in test output (down from 6) from a Point-Free

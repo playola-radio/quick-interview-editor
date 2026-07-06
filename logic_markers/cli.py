@@ -19,6 +19,7 @@ from .audio import convert_to_aiff, read_aiff_mono
 from .boundaries import snap_boundaries
 from .editplan import (
     ResolvedSegment,
+    _word_end,
     boundary_limits,
     build_edit_plan,
     parse_edit_file,
@@ -27,10 +28,19 @@ from .editplan import (
 from .silence import detect_silences
 from .slicer import slice_aiff
 from .transcribe import Word
-from .words import Transcript, render_transcript
+from .words import Transcript, Word as RichWord, render_transcript
 
 SNAP_PARAMS = {"search_radius_ms": 800.0, "roll_ms": 20.0, "pad_ms": 100.0, "tail_ms": 250.0}
 SILENCE_PARAMS = {"min_silence_ms": 120.0, "margin_db": 8.0, "floor_percentile": 20.0}
+
+
+def _emit_event(event: dict) -> None:
+    """One machine event per stderr line; stdout stays pure JSON."""
+    print(f"QIE_EVENT {json.dumps(event)}", file=sys.stderr, flush=True)
+
+
+def _progress(phase: str, message: str) -> None:
+    _emit_event({"type": "progress", "phase": phase, "message": message})
 
 
 def _load_or_transcribe_transcript(source: Path, refresh: bool) -> Transcript:
@@ -42,6 +52,18 @@ def _load_or_transcribe_transcript(source: Path, refresh: bool) -> Transcript:
         print(f"      using cached transcript ({cache.name}); pass --refresh to redo.")
         return Transcript.from_dict(json.loads(cache.read_text()))
 
+    transcript = transcribe_transcript(source)
+    cache.write_text(json.dumps(transcript.to_dict(), indent=2))
+    return transcript
+
+
+def _load_or_transcribe_transcript_in(source: Path, work_dir: Path, refresh: bool) -> Transcript:
+    """Same as `_load_or_transcribe_transcript`, but cached in `work_dir` (never beside source)."""
+    from .whisperx_backend import transcribe_transcript
+
+    cache = work_dir / (source.name + ".transcript.json")
+    if cache.exists() and not refresh:
+        return Transcript.from_dict(json.loads(cache.read_text()))
     transcript = transcribe_transcript(source)
     cache.write_text(json.dumps(transcript.to_dict(), indent=2))
     return transcript
@@ -268,6 +290,56 @@ def _cmd_transcript(args) -> int:
     return 0
 
 
+def run_plan(source: Path, work_dir: Path, sample_rate: int, refresh: bool = False) -> dict:
+    """Analyze (no cut): transcript + canonical AIFF + samples + silences → edit-plan dict."""
+    work_dir.mkdir(parents=True, exist_ok=True)
+
+    _progress("transcribing", "Transcribing with WhisperX (first run downloads models)")
+    transcript = _load_or_transcribe_transcript_in(source, work_dir, refresh)
+
+    _progress("converting", "Converting audio")
+    aiff_path = work_dir / (source.stem + ".plan.aiff")
+    convert_to_aiff(source, aiff_path, sample_rate)
+    aiff_bytes = aiff_path.read_bytes()
+    sr = aiff_markers.read_sample_rate(aiff_bytes)
+    _, chunks = aiff_markers.parse_chunks(aiff_bytes)
+    channels = struct.unpack(">h", dict(chunks)[b"COMM"][0:2])[0]
+    mono, _ = read_aiff_mono(aiff_bytes)
+    total_samples = len(mono)
+
+    # WhisperX occasionally omits a word's end. Fill it with the engine's own
+    # fallback, clamped to the audio duration so a trailing word's assumed
+    # duration can't push end_sample past the end of the clip (which would poison
+    # later selection/export math). Done here, after conversion, so the clip
+    # duration is known.
+    duration_sec = total_samples / sr
+    by_id = {w.id: w for w in transcript.words}
+    filled = tuple(
+        w if w.end is not None
+        else RichWord(id=w.id, text=w.text, start=w.start,
+                      end=min(_word_end(w, by_id), duration_sec))
+        for w in transcript.words
+    )
+    transcript = Transcript(words=filled, segments=transcript.segments)
+
+    _progress("analyzing_silence", "Finding silence")
+    silences = detect_silences(mono, sr, **SILENCE_PARAMS)
+
+    _progress("writing_plan", "Preparing transcript")
+    return build_edit_plan(
+        source_path=source, sample_rate=sr, channels=channels,
+        total_samples=total_samples, params={**SNAP_PARAMS, **SILENCE_PARAMS},
+        transcript=transcript, silences=silences, segments=[],
+    )
+
+
+def _cmd_plan(args) -> int:
+    plan = run_plan(args.input, args.work_dir, args.sample_rate, args.refresh)
+    json.dump(plan, sys.stdout)
+    sys.stdout.flush()
+    return 0
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
         prog="logic-markers",
@@ -296,6 +368,13 @@ def main(argv=None) -> int:
     c.add_argument("input", type=Path, help="source audio (must match the transcript)")
     c.add_argument("edit", type=Path, help="the edited transcript .txt")
     c.set_defaults(func=_cmd_cut)
+
+    p = sub.add_parser("plan", help="analyze audio into an edit-plan (no cut); JSON to stdout")
+    p.add_argument("input", type=Path, help="source audio (wav/mp3/m4a/aiff)")
+    p.add_argument("--work-dir", type=Path, required=True, help="scratch dir for caches (NOT next to source)")
+    p.add_argument("--sample-rate", type=int, default=44100)
+    p.add_argument("--refresh", action="store_true", help="ignore cached transcript")
+    p.set_defaults(func=_cmd_plan)
 
     args = parser.parse_args(argv)
 

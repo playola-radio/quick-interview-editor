@@ -1,5 +1,7 @@
 import CustomDump
+import Dependencies
 import Foundation
+import IssueReporting
 import Testing
 
 @testable import QuickInterviewEditor
@@ -10,6 +12,26 @@ struct EngineClientTests {
       .url(forResource: "edit-plan", withExtension: "json")!
     let plan = try await EngineClient.liveValue.loadPlan(url)
     expectNoDifference(plan.words.count, 122)
+  }
+
+  @Test func testValueLoadPlanFailsCleanlyWithoutOverride() async {
+    await withKnownIssue {
+      _ = try await EngineClient.testValue.loadPlan(URL(fileURLWithPath: "/x"))
+    }
+  }
+
+  @Test func testValueTranscribeFailsCleanlyWithoutOverride() async {
+    await withKnownIssue {
+      for try await _ in EngineClient.testValue.transcribe(URL(fileURLWithPath: "/x")) {}
+    }
+  }
+
+  @Test func previewValueYieldsFixture() async throws {
+    var got: EditPlan?
+    for try await event in EngineClient.previewValue.transcribe(URL(fileURLWithPath: "/x")) {
+      if case .completed(let plan) = event { got = plan }
+    }
+    expectNoDifference(got?.words.count, 122)
   }
 }
 

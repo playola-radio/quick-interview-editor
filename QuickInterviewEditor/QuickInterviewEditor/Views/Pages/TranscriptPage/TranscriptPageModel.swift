@@ -18,6 +18,12 @@ class TranscriptPageModel: ViewModel {
     super.init()
   }
 
+  convenience init(editPlan: EditPlan) {
+    self.init(planURL: nil)
+    self.editPlan = editPlan
+    recomputeWords()
+  }
+
   // MARK: - Properties
   var editPlan: EditPlan?
   var words: IdentifiedArrayOf<WordViewState> = []

@@ -7,6 +7,12 @@ import Testing
 
 @MainActor
 struct TranscriptPageTests {
+  @Test func initWithEditPlanPopulatesWordsImmediately() {
+    let model = TranscriptPageModel(editPlan: Fixtures.editPlan())
+    expectNoDifference(model.words.count, 122)
+    #expect(model.words.first { $0.text == "want" }?.isRunTogether == true)
+  }
+
   @Test func viewAppearedLoadsWords() async {
     await withDependencies {
       $0.engine.loadPlan = { _ in Fixtures.editPlan() }

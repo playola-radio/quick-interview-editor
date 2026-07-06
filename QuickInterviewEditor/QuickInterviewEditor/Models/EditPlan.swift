@@ -39,10 +39,14 @@ struct EditPlan: Codable, Equatable {
     }
   }
 
-  // NOTE: engine emits SAMPLES here (not seconds). Decoded but unused in Step 1.
+  /// Engine emits SAMPLE indices here (start inclusive, end exclusive), not seconds.
   struct Silence: Codable, Equatable {
-    var start: Double
-    var end: Double
+    var startSample: Int
+    var endSample: Int
+    enum CodingKeys: String, CodingKey {
+      case startSample = "start"
+      case endSample = "end"
+    }
   }
 
   // Decoded but unused in Step 1. Only the fields Step 1 needs are modeled;
