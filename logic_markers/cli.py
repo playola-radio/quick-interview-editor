@@ -334,7 +334,21 @@ def run_plan(source: Path, work_dir: Path, sample_rate: int, refresh: bool = Fal
 
 
 def _cmd_plan(args) -> int:
-    plan = run_plan(args.input, args.work_dir, args.sample_rate, args.refresh)
+    # stdout is a pure-JSON channel the app decodes wholesale. WhisperX/pyannote
+    # emit `logging` INFO records to stdout during transcription, which would
+    # corrupt that JSON. Redirect fd 1 to stderr for the whole analysis (progress
+    # already flows over stderr as QIE_EVENT lines, and the app ignores any stderr
+    # line without that prefix), then restore the real stdout and write only the
+    # plan JSON to it. Operating at the fd level catches Python- and C-level writes.
+    sys.stdout.flush()
+    saved_stdout_fd = os.dup(1)
+    try:
+        os.dup2(2, 1)
+        plan = run_plan(args.input, args.work_dir, args.sample_rate, args.refresh)
+    finally:
+        sys.stdout.flush()
+        os.dup2(saved_stdout_fd, 1)
+        os.close(saved_stdout_fd)
     json.dump(plan, sys.stdout)
     sys.stdout.flush()
     return 0
