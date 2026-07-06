@@ -39,7 +39,9 @@ extension AudioPlayerClient {
   static func live() -> AudioPlayerClient {
     let box = LivePlayerBox()
     return AudioPlayerClient(
-      play: { url, range, _ in try box.play(url: url, range: range) },
+      play: { url, range, sampleRate in
+        try box.play(url: url, range: range, planSampleRate: sampleRate)
+      },
       stop: { box.stop() }
     )
   }
@@ -50,18 +52,23 @@ private final class LivePlayerBox: @unchecked Sendable {
   private let node = AVAudioPlayerNode()
   private let lock = NSLock()
 
-  func play(url: URL, range: Range<Int>) throws {
+  func play(url: URL, range: Range<Int>, planSampleRate: Int) throws {
     lock.lock()
     defer { lock.unlock() }
-    stopLocked()
     let file = try AVAudioFile(forReading: url)
-    let start = AVAudioFramePosition(max(0, range.lowerBound))
-    let frames = AVAudioFrameCount(max(0, range.upperBound - range.lowerBound))
-    guard frames > 0 else { return }
+    let nativeRate = file.processingFormat.sampleRate
+    let ratio = nativeRate / Double(max(1, planSampleRate))
+    let startFrame = AVAudioFramePosition((Double(max(0, range.lowerBound)) * ratio).rounded())
+    let endFrameRaw = AVAudioFramePosition((Double(max(0, range.upperBound)) * ratio).rounded())
+    let clampedStart = min(startFrame, file.length)
+    let clampedEnd = min(endFrameRaw, file.length)
+    let frameCount = AVAudioFrameCount(max(0, clampedEnd - clampedStart))
+    guard frameCount > 0 else { return }
+    stopLocked()
     if node.engine == nil { engine.attach(node) }
     engine.connect(node, to: engine.mainMixerNode, format: file.processingFormat)
     if !engine.isRunning { try engine.start() }
-    node.scheduleSegment(file, startingFrame: start, frameCount: frames, at: nil)
+    node.scheduleSegment(file, startingFrame: clampedStart, frameCount: frameCount, at: nil)
     node.play()
   }
 
