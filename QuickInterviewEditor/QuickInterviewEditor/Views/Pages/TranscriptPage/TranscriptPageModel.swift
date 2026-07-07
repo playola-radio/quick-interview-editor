@@ -98,6 +98,14 @@ class TranscriptPageModel: ViewModel {
     recomputeWords()
   }
 
+  /// Selects exactly one word (anchor == focus). Used by the waveform→transcript sync
+  /// when the user clicks a point in the audio.
+  func selectWord(_ id: Word.ID) {
+    selectionAnchorID = id
+    selectionFocusID = id
+    recomputeWords()
+  }
+
   func sensitivityChanged(_ ms: Double) {
     runTogetherMaxGapMs = ms
     recomputeWords()
