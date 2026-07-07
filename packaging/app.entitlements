@@ -7,7 +7,7 @@
   so it needs no sandbox/file-access entitlements to open the user's audio. It
   spawns the engine helper as a separate process (the helper carries its own
   entitlements), so nothing special is required here. Hardened runtime itself is
-  enabled by `codesign --options runtime`, not by a key.
+  enabled by codesign's runtime option, not by a key.
 
   Kept as an explicit (empty) file so the signing step is identical for app and
   helper and so future additions have an obvious home.
