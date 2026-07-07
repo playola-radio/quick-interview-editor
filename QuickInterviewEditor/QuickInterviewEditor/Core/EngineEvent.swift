@@ -21,6 +21,8 @@ enum EngineClientError: Error, Equatable, LocalizedError {
   case engineNotFound(String)
   case engineFailed(String)
   case decodeFailed(String)
+  case renderFailed(String)
+  case renderDecodeFailed(String)
 
   var errorDescription: String? {
     switch self {
@@ -28,6 +30,8 @@ enum EngineClientError: Error, Equatable, LocalizedError {
     case .engineNotFound(let path): return "Transcription engine not found at \(path)."
     case .engineFailed(let message): return "Transcription failed: \(message)"
     case .decodeFailed(let message): return "Could not read the transcription result: \(message)"
+    case .renderFailed(let message): return "Export failed: \(message)"
+    case .renderDecodeFailed(let message): return "Could not read the export result: \(message)"
     }
   }
 }

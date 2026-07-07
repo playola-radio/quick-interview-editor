@@ -66,11 +66,11 @@ enum LiveEngine {
   /// returns its URL so error messages can point the user at it. Returns nil if
   /// the write fails, so error messages never point at a path that isn't there.
   private static func writeJobLog(
-    audio: URL, exitCode: Int32, stdout: Data, stderr: String
+    kind: String, audio: URL, exitCode: Int32, stdout: Data, stderr: String
   ) -> URL? {
     guard let dir = logsDirectory else { return nil }
-    pruneOldLogs(in: dir, keepingLast: 20)
-    let file = dir.appendingPathComponent("transcribe-\(logTimestamp()).log")
+    pruneOldLogs(in: dir, prefix: "\(kind)-", keepingLast: 20)
+    let file = dir.appendingPathComponent("\(kind)-\(logTimestamp()).log")
     // `String(decoding:as:)` substitutes U+FFFD for any invalid byte rather than
     // yielding nil, so a stray non-UTF-8 byte can't blank the whole log body.
     // swiftlint:disable:next optional_data_string_conversion
@@ -92,11 +92,11 @@ enum LiveEngine {
   /// Keeps only the most recent `keepingLast` `transcribe-*.log` files. Logs hold
   /// transcribed speech, so they shouldn't accumulate on disk unbounded. The
   /// timestamped names sort chronologically, so lexical order is chronological.
-  private static func pruneOldLogs(in dir: URL, keepingLast: Int) {
+  private static func pruneOldLogs(in dir: URL, prefix: String, keepingLast: Int) {
     guard
       let names = try? FileManager.default.contentsOfDirectory(atPath: dir.path)
     else { return }
-    let logs = names.filter { $0.hasPrefix("transcribe-") && $0.hasSuffix(".log") }.sorted()
+    let logs = names.filter { $0.hasPrefix(prefix) && $0.hasSuffix(".log") }.sorted()
     guard logs.count > keepingLast else { return }
     for name in logs.dropLast(keepingLast) {
       try? FileManager.default.removeItem(at: dir.appendingPathComponent(name))
@@ -173,7 +173,8 @@ enum LiveEngine {
           // Persist a per-run log (command, exit, full stdout, stderr tail) so any
           // transcription is inspectable after the fact.
           let logURL = writeJobLog(
-            audio: audio, exitCode: code, stdout: out, stderr: proc.stderrTail())
+            kind: "transcribe", audio: audio, exitCode: code, stdout: out, stderr: proc.stderrTail()
+          )
 
           if Task.isCancelled {
             continuation.finish()
@@ -214,6 +215,195 @@ enum LiveEngine {
     var phase: String?
     var message: String?
   }
+
+  // MARK: render
+
+  // swiftlint:disable function_body_length
+  /// Renders the request's slices to app-owned temp AIFFs (one per slice id) by
+  /// driving `logic_markers.cli render`. Mirrors `transcribe` (streaming progress,
+  /// process-group cancel), with one difference: on **success** the work-dir is
+  /// left in place because the caller (EditorModel) copies the AIFFs to the user's
+  /// folder and deletes the work-dir afterward. On failure/cancel it's removed here.
+  static func render(_ request: RenderRequest) -> AsyncThrowingStream<RenderEvent, Error> {
+    AsyncThrowingStream { continuation in
+      let procBox = Mutex<SpawnedProcess?>(nil)
+
+      let task = Task {
+        var succeeded = false
+        do {
+          guard FileManager.default.isExecutableFile(atPath: pythonURL.path) else {
+            throw EngineClientError.engineNotFound(pythonURL.path)
+          }
+          let work = try makeWorkDir()
+          // Keep the rendered AIFFs on success (the caller copies + cleans up);
+          // remove the scratch dir on every failure/cancel path.
+          defer { if !succeeded { try? FileManager.default.removeItem(at: work) } }
+
+          let requestURL = work.appendingPathComponent("request.json")
+          try writeRequest(request, to: requestURL)
+
+          let proc = try SpawnedProcess(
+            executable: pythonURL,
+            arguments: [
+              "-m", "logic_markers.cli", "render", request.sourceURL.path,
+              "--request", requestURL.path, "--work-dir", work.path,
+              "--sample-rate", String(request.sampleRate),
+            ],
+            currentDirectory: repoRoot
+          )
+          procBox.withLock { $0 = proc }
+          if Task.isCancelled { proc.terminate() }
+
+          async let stdoutData = proc.readStdoutToEnd()
+          async let exitCode = proc.waitForExit()
+
+          for await line in proc.stderrLines() {
+            guard line.hasPrefix("QIE_EVENT ") else { continue }
+            let json = Data(line.dropFirst("QIE_EVENT ".count).utf8)
+            guard
+              let wire = try? JSONDecoder().decode(RenderWireEvent.self, from: json),
+              wire.type == "progress"
+            else { continue }
+            continuation.yield(
+              .progress(
+                RenderProgress(
+                  message: wire.message ?? "", index: wire.index ?? 0, total: wire.total ?? 0)))
+          }
+
+          let out = await stdoutData
+          let code = await exitCode
+          let logURL = writeJobLog(
+            kind: "render", audio: request.sourceURL, exitCode: code, stdout: out,
+            stderr: proc.stderrTail())
+
+          if Task.isCancelled {
+            continuation.finish()
+            return
+          }
+          guard code == 0 else {
+            throw EngineClientError.renderFailed(proc.stderrTail() + logHint(logURL))
+          }
+          let expectedIDs = Set(request.slices.map(\.id))
+          let slices = try decodeRenderResult(
+            out, workDir: work, expectedIDs: expectedIDs, logURL: logURL)
+          succeeded = true
+          continuation.yield(.completed(RenderResult(slices: slices, workDir: work)))
+          continuation.finish()
+        } catch is CancellationError {
+          continuation.finish()
+        } catch {
+          continuation.finish(throwing: error)
+        }
+      }
+
+      continuation.onTermination = { _ in
+        task.cancel()
+        procBox.withLock { $0 }?.terminate()
+      }
+    }
+  }
+  // swiftlint:enable function_body_length
+
+  private static func writeRequest(_ request: RenderRequest, to url: URL) throws {
+    let wire = RenderWireRequest(
+      sampleRate: request.sampleRate,
+      markers: request.markers.map {
+        RenderWireRequest.Marker(position: $0.position, name: $0.name)
+      },
+      slices: request.slices.map {
+        RenderWireRequest.Slice(
+          id: $0.id.uuidString, startSample: $0.startSample, endSample: $0.endSample)
+      }
+    )
+    try JSONEncoder().encode(wire).write(to: url)
+  }
+
+  /// Decodes the engine's result into `RenderedSlice`s. The engine's `path` field is
+  /// **ignored** — each output URL is derived from our own `workDir` and the returned
+  /// id (validated as a UUID), so a malformed/hostile result can never point the copy
+  /// at a file outside the scratch dir. The derived file must exist on disk.
+  private static func decodeRenderResult(
+    _ out: Data, workDir: URL, expectedIDs: Set<UUID>, logURL: URL?
+  ) throws -> [RenderedSlice] {
+    do {
+      let wire = try JSONDecoder().decode(RenderWireResult.self, from: out)
+      let rendered = try wire.slices.map { slice -> RenderedSlice in
+        guard let id = UUID(uuidString: slice.id) else {
+          throw EngineClientError.renderDecodeFailed(
+            "engine returned an unrecognized slice id: \(slice.id)")
+        }
+        let url = workDir.appendingPathComponent("\(id.uuidString).aiff")
+        guard FileManager.default.fileExists(atPath: url.path) else {
+          throw EngineClientError.renderDecodeFailed(
+            "engine did not produce the expected file for slice \(id.uuidString)")
+        }
+        return RenderedSlice(id: id, url: url)
+      }
+      // A clean exit that omits (or duplicates/adds) a slice must not pass as
+      // success — the result has to cover exactly the requested set.
+      let renderedIDs = Set(rendered.map(\.id))
+      guard renderedIDs == expectedIDs, rendered.count == expectedIDs.count else {
+        let missing = expectedIDs.subtracting(renderedIDs).map(\.uuidString).sorted()
+        throw EngineClientError.renderDecodeFailed(
+          "engine returned an incomplete render result; missing [\(missing.joined(separator: ", "))]"
+            + logHint(logURL))
+      }
+      return rendered
+    } catch let error as EngineClientError {
+      throw error
+    } catch {
+      // swiftlint:disable:next optional_data_string_conversion
+      let preview = String(decoding: out.prefix(500), as: UTF8.self)
+      throw EngineClientError.renderDecodeFailed(
+        "\(error)\n\nEngine output was not valid JSON. It began with:\n\(preview)" + logHint(logURL)
+      )
+    }
+  }
+
+}
+
+// MARK: - Render wire types
+
+/// Snake-cased JSON shapes exchanged with `logic_markers.cli render` — the request
+/// file Swift writes and the result/progress it reads back.
+private struct RenderWireRequest: Encodable {
+  var sampleRate: Int
+  var markers: [Marker]
+  var slices: [Slice]
+  enum CodingKeys: String, CodingKey {
+    case sampleRate = "sample_rate"
+    case markers, slices
+  }
+  struct Marker: Encodable {
+    var position: Int
+    var name: String
+  }
+  struct Slice: Encodable {
+    var id: String
+    var startSample: Int
+    var endSample: Int
+    enum CodingKeys: String, CodingKey {
+      case id
+      case startSample = "start_sample"
+      case endSample = "end_sample"
+    }
+  }
+}
+
+private struct RenderWireResult: Decodable {
+  struct Slice: Decodable {
+    var id: String
+    var path: String
+  }
+  var slices: [Slice]
+}
+
+private struct RenderWireEvent: Decodable {
+  var type: String
+  var phase: String?
+  var message: String?
+  var index: Int?
+  var total: Int?
 }
 
 // MARK: - SpawnedProcess

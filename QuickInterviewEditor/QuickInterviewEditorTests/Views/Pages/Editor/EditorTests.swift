@@ -340,4 +340,354 @@ struct EditorTests {
     for id in ids { await model.deleteSlice(id) }
     expectNoDifference(model.slices.map(\.id), [middleID])
   }
+
+  // MARK: - Export
+
+  private func addSlices(_ model: EditorModel, _ pairs: [(Int, Int)]) {
+    for pair in pairs {
+      model.transcript.wordTapped(model.transcript.words[pair.0].id)
+      model.transcript.wordTapped(model.transcript.words[pair.1].id)
+      model.addSliceTapped()
+    }
+  }
+
+  /// Yields cooperatively until `condition` holds (or a generous bound), so a
+  /// worker task on the shared main actor can advance without `Task.sleep`.
+  private func settle(until condition: () -> Bool) async {
+    for _ in 0..<1000 where !condition() { await Task.yield() }
+  }
+
+  private func makeTempDir() throws -> URL {
+    let dir = FileManager.default.temporaryDirectory
+      .appendingPathComponent("qie-export-test-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    return dir
+  }
+
+  private func writeTempAIFF(in dir: URL, named name: String) throws -> URL {
+    let url = dir.appendingPathComponent(name)
+    try Data("aiff".utf8).write(to: url)
+    return url
+  }
+
+  /// A stream that reports rendering `ids` and completes with a temp AIFF per id.
+  private func renderedSlices(
+    for ids: [Slice.ID], workDir: URL
+  ) throws -> [RenderedSlice] {
+    try ids.map { id in
+      RenderedSlice(id: id, url: try writeTempAIFF(in: workDir, named: "\(id.uuidString).aiff"))
+    }
+  }
+
+  @Test func exportAllCopiesRevealsAndRemembersDestination() async throws {
+    let model = editor()
+    addSlices(model, [(0, 1), (2, 3)])
+    let ids = model.slices.map(\.id)
+    let workDir = try makeTempDir()
+    let destination = try makeTempDir()
+    defer { try? FileManager.default.removeItem(at: destination) }
+    let rendered = try renderedSlices(for: ids, workDir: workDir)
+    let revealed = LockIsolated<[URL]>([])
+    let capturedRequest = LockIsolated<RenderRequest?>(nil)
+
+    await withDependencies {
+      $0.engine.renderSlices = { request in
+        capturedRequest.setValue(request)
+        return AsyncThrowingStream { continuation in
+          continuation.yield(.progress(RenderProgress(message: "", index: 1, total: ids.count)))
+          continuation.yield(.completed(RenderResult(slices: rendered, workDir: workDir)))
+          continuation.finish()
+        }
+      }
+      $0.workspace.reveal = { revealed.setValue($0) }
+    } operation: {
+      model.destinationURL = destination
+      model.exportAllTapped()
+      await model.exportTask?.value
+    }
+
+    expectNoDifference(model.exportPhase, .done(count: 2))
+    expectNoDifference(Set(capturedRequest.value?.slices.map(\.id) ?? []), Set(ids))
+    let contents = try FileManager.default.contentsOfDirectory(atPath: destination.path).sorted()
+    expectNoDifference(contents.count, 2)
+    expectNoDifference(revealed.value.count, 2)
+    expectNoDifference(
+      Set(revealed.value.map { $0.deletingLastPathComponent().path }), [destination.path])
+    // The engine work-dir is removed after the copy.
+    #expect(!FileManager.default.fileExists(atPath: workDir.path))
+  }
+
+  @Test func exportAllMapsResultsByIdNotOrder() async throws {
+    let model = editor()
+    addSlices(model, [(0, 1), (2, 3)])
+    let ids = model.slices.map(\.id)
+    let stem = model.sourceURL.deletingPathExtension().lastPathComponent
+    let workDir = try makeTempDir()
+    let destination = try makeTempDir()
+    defer { try? FileManager.default.removeItem(at: destination) }
+    // Render results returned in REVERSE order; copy must still match slice → name by id.
+    let rendered = try renderedSlices(for: ids, workDir: workDir).reversed()
+
+    await withDependencies {
+      $0.engine.renderSlices = { _ in
+        AsyncThrowingStream { continuation in
+          continuation.yield(.completed(RenderResult(slices: Array(rendered), workDir: workDir)))
+          continuation.finish()
+        }
+      }
+      $0.workspace.reveal = { _ in }
+    } operation: {
+      model.destinationURL = destination
+      model.exportAllTapped()
+      await model.exportTask?.value
+    }
+
+    let contents = Set(try FileManager.default.contentsOfDirectory(atPath: destination.path))
+    expectNoDifference(contents, ["\(stem) - Slice 1.aiff", "\(stem) - Slice 2.aiff"])
+  }
+
+  @Test func missingDestinationPromptsChooseDirectory() async throws {
+    let model = editor()
+    addSlices(model, [(0, 1)])
+    let ids = model.slices.map(\.id)
+    let workDir = try makeTempDir()
+    let destination = try makeTempDir()
+    defer { try? FileManager.default.removeItem(at: destination) }
+    let rendered = try renderedSlices(for: ids, workDir: workDir)
+    let promptCount = LockIsolated(0)
+
+    await withDependencies {
+      $0.workspace.chooseDirectory = {
+        promptCount.withValue { $0 += 1 }
+        return destination
+      }
+      $0.workspace.reveal = { _ in }
+      $0.engine.renderSlices = { _ in
+        AsyncThrowingStream { continuation in
+          continuation.yield(.completed(RenderResult(slices: rendered, workDir: workDir)))
+          continuation.finish()
+        }
+      }
+    } operation: {
+      model.exportAllTapped()
+      await model.exportTask?.value
+    }
+
+    expectNoDifference(promptCount.value, 1)
+    expectNoDifference(model.destinationURL, destination)
+    expectNoDifference(model.exportPhase, .done(count: 1))
+  }
+
+  @Test func cancellingDestinationPromptLeavesIdle() async {
+    let model = editor()
+    addSlices(model, [(0, 1)])
+    let revealed = LockIsolated(false)
+
+    await withDependencies {
+      $0.workspace.chooseDirectory = { nil }  // user cancelled the panel
+      $0.workspace.reveal = { _ in revealed.setValue(true) }
+    } operation: {
+      model.exportAllTapped()
+      await model.exportTask?.value
+    }
+
+    expectNoDifference(model.exportPhase, .idle)
+    #expect(!revealed.value)
+    #expect(model.destinationURL == nil)
+  }
+
+  @Test func throwingRenderStreamSetsFailed() async throws {
+    let model = editor()
+    addSlices(model, [(0, 1)])
+    let destination = try makeTempDir()
+    defer { try? FileManager.default.removeItem(at: destination) }
+
+    await withDependencies {
+      $0.engine.renderSlices = { _ in
+        AsyncThrowingStream { continuation in
+          continuation.finish(throwing: EngineClientError.renderFailed("boom"))
+        }
+      }
+    } operation: {
+      model.destinationURL = destination
+      model.exportAllTapped()
+      await model.exportTask?.value
+    }
+
+    guard case .failed(let message) = model.exportPhase else {
+      Issue.record("expected .failed, got \(model.exportPhase)")
+      return
+    }
+    #expect(message.contains("boom"))
+  }
+
+  @Test func partialRenderResultIsReportedAsFailureNotSuccess() async throws {
+    let model = editor()
+    addSlices(model, [(0, 1), (2, 3)])
+    let ids = model.slices.map(\.id)
+    let workDir = try makeTempDir()
+    let destination = try makeTempDir()
+    defer { try? FileManager.default.removeItem(at: destination) }
+    // Engine returns only the FIRST of two requested slices.
+    let rendered = Array(try renderedSlices(for: ids, workDir: workDir).prefix(1))
+    let revealed = LockIsolated(false)
+
+    await withDependencies {
+      $0.engine.renderSlices = { _ in
+        AsyncThrowingStream { continuation in
+          continuation.yield(.completed(RenderResult(slices: rendered, workDir: workDir)))
+          continuation.finish()
+        }
+      }
+      $0.workspace.reveal = { _ in revealed.setValue(true) }
+    } operation: {
+      model.destinationURL = destination
+      model.exportAllTapped()
+      await model.exportTask?.value
+    }
+
+    guard case .failed(let message) = model.exportPhase else {
+      Issue.record("expected .failed, got \(model.exportPhase)")
+      return
+    }
+    #expect(message.contains("1 of 2"))
+    #expect(!revealed.value)  // no partial reveal
+    #expect(!FileManager.default.fileExists(atPath: workDir.path))  // still cleaned up
+  }
+
+  @Test func progressEventsWalkExportingThenDone() async throws {
+    let model = editor()
+    addSlices(model, [(0, 1), (2, 3)])
+    let ids = model.slices.map(\.id)
+    let workDir = try makeTempDir()
+    let destination = try makeTempDir()
+    defer { try? FileManager.default.removeItem(at: destination) }
+    let rendered = try renderedSlices(for: ids, workDir: workDir)
+    let (stream, continuation) = AsyncThrowingStream<RenderEvent, Error>.makeStream()
+
+    await withDependencies {
+      $0.engine.renderSlices = { _ in stream }
+      $0.workspace.reveal = { _ in }
+    } operation: {
+      model.destinationURL = destination
+      model.exportAllTapped()
+
+      continuation.yield(.progress(RenderProgress(message: "", index: 1, total: 2)))
+      await settle { model.exportPhase == .exporting(current: 1, total: 2) }
+      expectNoDifference(model.exportPhase, .exporting(current: 1, total: 2))
+
+      continuation.yield(.progress(RenderProgress(message: "", index: 2, total: 2)))
+      await settle { model.exportPhase == .exporting(current: 2, total: 2) }
+      expectNoDifference(model.exportPhase, .exporting(current: 2, total: 2))
+
+      continuation.yield(.completed(RenderResult(slices: rendered, workDir: workDir)))
+      continuation.finish()
+      await model.exportTask?.value
+      expectNoDifference(model.exportPhase, .done(count: 2))
+    }
+  }
+
+  @Test func cancelExportReportsPartialAndCleansTemp() async throws {
+    let model = editor()
+    addSlices(model, [(0, 1), (2, 3)])
+    let destination = try makeTempDir()
+    defer { try? FileManager.default.removeItem(at: destination) }
+    let (stream, continuation) = AsyncThrowingStream<RenderEvent, Error>.makeStream()
+    let terminated = LockIsolated(false)
+    continuation.onTermination = { _ in terminated.setValue(true) }
+
+    await withDependencies {
+      $0.engine.renderSlices = { _ in stream }
+      $0.workspace.reveal = { _ in }
+    } operation: {
+      model.destinationURL = destination
+      model.exportAllTapped()  // sync fire; stores the cancellable task
+      continuation.yield(.progress(RenderProgress(message: "", index: 1, total: 2)))
+      await Task.yield()
+      #expect(model.isExporting)
+      model.cancelExportTapped()
+      await model.exportTask?.value
+    }
+
+    #expect(terminated.value)
+    guard case .failed(let message) = model.exportPhase else {
+      Issue.record("expected .failed, got \(model.exportPhase)")
+      return
+    }
+    #expect(message.contains("cancelled"))
+    // Nothing was copied to the destination.
+    let contents = try FileManager.default.contentsOfDirectory(atPath: destination.path)
+    expectNoDifference(contents, [])
+  }
+
+  @Test func tightJoinWarningCarriedIntoSummary() async throws {
+    let model = editor()
+    let tight = Slice(
+      id: UUID(), name: "Intro", startSample: 10, endSample: 200,
+      wordIDs: [], snippet: "x", warnings: [.tightStart])
+    model.slices.append(tight)
+    let workDir = try makeTempDir()
+    let destination = try makeTempDir()
+    defer { try? FileManager.default.removeItem(at: destination) }
+    let rendered = try renderedSlices(for: [tight.id], workDir: workDir)
+
+    await withDependencies {
+      $0.engine.renderSlices = { _ in
+        AsyncThrowingStream { continuation in
+          continuation.yield(.completed(RenderResult(slices: rendered, workDir: workDir)))
+          continuation.finish()
+        }
+      }
+      $0.workspace.reveal = { _ in }
+    } operation: {
+      model.destinationURL = destination
+      model.exportAllTapped()
+      await model.exportTask?.value
+    }
+
+    #expect(model.exportTightWarning.contains("Intro"))
+    #expect(model.exportTightWarning.contains("tight"))
+  }
+
+  @Test func renderRequestNudgesCollidingMarkerPositions() async {
+    let plan = EditPlan(
+      schemaVersion: 1,
+      source: .init(path: "/clip.m4a", sampleRate: 44100, channels: 1, durationSamples: 100_000),
+      words: [
+        .init(id: 1, text: "a", start: 0.1, end: 0.2, startSample: 4410, endSample: 8820),
+        .init(id: 2, text: "b", start: 0.1, end: 0.2, startSample: 4410, endSample: 8820),
+      ],
+      silences: [], segments: [])
+    let model = editor(plan)
+    model.slices.append(
+      Slice(
+        id: UUID(), name: "A", startSample: 0, endSample: 8820, wordIDs: [1, 2], snippet: "x",
+        warnings: []))
+    let captured = LockIsolated<RenderRequest?>(nil)
+
+    await withDependencies {
+      $0.engine.renderSlices = { request in
+        captured.setValue(request)
+        return AsyncThrowingStream { $0.finish() }
+      }
+    } operation: {
+      model.destinationURL = URL(fileURLWithPath: NSTemporaryDirectory())
+      model.exportAllTapped()
+      await model.exportTask?.value
+    }
+
+    // Colliding start samples become strictly increasing marker positions.
+    expectNoDifference(captured.value?.markers.map(\.position), [4410, 4411])
+  }
+
+  @Test func exportControlsGatedByStateAndExporting() async {
+    let model = editor()
+    expectNoDifference(model.canExportAll, false)  // no slices yet
+    addSlices(model, [(0, 1)])
+    expectNoDifference(model.canExportAll, true)
+    model.exportPhase = .exporting(current: 0, total: 1)
+    expectNoDifference(model.canExportAll, false)
+    expectNoDifference(model.canExportSlice, false)
+    expectNoDifference(model.showsCancelExport, true)
+  }
 }

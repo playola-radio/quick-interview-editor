@@ -12,6 +12,7 @@ import os
 import struct
 import sys
 import tempfile
+import uuid
 from pathlib import Path
 
 from . import aiff_markers
@@ -333,6 +334,99 @@ def run_plan(source: Path, work_dir: Path, sample_rate: int, refresh: bool = Fal
     )
 
 
+def run_render(source: Path, request_path: Path, work_dir: Path, sample_rate: int) -> dict:
+    """Stateless render: convert the source once, then slice per request.
+
+    The request (written by the app) carries canonical-rate word markers with
+    ABSOLUTE sample positions and the slices to cut ({id, start_sample, end_sample}).
+    Markers are taken as-is — the engine never rebuilds them from seconds, so no
+    rounding drift is reintroduced. Each slice becomes `<work-dir>/<id>.aiff`; the
+    returned dict is keyed by slice id (not request order). Writes only into
+    `work_dir`.
+    """
+    work_dir.mkdir(parents=True, exist_ok=True)
+    request = json.loads(request_path.read_text())
+    req_rate = int(request.get("sample_rate", sample_rate))
+
+    # Incoming ids are ignored (slice_aiff renumbers per slice); positions are
+    # authoritative and preserved.
+    markers = [
+        aiff_markers.Marker(id=i + 1, position=int(m["position"]), name=str(m["name"]))
+        for i, m in enumerate(request.get("markers", []))
+    ]
+    slices = request.get("slices", [])
+    total = len(slices)
+
+    _emit_event({"type": "progress", "phase": "rendering", "message": "Converting audio",
+                 "index": 0, "total": total})
+    aiff_path = work_dir / "render.aiff"
+    convert_to_aiff(source, aiff_path, req_rate)
+    aiff_bytes = aiff_path.read_bytes()
+    # Slices are cut from the in-memory bytes; free the (possibly several-hundred-MB)
+    # converted AIFF now so it doesn't sit alongside the per-slice outputs.
+    aiff_path.unlink(missing_ok=True)
+    frame_count = aiff_markers.read_frame_count(aiff_bytes)
+
+    out_slices = []
+    for i, spec in enumerate(slices):
+        _emit_event({"type": "progress", "phase": "rendering",
+                     "message": f"Rendering slice {i + 1} of {total}",
+                     "index": i + 1, "total": total})
+        # The id becomes a filename in work_dir, so it must be a plain UUID — never a
+        # path fragment. Reject anything else so a malformed request can't write
+        # outside the work-dir (defense in depth; the app only ever sends UUIDs).
+        slice_id = str(spec["id"])
+        try:
+            uuid.UUID(slice_id)
+        except ValueError as exc:
+            raise ValueError(f"invalid slice id (expected a UUID): {slice_id!r}") from exc
+        start = int(spec["start_sample"])
+        end = int(spec["end_sample"])
+        # slice_aiff clamps out-of-range bounds, which would silently export a
+        # shorter/empty AIFF while the result still reports the requested range.
+        # Reject instead so a bad range fails explicitly.
+        if start < 0 or end < start or end > frame_count:
+            raise ValueError(
+                f"slice {slice_id} range [{start}, {end}) is outside the render audio "
+                f"({frame_count} frames)"
+            )
+        out_path = work_dir / f"{slice_id}.aiff"
+        out_path.write_bytes(slice_aiff(aiff_bytes, start, end, markers))
+        out_slices.append({"id": spec["id"], "path": str(out_path),
+                           "start_sample": start, "end_sample": end})
+
+    return {"slices": out_slices}
+
+
+def _redirect_stdout_during(func):
+    """Run `func`, keeping stdout a pure-JSON channel (see `_cmd_plan`'s note).
+
+    afconvert output is captured elsewhere, but redirecting fd 1 → 2 for the whole
+    render is cheap insurance against any library writing to stdout, and mirrors the
+    proven `plan` path exactly."""
+    sys.stdout.flush()
+    saved_stdout_fd = os.dup(1)
+    try:
+        os.dup2(2, 1)
+        return func()
+    finally:
+        sys.stdout.flush()
+        os.dup2(saved_stdout_fd, 1)
+        os.close(saved_stdout_fd)
+
+
+def _cmd_render(args) -> int:
+    if not args.request.exists():
+        print(f"error: no such request file: {args.request}", file=sys.stderr)
+        return 2
+    result = _redirect_stdout_during(
+        lambda: run_render(args.input, args.request, args.work_dir, args.sample_rate)
+    )
+    json.dump(result, sys.stdout)
+    sys.stdout.flush()
+    return 0
+
+
 def _cmd_plan(args) -> int:
     # stdout is a pure-JSON channel the app decodes wholesale. WhisperX/pyannote
     # emit `logging` INFO records to stdout during transcription, which would
@@ -389,6 +483,13 @@ def main(argv=None) -> int:
     p.add_argument("--sample-rate", type=int, default=44100)
     p.add_argument("--refresh", action="store_true", help="ignore cached transcript")
     p.set_defaults(func=_cmd_plan)
+
+    r = sub.add_parser("render", help="render slices to AIFFs from a request file; JSON to stdout")
+    r.add_argument("input", type=Path, help="source audio (wav/mp3/m4a/aiff)")
+    r.add_argument("--request", type=Path, required=True, help="request.json (markers + slices)")
+    r.add_argument("--work-dir", type=Path, required=True, help="scratch dir for AIFFs (NOT next to source)")
+    r.add_argument("--sample-rate", type=int, default=44100, help="fallback canonical rate")
+    r.set_defaults(func=_cmd_render)
 
     args = parser.parse_args(argv)
 

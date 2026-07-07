@@ -33,6 +33,25 @@ struct EngineClientTests {
     }
     expectNoDifference(got?.words.count, 122)
   }
+
+  @Test func testValueRenderSlicesFailsCleanlyWithoutOverride() async {
+    await withKnownIssue {
+      for try await _ in EngineClient.testValue.renderSlices(Self.sampleRequest) {}
+    }
+  }
+
+  @Test func previewValueRenderSlicesFinishesWithoutEmitting() async throws {
+    var events = 0
+    for try await _ in EngineClient.previewValue.renderSlices(Self.sampleRequest) { events += 1 }
+    expectNoDifference(events, 0)
+  }
+
+  private static let sampleRequest = RenderRequest(
+    sourceURL: URL(fileURLWithPath: "/clip.m4a"),
+    sampleRate: 44100,
+    markers: [RenderMarker(position: 0, name: "So")],
+    slices: [RenderSliceSpec(id: UUID(), startSample: 0, endSample: 100)]
+  )
 }
 
 private final class EngineClientBundleToken {}
