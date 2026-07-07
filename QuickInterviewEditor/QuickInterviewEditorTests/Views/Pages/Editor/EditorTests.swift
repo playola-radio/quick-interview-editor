@@ -70,6 +70,49 @@ struct EditorTests {
     #expect(!slice.snippet.isEmpty)
   }
 
+  // MARK: - Snippet middle-truncation
+
+  @Test func shortSnippetPassesThroughUnchanged() {
+    expectNoDifference(
+      middleTruncatedSnippet("So a young Hayes Carl", maxLength: 68),
+      "So a young Hayes Carl")
+  }
+
+  @Test func longSnippetKeepsFirstAndLastWordsWithMiddleEllipsis() {
+    let text = "So a young Hayes Carl goes to a Ray Wiley Hubbard concert and it was great"
+    let out = middleTruncatedSnippet(text, maxLength: 40)
+    #expect(out.hasPrefix("So "))
+    #expect(out.hasSuffix(" great"))
+    #expect(out.contains("…"))
+    #expect(out.count <= 40)
+  }
+
+  @Test func fewerThanThreeWordsPassThrough() {
+    let longTwoWords = String(repeating: "a", count: 40) + " " + String(repeating: "b", count: 40)
+    expectNoDifference(middleTruncatedSnippet(longTwoWords, maxLength: 20), longTwoWords)
+  }
+
+  @Test func oversizedFirstOrLastWordStillRespectsMaxLength() {
+    // A single run-on word (or long URL) as the first/last word must not let the
+    // result exceed maxLength — the minimal first…last window itself overflows.
+    let text = String(repeating: "x", count: 80) + " b " + String(repeating: "y", count: 80)
+    let out = middleTruncatedSnippet(text, maxLength: 20)
+    #expect(out.count <= 20)
+    #expect(out.hasSuffix("…"))
+  }
+
+  @Test func sliceSnippetShowsFirstAndLastWordsOfSelection() {
+    let model = editor()
+    let words = model.transcript.words
+    model.transcript.wordTapped(words[0].id)  // "So"
+    model.transcript.wordTapped(words[words.count - 1].id)  // last word: "Carl"
+    model.addSliceTapped()
+    let snippet = model.slices[0].snippet
+    #expect(snippet.hasPrefix("“So"))
+    #expect(snippet.hasSuffix("Carl”"))
+    #expect(snippet.contains("…"))
+  }
+
   @Test func addSliceRejectedWithoutSelection() {
     let model = editor()
     #expect(!model.canAddSlice)

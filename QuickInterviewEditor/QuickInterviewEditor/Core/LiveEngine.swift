@@ -49,6 +49,71 @@ enum LiveEngine {
     return base
   }
 
+  // MARK: Logging
+
+  /// Where per-run engine logs land (Application Support/…/Logs), for QA/inspection.
+  static var logsDirectory: URL? {
+    guard
+      let base = try? FileManager.default.url(
+        for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+    else { return nil }
+    let dir = base.appendingPathComponent("Quick Interview Editor/Logs")
+    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    return dir
+  }
+
+  /// Writes a per-run log (command, exit code, full stdout, stderr tail) and
+  /// returns its URL so error messages can point the user at it. Returns nil if
+  /// the write fails, so error messages never point at a path that isn't there.
+  private static func writeJobLog(
+    audio: URL, exitCode: Int32, stdout: Data, stderr: String
+  ) -> URL? {
+    guard let dir = logsDirectory else { return nil }
+    pruneOldLogs(in: dir, keepingLast: 20)
+    let file = dir.appendingPathComponent("transcribe-\(logTimestamp()).log")
+    // `String(decoding:as:)` substitutes U+FFFD for any invalid byte rather than
+    // yielding nil, so a stray non-UTF-8 byte can't blank the whole log body.
+    // swiftlint:disable:next optional_data_string_conversion
+    let stdoutText = String(decoding: stdout, as: UTF8.self)
+    let body = """
+      audio: \(audio.path)
+      exit: \(exitCode)
+
+      ===== STDOUT (\(stdout.count) bytes) =====
+      \(stdoutText)
+
+      ===== STDERR (tail) =====
+      \(stderr)
+      """
+    guard (try? body.write(to: file, atomically: true, encoding: .utf8)) != nil else { return nil }
+    return file
+  }
+
+  /// Keeps only the most recent `keepingLast` `transcribe-*.log` files. Logs hold
+  /// transcribed speech, so they shouldn't accumulate on disk unbounded. The
+  /// timestamped names sort chronologically, so lexical order is chronological.
+  private static func pruneOldLogs(in dir: URL, keepingLast: Int) {
+    guard
+      let names = try? FileManager.default.contentsOfDirectory(atPath: dir.path)
+    else { return }
+    let logs = names.filter { $0.hasPrefix("transcribe-") && $0.hasSuffix(".log") }.sorted()
+    guard logs.count > keepingLast else { return }
+    for name in logs.dropLast(keepingLast) {
+      try? FileManager.default.removeItem(at: dir.appendingPathComponent(name))
+    }
+  }
+
+  private static func logHint(_ url: URL?) -> String {
+    guard let url else { return "" }
+    return "\n\nFull engine log: \(url.path)"
+  }
+
+  private static func logTimestamp() -> String {
+    let formatter = DateFormatter()
+    formatter.dateFormat = "yyyy-MM-dd_HH-mm-ss"
+    return formatter.string(from: Date())
+  }
+
   // MARK: transcribe
 
   // swiftlint:disable:next function_body_length
@@ -105,19 +170,30 @@ enum LiveEngine {
           let out = await stdoutData
           let code = await exitCode
 
+          // Persist a per-run log (command, exit, full stdout, stderr tail) so any
+          // transcription is inspectable after the fact.
+          let logURL = writeJobLog(
+            audio: audio, exitCode: code, stdout: out, stderr: proc.stderrTail())
+
           if Task.isCancelled {
             continuation.finish()
             return
           }
           guard code == 0 else {
-            throw EngineClientError.engineFailed(proc.stderrTail())
+            throw EngineClientError.engineFailed(proc.stderrTail() + logHint(logURL))
           }
           do {
             let plan = try JSONDecoder().decode(EditPlan.self, from: out)
             continuation.yield(.completed(plan))
             continuation.finish()
           } catch {
-            throw EngineClientError.decodeFailed(String(describing: error))
+            // Include a preview of what the engine actually emitted — a decode
+            // failure almost always means non-JSON leaked onto stdout.
+            // swiftlint:disable:next optional_data_string_conversion
+            let preview = String(decoding: out.prefix(500), as: UTF8.self)
+            throw EngineClientError.decodeFailed(
+              "\(error)\n\nEngine output was not valid JSON. It began with:\n\(preview)"
+                + logHint(logURL))
           }
         } catch is CancellationError {
           continuation.finish()
