@@ -27,14 +27,25 @@ enum LiveEngine {
       filePathRepoRoot: filePathRepoRoot,
       isExecutable: { FileManager.default.isExecutableFile(atPath: $0.path) }
     )
-    // Only force offline model dirs when a *verified* install exists (sentinel +
-    // correct file sizes). Otherwise leave the env empty rather than pointing the
-    // engine at missing dirs with QIE_OFFLINE=1, which would hard-fail validation
-    // before the first-launch download has run.
-    if launch.isBundled, let installation = LiveModelDownloader.installedLocation(.current) {
+    // The packaged app must ALWAYS run the engine offline against the managed,
+    // checksummed model download — never fall open to the engine's ad-hoc online
+    // fetch. So bundled launches always get `QIE_OFFLINE=1` + the model dirs. If
+    // the models aren't installed yet, the engine fails fast with a clear message
+    // (validate()); the first-launch model-setup gate installs them before any
+    // transcription reaches this path. Dev (not bundled) keeps its download-on-
+    // demand behavior with no env injected.
+    if launch.isBundled, let installation = try? ModelLocations.installation() {
       launch.environment = installation.engineEnvironment
     }
     return launch
+  }
+
+  /// True when the frozen engine is bundled in the app (the packaged build). The
+  /// launch flow uses this to gate first-launch model setup: the packaged app
+  /// manages its own model download; dev downloads on demand, so it skips the gate.
+  static var isPackaged: Bool {
+    guard let helper = bundledHelperURL else { return false }
+    return FileManager.default.isExecutableFile(atPath: helper.path)
   }
 
   /// The packaged helper's expected location inside the app bundle, or `nil` when

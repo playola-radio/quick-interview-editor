@@ -42,6 +42,12 @@ enum LiveModelDownloader {
           let total = manifest.totalByteCount
           var completed: Int64 = 0
 
+          // Clear any prior completion sentinel up front: while we're (re)downloading
+          // or repairing, the install must read as incomplete, so a crash mid-repair
+          // can't leave a sentinel next to a missing/half-written file.
+          try? FileManager.default.removeItem(
+            at: root.appendingPathComponent(".complete-v\(manifest.version)"))
+
           for file in manifest.files {
             try Task.checkCancellation()
             let dest = root.appendingPathComponent(file.relativePath)

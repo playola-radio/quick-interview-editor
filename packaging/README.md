@@ -93,6 +93,24 @@ notarization (roadmap decision 6):
 - `Systran/faster-whisper-large-v2` (CTranslate2, MIT) — pinned HF revision.
 - torchaudio `WAV2VEC2_ASR_BASE_960H` English align model (MIT).
 
+## Gotchas
+
+- **Running the in-app engine invalidates the app signature.** `verify-offline.sh`
+  defaults to the standalone `dist/logic-markers-engine/` binary. If you point it
+  at the engine *inside* a signed `.app`, first import may write bytecode/caches
+  into the sealed bundle and `codesign --verify` will then report "code or
+  signature have been modified". Verify against the standalone engine, and always
+  sign (and notarize) **after** any in-place run.
+- **Offline is English-only for the spike.** The manifest ships only the English
+  torchaudio align model, and the engine passes `model_cache_only=offline`, so a
+  non-English detected language fails clearly offline rather than downloading an
+  undeclared model. Shipping more languages = adding align files to the manifest.
+- **The installed-check is size-only for speed.** `installedLocation` trusts the
+  per-version `.complete` sentinel + file sizes rather than re-hashing gigabytes
+  on every launch; SHA-256 is verified at download time before the sentinel is
+  written. Change a file's bytes without a `ModelManifest.version` bump and it can
+  read as installed — so bump the version whenever a checksum changes.
+
 ## Known gaps (spike)
 
 - **Notarization** can't be executed wherever notarytool credentials aren't

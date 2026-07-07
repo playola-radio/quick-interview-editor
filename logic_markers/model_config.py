@@ -54,7 +54,8 @@ class ModelConfig:
         ):
             if path is not None and not os.path.isdir(path):
                 raise FileNotFoundError(
-                    f"{name} points at a missing directory: {path}"
+                    f"Speech models are not installed yet (missing {name}: {path}). "
+                    "Finish first-launch model setup before transcribing."
                 )
 
     def apply_offline_env(self, env: dict[str, str] | None = None) -> None:

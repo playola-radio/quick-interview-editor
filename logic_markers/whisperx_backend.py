@@ -69,8 +69,15 @@ def _aligned_segments(
         whisper_arch, device, compute_type=compute_type, local_files_only=config.offline
     )
     result = model.transcribe(audio, batch_size=16)
+    # `model_cache_only=offline` forces the alignment model to load from disk only.
+    # The packaged app ships just the English torchaudio align model; offline mode
+    # therefore fails clearly for any other detected language instead of silently
+    # trying to download an undeclared model. (English-only is a spike limitation.)
     align_model, metadata = whisperx.load_align_model(
-        language_code=result["language"], device=device, model_dir=config.align_model_dir
+        language_code=result["language"],
+        device=device,
+        model_dir=config.align_model_dir,
+        model_cache_only=config.offline,
     )
     aligned = whisperx.align(
         result["segments"], align_model, metadata, audio, device,

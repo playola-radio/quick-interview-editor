@@ -2,11 +2,11 @@ import SwiftUI
 
 @main
 struct QuickInterviewEditorApp: App {
-  @State private var model = RootModel()
+  @State private var model = AppLaunchModel()
 
   var body: some Scene {
     WindowGroup {
-      RootView(model: model)
+      AppLaunchView(model: model)
         .preferredColorScheme(.dark)
     }
   }

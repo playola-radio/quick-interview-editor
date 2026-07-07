@@ -107,7 +107,7 @@ final class ModelSetupModel: ViewModel {
 
   func cancelTapped() {
     task?.cancel()
-    phase = .failed("Download cancelled. \(retryButtonLabel) to resume.")
+    phase = .failed("Download stopped. \(retryButtonLabel) to restart.")
   }
 
   // MARK: - Private Helpers
