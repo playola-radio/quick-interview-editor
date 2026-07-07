@@ -32,6 +32,8 @@ final class WaveformModel: ViewModel {
   var samplesPerPixel: Double = 1
   /// Plan-sample index at the left edge of the viewport.
   var visibleStartSample = 0
+  /// `visibleStartSample` captured at the start of a drag-pan gesture.
+  @ObservationIgnored private var dragAnchorStartSample = 0
 
   /// Current playback position, pushed in from the playback stream; nil when stopped.
   var playheadSample: Int?
@@ -67,7 +69,9 @@ final class WaveformModel: ViewModel {
   /// size best matches the current zoom. Each pixel covers plan samples
   /// `[floor(px·spp), floor((px+1)·spp))` from `visibleStartSample`, clamped to the file.
   func visibleColumns() -> [WaveformColumn] {
-    guard let waveform, showsWaveform, viewportWidth >= 1, samplesPerPixel > 0 else { return [] }
+    guard let waveform, waveform.baseLevel != nil, showsWaveform, viewportWidth >= 1,
+      samplesPerPixel > 0
+    else { return [] }
     let level = pyramidLevel(for: samplesPerPixel, in: waveform)
     let columnCount = Int(viewportWidth.rounded(.up))
     var columns: [WaveformColumn] = []
@@ -150,6 +154,13 @@ final class WaveformModel: ViewModel {
     visibleStartSample = clampedStart(start)
   }
 
+  /// Drag-to-pan: records the anchor when a horizontal drag begins so subsequent
+  /// `dragScrolled` calls pan relative to it (dragging right reveals earlier audio).
+  func dragScrollBegan() { dragAnchorStartSample = visibleStartSample }
+  func dragScrolled(byPixels deltaX: CGFloat) {
+    scrolled(toStartSample: dragAnchorStartSample - Int(Double(deltaX) * samplesPerPixel))
+  }
+
   // MARK: - Private Helpers
   private func zoom(by factor: Double) {
     guard viewportWidth > 0, totalSamples > 0 else { return }
@@ -177,9 +188,12 @@ final class WaveformModel: ViewModel {
   }
 
   /// The finest level whose bucket size doesn't exceed `spp` (so each pixel aggregates
-  /// whole buckets); level 0 when zoomed in past the base resolution.
+  /// whole buckets); level 0 when zoomed in past the base resolution. Falls back to an
+  /// empty level for a degenerate (levels-empty) waveform rather than trapping.
   private func pyramidLevel(for spp: Double, in waveform: Waveform) -> Waveform.Level {
-    var chosen = waveform.levels[0]
+    guard var chosen = waveform.levels.first else {
+      return Waveform.Level(bucketSize: Waveform.baseBucketSize, mins: [], maxs: [])
+    }
     for level in waveform.levels {
       if Double(level.bucketSize) <= spp { chosen = level } else { break }
     }

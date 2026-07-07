@@ -6,6 +6,7 @@ import SwiftUI
 /// updates never invalidate the canvas.
 struct WaveformView: View {
   @Bindable var model: EditorModel
+  @State private var isPanning = false
 
   private let bandHeight: CGFloat = 148
 
@@ -20,6 +21,7 @@ struct WaveformView: View {
       .clipShape(RoundedRectangle(cornerRadius: 4))
       .contentShape(Rectangle())
       .onTapGesture(coordinateSpace: .local) { model.waveformTapped(atX: $0.x) }
+      .gesture(panGesture)
       .onGeometryChange(for: CGFloat.self) {
         $0.size.width
       } action: {
@@ -29,6 +31,20 @@ struct WaveformView: View {
     .padding(.horizontal, 20)
     .padding(.vertical, 12)
     .background(Color.black)
+  }
+
+  /// Horizontal drag pans the zoomed-in viewport; a plain tap (below the threshold) still
+  /// selects a word. All coordinate math lives on the model.
+  private var panGesture: some Gesture {
+    DragGesture(minimumDistance: 6)
+      .onChanged { value in
+        if !isPanning {
+          isPanning = true
+          model.waveform.dragScrollBegan()
+        }
+        model.waveform.dragScrolled(byPixels: value.translation.width)
+      }
+      .onEnded { _ in isPanning = false }
   }
 
   private var header: some View {

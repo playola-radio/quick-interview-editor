@@ -58,13 +58,13 @@ final class EditorModel: ViewModel {
   /// The selected audio range, mirrored from the transcript selection.
   var highlightedSampleRange: Range<Int>? { transcript.selectedSampleRange }
 
-  /// Sample ranges of the run-together (tight-join) words to paint red — derived from the
-  /// SAME gap-based function and live sensitivity the transcript uses, so the waveform's
-  /// red always matches the transcript's. Words missing sample bounds are excluded.
+  /// Sample ranges of the run-together (tight-join) words to paint red. Reuses the
+  /// transcript's already-computed `isRunTogether` (same gap function + live sensitivity),
+  /// so the waveform's red always matches the transcript's without recomputing it. Words
+  /// missing sample bounds are excluded.
   var redRanges: [Range<Int>] {
-    let redIDs = runTogetherWordIDs(editPlan.words, maxGapMs: transcript.runTogetherMaxGapMs)
-    return editPlan.words.compactMap { word in
-      guard redIDs.contains(word.id), let start = word.startSample, let end = word.endSample,
+    transcript.words.compactMap { word in
+      guard word.isRunTogether, let start = word.startSample, let end = word.endSample,
         start < end
       else { return nil }
       return start..<end
@@ -153,7 +153,7 @@ final class EditorModel: ViewModel {
   func observePlayback() async {
     for await position in audioPlayer.positions() {
       guard playingSliceID != nil else {
-        waveform.playheadSample = nil
+        if waveform.playheadSample != nil { waveform.playheadSample = nil }
         continue
       }
       waveform.playheadSample = position.isPlaying ? position.sample : nil

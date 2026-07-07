@@ -236,6 +236,9 @@ private enum WaveformDecoder {
       }
       guard let blockBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else { continue }
       let length = CMBlockBufferGetDataLength(blockBuffer)
+      // An empty/marker buffer leaves `samples` empty, so its `baseAddress` is nil and the
+      // force-unwrap below would trap; skip it.
+      guard length >= MemoryLayout<Float>.size else { continue }
       var samples = [Float](repeating: 0, count: length / MemoryLayout<Float>.size)
       let status = samples.withUnsafeMutableBytes { raw -> OSStatus in
         CMBlockBufferCopyDataBytes(

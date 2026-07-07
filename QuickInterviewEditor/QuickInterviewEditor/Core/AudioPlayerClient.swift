@@ -57,7 +57,9 @@ extension AudioPlayerClient {
       },
       stop: { await box.stop() },
       positions: {
-        AsyncStream { continuation in
+        // Only the latest playhead position matters; drop stale ticks rather than let a
+        // lagging consumer accumulate a backlog.
+        AsyncStream(bufferingPolicy: .bufferingNewest(1)) { continuation in
           // Register on the actor; the builder closure runs synchronously, so hop.
           let id = UUID()
           Task { await box.addPositionContinuation(id: id, continuation) }

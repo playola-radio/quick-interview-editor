@@ -166,6 +166,20 @@ struct WaveformTests {
     #expect(model.canZoomOut == false)
   }
 
+  @Test func dragScrollPansRelativeToAnchorAndClamps() {
+    let model = WaveformModel()
+    model.totalSamples = 10_000
+    model.viewportResized(width: 100)
+    model.zoomInTapped()  // spp 50, visibleStart 2500
+    model.dragScrollBegan()  // anchor 2500
+    model.dragScrolled(byPixels: 10)  // drag right reveals earlier audio: 2500 - 10*50
+    #expect(model.visibleStartSample == 2000)
+    model.dragScrolled(byPixels: -10)  // still relative to the same anchor
+    #expect(model.visibleStartSample == 3000)
+    model.dragScrolled(byPixels: 100_000)  // clamps to 0
+    #expect(model.visibleStartSample == 0)
+  }
+
   @Test func scrolledClampsToBounds() {
     let model = WaveformModel()
     model.totalSamples = 10_000
