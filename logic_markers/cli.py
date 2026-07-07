@@ -362,6 +362,9 @@ def run_render(source: Path, request_path: Path, work_dir: Path, sample_rate: in
     aiff_path = work_dir / "render.aiff"
     convert_to_aiff(source, aiff_path, req_rate)
     aiff_bytes = aiff_path.read_bytes()
+    # Slices are cut from the in-memory bytes; free the (possibly several-hundred-MB)
+    # converted AIFF now so it doesn't sit alongside the per-slice outputs.
+    aiff_path.unlink(missing_ok=True)
 
     out_slices = []
     for i, spec in enumerate(slices):

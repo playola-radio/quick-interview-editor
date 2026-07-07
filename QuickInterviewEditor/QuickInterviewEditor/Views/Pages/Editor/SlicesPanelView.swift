@@ -107,7 +107,7 @@ private struct SliceCard: View {
 }
 
 private struct ExportStatus: View {
-  @Bindable var model: EditorModel
+  let model: EditorModel
 
   var body: some View {
     VStack(alignment: .leading, spacing: 4) {

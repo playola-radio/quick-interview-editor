@@ -402,7 +402,8 @@ struct EditorTests {
       $0.workspace.reveal = { revealed.setValue($0) }
     } operation: {
       model.destinationURL = destination
-      await model.performExport(Array(model.slices))
+      model.exportAllTapped()
+      await model.exportTask?.value
     }
 
     expectNoDifference(model.exportPhase, .done(count: 2))
@@ -437,7 +438,8 @@ struct EditorTests {
       $0.workspace.reveal = { _ in }
     } operation: {
       model.destinationURL = destination
-      await model.performExport(Array(model.slices))
+      model.exportAllTapped()
+      await model.exportTask?.value
     }
 
     let contents = Set(try FileManager.default.contentsOfDirectory(atPath: destination.path))
@@ -467,7 +469,8 @@ struct EditorTests {
         }
       }
     } operation: {
-      await model.performExport(Array(model.slices))
+      model.exportAllTapped()
+      await model.exportTask?.value
     }
 
     expectNoDifference(promptCount.value, 1)
@@ -484,7 +487,8 @@ struct EditorTests {
       $0.workspace.chooseDirectory = { nil }  // user cancelled the panel
       $0.workspace.reveal = { _ in revealed.setValue(true) }
     } operation: {
-      await model.performExport(Array(model.slices))
+      model.exportAllTapped()
+      await model.exportTask?.value
     }
 
     expectNoDifference(model.exportPhase, .idle)
@@ -506,7 +510,8 @@ struct EditorTests {
       }
     } operation: {
       model.destinationURL = destination
-      await model.performExport(Array(model.slices))
+      model.exportAllTapped()
+      await model.exportTask?.value
     }
 
     guard case .failed(let message) = model.exportPhase else {
@@ -537,7 +542,8 @@ struct EditorTests {
       $0.workspace.reveal = { _ in revealed.setValue(true) }
     } operation: {
       model.destinationURL = destination
-      await model.performExport(Array(model.slices))
+      model.exportAllTapped()
+      await model.exportTask?.value
     }
 
     guard case .failed(let message) = model.exportPhase else {
@@ -564,7 +570,7 @@ struct EditorTests {
       $0.workspace.reveal = { _ in }
     } operation: {
       model.destinationURL = destination
-      let task = Task { await model.performExport(Array(model.slices)) }
+      model.exportAllTapped()
 
       continuation.yield(.progress(RenderProgress(message: "", index: 1, total: 2)))
       await settle { model.exportPhase == .exporting(current: 1, total: 2) }
@@ -576,7 +582,7 @@ struct EditorTests {
 
       continuation.yield(.completed(RenderResult(slices: rendered, workDir: workDir)))
       continuation.finish()
-      await task.value
+      await model.exportTask?.value
       expectNoDifference(model.exportPhase, .done(count: 2))
     }
   }
@@ -635,7 +641,8 @@ struct EditorTests {
       $0.workspace.reveal = { _ in }
     } operation: {
       model.destinationURL = destination
-      await model.performExport(Array(model.slices))
+      model.exportAllTapped()
+      await model.exportTask?.value
     }
 
     #expect(model.exportTightWarning.contains("Intro"))
@@ -665,7 +672,8 @@ struct EditorTests {
       }
     } operation: {
       model.destinationURL = URL(fileURLWithPath: NSTemporaryDirectory())
-      await model.performExport(Array(model.slices))
+      model.exportAllTapped()
+      await model.exportTask?.value
     }
 
     // Colliding start samples become strictly increasing marker positions.

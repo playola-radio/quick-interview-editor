@@ -55,6 +55,26 @@ struct ExportNamingTests {
     expectNoDifference(name, "interview - Intro 2.aiff")
   }
 
+  @Test func filenameIsCappedAt255UTF8Bytes() {
+    var taken: Set<String> = []
+    let name = exportFileName(
+      sourceStem: String(repeating: "s", count: 300),
+      sliceName: String(repeating: "n", count: 300), index: 1, taken: &taken)
+    #expect(name.utf8.count <= 255)
+    #expect(name.hasSuffix(".aiff"))
+  }
+
+  @Test func longMultibyteNameStaysValidAndUnderTheByteCap() {
+    var taken: Set<String> = []
+    // Each emoji is 4 UTF-8 bytes; truncation must not split one.
+    let name = exportFileName(
+      sourceStem: "interview", sliceName: String(repeating: "😀", count: 200), index: 1,
+      taken: &taken)
+    #expect(name.utf8.count <= 255)
+    #expect(name.hasSuffix(".aiff"))
+    #expect(!name.isEmpty)
+  }
+
   @Test func collidesWithExistingFolderContents() {
     var taken: Set<String> = ["interview - slice 001.aiff"]
     let name = exportFileName(sourceStem: "interview", sliceName: "", index: 1, taken: &taken)

@@ -206,7 +206,7 @@ final class EditorModel: ViewModel {
     exportTask = Task { await performExport(targets) }
   }
 
-  func performExport(_ targets: [Slice]) async {
+  private func performExport(_ targets: [Slice]) async {
     guard let destination = await resolvedDestination() else {
       exportPhase = .idle
       return

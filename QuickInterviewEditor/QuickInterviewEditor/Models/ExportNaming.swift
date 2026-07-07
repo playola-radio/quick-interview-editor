@@ -12,16 +12,34 @@ import Foundation
 func exportFileName(
   sourceStem: String, sliceName: String, index: Int, taken: inout Set<String>
 ) -> String {
-  let name = sanitizedSliceName(sliceName, fallbackIndex: index)
-  let stem = "\(sanitizedStem(sourceStem)) - \(name)"
-  var candidate = "\(stem).aiff"
+  // macOS caps a filename at 255 UTF-8 bytes. Both the stem and the slice name are
+  // user-controlled, so clamp them (reserving room for " - ", ".aiff", and a " NN"
+  // collision suffix) rather than letting `copyItem` throw a cryptic OS error.
+  let reserved = " - ".utf8.count + ".aiff".utf8.count + 4  // " 999"
+  let maxStemBytes = max(1, 255 - reserved - 8)  // leave ≥8 bytes for the name
+  let stem = truncatedToUTF8Bytes(sanitizedStem(sourceStem), maxBytes: maxStemBytes)
+  let nameBudget = max(1, 255 - stem.utf8.count - reserved)
+  let name = truncatedToUTF8Bytes(
+    sanitizedSliceName(sliceName, fallbackIndex: index), maxBytes: nameBudget)
+
+  let base = "\(stem) - \(name)"
+  var candidate = "\(base).aiff"
   var suffix = 2
   while taken.contains(candidate.lowercased()) {
-    candidate = "\(stem) \(suffix).aiff"
+    candidate = "\(base) \(suffix).aiff"
     suffix += 1
   }
   taken.insert(candidate.lowercased())
   return candidate
+}
+
+/// Trim `s` to at most `maxBytes` UTF-8 bytes, dropping whole characters so the
+/// result stays valid (never splits a multi-byte scalar or grapheme).
+private func truncatedToUTF8Bytes(_ text: String, maxBytes: Int) -> String {
+  guard text.utf8.count > maxBytes else { return text }
+  var result = text
+  while result.utf8.count > maxBytes, !result.isEmpty { result.removeLast() }
+  return result
 }
 
 private let illegalFilenameCharacters = CharacterSet(charactersIn: "/\\:\u{0}")
