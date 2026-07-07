@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Hardened-runtime entitlements for the SwiftUI app shell.
+
+  The app is a direct-download Developer ID app (NOT sandboxed, NOT App Store),
+  so it needs no sandbox/file-access entitlements to open the user's audio. It
+  spawns the engine helper as a separate process (the helper carries its own
+  entitlements), so nothing special is required here. Hardened runtime itself is
+  enabled by codesign's runtime option, not by a key.
+
+  Kept as an explicit (empty) file so the signing step is identical for app and
+  helper and so future additions have an obvious home.
+-->
+<plist version="1.0">
+<dict>
+</dict>
+</plist>

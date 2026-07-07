@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Hardened-runtime entitlements for the frozen engine helper (the process that
+  loads torch/ctranslate2/torchaudio dylibs).
+
+  Start STRICT, add only what a runtime crash log proves you need:
+
+  - disable-library-validation: present because a PyInstaller one-folder bundle
+    dlopen()s many nested dylibs. We re-sign every one with our Developer ID
+    (so Team IDs match), but the frozen bootloader's load pattern still commonly
+    trips Library Validation. This is the one exception a frozen Python/torch
+    helper almost always needs and it is rarely a notarization blocker.
+
+  If, on a clean Mac, the helper crashes with a message about executable memory
+  or ctypes/libffi trampolines ("mapped file has no cdhash" / "allow-unsigned-
+  executable-memory"), add the two commented keys below and re-sign. Do NOT add
+  them pre-emptively — extra entitlements weaken the runtime and draw notary
+  scrutiny.
+
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key><true/>
+    <key>com.apple.security.cs.allow-jit</key><true/>
+
+  NOT needed: allow-dyld-environment-variables — we set HF_HOME/TORCH_HOME/
+  NLTK_DATA/PYTHONPATH in the child env, none of which are DYLD_* variables.
+-->
+<plist version="1.0">
+<dict>
+	<key>com.apple.security.cs.disable-library-validation</key>
+	<true/>
+</dict>
+</plist>

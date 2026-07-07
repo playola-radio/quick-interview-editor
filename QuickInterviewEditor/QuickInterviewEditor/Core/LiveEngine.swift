@@ -6,31 +6,72 @@ import Synchronization
 /// Drives the Python `logic_markers` CLI as a subprocess to transcribe an audio
 /// file into an ``EditPlan``.
 ///
-/// DEV ONLY: this resolves a `.venv` inside the `logic-utils` checkout. The
-/// notarized, bundled helper is roadmap Phase 1. Override the repo location with
-/// the `QIE_ENGINE_REPO` environment variable.
+/// Prefers the **packaged frozen helper** bundled at
+/// `…/Resources/engine/logic-markers-engine` (roadmap Phase 1). When that isn't
+/// present it falls back to the **dev `.venv`** inside the `logic-utils`
+/// checkout, resolved via `QIE_ENGINE_REPO` or `#filePath`. See
+/// ``EngineResolver`` for the (unit-tested) resolution logic.
 enum LiveEngine {
 
-  // MARK: Dev engine resolution
+  // MARK: Engine resolution
 
-  /// The `logic-utils` checkout that contains the Python engine and its `.venv`.
+  /// Resolves how to launch the engine for a job (bundled helper → dev `.venv`).
+  ///
+  /// When running the packaged helper, the models were downloaded into
+  /// Application Support by the first-launch flow, so we point the engine at
+  /// them (offline) via `QIE_*` env. Dev keeps its default download caches.
+  static func resolvedLaunch() -> EngineLaunch {
+    var launch = EngineResolver.resolve(
+      bundledHelper: bundledHelperURL,
+      repoRootOverride: ProcessInfo.processInfo.environment["QIE_ENGINE_REPO"],
+      filePathRepoRoot: filePathRepoRoot,
+      isExecutable: { FileManager.default.isExecutableFile(atPath: $0.path) }
+    )
+    // The packaged app must ALWAYS run the engine offline against the managed,
+    // checksummed model download — never fall open to the engine's ad-hoc online
+    // fetch. So bundled launches always get `QIE_OFFLINE=1` + the model dirs. If
+    // the models aren't installed yet, the engine fails fast with a clear message
+    // (validate()); the first-launch model-setup gate installs them before any
+    // transcription reaches this path. Dev (not bundled) keeps its download-on-
+    // demand behavior with no env injected.
+    if launch.isBundled {
+      if let installation = try? ModelLocations.installation() {
+        launch.environment = installation.engineEnvironment
+      } else {
+        // Even if the model dirs can't be resolved (Application Support
+        // unavailable), never let the packaged engine fall open to an online
+        // download — force offline so it fails clearly instead.
+        launch.environment = ["QIE_OFFLINE": "1"]
+      }
+    }
+    return launch
+  }
+
+  /// True when the frozen engine is bundled in the app (the packaged build). The
+  /// launch flow uses this to gate first-launch model setup: the packaged app
+  /// manages its own model download; dev downloads on demand, so it skips the gate.
+  static var isPackaged: Bool {
+    guard let helper = bundledHelperURL else { return false }
+    return FileManager.default.isExecutableFile(atPath: helper.path)
+  }
+
+  /// The packaged helper's expected location inside the app bundle, or `nil` when
+  /// there is no bundle resource URL (e.g. some test hosts).
+  private static var bundledHelperURL: URL? {
+    Bundle.main.resourceURL?.appendingPathComponent("engine/logic-markers-engine")
+  }
+
+  /// The `logic-utils` checkout inferred from `#filePath` (dev default).
   ///
   /// `#filePath` is `.../<repo>/QuickInterviewEditor/QuickInterviewEditor/Core/LiveEngine.swift`,
   /// so four `deletingLastPathComponent()` calls (Core → QuickInterviewEditor →
   /// QuickInterviewEditor → <repo>) land on the repo root.
-  private static var repoRoot: URL {
-    if let path = ProcessInfo.processInfo.environment["QIE_ENGINE_REPO"] {
-      return URL(fileURLWithPath: path)
-    }
-    return URL(fileURLWithPath: #filePath)
+  private static var filePathRepoRoot: URL {
+    URL(fileURLWithPath: #filePath)
       .deletingLastPathComponent()  // Core
       .deletingLastPathComponent()  // QuickInterviewEditor (inner)
       .deletingLastPathComponent()  // QuickInterviewEditor (outer)
       .deletingLastPathComponent()  // repo root
-  }
-
-  private static var pythonURL: URL {
-    repoRoot.appendingPathComponent(".venv/bin/python")
   }
 
   // MARK: Work directory
@@ -125,20 +166,22 @@ enum LiveEngine {
 
       let task = Task {
         do {
-          guard FileManager.default.isExecutableFile(atPath: pythonURL.path) else {
-            throw EngineClientError.engineNotFound(pythonURL.path)
+          let launch = resolvedLaunch()
+          guard FileManager.default.isExecutableFile(atPath: launch.executable.path) else {
+            throw EngineClientError.engineNotFound(launch.executable.path)
           }
           let work = try makeWorkDir()
           // Remove the scratch dir (cached AIFF + transcript JSON, both derived
           // from the user's audio) on every exit path — success, failure, cancel.
           defer { try? FileManager.default.removeItem(at: work) }
           let proc = try SpawnedProcess(
-            executable: pythonURL,
-            arguments: [
-              "-m", "logic_markers.cli", "plan", audio.path,
-              "--work-dir", work.path, "--sample-rate", "44100",
-            ],
-            currentDirectory: repoRoot
+            executable: launch.executable,
+            arguments: launch.arguments(
+              subcommand: "plan",
+              [audio.path, "--work-dir", work.path, "--sample-rate", "44100"]
+            ),
+            currentDirectory: launch.workingDirectory,
+            extraEnvironment: launch.environment
           )
           procBox.withLock { $0 = proc }
           // If cancellation landed before the process was published, kill now.
@@ -231,8 +274,9 @@ enum LiveEngine {
       let task = Task {
         var succeeded = false
         do {
-          guard FileManager.default.isExecutableFile(atPath: pythonURL.path) else {
-            throw EngineClientError.engineNotFound(pythonURL.path)
+          let launch = resolvedLaunch()
+          guard FileManager.default.isExecutableFile(atPath: launch.executable.path) else {
+            throw EngineClientError.engineNotFound(launch.executable.path)
           }
           let work = try makeWorkDir()
           // Keep the rendered AIFFs on success (the caller copies + cleans up);
@@ -243,13 +287,16 @@ enum LiveEngine {
           try writeRequest(request, to: requestURL)
 
           let proc = try SpawnedProcess(
-            executable: pythonURL,
-            arguments: [
-              "-m", "logic_markers.cli", "render", request.sourceURL.path,
-              "--request", requestURL.path, "--work-dir", work.path,
-              "--sample-rate", String(request.sampleRate),
-            ],
-            currentDirectory: repoRoot
+            executable: launch.executable,
+            arguments: launch.arguments(
+              subcommand: "render",
+              [
+                request.sourceURL.path, "--request", requestURL.path,
+                "--work-dir", work.path, "--sample-rate", String(request.sampleRate),
+              ]
+            ),
+            currentDirectory: launch.workingDirectory,
+            extraEnvironment: launch.environment
           )
           procBox.withLock { $0 = proc }
           if Task.isCancelled { proc.terminate() }
@@ -439,7 +486,10 @@ final class SpawnedProcess: Sendable {
   // it hurts the fd-cleanup correctness that was carefully reviewed, so keep it
   // whole and suppress the length/complexity rules here.
   // swiftlint:disable:next cyclomatic_complexity function_body_length
-  init(executable: URL, arguments: [String], currentDirectory: URL) throws {
+  init(
+    executable: URL, arguments: [String], currentDirectory: URL,
+    extraEnvironment: [String: String] = [:]
+  ) throws {
     // Create pipes with raw fds so nothing crosses concurrency domains as a
     // non-Sendable FileHandle, and closing is a plain `close(fd)`.
     var outFDs: [Int32] = [-1, -1]  // [read, write]
@@ -600,7 +650,8 @@ final class SpawnedProcess: Sendable {
     // than chdir the child (the non-deprecated file action is macOS 26+ only),
     // prepend the repo root to PYTHONPATH so the module is found regardless of
     // the inherited working directory.
-    let childEnv = Self.environment(prependingPythonPath: currentDirectory.path)
+    let childEnv = Self.environment(
+      prependingPythonPath: currentDirectory.path, overrides: extraEnvironment)
     let cEnv: [UnsafeMutablePointer<CChar>?] = childEnv.map { strdup($0) } + [nil]
     defer { for ptr in cEnv where ptr != nil { free(ptr) } }
 
@@ -633,14 +684,18 @@ final class SpawnedProcess: Sendable {
   // MARK: Environment
 
   /// The parent environment as `KEY=VALUE` strings, with `path` prepended to
-  /// `PYTHONPATH` so `python -m logic_markers.cli` finds the package.
-  private static func environment(prependingPythonPath path: String) -> [String] {
+  /// `PYTHONPATH` so `python -m logic_markers.cli` finds the package, plus any
+  /// `overrides` (e.g. the `QIE_*` model dirs for the bundled helper) applied last.
+  private static func environment(
+    prependingPythonPath path: String, overrides: [String: String] = [:]
+  ) -> [String] {
     var env = ProcessInfo.processInfo.environment
     if let existing = env["PYTHONPATH"], !existing.isEmpty {
       env["PYTHONPATH"] = path + ":" + existing
     } else {
       env["PYTHONPATH"] = path
     }
+    for (key, value) in overrides { env[key] = value }
     return env.map { "\($0.key)=\($0.value)" }
   }
 
