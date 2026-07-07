@@ -9,7 +9,7 @@ struct RootView: View {
       if !model.tabs.isEmpty { tabStrip }
       content
     }
-    .frame(minWidth: 900, minHeight: 600)
+    .frame(minWidth: 1040, minHeight: 680)
     .background(Color.black)
     .dropDestination(for: URL.self) { urls, _ in
       model.fileDropped(urls)  // model filters to audio files

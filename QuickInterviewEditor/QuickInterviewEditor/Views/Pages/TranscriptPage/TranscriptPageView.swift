@@ -11,7 +11,7 @@ struct TranscriptPageView: View {
       controls
     }
     .padding(20)
-    .frame(minWidth: 900, minHeight: 600, alignment: .topLeading)
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     .background(Color.black)
     .task { await model.viewAppeared() }
   }
