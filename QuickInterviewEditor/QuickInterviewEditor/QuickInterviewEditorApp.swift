@@ -9,5 +9,6 @@ struct QuickInterviewEditorApp: App {
       AppLaunchView(model: model)
         .preferredColorScheme(.dark)
     }
+    .defaultSize(width: 1200, height: 800)
   }
 }

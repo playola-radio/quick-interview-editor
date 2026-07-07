@@ -47,6 +47,9 @@ node_modules/
 # --- Xcode / fastlane ---
 DerivedData/
 *.xcresult
+# Per-user Xcode UI/breakpoint state — machine-local, not shared.
+xcuserdata/
+*.xcuserstate
 QuickInterviewEditor/fastlane/test_output/
 QuickInterviewEditor/fastlane/report.xml
 QuickInterviewEditor/vendor/
