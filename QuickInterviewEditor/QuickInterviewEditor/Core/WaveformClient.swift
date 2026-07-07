@@ -281,6 +281,7 @@ private enum WaveformDecoder {
   /// never reaches finish as silence rather than ±infinity.
   private struct BaseAccumulator {
     let bucketSize: Int
+    private let durationSamples: Int
     private(set) var position = 0
     private var mins: [Float]
     private var maxs: [Float]
@@ -288,23 +289,29 @@ private enum WaveformDecoder {
 
     init(bucketSize: Int, durationSamples: Int) {
       self.bucketSize = bucketSize
-      let count = max(1, (max(0, durationSamples) + bucketSize - 1) / bucketSize)
+      self.durationSamples = max(0, durationSamples)
+      let count = max(1, (self.durationSamples + bucketSize - 1) / bucketSize)
       mins = [Float](repeating: .greatestFiniteMagnitude, count: count)
       maxs = [Float](repeating: -.greatestFiniteMagnitude, count: count)
       touched = [Bool](repeating: false, count: count)
     }
 
     /// Folds one chunk, walking it bucket-aligned slice by slice with `vDSP` per slice.
+    /// Never folds a sample at or beyond `durationSamples` (codec padding past the plan's
+    /// timeline), so the final partial bucket stays inside `[0, durationSamples)`.
     mutating func fold(samples: [Float]) {
       defer { position += samples.count }
       guard !samples.isEmpty else { return }
       samples.withUnsafeBufferPointer { buffer in
         var offset = 0
         while offset < buffer.count {
-          let bucket = (position + offset) / bucketSize
+          let globalPosition = position + offset
+          guard globalPosition < durationSamples else { break }
+          let bucket = globalPosition / bucketSize
           guard bucket >= 0, bucket < mins.count else { break }
-          let bucketEnd = (bucket + 1) * bucketSize
-          let sliceLen = Swift.min(bucketEnd - (position + offset), buffer.count - offset)
+          let sliceEnd = Swift.min((bucket + 1) * bucketSize, durationSamples)
+          let sliceLen = Swift.min(sliceEnd - globalPosition, buffer.count - offset)
+          guard sliceLen > 0 else { break }
           var low: Float = 0
           var high: Float = 0
           vDSP_minv(buffer.baseAddress! + offset, 1, &low, vDSP_Length(sliceLen))
