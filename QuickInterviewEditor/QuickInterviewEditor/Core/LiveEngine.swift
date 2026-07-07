@@ -283,7 +283,9 @@ enum LiveEngine {
           guard code == 0 else {
             throw EngineClientError.renderFailed(proc.stderrTail() + logHint(logURL))
           }
-          let slices = try decodeRenderResult(out, workDir: work, logURL: logURL)
+          let expectedIDs = Set(request.slices.map(\.id))
+          let slices = try decodeRenderResult(
+            out, workDir: work, expectedIDs: expectedIDs, logURL: logURL)
           succeeded = true
           continuation.yield(.completed(RenderResult(slices: slices, workDir: work)))
           continuation.finish()
@@ -321,11 +323,11 @@ enum LiveEngine {
   /// id (validated as a UUID), so a malformed/hostile result can never point the copy
   /// at a file outside the scratch dir. The derived file must exist on disk.
   private static func decodeRenderResult(
-    _ out: Data, workDir: URL, logURL: URL?
+    _ out: Data, workDir: URL, expectedIDs: Set<UUID>, logURL: URL?
   ) throws -> [RenderedSlice] {
     do {
       let wire = try JSONDecoder().decode(RenderWireResult.self, from: out)
-      return try wire.slices.map { slice in
+      let rendered = try wire.slices.map { slice -> RenderedSlice in
         guard let id = UUID(uuidString: slice.id) else {
           throw EngineClientError.renderDecodeFailed(
             "engine returned an unrecognized slice id: \(slice.id)")
@@ -337,6 +339,16 @@ enum LiveEngine {
         }
         return RenderedSlice(id: id, url: url)
       }
+      // A clean exit that omits (or duplicates/adds) a slice must not pass as
+      // success — the result has to cover exactly the requested set.
+      let renderedIDs = Set(rendered.map(\.id))
+      guard renderedIDs == expectedIDs, rendered.count == expectedIDs.count else {
+        let missing = expectedIDs.subtracting(renderedIDs).map(\.uuidString).sorted()
+        throw EngineClientError.renderDecodeFailed(
+          "engine returned an incomplete render result; missing [\(missing.joined(separator: ", "))]"
+            + logHint(logURL))
+      }
+      return rendered
     } catch let error as EngineClientError {
       throw error
     } catch {

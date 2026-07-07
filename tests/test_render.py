@@ -77,6 +77,7 @@ def _run_render(tmp_path: Path, frames: int, markers, slices):
         [sys.executable, "-m", "logic_markers.cli", "render", str(src),
          "--request", str(req_path), "--work-dir", str(work)],
         capture_output=True, text=True,
+        check=False,
     )
     assert proc.returncode == 0, proc.stderr
     return src, work, proc
@@ -119,7 +120,7 @@ def test_render_result_is_keyed_by_id_not_order(tmp_path):
 
 
 def test_render_markers_are_rebased_and_renumbered_within_each_slice(tmp_path):
-    _src, work, proc = _run_render(tmp_path, 44100, MARKERS, SLICES)
+    _src, _work, proc = _run_render(tmp_path, 44100, MARKERS, SLICES)
     result = json.loads(proc.stdout)
     by_id = {s["id"]: s for s in result["slices"]}
 
@@ -182,7 +183,36 @@ def test_render_rejects_non_uuid_slice_id_and_writes_nothing_outside(tmp_path):
         [sys.executable, "-m", "logic_markers.cli", "render", str(src),
          "--request", str(req_path), "--work-dir", str(work)],
         capture_output=True, text=True,
+        check=False,
     )
     assert proc.returncode != 0
     assert "invalid slice id" in proc.stderr
     assert not outside.exists()  # nothing written outside the work-dir
+
+
+def test_render_rejects_out_of_range_slice(tmp_path):
+    # An end past the converted audio must fail explicitly rather than be silently
+    # clamped to a shorter AIFF while the result reports the requested range.
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    src = src_dir / "clip.wav"
+    _write_wav(src, 44100)
+    work = tmp_path / "work"
+    work.mkdir()
+    slice_id = "CCCCCCCC-1111-2222-3333-444444444444"
+    request = {
+        "sample_rate": SR,
+        "markers": MARKERS,
+        "slices": [{"id": slice_id, "start_sample": 0, "end_sample": 99999}],
+    }
+    req_path = work / "request.json"
+    req_path.write_text(json.dumps(request))
+    proc = subprocess.run(
+        [sys.executable, "-m", "logic_markers.cli", "render", str(src),
+         "--request", str(req_path), "--work-dir", str(work)],
+        capture_output=True, text=True,
+        check=False,
+    )
+    assert proc.returncode != 0
+    assert "outside the render audio" in proc.stderr
+    assert not (work / f"{slice_id}.aiff").exists()

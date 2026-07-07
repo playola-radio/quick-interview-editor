@@ -365,6 +365,8 @@ def run_render(source: Path, request_path: Path, work_dir: Path, sample_rate: in
     # Slices are cut from the in-memory bytes; free the (possibly several-hundred-MB)
     # converted AIFF now so it doesn't sit alongside the per-slice outputs.
     aiff_path.unlink(missing_ok=True)
+    _, chunks = aiff_markers.parse_chunks(aiff_bytes)
+    frame_count = struct.unpack(">I", dict(chunks)[b"COMM"][2:6])[0]
 
     out_slices = []
     for i, spec in enumerate(slices):
@@ -381,6 +383,14 @@ def run_render(source: Path, request_path: Path, work_dir: Path, sample_rate: in
             raise ValueError(f"invalid slice id (expected a UUID): {slice_id!r}") from exc
         start = int(spec["start_sample"])
         end = int(spec["end_sample"])
+        # slice_aiff clamps out-of-range bounds, which would silently export a
+        # shorter/empty AIFF while the result still reports the requested range.
+        # Reject instead so a bad range fails explicitly.
+        if start < 0 or end < start or end > frame_count:
+            raise ValueError(
+                f"slice {slice_id} range [{start}, {end}) is outside the render audio "
+                f"({frame_count} frames)"
+            )
         out_path = work_dir / f"{slice_id}.aiff"
         out_path.write_bytes(slice_aiff(aiff_bytes, start, end, markers))
         out_slices.append({"id": spec["id"], "path": str(out_path),
