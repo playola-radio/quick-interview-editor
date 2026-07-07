@@ -343,52 +343,54 @@ struct EditorTests {
 
   // MARK: - Playhead (playback position)
 
-  @Test func observePlaybackMapsPositionToWaveformPlayhead() async {
+  @Test func observePlaybackMapsPositionThenClearsOnExit() async {
     let model = editor()
     model.playingSliceID = UUID()  // this editor owns playback
+    let (stream, continuation) = AsyncStream.makeStream(of: PlaybackPosition.self)
     await withDependencies {
-      $0.audioPlayer.positions = {
-        AsyncStream { continuation in
-          continuation.yield(PlaybackPosition(sample: 1000, isPlaying: true))
-          continuation.finish()
-        }
-      }
+      $0.audioPlayer.positions = { stream }
     } operation: {
-      await model.observePlayback()
+      let task = Task { await model.observePlayback() }
+      continuation.yield(PlaybackPosition(sample: 1000, isPlaying: true))
+      await settle { model.waveform.playheadSample == 1000 }
+      #expect(model.waveform.playheadSample == 1000)  // maps the live position
+      continuation.finish()  // stands in for the task being cancelled / stream ending
+      await task.value
+      #expect(model.waveform.playheadSample == nil)  // cleared on exit — no phantom marker
     }
-    #expect(model.waveform.playheadSample == 1000)
   }
 
   @Test func observePlaybackIgnoresTicksWhenThisEditorIsNotPlaying() async {
     let model = editor()  // playingSliceID is nil — another tab owns playback
+    let (stream, continuation) = AsyncStream.makeStream(of: PlaybackPosition.self)
     await withDependencies {
-      $0.audioPlayer.positions = {
-        AsyncStream { continuation in
-          continuation.yield(PlaybackPosition(sample: 5000, isPlaying: true))
-          continuation.finish()
-        }
-      }
+      $0.audioPlayer.positions = { stream }
     } operation: {
-      await model.observePlayback()
+      let task = Task { await model.observePlayback() }
+      continuation.yield(PlaybackPosition(sample: 5000, isPlaying: true))
+      await settle { false }  // let the tick be processed
+      #expect(model.waveform.playheadSample == nil)  // never adopts another tab's position
+      continuation.finish()
+      await task.value
     }
-    #expect(model.waveform.playheadSample == nil)
   }
 
-  @Test func observePlaybackClearsPlayheadWhenStopped() async {
+  @Test func observePlaybackClearsPlayheadOnStopTick() async {
     let model = editor()
     model.playingSliceID = UUID()  // this editor owns playback
+    let (stream, continuation) = AsyncStream.makeStream(of: PlaybackPosition.self)
     await withDependencies {
-      $0.audioPlayer.positions = {
-        AsyncStream { continuation in
-          continuation.yield(PlaybackPosition(sample: 1000, isPlaying: true))
-          continuation.yield(PlaybackPosition(sample: 1200, isPlaying: false))
-          continuation.finish()
-        }
-      }
+      $0.audioPlayer.positions = { stream }
     } operation: {
-      await model.observePlayback()
+      let task = Task { await model.observePlayback() }
+      continuation.yield(PlaybackPosition(sample: 1000, isPlaying: true))
+      await settle { model.waveform.playheadSample == 1000 }
+      continuation.yield(PlaybackPosition(sample: 1200, isPlaying: false))  // stop tick
+      await settle { model.waveform.playheadSample == nil }
+      #expect(model.waveform.playheadSample == nil)
+      continuation.finish()
+      await task.value
     }
-    #expect(model.waveform.playheadSample == nil)
   }
 
   // MARK: - Waveform sync

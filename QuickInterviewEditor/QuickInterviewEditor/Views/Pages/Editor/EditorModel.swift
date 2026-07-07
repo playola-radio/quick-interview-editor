@@ -158,6 +158,9 @@ final class EditorModel: ViewModel {
       }
       waveform.playheadSample = position.isPlaying ? position.sample : nil
     }
+    // The loop also exits when the view's task is cancelled (tab switch / disappear);
+    // clear the playhead so a stale marker doesn't linger when the tab reactivates.
+    waveform.playheadSample = nil
   }
 
   /// Waveform → transcript: a click at view-x selects the word whose audio contains that
