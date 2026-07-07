@@ -82,8 +82,15 @@ private actor LivePlayerBox {
     let myGeneration = generation
     await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
       continuation = cont
-      node.scheduleSegment(file, startingFrame: clampedStart, frameCount: frameCount, at: nil) {
-        [weak self] in
+      // `.dataPlayedBack` fires when the audio has actually been played through the
+      // output, NOT when the file segment has merely been read/consumed. The player
+      // pre-buffers ~1-2s ahead, so the default (consumed) callback fires early and
+      // `stopNode()` would truncate the pre-buffered tail — cutting off the last
+      // words of the slice.
+      node.scheduleSegment(
+        file, startingFrame: clampedStart, frameCount: frameCount, at: nil,
+        completionCallbackType: .dataPlayedBack
+      ) { [weak self] _ in
         Task { await self?.complete(generation: myGeneration) }
       }
       node.play()
