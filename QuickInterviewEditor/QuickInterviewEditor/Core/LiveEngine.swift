@@ -283,9 +283,9 @@ enum LiveEngine {
           guard code == 0 else {
             throw EngineClientError.renderFailed(proc.stderrTail() + logHint(logURL))
           }
-          let rendered = try decodeRenderResult(out, logURL: logURL)
+          let slices = try decodeRenderResult(out, workDir: work, logURL: logURL)
           succeeded = true
-          continuation.yield(.completed(rendered))
+          continuation.yield(.completed(RenderResult(slices: slices, workDir: work)))
           continuation.finish()
         } catch is CancellationError {
           continuation.finish()
@@ -316,7 +316,13 @@ enum LiveEngine {
     try JSONEncoder().encode(wire).write(to: url)
   }
 
-  private static func decodeRenderResult(_ out: Data, logURL: URL?) throws -> [RenderedSlice] {
+  /// Decodes the engine's result into `RenderedSlice`s. The engine's `path` field is
+  /// **ignored** — each output URL is derived from our own `workDir` and the returned
+  /// id (validated as a UUID), so a malformed/hostile result can never point the copy
+  /// at a file outside the scratch dir. The derived file must exist on disk.
+  private static func decodeRenderResult(
+    _ out: Data, workDir: URL, logURL: URL?
+  ) throws -> [RenderedSlice] {
     do {
       let wire = try JSONDecoder().decode(RenderWireResult.self, from: out)
       return try wire.slices.map { slice in
@@ -324,7 +330,12 @@ enum LiveEngine {
           throw EngineClientError.renderDecodeFailed(
             "engine returned an unrecognized slice id: \(slice.id)")
         }
-        return RenderedSlice(id: id, url: URL(fileURLWithPath: slice.path))
+        let url = workDir.appendingPathComponent("\(id.uuidString).aiff")
+        guard FileManager.default.fileExists(atPath: url.path) else {
+          throw EngineClientError.renderDecodeFailed(
+            "engine did not produce the expected file for slice \(id.uuidString)")
+        }
+        return RenderedSlice(id: id, url: url)
       }
     } catch let error as EngineClientError {
       throw error

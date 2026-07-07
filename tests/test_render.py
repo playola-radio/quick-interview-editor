@@ -159,3 +159,30 @@ def test_render_stdout_is_pure_json(tmp_path):
     # Whole stdout parses as JSON — no stray prints leaked onto the channel.
     result = json.loads(proc.stdout)
     assert "slices" in result
+
+
+def test_render_rejects_non_uuid_slice_id_and_writes_nothing_outside(tmp_path):
+    # A slice id with a path fragment must be rejected before any file is written,
+    # so a malformed request can't escape the work-dir.
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    src = src_dir / "clip.wav"
+    _write_wav(src, 44100)
+    work = tmp_path / "work"
+    work.mkdir()
+    outside = tmp_path / "outside.aiff"
+    request = {
+        "sample_rate": SR,
+        "markers": MARKERS,
+        "slices": [{"id": f"../{outside.stem}", "start_sample": 0, "end_sample": 100}],
+    }
+    req_path = work / "request.json"
+    req_path.write_text(json.dumps(request))
+    proc = subprocess.run(
+        [sys.executable, "-m", "logic_markers.cli", "render", str(src),
+         "--request", str(req_path), "--work-dir", str(work)],
+        capture_output=True, text=True,
+    )
+    assert proc.returncode != 0
+    assert "invalid slice id" in proc.stderr
+    assert not outside.exists()  # nothing written outside the work-dir

@@ -213,35 +213,52 @@ final class EditorModel: ViewModel {
     }
     exportPhase = .exporting(current: 0, total: targets.count)
 
-    var rendered: [RenderedSlice] = []
-    var workDir: URL?
     do {
+      var rendered: [RenderedSlice] = []
+      var workDir: URL?
       for try await event in engine.renderSlices(renderRequest(for: targets)) {
         switch event {
         case .progress(let progress):
           exportPhase = .exporting(
             current: progress.index,
             total: progress.total == 0 ? targets.count : progress.total)
-        case .completed(let slices):
-          rendered = slices
-          workDir = slices.first?.url.deletingLastPathComponent()
+        case .completed(let result):
+          rendered = result.slices
+          workDir = result.workDir
         }
       }
       if Task.isCancelled {
-        cleanUp(workDir)
+        await removeWorkDir(workDir)
         exportPhase = .failed(cancelMessage(copied: 0, total: targets.count))
         return
       }
-      let copied = try copyToDestination(rendered, targets: targets, destination: destination)
-      cleanUp(workDir)
-      workspace.reveal(copied)
-      lastExportTightNames = targets.filter { !$0.warnings.isEmpty }.map(\.name)
-      exportPhase = .done(count: copied.count)
+      // Copy off the main actor — copying many/large AIFFs (or to a slow/network
+      // folder) must not freeze the UI or block the cancel control.
+      let byID = Dictionary(
+        rendered.map { ($0.id, $0.url) }, uniquingKeysWith: { first, _ in first })
+      let stem = sourceURL.deletingPathExtension().lastPathComponent
+      let outcome = await Self.copyRenderedSlices(
+        stem: stem, targets: targets, renderedByID: byID, destination: destination)
+      await removeWorkDir(workDir)
+
+      if outcome.cancelled {
+        exportPhase = .failed(cancelMessage(copied: outcome.copied.count, total: targets.count))
+      } else if let message = outcome.errorMessage {
+        exportPhase = .failed(message)
+      } else if outcome.copied.count != targets.count {
+        // A short result means the engine didn't render every requested slice —
+        // report it rather than claiming success on a partial reveal.
+        exportPhase = .failed(
+          "The engine rendered \(outcome.copied.count) of \(targets.count) slices.")
+      } else {
+        workspace.reveal(outcome.copied)
+        lastExportTightNames = targets.filter { !$0.warnings.isEmpty }.map(\.name)
+        exportPhase = .done(count: outcome.copied.count)
+      }
     } catch is CancellationError {
-      cleanUp(workDir)
+      // The engine cleans up its own work-dir on a cancelled/failed run.
       exportPhase = .failed(cancelMessage(copied: 0, total: targets.count))
     } catch {
-      cleanUp(workDir)
       exportPhase = .failed(error.localizedDescription)
     }
   }
@@ -266,32 +283,45 @@ final class EditorModel: ViewModel {
       sourceURL: sourceURL, sampleRate: sampleRate, markers: markers, slices: specs)
   }
 
+  /// The result of copying rendered slices to the destination, computed off the main
+  /// actor. `cancelled` means the export task was cancelled mid-copy (partial state);
+  /// `errorMessage` means a copy failed; otherwise `copied` holds one URL per target.
+  struct CopyOutcome: Sendable {
+    var copied: [URL]
+    var cancelled: Bool
+    var errorMessage: String?
+  }
+
   /// Copies each rendered temp AIFF to the destination under a unique, sanitized name.
-  /// Returns the copied destination URLs (in `targets` order).
-  private func copyToDestination(
-    _ rendered: [RenderedSlice], targets: [Slice], destination: URL
-  ) throws -> [URL] {
-    let byID = Dictionary(rendered.map { ($0.id, $0.url) }, uniquingKeysWith: { first, _ in first })
-    let stem = sourceURL.deletingPathExtension().lastPathComponent
-    var taken = Set(existingFileNames(in: destination))
+  /// `nonisolated` so the file IO runs off the main actor. Cancellation is honoured
+  /// between files so a mid-copy cancel reports how many actually landed.
+  private nonisolated static func copyRenderedSlices(
+    stem: String, targets: [Slice], renderedByID: [UUID: URL], destination: URL
+  ) async -> CopyOutcome {
+    var taken = Set(
+      ((try? FileManager.default.contentsOfDirectory(atPath: destination.path)) ?? [])
+        .map { $0.lowercased() })
     var copied: [URL] = []
     for (offset, slice) in targets.enumerated() {
-      guard let source = byID[slice.id] else { continue }
+      if Task.isCancelled {
+        return CopyOutcome(copied: copied, cancelled: true, errorMessage: nil)
+      }
+      guard let source = renderedByID[slice.id] else { continue }
       let name = exportFileName(
         sourceStem: stem, sliceName: slice.name, index: offset + 1, taken: &taken)
       let target = destination.appendingPathComponent(name)
-      try FileManager.default.copyItem(at: source, to: target)
-      copied.append(target)
+      do {
+        try FileManager.default.copyItem(at: source, to: target)
+        copied.append(target)
+      } catch {
+        return CopyOutcome(
+          copied: copied, cancelled: false, errorMessage: error.localizedDescription)
+      }
     }
-    return copied
+    return CopyOutcome(copied: copied, cancelled: false, errorMessage: nil)
   }
 
-  private func existingFileNames(in directory: URL) -> [String] {
-    ((try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? [])
-      .map { $0.lowercased() }
-  }
-
-  private func cleanUp(_ workDir: URL?) {
+  private nonisolated func removeWorkDir(_ workDir: URL?) async {
     guard let workDir else { return }
     try? FileManager.default.removeItem(at: workDir)
   }

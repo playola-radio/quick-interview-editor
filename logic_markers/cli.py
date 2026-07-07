@@ -12,6 +12,7 @@ import os
 import struct
 import sys
 import tempfile
+import uuid
 from pathlib import Path
 
 from . import aiff_markers
@@ -367,9 +368,17 @@ def run_render(source: Path, request_path: Path, work_dir: Path, sample_rate: in
         _emit_event({"type": "progress", "phase": "rendering",
                      "message": f"Rendering slice {i + 1} of {total}",
                      "index": i + 1, "total": total})
+        # The id becomes a filename in work_dir, so it must be a plain UUID — never a
+        # path fragment. Reject anything else so a malformed request can't write
+        # outside the work-dir (defense in depth; the app only ever sends UUIDs).
+        slice_id = str(spec["id"])
+        try:
+            uuid.UUID(slice_id)
+        except ValueError as exc:
+            raise ValueError(f"invalid slice id (expected a UUID): {slice_id!r}") from exc
         start = int(spec["start_sample"])
         end = int(spec["end_sample"])
-        out_path = work_dir / f"{spec['id']}.aiff"
+        out_path = work_dir / f"{slice_id}.aiff"
         out_path.write_bytes(slice_aiff(aiff_bytes, start, end, markers))
         out_slices.append({"id": spec["id"], "path": str(out_path),
                            "start_sample": start, "end_sample": end})

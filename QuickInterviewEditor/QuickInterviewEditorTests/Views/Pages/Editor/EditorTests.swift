@@ -395,7 +395,7 @@ struct EditorTests {
         capturedRequest.setValue(request)
         return AsyncThrowingStream { continuation in
           continuation.yield(.progress(RenderProgress(message: "", index: 1, total: ids.count)))
-          continuation.yield(.completed(rendered))
+          continuation.yield(.completed(RenderResult(slices: rendered, workDir: workDir)))
           continuation.finish()
         }
       }
@@ -430,7 +430,7 @@ struct EditorTests {
     await withDependencies {
       $0.engine.renderSlices = { _ in
         AsyncThrowingStream { continuation in
-          continuation.yield(.completed(Array(rendered)))
+          continuation.yield(.completed(RenderResult(slices: Array(rendered), workDir: workDir)))
           continuation.finish()
         }
       }
@@ -462,7 +462,7 @@ struct EditorTests {
       $0.workspace.reveal = { _ in }
       $0.engine.renderSlices = { _ in
         AsyncThrowingStream { continuation in
-          continuation.yield(.completed(rendered))
+          continuation.yield(.completed(RenderResult(slices: rendered, workDir: workDir)))
           continuation.finish()
         }
       }
@@ -516,6 +516,39 @@ struct EditorTests {
     #expect(message.contains("boom"))
   }
 
+  @Test func partialRenderResultIsReportedAsFailureNotSuccess() async throws {
+    let model = editor()
+    addSlices(model, [(0, 1), (2, 3)])
+    let ids = model.slices.map(\.id)
+    let workDir = try makeTempDir()
+    let destination = try makeTempDir()
+    defer { try? FileManager.default.removeItem(at: destination) }
+    // Engine returns only the FIRST of two requested slices.
+    let rendered = Array(try renderedSlices(for: ids, workDir: workDir).prefix(1))
+    let revealed = LockIsolated(false)
+
+    await withDependencies {
+      $0.engine.renderSlices = { _ in
+        AsyncThrowingStream { continuation in
+          continuation.yield(.completed(RenderResult(slices: rendered, workDir: workDir)))
+          continuation.finish()
+        }
+      }
+      $0.workspace.reveal = { _ in revealed.setValue(true) }
+    } operation: {
+      model.destinationURL = destination
+      await model.performExport(Array(model.slices))
+    }
+
+    guard case .failed(let message) = model.exportPhase else {
+      Issue.record("expected .failed, got \(model.exportPhase)")
+      return
+    }
+    #expect(message.contains("1 of 2"))
+    #expect(!revealed.value)  // no partial reveal
+    #expect(!FileManager.default.fileExists(atPath: workDir.path))  // still cleaned up
+  }
+
   @Test func progressEventsWalkExportingThenDone() async throws {
     let model = editor()
     addSlices(model, [(0, 1), (2, 3)])
@@ -541,7 +574,7 @@ struct EditorTests {
       await settle { model.exportPhase == .exporting(current: 2, total: 2) }
       expectNoDifference(model.exportPhase, .exporting(current: 2, total: 2))
 
-      continuation.yield(.completed(rendered))
+      continuation.yield(.completed(RenderResult(slices: rendered, workDir: workDir)))
       continuation.finish()
       await task.value
       expectNoDifference(model.exportPhase, .done(count: 2))
@@ -595,7 +628,7 @@ struct EditorTests {
     await withDependencies {
       $0.engine.renderSlices = { _ in
         AsyncThrowingStream { continuation in
-          continuation.yield(.completed(rendered))
+          continuation.yield(.completed(RenderResult(slices: rendered, workDir: workDir)))
           continuation.finish()
         }
       }
