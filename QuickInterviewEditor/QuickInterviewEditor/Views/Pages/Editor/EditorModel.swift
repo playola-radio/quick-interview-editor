@@ -274,9 +274,16 @@ final class EditorModel: ViewModel {
 
   private func renderRequest(for targets: [Slice]) -> RenderRequest {
     let sampleRate = editPlan.source.sampleRate
-    let markers = editPlan.words.map { word in
-      RenderMarker(
-        position: word.startSample ?? Int(word.start * Double(sampleRate)), name: word.text)
+    // Walk words in spoken order and nudge any tie one frame forward so two markers
+    // never stack on the same position or get reordered by Logic — matching the
+    // engine's own `build_markers` invariant (aligned timestamps occasionally
+    // collide at the same rounded sample).
+    var lastPosition = Int.min
+    let markers = editPlan.words.map { word -> RenderMarker in
+      var position = word.startSample ?? Int(word.start * Double(sampleRate))
+      if position <= lastPosition { position = lastPosition + 1 }
+      lastPosition = position
+      return RenderMarker(position: position, name: word.text)
     }
     let specs = targets.map {
       RenderSliceSpec(id: $0.id, startSample: $0.startSample, endSample: $0.endSample)

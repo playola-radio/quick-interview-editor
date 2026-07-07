@@ -642,6 +642,36 @@ struct EditorTests {
     #expect(model.exportTightWarning.contains("tight"))
   }
 
+  @Test func renderRequestNudgesCollidingMarkerPositions() async {
+    let plan = EditPlan(
+      schemaVersion: 1,
+      source: .init(path: "/clip.m4a", sampleRate: 44100, channels: 1, durationSamples: 100_000),
+      words: [
+        .init(id: 1, text: "a", start: 0.1, end: 0.2, startSample: 4410, endSample: 8820),
+        .init(id: 2, text: "b", start: 0.1, end: 0.2, startSample: 4410, endSample: 8820),
+      ],
+      silences: [], segments: [])
+    let model = editor(plan)
+    model.slices.append(
+      Slice(
+        id: UUID(), name: "A", startSample: 0, endSample: 8820, wordIDs: [1, 2], snippet: "x",
+        warnings: []))
+    let captured = LockIsolated<RenderRequest?>(nil)
+
+    await withDependencies {
+      $0.engine.renderSlices = { request in
+        captured.setValue(request)
+        return AsyncThrowingStream { $0.finish() }
+      }
+    } operation: {
+      model.destinationURL = URL(fileURLWithPath: NSTemporaryDirectory())
+      await model.performExport(Array(model.slices))
+    }
+
+    // Colliding start samples become strictly increasing marker positions.
+    expectNoDifference(captured.value?.markers.map(\.position), [4410, 4411])
+  }
+
   @Test func exportControlsGatedByStateAndExporting() async {
     let model = editor()
     expectNoDifference(model.canExportAll, false)  // no slices yet
