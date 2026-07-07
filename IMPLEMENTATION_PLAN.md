@@ -15,7 +15,7 @@ min/max pyramid keyed in plan samples (base bucket 256), native→plan ratio int
 pyramid level invariants (bucketSize doubles, mins ≤ maxs, level lengths halve). Live
 decode is not unit-tested (parity with `AudioPlayerClient.live`).
 **Success**: builds; client injectable; `make lint`/`format-check` clean.
-**Status**: Not Started
+**Status**: Complete
 
 ## Stage 2: `WaveformModel` geometry + hit-testing (the correctness core)
 **Goal**: All sample↔pixel math, zoom, visible-window, columns, overlay rects — pure,
