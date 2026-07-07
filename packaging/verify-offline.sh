@@ -26,13 +26,15 @@ trap 'rm -rf "$(dirname "$STAGE")"' EXIT
 echo "==> Staging models as data into the app's Application Support layout"
 WHISP_SNAP=$(ls -d ~/.cache/huggingface/hub/models--Systran--faster-whisper-large-v2/snapshots/*/ 2>/dev/null | head -1)
 [ -n "$WHISP_SNAP" ] || { echo "error: faster-whisper-large-v2 not cached; run the engine once online first" >&2; exit 1; }
-# cp -c = APFS copy-on-write clone (instant even for the 3 GB model.bin).
-cp -c "$WHISP_SNAP"config.json "$WHISP_SNAP"model.bin \
+# Prefer APFS copy-on-write clone (`cp -c`, instant even for the 3 GB model.bin),
+# but fall back to a plain copy on non-APFS volumes (HFS+/exFAT/CI) where -c fails.
+clone() { cp -c "$@" 2>/dev/null || cp "$@"; }
+clone "$WHISP_SNAP"config.json "$WHISP_SNAP"model.bin \
       "$WHISP_SNAP"tokenizer.json "$WHISP_SNAP"vocabulary.txt \
       "$STAGE/models/faster-whisper-large-v2/"
 ALIGN=~/.cache/torch/hub/checkpoints/wav2vec2_fairseq_base_ls960_asr_ls960.pth
 [ -r "$ALIGN" ] || { echo "error: align model not cached at $ALIGN; run the engine once online first" >&2; exit 1; }
-cp -c "$ALIGN" "$STAGE/models/align/"
+clone "$ALIGN" "$STAGE/models/align/"
 
 echo "==> Running frozen 'plan' with a SCRUBBED, OFFLINE environment (env -i)"
 set +e

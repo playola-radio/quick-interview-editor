@@ -34,8 +34,15 @@ enum LiveEngine {
     // (validate()); the first-launch model-setup gate installs them before any
     // transcription reaches this path. Dev (not bundled) keeps its download-on-
     // demand behavior with no env injected.
-    if launch.isBundled, let installation = try? ModelLocations.installation() {
-      launch.environment = installation.engineEnvironment
+    if launch.isBundled {
+      if let installation = try? ModelLocations.installation() {
+        launch.environment = installation.engineEnvironment
+      } else {
+        // Even if the model dirs can't be resolved (Application Support
+        // unavailable), never let the packaged engine fall open to an online
+        // download — force offline so it fails clearly instead.
+        launch.environment = ["QIE_OFFLINE": "1"]
+      }
     }
     return launch
   }

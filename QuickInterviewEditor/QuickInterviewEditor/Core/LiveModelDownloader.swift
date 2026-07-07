@@ -103,7 +103,8 @@ enum LiveModelDownloader {
       try Task.checkCancellation()
       do {
         let tempURL = try await SingleFileDownload.run(
-          url: file.remoteURL, resumeData: resumeData, onProgress: onProgress)
+          url: file.remoteURL, label: file.relativePath, resumeData: resumeData,
+          onProgress: onProgress)
         defer { try? FileManager.default.removeItem(at: tempURL) }
 
         let size = fileSize(tempURL) ?? 0
@@ -161,22 +162,29 @@ enum LiveModelDownloader {
 /// and preserving `resumeData` on failure (so the caller can resume).
 private final class SingleFileDownload: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
 
+  private let label: String
   private let onProgress: @Sendable (Int64) -> Void
   private var continuation: CheckedContinuation<URL, Error>?
   /// The delegate hands back a temp file that URLSession will delete when the
   /// delegate callback returns, so we copy it out synchronously and hand the copy up.
   private var deliveredURL: URL?
+  /// A non-2xx HTTP status seen at completion. URLSession delivers 404/403/500
+  /// bodies as "successful" transfers, so we must reject them explicitly instead
+  /// of letting an error page flow into the size/checksum path.
+  private var httpErrorStatus: Int?
 
-  private init(onProgress: @escaping @Sendable (Int64) -> Void) {
+  private init(label: String, onProgress: @escaping @Sendable (Int64) -> Void) {
+    self.label = label
     self.onProgress = onProgress
   }
 
   static func run(
     url: URL,
+    label: String,
     resumeData: Data?,
     onProgress: @escaping @Sendable (Int64) -> Void
   ) async throws -> URL {
-    let delegate = SingleFileDownload(onProgress: onProgress)
+    let delegate = SingleFileDownload(label: label, onProgress: onProgress)
     let session = URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
     defer { session.finishTasksAndInvalidate() }
 
@@ -205,6 +213,14 @@ private final class SingleFileDownload: NSObject, URLSessionDownloadDelegate, @u
     _ session: URLSession, downloadTask: URLSessionDownloadTask,
     didFinishDownloadingTo location: URL
   ) {
+    // Reject non-2xx up front: the "downloaded" file is an error page (404/403/
+    // 500 body), not the model. URLSession treats these as successful transfers.
+    if let http = downloadTask.response as? HTTPURLResponse,
+      !(200..<300).contains(http.statusCode)
+    {
+      httpErrorStatus = http.statusCode
+      return
+    }
     // Must copy synchronously: `location` is removed once this returns.
     let copy = FileManager.default.temporaryDirectory
       .appendingPathComponent(UUID().uuidString)
@@ -219,13 +235,14 @@ private final class SingleFileDownload: NSObject, URLSessionDownloadDelegate, @u
   func urlSession(
     _ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?
   ) {
-    if let error {
+    if let status = httpErrorStatus {
+      continuation?.resume(throwing: ModelDownloadError.httpError(file: label, status: status))
+    } else if let error {
       continuation?.resume(throwing: error)
     } else if let url = deliveredURL {
       continuation?.resume(returning: url)
     } else {
-      continuation?.resume(
-        throwing: URLError(.cannotWriteToFile))
+      continuation?.resume(throwing: URLError(.cannotWriteToFile))
     }
     continuation = nil
   }

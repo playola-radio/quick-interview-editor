@@ -9,8 +9,10 @@ In **dev** (no ``QIE_*`` env set) both download to the default HuggingFace/torch
 caches on first use — exactly the behavior this project has always had. In the
 **packaged app** the models are pre-downloaded into Application Support as data
 and the app sets ``QIE_WHISPER_MODEL_DIR`` / ``QIE_ALIGN_MODEL_DIR`` /
-``QIE_NLTK_DATA`` / ``QIE_OFFLINE=1`` so the engine loads from those absolute
-paths and never touches the network.
+``QIE_OFFLINE=1`` so the engine loads from those absolute paths and never
+touches the network. (The bundled NLTK ``punkt_tab`` is wired separately by the
+frozen ``engine_entry.py`` via ``sys._MEIPASS``, not by the app;
+``QIE_NLTK_DATA`` is only an optional override honored here.)
 
 Keeping this a pure ``env -> config`` mapping lets it be unit-tested without
 torch (see ``tests/test_model_config.py``).
