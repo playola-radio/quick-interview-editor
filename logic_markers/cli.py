@@ -365,8 +365,7 @@ def run_render(source: Path, request_path: Path, work_dir: Path, sample_rate: in
     # Slices are cut from the in-memory bytes; free the (possibly several-hundred-MB)
     # converted AIFF now so it doesn't sit alongside the per-slice outputs.
     aiff_path.unlink(missing_ok=True)
-    _, chunks = aiff_markers.parse_chunks(aiff_bytes)
-    frame_count = struct.unpack(">I", dict(chunks)[b"COMM"][2:6])[0]
+    frame_count = aiff_markers.read_frame_count(aiff_bytes)
 
     out_slices = []
     for i, spec in enumerate(slices):

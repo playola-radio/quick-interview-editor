@@ -83,6 +83,15 @@ def build_mark_chunk(markers: list[Marker]) -> bytes:
     return bytes(out)
 
 
+def read_frame_count(data: bytes) -> int:
+    """Return numSampleFrames from the AIFF COMM chunk."""
+    _, chunks = parse_chunks(data)
+    for ck_id, ck_data in chunks:
+        if ck_id == b"COMM":
+            return struct.unpack(">I", ck_data[2:6])[0]
+    raise ValueError("no COMM chunk found; not a valid AIFF")
+
+
 def read_sample_rate(data: bytes) -> int:
     """Read the sample rate (Hz) from the COMM chunk's 80-bit extended float."""
     _, chunks = parse_chunks(data)
