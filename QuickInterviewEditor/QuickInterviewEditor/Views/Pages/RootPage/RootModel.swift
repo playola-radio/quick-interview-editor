@@ -52,6 +52,7 @@ final class RootModel: ViewModel {
     let tab = tabs[id: id]
     tab?.cancel()
     if let editor = tab?.editor {
+      editor.cancelExportTapped()  // don't let an export outlive its closed tab
       Task { await editor.stopPlaybackTapped() }
     }
     let wasSelected = selectedTabID == id

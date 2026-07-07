@@ -106,6 +106,51 @@ struct RootTests {
     }
   }
 
+  @Test func closingATabCancelsAnInFlightExport() async throws {
+    let plan = Fixtures.editPlan()
+    let (stream, continuation) = AsyncThrowingStream<RenderEvent, Error>.makeStream()
+    let terminated = LockIsolated(false)
+    continuation.onTermination = { _ in terminated.setValue(true) }
+    let destination = FileManager.default.temporaryDirectory
+      .appendingPathComponent("qie-root-export-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: destination) }
+
+    try await withDependencies {
+      $0.engine.transcribe = { _ in
+        AsyncThrowingStream {
+          $0.yield(.completed(plan))
+          $0.finish()
+        }
+      }
+      $0.engine.renderSlices = { _ in stream }
+      $0.workspace.reveal = { _ in }
+      $0.audioPlayer.stop = {}  // closeTab also stops playback
+    } operation: {
+      let model = RootModel()
+      model.filePicked(URL(fileURLWithPath: "/clip.m4a"))
+      let tabID = model.tabs.first!.id
+      for _ in 0..<1000 where model.tabs[id: tabID]?.editor == nil { await Task.yield() }
+      let editor = try #require(model.tabs[id: tabID]?.editor)
+
+      editor.destinationURL = destination
+      editor.slices.append(
+        Slice(
+          id: UUID(), name: "A", startSample: 0, endSample: 100, wordIDs: [], snippet: "x",
+          warnings: []))
+      editor.exportAllTapped()
+      #expect(editor.isExporting)
+
+      model.closeTab(tabID)  // must cancel the export, not let it outlive the tab
+      await editor.exportTask?.value
+      #expect(terminated.value)
+      guard case .failed = editor.exportPhase else {
+        Issue.record("expected .failed after close, got \(editor.exportPhase)")
+        return
+      }
+    }
+  }
+
   @Test func closingARunningTabPromotesAQueuedOne() {
     withDependencies {
       $0.engine.transcribe = { _ in neverCompleting() }

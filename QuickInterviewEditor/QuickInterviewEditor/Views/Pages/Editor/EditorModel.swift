@@ -241,7 +241,9 @@ final class EditorModel: ViewModel {
         stem: stem, targets: targets, renderedByID: byID, destination: destination)
       await removeWorkDir(workDir)
 
-      if outcome.cancelled {
+      if outcome.cancelled || Task.isCancelled {
+        // A cancel landing during the final copy also lands here, so the cancel
+        // button can never report success.
         exportPhase = .failed(cancelMessage(copied: outcome.copied.count, total: targets.count))
       } else if let message = outcome.errorMessage {
         exportPhase = .failed(message)
