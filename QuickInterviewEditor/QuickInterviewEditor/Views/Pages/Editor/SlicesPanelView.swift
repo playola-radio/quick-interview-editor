@@ -65,6 +65,7 @@ private struct SliceCard: View {
         )
         .onHover { nameHovering = $0 }
         .help("Click to rename")
+        .accessibilityLabel("Slice name")
         Spacer()
         Text(row.durationLabel).font(.system(size: 11))
           .foregroundStyle(Color(white: 0.54))

@@ -150,6 +150,12 @@ func middleTruncatedSnippet(_ text: String, maxLength: Int) -> String {
   var head = 1
   var tail = 1
   var growTail = true
+  // If even the minimal first-word … last-word window overflows (e.g. a single
+  // run-on word or a long URL), fall back to a hard character truncation so the
+  // maxLength guarantee always holds.
+  guard rendered(head: head, tail: tail).count <= maxLength else {
+    return String(trimmed.prefix(max(0, maxLength - 1))) + "…"
+  }
   while head + tail < words.count {
     let headFits = rendered(head: head + 1, tail: tail).count <= maxLength
     let tailFits = rendered(head: head, tail: tail + 1).count <= maxLength

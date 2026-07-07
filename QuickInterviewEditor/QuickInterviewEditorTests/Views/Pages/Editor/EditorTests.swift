@@ -92,6 +92,15 @@ struct EditorTests {
     expectNoDifference(middleTruncatedSnippet(longTwoWords, maxLength: 20), longTwoWords)
   }
 
+  @Test func oversizedFirstOrLastWordStillRespectsMaxLength() {
+    // A single run-on word (or long URL) as the first/last word must not let the
+    // result exceed maxLength — the minimal first…last window itself overflows.
+    let text = String(repeating: "x", count: 80) + " b " + String(repeating: "y", count: 80)
+    let out = middleTruncatedSnippet(text, maxLength: 20)
+    #expect(out.count <= 20)
+    #expect(out.hasSuffix("…"))
+  }
+
   @Test func sliceSnippetShowsFirstAndLastWordsOfSelection() {
     let model = editor()
     let words = model.transcript.words
