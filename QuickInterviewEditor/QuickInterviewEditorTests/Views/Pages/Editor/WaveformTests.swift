@@ -115,17 +115,6 @@ struct WaveformTests {
     #expect(model.span(for: 300..<300) == nil)  // empty range
   }
 
-  @Test func highlightAndRedSpansDerivedFromRanges() {
-    let model = makeModel(totalSamples: 100_000, viewportWidth: 100, samplesPerPixel: 10)
-    model.highlightedRange = 100..<300
-    model.redRanges = [0..<100, 500..<700]
-    expectNoDifference(model.highlightSpan, WaveformSpan(positionX: 10, width: 20))
-    // second red range starts at x 50 (on-screen), first at x 0.
-    expectNoDifference(
-      model.redSpans,
-      [WaveformSpan(positionX: 0, width: 10), WaveformSpan(positionX: 50, width: 20)])
-  }
-
   // MARK: - playhead
 
   @Test func playheadXOnlyWhenInsideViewport() {

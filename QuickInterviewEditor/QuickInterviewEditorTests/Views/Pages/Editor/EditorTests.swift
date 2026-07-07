@@ -374,6 +374,94 @@ struct EditorTests {
     #expect(model.waveform.playheadSample == nil)
   }
 
+  // MARK: - Waveform sync
+
+  /// Sets identity geometry (1 sample per pixel, no scroll) so xToSample(x) == x.
+  private func identityGeometry(_ model: EditorModel, viewportWidth: CGFloat = 1_000_000) {
+    model.waveform.viewportWidth = viewportWidth
+    model.waveform.samplesPerPixel = 1
+    model.waveform.visibleStartSample = 0
+  }
+
+  @Test func waveformTapSelectsContainingWord() {
+    let model = editor()
+    identityGeometry(model)
+    let word = model.editPlan.words.first { $0.startSample != nil && $0.endSample != nil }!
+    model.waveformTapped(atX: CGFloat(word.startSample! + 1))
+    expectNoDifference(model.transcript.orderedSelectedWordIDs, [word.id])
+  }
+
+  @Test func waveformTapAtWordStartIsInclusiveAtEndIsExclusive() {
+    let model = editor()
+    identityGeometry(model)
+    // choose a non-final word with sample bounds
+    let words = model.editPlan.words
+    let index = words.firstIndex {
+      $0.startSample != nil && $0.endSample != nil && $0.id != words.last?.id
+    }!
+    let word = words[index]
+    model.waveformTapped(atX: CGFloat(word.startSample!))  // start is inclusive
+    expectNoDifference(model.transcript.orderedSelectedWordIDs, [word.id])
+    // Clear first: a tap at the exclusive end lands in the next word or a gap, never
+    // back on this word — so the selection must not be this word afterward.
+    model.transcript.clearSelectionTapped()
+    model.waveformTapped(atX: CGFloat(word.endSample!))  // end is exclusive
+    #expect(model.transcript.orderedSelectedWordIDs != [word.id])
+  }
+
+  @Test func waveformTapInEmptyAreaLeavesSelectionUntouched() {
+    let model = editor()
+    identityGeometry(model)
+    model.transcript.wordTapped(model.transcript.words[0].id)
+    let before = model.transcript.orderedSelectedWordIDs
+    // a sample far beyond the audio belongs to no word
+    model.waveformTapped(atX: CGFloat(model.editPlan.source.durationSamples + 10_000))
+    expectNoDifference(model.transcript.orderedSelectedWordIDs, before)
+  }
+
+  @Test func highlightedSampleRangeMirrorsTranscriptSelection() {
+    let model = editor()
+    #expect(model.highlightedSampleRange == nil)
+    model.transcript.wordTapped(model.transcript.words[0].id)
+    model.transcript.wordTapped(model.transcript.words[2].id)
+    expectNoDifference(model.highlightedSampleRange, model.transcript.selectedSampleRange)
+    #expect(model.highlightedSampleRange != nil)
+  }
+
+  @Test func waveformHighlightSpanCombinesSelectionWithGeometry() {
+    let model = editor()
+    identityGeometry(model)
+    model.transcript.selectWord(model.transcript.words[0].id)
+    let range = model.highlightedSampleRange!
+    expectNoDifference(model.waveformHighlightSpan, model.waveform.span(for: range))
+    #expect(model.waveformHighlightSpan != nil)
+  }
+
+  @Test func redRangesTrackRunTogetherWordsAndSensitivity() {
+    let model = editor()
+    model.transcript.sensitivityChanged(10)
+    let tight = model.redRanges.count
+    model.transcript.sensitivityChanged(80)
+    let loose = model.redRanges.count
+    #expect(tight < loose)
+    for range in model.redRanges { #expect(range.lowerBound < range.upperBound) }
+  }
+
+  @Test func loadWaveformPopulatesChildViaClient() async {
+    let plan = Fixtures.editPlan()
+    let fixture = Waveform.pyramid(
+      baseMins: [0], baseMaxs: [0.5], sampleRate: plan.source.sampleRate,
+      totalSamples: plan.source.durationSamples)
+    let model = withDependencies {
+      $0.waveform = WaveformClient(loadWaveform: { _, _, _ in fixture })
+    } operation: {
+      EditorModel(sourceURL: URL(fileURLWithPath: "/clip.m4a"), editPlan: plan)
+    }
+    await model.loadWaveform()
+    expectNoDifference(model.waveform.waveform, fixture)
+    #expect(model.waveform.totalSamples == plan.source.durationSamples)
+  }
+
   // MARK: - Export
 
   private func addSlices(_ model: EditorModel, _ pairs: [(Int, Int)]) {

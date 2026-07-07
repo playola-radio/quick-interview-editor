@@ -52,7 +52,7 @@ end-belongs-to-next).
 at a boundary picks the next/none; transcript selection updates `highlightedSampleRange`;
 sensitivity change updates `redRanges`; words missing samples excluded.
 **Success**: sync correct both directions, all on the model.
-**Status**: Not Started
+**Status**: Complete
 
 ## Stage 5: Views + `EditorView` integration
 **Goal**: It renders and is interactive; zero logic in the view.
