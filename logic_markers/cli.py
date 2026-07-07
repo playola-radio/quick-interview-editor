@@ -500,6 +500,13 @@ def main(argv=None) -> int:
     try:
         return args.func(args)
     except Exception as exc:  # fail fast with a clear message
+        # Set QIE_DEBUG=1 for the full traceback (incl. the chained cause that a
+        # library like transformers/pyannote hides behind a terse message). This
+        # is the difference between a diagnosable packaged helper and a black box.
+        if os.environ.get("QIE_DEBUG"):
+            import traceback
+
+            traceback.print_exc(file=sys.stderr)
         print(f"error: {exc}", file=sys.stderr)
         return 1
 

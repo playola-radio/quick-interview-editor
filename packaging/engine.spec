@@ -13,7 +13,12 @@ first). Apple Silicon only for the spike (``target_arch='arm64'``).
 
 import os
 
-from PyInstaller.utils.hooks import collect_all, collect_data_files, collect_submodules
+from PyInstaller.utils.hooks import (
+    collect_all,
+    collect_data_files,
+    collect_submodules,
+    copy_metadata,
+)
 
 # PyInstaller resolves relative paths in a .spec against the spec's own
 # directory, not the invocation CWD. Anchor everything on absolute paths derived
@@ -58,6 +63,34 @@ for pkg in _COLLECT:
 # not Python modules — collect_all misses these, so grab them explicitly. These
 # ship *inside* the notarized bundle (static data, signed + notarized).
 datas += collect_data_files("whisperx", includes=["assets/*"])
+
+# Package METADATA (.dist-info). transformers version-checks several packages at
+# import time via importlib.metadata.version(...), which raises
+# PackageNotFoundError if the metadata isn't bundled even when the package IS.
+# The blocker here is `transformers/audio_utils.py` reading torchcodec's version;
+# bundle it plus the other commonly version-checked deps defensively.
+for meta_pkg in [
+    "torchcodec",
+    "torch",
+    "torchaudio",
+    "transformers",
+    "tokenizers",
+    "huggingface-hub",
+    "safetensors",
+    "numpy",
+    "tqdm",
+    "regex",
+    "requests",
+    "filelock",
+    "packaging",
+    "pyyaml",
+    "faster-whisper",
+    "ctranslate2",
+]:
+    try:
+        datas += copy_metadata(meta_pkg)
+    except Exception as exc:  # noqa: BLE001 — a missing optional dep's metadata isn't fatal
+        print(f"[engine.spec] copy_metadata({meta_pkg}) skipped: {exc}")
 
 # whisperx.vads.* and the transformers wav2vec2 model are imported dynamically.
 hiddenimports += collect_submodules("whisperx")
