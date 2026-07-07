@@ -118,12 +118,19 @@ final class WaveformModel: ViewModel {
   /// once the pyramid is built or while it's building, so long files aren't re-decoded.
   func load(url: URL, planSampleRate: Int, durationSamples: Int) async {
     guard waveform == nil, !isLoading else { return }
+    // A degenerate plan (rate/duration <= 0) would pass garbage to AVFoundation; show the
+    // empty state instead. Other code clamps these for labels; the waveform bails.
+    guard planSampleRate > 0, durationSamples > 0 else { return }
     sampleRate = planSampleRate
     totalSamples = durationSamples
     isLoading = true
     defer { isLoading = false }
-    await withErrorReporting {
+    do {
       waveform = try await waveformClient.loadWaveform(url, planSampleRate, durationSamples)
+    } catch is CancellationError {
+      // The view went away mid-decode; stay unloaded and retry when it reappears.
+    } catch {
+      reportIssue(error)
     }
     if viewportWidth > 0 { samplesPerPixel = clampedSamplesPerPixel(fitSamplesPerPixel()) }
   }

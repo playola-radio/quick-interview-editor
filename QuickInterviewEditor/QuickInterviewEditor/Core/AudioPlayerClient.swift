@@ -88,6 +88,9 @@ private actor LivePlayerBox {
   /// that started playback always gets ticks, even if another tab subscribed later; each
   /// subscriber decides for itself whether to show them.
   private var positionContinuations: [UUID: AsyncStream<PlaybackPosition>.Continuation] = [:]
+  /// IDs whose stream terminated before their (unordered) registration task landed, so a
+  /// late `add` doesn't store a dead continuation forever.
+  private var terminatedContinuationIDs: Set<UUID> = []
   private var tickTask: Task<Void, Never>?
   private var startPlanSample = 0
   private var playRatio = 1.0
@@ -95,11 +98,14 @@ private actor LivePlayerBox {
   func addPositionContinuation(
     id: UUID, _ continuation: AsyncStream<PlaybackPosition>.Continuation
   ) {
+    if terminatedContinuationIDs.remove(id) != nil { return }  // termination beat us here
     positionContinuations[id] = continuation
   }
 
   func removePositionContinuation(id: UUID) {
-    positionContinuations[id] = nil
+    if positionContinuations.removeValue(forKey: id) == nil {
+      terminatedContinuationIDs.insert(id)  // removal beat registration
+    }
   }
 
   private func broadcast(_ position: PlaybackPosition) {
@@ -199,6 +205,11 @@ private actor LivePlayerBox {
   }
 
   /// Reads the node's played-frame count, maps it back to a plan sample, and yields it.
+  /// The playhead follows the audio the user actually hears (native frames → plan via the
+  /// same ratio playback uses); it is exact when the source is already at the plan rate
+  /// (the common case). On a resampled source it can differ from the waveform pyramid by
+  /// resampler rounding — a cosmetic read-only-playhead limitation, closed once a single
+  /// canonical AIFF backs both (roadmap decision 4).
   private func emitPosition() {
     guard node.isPlaying, let nodeTime = node.lastRenderTime,
       let playerTime = node.playerTime(forNodeTime: nodeTime)

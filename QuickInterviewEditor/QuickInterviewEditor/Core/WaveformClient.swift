@@ -172,9 +172,31 @@ private enum WaveformDecoder {
     guard let track = tracks.first else { throw WaveformClientError.noAudioTrack }
 
     let reader = try AVAssetReader(asset: asset)
-    // Force mono Float32 at the plan sample rate: AVAssetReader downmixes channels and
-    // resamples, so each frame the loop sees IS one plan sample (frame index == plan
-    // sample). This is the entire native→plan conversion, confined here.
+    let output = makeOutput(track: track, planSampleRate: planSampleRate)
+    guard reader.canAdd(output) else {
+      throw WaveformClientError.readFailed("cannot add track output")
+    }
+    reader.add(output)
+    guard reader.startReading() else {
+      throw WaveformClientError.readFailed(reader.error?.localizedDescription ?? "startReading")
+    }
+
+    let base = try accumulate(
+      output: output, reader: reader, planSampleRate: planSampleRate,
+      durationSamples: durationSamples)
+    // The plan's duration is authoritative (roadmap decision 4): the pyramid always spans
+    // exactly [0, durationSamples), so its coverage and the x-axis can't disagree.
+    return Waveform.pyramid(
+      baseMins: base.mins, baseMaxs: base.maxs, sampleRate: planSampleRate,
+      totalSamples: durationSamples)
+  }
+
+  /// Mono Float32 at the plan sample rate: AVAssetReader downmixes channels and resamples,
+  /// so each frame the loop sees IS one plan sample (frame index == plan sample). This is
+  /// the entire native→plan conversion, confined here.
+  private static func makeOutput(track: AVAssetTrack, planSampleRate: Int)
+    -> AVAssetReaderTrackOutput
+  {
     let output = AVAssetReaderTrackOutput(
       track: track,
       outputSettings: [
@@ -187,18 +209,31 @@ private enum WaveformDecoder {
         AVNumberOfChannelsKey: 1,
       ])
     output.alwaysCopiesSampleData = false
-    guard reader.canAdd(output) else {
-      throw WaveformClientError.readFailed("cannot add track output")
-    }
-    reader.add(output)
-    guard reader.startReading() else {
-      throw WaveformClientError.readFailed(reader.error?.localizedDescription ?? "startReading")
-    }
+    return output
+  }
 
+  /// Streams the reader's PCM into finest-level min/max buckets, honoring cancellation and
+  /// stopping once every plan-duration bucket is filled.
+  private static func accumulate(
+    output: AVAssetReaderTrackOutput, reader: AVAssetReader, planSampleRate: Int,
+    durationSamples: Int
+  ) throws -> (mins: [Float], maxs: [Float]) {
     var accumulator = BaseAccumulator(
       bucketSize: Waveform.baseBucketSize, durationSamples: durationSamples)
+    var verifiedFormat = false
 
     while let sampleBuffer = output.copyNextSampleBuffer() {
+      if Task.isCancelled {
+        reader.cancelReading()
+        throw CancellationError()
+      }
+      // Verify AVAssetReader actually delivered mono Float32 at the plan rate. If a codec
+      // path ever ignores the output settings, fail loud rather than silently treat
+      // native-rate PCM as plan samples (which would drift the waveform).
+      if !verifiedFormat {
+        try verifyFormat(sampleBuffer, planSampleRate: planSampleRate)
+        verifiedFormat = true
+      }
       guard let blockBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else { continue }
       let length = CMBlockBufferGetDataLength(blockBuffer)
       var samples = [Float](repeating: 0, count: length / MemoryLayout<Float>.size)
@@ -208,15 +243,36 @@ private enum WaveformDecoder {
       }
       guard status == kCMBlockBufferNoErr else { continue }
       accumulator.fold(samples: samples)
+      // Every plan-duration bucket is filled; extra decoder tail (codec padding beyond the
+      // plan's timeline) isn't part of our coordinate space, so stop early.
+      if accumulator.position >= durationSamples {
+        reader.cancelReading()
+        break
+      }
     }
 
     if reader.status == .failed {
       throw WaveformClientError.readFailed(reader.error?.localizedDescription ?? "read failed")
     }
-    let base = accumulator.finish()
-    return Waveform.pyramid(
-      baseMins: base.mins, baseMaxs: base.maxs, sampleRate: planSampleRate,
-      totalSamples: max(durationSamples, accumulator.position))
+    return accumulator.finish()
+  }
+
+  /// Throws if the sample buffer isn't the mono 32-bit float PCM at `planSampleRate` we
+  /// asked for — the guarantee the whole "frame index == plan sample" mapping rests on.
+  private static func verifyFormat(_ sampleBuffer: CMSampleBuffer, planSampleRate: Int) throws {
+    guard let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer),
+      let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(formatDescription)?.pointee
+    else {
+      throw WaveformClientError.readFailed("missing PCM format description")
+    }
+    let isFloat = asbd.mFormatFlags & kAudioFormatFlagIsFloat != 0
+    guard Int(asbd.mSampleRate.rounded()) == planSampleRate, asbd.mChannelsPerFrame == 1,
+      isFloat, asbd.mBitsPerChannel == 32
+    else {
+      throw WaveformClientError.readFailed(
+        "unexpected PCM format: \(asbd.mSampleRate) Hz, \(asbd.mChannelsPerFrame) ch, "
+          + "\(asbd.mBitsPerChannel)-bit")
+    }
   }
 
   /// Accumulates streamed mono samples into finest-level min/max buckets without ever

@@ -212,4 +212,33 @@ struct WaveformTests {
     await model.load(url: url, planSampleRate: 44100, durationSamples: 500)
     #expect(calls.value == 1)  // second call is a no-op — no re-decode
   }
+
+  @Test func loadIgnoresDegeneratePlan() async {
+    let calls = LockIsolated(0)
+    let model = withDependencies {
+      $0.waveform = WaveformClient(loadWaveform: { _, _, _ in
+        calls.withValue { $0 += 1 }
+        return Waveform.pyramid(baseMins: [0], baseMaxs: [0], sampleRate: 1, totalSamples: 1)
+      })
+    } operation: {
+      WaveformModel()
+    }
+    await model.load(url: URL(fileURLWithPath: "/x"), planSampleRate: 0, durationSamples: 0)
+    #expect(calls.value == 0)  // never touches AVFoundation with a garbage plan
+    #expect(model.waveform == nil)
+    #expect(model.showsEmpty)
+  }
+
+  @Test func loadSwallowsCancellationWithoutReportingAnIssue() async {
+    let model = withDependencies {
+      $0.waveform = WaveformClient(loadWaveform: { _, _, _ in throw CancellationError() })
+    } operation: {
+      WaveformModel()
+    }
+    // No withKnownIssue: a reported issue here would fail the test, proving cancellation
+    // is swallowed (the view went away) rather than surfaced as an error.
+    await model.load(url: URL(fileURLWithPath: "/x"), planSampleRate: 44100, durationSamples: 1000)
+    #expect(model.waveform == nil)
+    #expect(model.isLoading == false)
+  }
 }
