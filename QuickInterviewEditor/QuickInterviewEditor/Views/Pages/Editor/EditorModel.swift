@@ -17,11 +17,13 @@ final class EditorModel: ViewModel {
   let sourceURL: URL
   let editPlan: EditPlan
   var transcript: TranscriptPageModel
+  var waveform: WaveformModel
 
   init(sourceURL: URL, editPlan: EditPlan) {
     self.sourceURL = sourceURL
     self.editPlan = editPlan
     self.transcript = TranscriptPageModel(editPlan: editPlan)
+    self.waveform = WaveformModel()
     super.init()
   }
 
@@ -115,6 +117,14 @@ final class EditorModel: ViewModel {
   }
 
   // MARK: - User Actions
+  /// Streams playback positions from the player into the waveform playhead (plan
+  /// samples while playing, cleared on stop). Runs for the editor's lifetime.
+  func observePlayback() async {
+    for await position in audioPlayer.positions() {
+      waveform.playheadSample = position.isPlaying ? position.sample : nil
+    }
+  }
+
   func addSliceTapped() {
     guard let range = transcript.selectedSampleRange else { return }
     let wordIDs = transcript.orderedSelectedWordIDs

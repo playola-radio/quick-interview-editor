@@ -8,6 +8,17 @@ struct AudioPlayerClient: Sendable {
   /// finishes or stop() is called.
   var play: @Sendable (URL, Range<Int>, Int) async throws -> Void
   var stop: @Sendable () async -> Void
+  /// A stream of playback positions in PLAN samples while a slice plays, terminated by an
+  /// `isPlaying: false` tick on stop/finish. Additive to `play`/`stop` so the waveform
+  /// playhead gets real positions without disturbing the tuned slice-playback path.
+  var positions: @Sendable () -> AsyncStream<PlaybackPosition>
+}
+
+/// A playback position sampled from the audio node, expressed in PLAN samples so it lands
+/// in the same coordinate system as the waveform (the native→plan conversion is internal).
+struct PlaybackPosition: Sendable, Equatable {
+  var sample: Int
+  var isPlaying: Bool
 }
 
 extension AudioPlayerClient: DependencyKey {
@@ -20,10 +31,12 @@ extension AudioPlayerClient: TestDependencyKey {
       reportIssue("AudioPlayerClient.play called without a test override")
       throw EngineClientError.unimplemented("AudioPlayerClient.play")
     },
-    stop: { reportIssue("AudioPlayerClient.stop called without a test override") }
+    stop: { reportIssue("AudioPlayerClient.stop called without a test override") },
+    positions: { AsyncStream { $0.finish() } }
   )
 
-  static let previewValue = AudioPlayerClient(play: { _, _, _ in }, stop: {})
+  static let previewValue = AudioPlayerClient(
+    play: { _, _, _ in }, stop: {}, positions: { AsyncStream { $0.finish() } })
 }
 
 extension DependencyValues {
@@ -42,7 +55,13 @@ extension AudioPlayerClient {
       play: { url, range, sampleRate in
         try await box.play(url: url, range: range, planSampleRate: sampleRate)
       },
-      stop: { await box.stop() }
+      stop: { await box.stop() },
+      positions: {
+        AsyncStream { continuation in
+          // Register on the actor; the builder closure runs synchronously, so hop.
+          Task { await box.setPositionContinuation(continuation) }
+        }
+      }
     )
   }
 }
@@ -58,6 +77,17 @@ private actor LivePlayerBox {
   private let node = AVAudioPlayerNode()
   private var continuation: CheckedContinuation<Void, Never>?
   private var generation = 0
+
+  /// Position-stream plumbing. `startPlanSample` + `playRatio` convert the node's native
+  /// render frames back to plan samples; `tickTask` polls ~30 Hz while a slice plays.
+  private var positionContinuation: AsyncStream<PlaybackPosition>.Continuation?
+  private var tickTask: Task<Void, Never>?
+  private var startPlanSample = 0
+  private var playRatio = 1.0
+
+  func setPositionContinuation(_ continuation: AsyncStream<PlaybackPosition>.Continuation) {
+    positionContinuation = continuation
+  }
 
   /// Returns when the scheduled segment finishes playing, or when `stop()` or
   /// another `play()` supersedes it.
@@ -75,6 +105,8 @@ private actor LivePlayerBox {
     guard frameCount > 0 else { return }
 
     supersede()  // resume + tear down any current playback
+    startPlanSample = max(0, range.lowerBound)
+    playRatio = ratio
     if node.engine == nil { engine.attach(node) }
     engine.connect(node, to: engine.mainMixerNode, format: file.processingFormat)
     try engine.start()
@@ -95,6 +127,7 @@ private actor LivePlayerBox {
       Task { await self?.complete(generation: myGeneration) }
     }
     node.play()
+    startTicking()
     // Suspend until the segment completes or is superseded. Schedule/play happen
     // before this (not inside the continuation body) so the `sending` body
     // captures only the actor's own `continuation`, never the non-Sendable
@@ -116,6 +149,7 @@ private actor LivePlayerBox {
     generation += 1
     let waiter = continuation
     continuation = nil
+    stopTicking()
     stopNode()
     waiter?.resume()
   }
@@ -123,8 +157,38 @@ private actor LivePlayerBox {
   private func complete(generation completedGeneration: Int) {
     guard generation == completedGeneration, let waiter = continuation else { return }
     continuation = nil
+    stopTicking()
     stopNode()
     waiter.resume()
+  }
+
+  /// Polls the node's render position ~30 Hz and yields plan-sample positions.
+  private func startTicking() {
+    tickTask?.cancel()
+    tickTask = Task { [weak self] in
+      while !Task.isCancelled {
+        guard let self else { return }
+        await self.emitPosition()
+        try? await Task.sleep(for: .milliseconds(33))
+      }
+    }
+  }
+
+  /// Stops polling and emits a final `isPlaying: false` tick so the playhead clears.
+  private func stopTicking() {
+    tickTask?.cancel()
+    tickTask = nil
+    positionContinuation?.yield(PlaybackPosition(sample: startPlanSample, isPlaying: false))
+  }
+
+  /// Reads the node's played-frame count, maps it back to a plan sample, and yields it.
+  private func emitPosition() {
+    guard node.isPlaying, let nodeTime = node.lastRenderTime,
+      let playerTime = node.playerTime(forNodeTime: nodeTime)
+    else { return }
+    let framesPlayed = max(0, playerTime.sampleTime)
+    let planSample = startPlanSample + Int(Double(framesPlayed) / max(playRatio, .ulpOfOne))
+    positionContinuation?.yield(PlaybackPosition(sample: planSample, isPlaying: true))
   }
 
   private func stopNode() {

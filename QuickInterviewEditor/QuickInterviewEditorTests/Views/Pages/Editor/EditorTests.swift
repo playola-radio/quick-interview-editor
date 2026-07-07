@@ -341,6 +341,39 @@ struct EditorTests {
     expectNoDifference(model.slices.map(\.id), [middleID])
   }
 
+  // MARK: - Playhead (playback position)
+
+  @Test func observePlaybackMapsPositionToWaveformPlayhead() async {
+    let model = editor()
+    await withDependencies {
+      $0.audioPlayer.positions = {
+        AsyncStream { continuation in
+          continuation.yield(PlaybackPosition(sample: 1000, isPlaying: true))
+          continuation.finish()
+        }
+      }
+    } operation: {
+      await model.observePlayback()
+    }
+    #expect(model.waveform.playheadSample == 1000)
+  }
+
+  @Test func observePlaybackClearsPlayheadWhenStopped() async {
+    let model = editor()
+    await withDependencies {
+      $0.audioPlayer.positions = {
+        AsyncStream { continuation in
+          continuation.yield(PlaybackPosition(sample: 1000, isPlaying: true))
+          continuation.yield(PlaybackPosition(sample: 1200, isPlaying: false))
+          continuation.finish()
+        }
+      }
+    } operation: {
+      await model.observePlayback()
+    }
+    #expect(model.waveform.playheadSample == nil)
+  }
+
   // MARK: - Export
 
   private func addSlices(_ model: EditorModel, _ pairs: [(Int, Int)]) {

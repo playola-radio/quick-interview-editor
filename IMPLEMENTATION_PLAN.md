@@ -40,7 +40,7 @@ positions while a slice plays, clears on stop.
 deterministically; cleared on stop; existing `AudioPlayerClientTests` still green.
 No `Task.sleep`.
 **Success**: playhead driven by injected positions in tests; live isolated in the actor.
-**Status**: Not Started
+**Status**: Complete
 
 ## Stage 4: Two-way sync wiring in `EditorModel`
 **Goal**: word↔waveform selection + red overlay, mediated by `EditorModel`.
