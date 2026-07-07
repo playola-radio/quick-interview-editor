@@ -129,7 +129,11 @@ private actor LivePlayerBox {
     // any current playback.
     guard frameCount > 0 else { return }
 
-    supersede()  // resume + tear down any current playback
+    // Tear down any current playback without a stop tick: playing slice B directly while
+    // A plays keeps `playingSliceID` set, so a `false` tick here would briefly flash this
+    // tab's playhead to nil before B's first position arrives. The new ticking task emits
+    // shortly.
+    supersede(broadcastStop: false)
     startPlanSample = max(0, range.lowerBound)
     playRatio = ratio
     if node.engine == nil { engine.attach(node) }
@@ -169,12 +173,14 @@ private actor LivePlayerBox {
   }
 
   /// Invalidate the current segment: bump the generation, resume the waiter, and
-  /// stop the engine — all on the actor, so it can't race the render thread.
-  private func supersede() {
+  /// stop the engine — all on the actor, so it can't race the render thread. Pass
+  /// `broadcastStop: false` when a new segment starts immediately after (a slice switch),
+  /// so the playhead isn't flashed to nil between the two.
+  private func supersede(broadcastStop: Bool = true) {
     generation += 1
     let waiter = continuation
     continuation = nil
-    stopTicking()
+    stopTicking(broadcastStop: broadcastStop)
     stopNode()
     waiter?.resume()
   }
@@ -199,11 +205,14 @@ private actor LivePlayerBox {
     }
   }
 
-  /// Stops polling and emits a final `isPlaying: false` tick so the playhead clears.
-  private func stopTicking() {
+  /// Stops polling and (on a real stop/completion) emits a final `isPlaying: false` tick
+  /// so the playhead clears. Skipped on a slice switch, where a new segment follows.
+  private func stopTicking(broadcastStop: Bool = true) {
     tickTask?.cancel()
     tickTask = nil
-    broadcast(PlaybackPosition(sample: startPlanSample, isPlaying: false))
+    if broadcastStop {
+      broadcast(PlaybackPosition(sample: startPlanSample, isPlaying: false))
+    }
   }
 
   /// Reads the node's played-frame count, maps it back to a plan sample, and yields it.

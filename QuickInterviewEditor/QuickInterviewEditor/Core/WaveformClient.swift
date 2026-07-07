@@ -234,17 +234,23 @@ private enum WaveformDecoder {
         try verifyFormat(sampleBuffer, planSampleRate: planSampleRate)
         verifiedFormat = true
       }
-      guard let blockBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else { continue }
+      // `position` only advances when a buffer is folded, so silently skipping a
+      // position-bearing buffer would shift every later sample into the wrong bucket for
+      // the rest of the file. Fail loud instead — matching this file's "no silent drift"
+      // rule. (A sub-frame buffer below carries no samples, so skipping it is safe.)
+      guard let blockBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else {
+        throw WaveformClientError.readFailed("sample buffer missing data buffer")
+      }
       let length = CMBlockBufferGetDataLength(blockBuffer)
-      // An empty/marker buffer leaves `samples` empty, so its `baseAddress` is nil and the
-      // force-unwrap below would trap; skip it.
       guard length >= MemoryLayout<Float>.size else { continue }
       var samples = [Float](repeating: 0, count: length / MemoryLayout<Float>.size)
       let status = samples.withUnsafeMutableBytes { raw -> OSStatus in
         CMBlockBufferCopyDataBytes(
           blockBuffer, atOffset: 0, dataLength: length, destination: raw.baseAddress!)
       }
-      guard status == kCMBlockBufferNoErr else { continue }
+      guard status == kCMBlockBufferNoErr else {
+        throw WaveformClientError.readFailed("CMBlockBufferCopyDataBytes failed (\(status))")
+      }
       accumulator.fold(samples: samples)
       // Every plan-duration bucket is filled; extra decoder tail (codec padding beyond the
       // plan's timeline) isn't part of our coordinate space, so stop early.

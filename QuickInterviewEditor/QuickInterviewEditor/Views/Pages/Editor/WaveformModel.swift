@@ -187,9 +187,10 @@ final class WaveformModel: ViewModel {
     return min(max(start, 0), maxStart)
   }
 
-  /// The finest level whose bucket size doesn't exceed `spp` (so each pixel aggregates
-  /// whole buckets); level 0 when zoomed in past the base resolution. Falls back to an
-  /// empty level for a degenerate (levels-empty) waveform rather than trapping.
+  /// The coarsest level whose bucket size doesn't exceed `spp` (so each pixel aggregates
+  /// as few whole buckets as possible); level 0 when zoomed in past the base resolution.
+  /// Falls back to an empty level for a degenerate (levels-empty) waveform rather than
+  /// trapping.
   private func pyramidLevel(for spp: Double, in waveform: Waveform) -> Waveform.Level {
     guard var chosen = waveform.levels.first else {
       return Waveform.Level(bucketSize: Waveform.baseBucketSize, mins: [], maxs: [])
