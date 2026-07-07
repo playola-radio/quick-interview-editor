@@ -64,6 +64,7 @@
 		E7381D2F864A5EB61915CAF5 /* RunTogetherTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0CD6F173A8779985CCABC01 /* RunTogetherTests.swift */; };
 		E96C33EEFA11E1600464E36B /* Fixtures.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82AAC742DA272C6E61C080A3 /* Fixtures.swift */; };
 		EA3B490C21BE968DCE015A9E /* RootTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25B50A86F8D81F12045ABB2A /* RootTests.swift */; };
+		EDE0D9411AF24E29700C4927 /* WaveformView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5865237D9AEA083F3D2A75A0 /* WaveformView.swift */; };
 		F4B2A1B1BFFF6834D69B5658 /* WaveformTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AEAAD47D27412B903572FE49 /* WaveformTests.swift */; };
 		F89547D7DD5C6573803BD544 /* TranscriptPageModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 238BBB22C13D9B5453A89ECD /* TranscriptPageModel.swift */; };
 		FA8D74962D8AAAAB60F93AF2 /* RootModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71CD050254B47F84F32EF54 /* RootModel.swift */; };
@@ -98,6 +99,7 @@
 		48930A836912299557952308 /* Slice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Slice.swift; sourceTree = "<group>"; };
 		4EA854547ED6426A4ABD6E8E /* EngineClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EngineClient.swift; sourceTree = "<group>"; };
 		4F3B3549446B80CE6BA09245 /* EngineResolution.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EngineResolution.swift; sourceTree = "<group>"; };
+		5865237D9AEA083F3D2A75A0 /* WaveformView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WaveformView.swift; sourceTree = "<group>"; };
 		6133EE6AF1867B8B9120A027 /* SliceWarningsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SliceWarningsTests.swift; sourceTree = "<group>"; };
 		6269F8643FFABC51DD9244ED /* AudioPlayerClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioPlayerClient.swift; sourceTree = "<group>"; };
 		653287A59343E1420B1B9E90 /* LiveEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveEngine.swift; sourceTree = "<group>"; };
@@ -168,6 +170,7 @@
 				CF59032A8FB779A2205DB749 /* EditorView.swift */,
 				9892BB9839BE8C69DC214C5D /* SlicesPanelView.swift */,
 				F1E29A237821D79F1F395D04 /* WaveformModel.swift */,
+				5865237D9AEA083F3D2A75A0 /* WaveformView.swift */,
 			);
 			path = Editor;
 			sourceTree = "<group>";
@@ -616,6 +619,7 @@
 				7742FDC7D65B2788C36D6522 /* ViewModel.swift in Sources */,
 				39A76766629B8F1693F8CC83 /* WaveformClient.swift in Sources */,
 				954B4523C2CBDCC535B41129 /* WaveformModel.swift in Sources */,
+				EDE0D9411AF24E29700C4927 /* WaveformView.swift in Sources */,
 				A72E6C1A34082ACE0B8382D0 /* WorkspaceClient.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

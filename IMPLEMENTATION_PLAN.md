@@ -64,7 +64,7 @@ bound to model.
 `QIE_ENGINE_REPO`; confirm sample alignment on the real Hayes Carll clip.
 **Success**: waveform visible, click/zoom/playhead work against real audio; `make lint`,
 `make format-check`, `xcodebuild test`, `pytest` all green.
-**Status**: Not Started
+**Status**: Complete
 
 ## Adversarial review (pre-PR)
 `/codex review` then `/codex challenge` on the diff — focus sample drift, pixel↔sample

@@ -6,9 +6,10 @@ import Observation
 
 /// All waveform geometry, zoom, and hit-testing math for the editor — the sample↔pixel
 /// core the app's trust depends on. Owns only geometry state; it does not know transcript
-/// semantics (word lookup lives in ``EditorModel``, which owns the plan). Its cross-domain
-/// render inputs (`highlightedRange`, `redRanges`, `playheadSample`) are plain values
-/// pushed in by ``EditorModel``. Every coordinate is in PLAN samples.
+/// semantics. ``EditorModel`` mediates: it derives selection/red ranges from the transcript
+/// and turns them into spans via `span(for:)`, and maps a tapped x back to a word.
+/// `playheadSample` is the one value pushed in (from the playback stream). Every coordinate
+/// is in PLAN samples.
 @MainActor
 @Observable
 final class WaveformModel: ViewModel {
@@ -32,14 +33,11 @@ final class WaveformModel: ViewModel {
   /// Plan-sample index at the left edge of the viewport.
   var visibleStartSample = 0
 
-  /// Selected audio range to highlight, pushed in from the transcript selection.
-  var highlightedRange: Range<Int>?
-  /// Run-together (tight-join) ranges to paint red, pushed in from ``EditorModel``.
-  var redRanges: [Range<Int>] = []
   /// Current playback position, pushed in from the playback stream; nil when stopped.
   var playheadSample: Int?
 
   // MARK: - Display Text
+  let caption = "WAVEFORM"
   let loadingMessage = "Loading waveform…"
   let emptyMessage = "No audio loaded."
   let zoomInLabel = "Zoom in"
@@ -53,6 +51,7 @@ final class WaveformModel: ViewModel {
   var hasWaveform: Bool { waveform != nil && totalSamples > 0 }
   var showsWaveform: Bool { hasWaveform && !isLoading }
   var showsLoading: Bool { isLoading }
+  var showsEmpty: Bool { !hasWaveform && !isLoading }
   var canZoomIn: Bool {
     showsWaveform && samplesPerPixel > minEffectiveSamplesPerPixel() + .ulpOfOne
   }
@@ -95,8 +94,6 @@ final class WaveformModel: ViewModel {
     return WaveformSpan(positionX: clippedStart, width: clippedEnd - clippedStart)
   }
 
-  var highlightSpan: WaveformSpan? { highlightedRange.flatMap(span(for:)) }
-  var redSpans: [WaveformSpan] { redRanges.compactMap(span(for:)) }
   var playheadX: CGFloat? {
     guard let playheadSample, viewportWidth > 0 else { return nil }
     let posX = sampleToX(playheadSample)
