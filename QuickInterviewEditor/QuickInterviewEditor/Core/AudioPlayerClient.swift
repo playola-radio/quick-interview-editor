@@ -88,7 +88,10 @@ private actor LivePlayerBox {
     node.scheduleSegment(
       file, startingFrame: clampedStart, frameCount: frameCount, at: nil,
       completionCallbackType: .dataPlayedBack
-    ) { [weak self] _ in
+    ) { @Sendable [weak self] _ in
+      // `@Sendable` so the completion isn't inferred as actor-isolated (it runs on
+      // an AVFoundation render thread); it captures only the actor ref + an Int and
+      // hops back onto the actor via `await`.
       Task { await self?.complete(generation: myGeneration) }
     }
     node.play()
