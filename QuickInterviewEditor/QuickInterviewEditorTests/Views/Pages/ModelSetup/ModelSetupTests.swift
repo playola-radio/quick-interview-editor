@@ -119,6 +119,36 @@ struct ModelSetupTests {
     #expect(model.errorMessage?.contains(model.retryButtonLabel) == true)
   }
 
+  /// Regression: cancel must actually stop an in-flight download. The stubbed
+  /// stream never finishes on its own, so `viewAppeared()` only returns if
+  /// `cancelTapped()` cancels the stored task — otherwise this test hangs.
+  @Test func cancelStopsAnInFlightDownload() async {
+    let model = ModelSetupModel(manifest: smallManifest)
+    let started = AsyncStream<Void>.makeStream()
+
+    await withDependencies {
+      $0.modelDownloader.installedLocation = { _ in nil }
+      $0.modelDownloader.download = { _ in
+        AsyncThrowingStream { continuation in
+          continuation.yield(
+            .progress(.init(completedBytes: 0, totalBytes: 400, currentFileName: "a.bin")))
+          started.continuation.yield()
+          started.continuation.finish()
+          // Never finishes on its own — only cancellation ends it.
+        }
+      }
+    } operation: {
+      let running = Task { await model.viewAppeared() }
+      var iterator = started.stream.makeAsyncIterator()
+      _ = await iterator.next()  // wait until the download is live (deterministic)
+      model.cancelTapped()
+      await running.value  // returns only if cancel truly stopped the task
+    }
+
+    #expect(model.showsRetry)
+    #expect(!model.isReady)
+  }
+
   @Test func engineEnvironmentMapsInstallationToQIEVars() {
     expectNoDifference(
       installation.engineEnvironment,

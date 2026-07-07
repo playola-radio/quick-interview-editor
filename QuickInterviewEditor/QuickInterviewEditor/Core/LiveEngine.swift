@@ -27,7 +27,11 @@ enum LiveEngine {
       filePathRepoRoot: filePathRepoRoot,
       isExecutable: { FileManager.default.isExecutableFile(atPath: $0.path) }
     )
-    if launch.isBundled, let installation = try? ModelLocations.installation() {
+    // Only force offline model dirs when a *verified* install exists (sentinel +
+    // correct file sizes). Otherwise leave the env empty rather than pointing the
+    // engine at missing dirs with QIE_OFFLINE=1, which would hard-fail validation
+    // before the first-launch download has run.
+    if launch.isBundled, let installation = LiveModelDownloader.installedLocation(.current) {
       launch.environment = installation.engineEnvironment
     }
     return launch

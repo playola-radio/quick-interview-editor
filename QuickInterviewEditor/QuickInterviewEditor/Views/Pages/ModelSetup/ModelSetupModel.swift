@@ -112,12 +112,22 @@ final class ModelSetupModel: ViewModel {
 
   // MARK: - Private Helpers
   private func runDownload() async {
+    // Store the consuming task so `cancelTapped()` can actually stop it —
+    // cancelling this task ends the for-await loop, whose stream `onTermination`
+    // cancels the underlying URLSession download.
     task?.cancel()
     phase = .downloading(
       ModelDownloadProgress(
         completedBytes: 0, totalBytes: manifest.totalByteCount, currentFileName: ""))
+    let downloadTask = Task { await self.consumeDownload() }
+    task = downloadTask
+    await downloadTask.value
+  }
+
+  private func consumeDownload() async {
     do {
       for try await event in modelDownloader.download(manifest) {
+        try Task.checkCancellation()
         switch event {
         case .progress(let progress):
           phase = .downloading(progress)
