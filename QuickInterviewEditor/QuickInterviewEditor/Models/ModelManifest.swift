@@ -44,11 +44,12 @@ struct ModelManifest: Equatable, Sendable {
             string:
               "https://huggingface.co/Systran/faster-whisper-large-v2/resolve/\(whisperRevision)/\(name)"
           )!,
-          relativePath: "faster-whisper-large-v2/\(name)",
+          relativePath: "\(ModelLocations.whisperDirName)/\(name)",
           sha256: sha,
           byteCount: size
         )
       }
+      let alignFile = "wav2vec2_fairseq_base_ls960_asr_ls960.pth"
       return [
         whisper(
           "config.json",
@@ -64,10 +65,9 @@ struct ModelManifest: Equatable, Sendable {
           "34ce3fe1c5041027b3f8d42912270993f986dbc4bb34cf27f951e34a1e453913", 459_861),
         ModelFile(
           remoteURL: URL(
-            string:
-              "https://download.pytorch.org/torchaudio/models/wav2vec2_fairseq_base_ls960_asr_ls960.pth"
+            string: "https://download.pytorch.org/torchaudio/models/\(alignFile)"
           )!,
-          relativePath: "align/wav2vec2_fairseq_base_ls960_asr_ls960.pth",
+          relativePath: "\(ModelLocations.alignDirName)/\(alignFile)",
           sha256: "488fd4f16de84438ffc945334278c1b9fb9b7159a806c1080b16111a958c945d",
           byteCount: 377_664_473),
       ]
@@ -83,6 +83,12 @@ struct ModelManifest: Equatable, Sendable {
 enum ModelLocations {
   private static let appFolder = "Quick Interview Editor"
 
+  /// The per-model subdirectory names under the models root. The single source of
+  /// truth — both ``ModelManifest`` (relative paths) and ``installation()``
+  /// (absolute dirs) derive from these, so they can never drift apart.
+  static let whisperDirName = "faster-whisper-large-v2"
+  static let alignDirName = "align"
+
   /// `~/Library/Application Support/Quick Interview Editor/Models`.
   static func modelsRoot(
     fileManager: FileManager = .default
@@ -97,8 +103,8 @@ enum ModelLocations {
   static func installation(fileManager: FileManager = .default) throws -> ModelInstallation {
     let root = try modelsRoot(fileManager: fileManager)
     return ModelInstallation(
-      whisperModelDir: root.appendingPathComponent("faster-whisper-large-v2"),
-      alignModelDir: root.appendingPathComponent("align")
+      whisperModelDir: root.appendingPathComponent(whisperDirName),
+      alignModelDir: root.appendingPathComponent(alignDirName)
     )
   }
 }

@@ -10,7 +10,7 @@ design and the Codex review that shaped it.
 
 ## The pipeline
 
-```
+```text
 packaging/package-engine.sh    # 1. PyInstaller one-folder freeze -> dist/logic-markers-engine/
 packaging/verify-offline.sh …  # 2. prove the frozen engine transcribes offline (no dev env)
 packaging/build-app.sh         # 3. build the .app + embed the engine at Resources/engine/

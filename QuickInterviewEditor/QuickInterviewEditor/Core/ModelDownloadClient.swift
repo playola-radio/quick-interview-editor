@@ -65,9 +65,24 @@ extension DependencyValues {
 
 // MARK: - Errors
 
-enum ModelDownloadError: Error, Equatable {
+enum ModelDownloadError: Error, Equatable, LocalizedError {
   case unimplemented
   case checksumMismatch(file: String, expected: String, actual: String)
   case httpError(file: String, status: Int)
   case incompleteDownload(file: String, expected: Int64, actual: Int64)
+
+  // Surfaced to the user via `error.localizedDescription` (e.g. ModelSetupModel's
+  // failed phase), so give an actionable message instead of the enum's default.
+  var errorDescription: String? {
+    switch self {
+    case .unimplemented:
+      return "The model downloader was used without a live implementation."
+    case .checksumMismatch(let file, _, _):
+      return "\(file) failed its checksum after downloading. It may be corrupted; try again."
+    case .httpError(let file, let status):
+      return "Downloading \(file) failed (HTTP \(status)). Check your connection and try again."
+    case .incompleteDownload(let file, let expected, let actual):
+      return "\(file) downloaded incompletely (\(actual) of \(expected) bytes). Try again."
+    }
+  }
 }

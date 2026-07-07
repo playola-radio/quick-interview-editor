@@ -16,11 +16,14 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
-VENV="${VENV:-$HOME/playola/logic-utils/.venv}"
+# Defaults to a repo-local .venv; override for any other engine environment
+# (e.g. the shared logic-utils checkout) with VENV=/path/to/.venv.
+VENV="${VENV:-$REPO_ROOT/.venv}"
 PY="$VENV/bin/python"
 
 if [[ ! -x "$PY" ]]; then
-  echo "error: no python at $PY (set VENV=/path/to/.venv)" >&2
+  echo "error: no python at $PY. Set VENV=/path/to/.venv (a venv with the engine" >&2
+  echo "       deps + PyInstaller), e.g. VENV=~/playola/logic-utils/.venv" >&2
   exit 1
 fi
 if ! "$PY" -c "import PyInstaller" 2>/dev/null; then

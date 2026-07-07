@@ -88,6 +88,13 @@ def test_validate_raises_on_missing_configured_dir(tmp_path):
         config.validate()
 
 
+def test_validate_raises_when_offline_without_whisper_dir():
+    config = ModelConfig(whisper_model_dir=None, align_model_dir=None,
+                         offline=True, nltk_data_dir=None)
+    with pytest.raises(FileNotFoundError, match="QIE_WHISPER_MODEL_DIR"):
+        config.validate()
+
+
 def test_validate_passes_when_dirs_exist(tmp_path):
     wdir = tmp_path / "whisper"
     wdir.mkdir()

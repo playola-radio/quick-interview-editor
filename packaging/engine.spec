@@ -52,7 +52,10 @@ _COLLECT = [
 for pkg in _COLLECT:
     try:
         pkg_datas, pkg_binaries, pkg_hidden = collect_all(pkg)
-    except Exception as exc:  # noqa: BLE001 — a missing optional dep must not fail the freeze
+    except (ModuleNotFoundError, ImportError) as exc:
+        # Only "not installed" is tolerated; any other failure (e.g. a hook bug on
+        # a core dep) must fail the build loudly rather than silently ship an
+        # incomplete bundle that breaks at offline verification / on a clean Mac.
         print(f"[engine.spec] collect_all({pkg}) skipped: {exc}")
         continue
     datas += pkg_datas
@@ -89,7 +92,7 @@ for meta_pkg in [
 ]:
     try:
         datas += copy_metadata(meta_pkg)
-    except Exception as exc:  # noqa: BLE001 — a missing optional dep's metadata isn't fatal
+    except (ModuleNotFoundError, ImportError) as exc:  # tolerate only "not installed"
         print(f"[engine.spec] copy_metadata({meta_pkg}) skipped: {exc}")
 
 # whisperx.vads.* and the transformers wav2vec2 model are imported dynamically.

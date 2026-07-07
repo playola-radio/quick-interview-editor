@@ -31,6 +31,8 @@ fi
 
 echo "==> Zipping app for submission (ditto preserves signatures/symlinks)"
 rm -f "$ZIP"
+# Remove the transient zip on any exit (success or a failed notarytool/staple).
+trap 'rm -f "$ZIP"' EXIT
 /usr/bin/ditto -c -k --keepParent "$APP" "$ZIP"
 
 echo "==> Submitting to Apple notary service (waits for result)"
@@ -42,5 +44,4 @@ xcrun stapler staple "$APP"
 echo "==> Validate staple + Gatekeeper assessment"
 xcrun stapler validate "$APP"
 spctl --assess --type exec -vvv "$APP"
-rm -f "$ZIP"
 echo "Notarized + stapled OK."

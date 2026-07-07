@@ -99,8 +99,13 @@ enum LiveModelDownloader {
     var resumeData: Data?
     var lastError: Error?
 
-    for _ in 0..<maxAttemptsPerFile {
+    for attempt in 0..<maxAttemptsPerFile {
       try Task.checkCancellation()
+      // Linear backoff between transient-failure retries (attempt 0 runs
+      // immediately); a permanent failure below throws without looping.
+      if attempt > 0 {
+        try await Task.sleep(for: .seconds(Double(attempt)))
+      }
       do {
         let tempURL = try await SingleFileDownload.run(
           url: file.remoteURL, label: file.relativePath, resumeData: resumeData,

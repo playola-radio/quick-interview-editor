@@ -49,6 +49,14 @@ class ModelConfig:
         """Fail fast (with the offending env var name) if a configured model
         directory is missing, instead of surfacing an opaque torch error deep in
         model loading."""
+        # Offline with no model dir (e.g. an env-wiring bug) would silently fall
+        # back to the named model with local_files_only=True and fail deep in
+        # faster-whisper. Catch it here with the friendly message.
+        if self.offline and self.whisper_model_dir is None:
+            raise FileNotFoundError(
+                "QIE_OFFLINE is set but QIE_WHISPER_MODEL_DIR is missing. "
+                "Finish first-launch model setup before transcribing."
+            )
         for name, path in (
             ("QIE_WHISPER_MODEL_DIR", self.whisper_model_dir),
             ("QIE_ALIGN_MODEL_DIR", self.align_model_dir),
