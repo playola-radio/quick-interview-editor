@@ -1,39 +1,48 @@
-# Implementation Plan: transcript-driven chunking
+# Implementation Plan: Step 3b — Engine render + export/reveal
 
-Spec: `docs/superpowers/specs/2026-07-03-transcript-chunking-design.md`
+Spec: `docs/superpowers/specs/2026-07-06-step3-slices-export-design.md` (the **3b** section).
+Mirrors the Step-2 plumbing (`cli.py` `plan`, `LiveEngine.transcribe`, `EngineClient`).
 
-## Stage 1: Word/segment model + `transcript` command
-**Goal**: `logic-markers transcript song.m4a` writes the `[n]`-tagged transcript and caches the full word list (with end times + segment/word ids).
-**Success**: transcript file matches the spec format; cache has per-word start/end/id and per-segment word ranges.
-**Tests**: transcript rendering from a synthetic segment list; cache round-trip.
+## Stage 1: Python `render` subcommand + pytest
+**Goal**: `python -m logic_markers.cli render <audio> --request req.json --work-dir dir`
+converts the source to a canonical AIFF once, then `slice_aiff` per slice into the
+work-dir; result JSON keyed by slice id on stdout; `QIE_EVENT` `rendering` progress
+(index/total) on stderr. Stateless, writes only to work-dir. Existing commands untouched.
+**Success**: N valid AIFFs, frame counts match requested ranges, markers rebased+renumbered,
+result keyed by id, nothing written beside the source, progress in order.
+**Tests**: `tests/test_render.py` (tiny hand-built WAV + request; no WhisperX/models).
 **Status**: Complete
 
-## Stage 2: Silence detection (`silence.py`)
-**Goal**: adaptive silence regions over a mono PCM array.
-**Success**: on synthetic tone+gap signals at varied noise floors, detected regions match known gaps within tolerance.
-**Tests**: adaptive threshold from noise floor; window/hop; min-silence filtering; no-silence case.
-**Status**: Complete
+## Stage 2: Swift render types + `EngineClient.renderSlices` + `LiveEngine.render`
+**Goal**: `RenderRequest`/`RenderMarker`/`RenderSliceSpec`/`RenderEvent`/`RenderProgress`/
+`RenderedSlice`; `EngineClient.renderSlices` (streaming/cancellable/mockable, mirrors
+`transcribe`); `LiveEngine.render` writes `request.json`, spawns, streams progress,
+decodes result on exit 0, cleans up work-dir on failure/cancel only.
+**Success**: testValue fails cleanly; previewValue yields fixture; decode maps results by id.
+**Tests**: `EngineClientTests` render cases (testValue/previewValue).
+**Status**: Not Started
 
-## Stage 3: Edit-file parse + alignment (`editplan.py`, part 1)
-**Goal**: parse edited transcript into blocks; resolve each to a word-index range + content time span using stable IDs (+ constrained intra-line fuzzy trim).
-**Success**: repeated-phrase transcript disambiguates correctly; deletes/splits/intra-line trims map right; missing-tag fallback warns.
-**Tests**: the failure cases from the spec.
-**Status**: Complete
+## Stage 3: `WorkspaceClient` + pure export-naming function
+**Goal**: `Core/WorkspaceClient.swift` (`chooseDirectory` + `reveal`, Sendable, mockable);
+`Models/ExportNaming.swift` pure `exportFileName(...)` — `<stem> - <sanitized name>.aiff`,
+zero-padded `Slice NNN` fallback, collision suffixes ` 2`, ` 3`, … case-insensitively.
+**Success**: sanitization strips separators/illegal chars; collisions resolved vs a taken set.
+**Tests**: `Models/ExportNamingTests.swift` (pure).
+**Status**: Not Started
 
-## Stage 4: Boundary snapping + edit-plan.json (`editplan.py`, part 2)
-**Goal**: snap each block's boundaries outward to silence edges; emit versioned edit-plan.json with statuses/candidates.
-**Success**: outward snap, no-clip guarantee, no-silence fallback all hold; JSON validates against the documented shape.
-**Tests**: word spans vs synthetic silence maps.
-**Status**: Complete
+## Stage 4: `EditorModel` export flow
+**Goal**: `ExportPhase`, `destinationURL`, `exportSliceTapped`, `exportAllTapped`,
+`cancelExportTapped`; ensure destination (prompt if nil) → build `RenderRequest` →
+consume `renderSlices` → copy temp AIFFs → destination (naming) → `reveal`; carry
+tight-join warnings into the summary; cancel kills the group + deletes temp, reports partial.
+**Success**: exportPhase walks exporting→done; results mapped by id; reveal called with
+copied URLs; missing-destination prompts; throwing stream → failed.
+**Tests**: `EditorTests` export cases (engine + workspace mocked; real temp-dir copy).
+**Status**: Not Started
 
-## Stage 5: Slicer + AIFF output (`slicer.py`)
-**Goal**: sample-accurate slice per segment; markers re-based to slice start; write `song.N.aiff`.
-**Success**: slice offsets and re-based marker positions correct on a synthetic AIFF.
-**Tests**: slicing + marker rebasing.
-**Status**: Complete
-
-## Stage 6: `cut` command wiring + real-file integration
-**Goal**: end-to-end `cut` on the real clip.
-**Success**: N valid AIFFs (afinfo), markers present/re-based, edit-plan.json written; manual Logic check.
-**Tests**: integration test.
-**Status**: Complete
+## Stage 5: Wire Export / "Export all" buttons + full gate
+**Goal**: per-slice **Export** + **"Export all"** + cancel/progress into
+`SlicesPanelView`/`EditorView` (all copy/flags from the model); `xcodegen generate`;
+green `xcodebuild test`, `make lint`, `make format-check`, `python3 -m pytest -q`.
+**Success**: no dead controls; all local gates green; Codex adversarial pass clean.
+**Status**: Not Started
