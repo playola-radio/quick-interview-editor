@@ -28,7 +28,7 @@ functions per design; zoom/scroll actions clamped.
 zoom/scroll clamping to `0..<totalSamples`; loads a fixture via `withDependencies`.
 Use `expectNoDifference`.
 **Success**: model fully unit-tested against fixtures, no subprocess/audio.
-**Status**: Not Started
+**Status**: Complete
 
 ## Stage 3: `AudioPlayerClient.positions` stream + playhead in the model
 **Goal**: Real, mockable playback position feeding a playhead sample.
