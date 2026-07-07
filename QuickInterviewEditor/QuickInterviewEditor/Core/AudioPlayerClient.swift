@@ -59,7 +59,11 @@ extension AudioPlayerClient {
       positions: {
         AsyncStream { continuation in
           // Register on the actor; the builder closure runs synchronously, so hop.
-          Task { await box.setPositionContinuation(continuation) }
+          let id = UUID()
+          Task { await box.addPositionContinuation(id: id, continuation) }
+          continuation.onTermination = { _ in
+            Task { await box.removePositionContinuation(id: id) }
+          }
         }
       }
     )
@@ -80,13 +84,26 @@ private actor LivePlayerBox {
 
   /// Position-stream plumbing. `startPlanSample` + `playRatio` convert the node's native
   /// render frames back to plan samples; `tickTask` polls ~30 Hz while a slice plays.
-  private var positionContinuation: AsyncStream<PlaybackPosition>.Continuation?
+  /// Positions broadcast to every registered subscriber (one per open editor) so the tab
+  /// that started playback always gets ticks, even if another tab subscribed later; each
+  /// subscriber decides for itself whether to show them.
+  private var positionContinuations: [UUID: AsyncStream<PlaybackPosition>.Continuation] = [:]
   private var tickTask: Task<Void, Never>?
   private var startPlanSample = 0
   private var playRatio = 1.0
 
-  func setPositionContinuation(_ continuation: AsyncStream<PlaybackPosition>.Continuation) {
-    positionContinuation = continuation
+  func addPositionContinuation(
+    id: UUID, _ continuation: AsyncStream<PlaybackPosition>.Continuation
+  ) {
+    positionContinuations[id] = continuation
+  }
+
+  func removePositionContinuation(id: UUID) {
+    positionContinuations[id] = nil
+  }
+
+  private func broadcast(_ position: PlaybackPosition) {
+    for continuation in positionContinuations.values { continuation.yield(position) }
   }
 
   /// Returns when the scheduled segment finishes playing, or when `stop()` or
@@ -178,7 +195,7 @@ private actor LivePlayerBox {
   private func stopTicking() {
     tickTask?.cancel()
     tickTask = nil
-    positionContinuation?.yield(PlaybackPosition(sample: startPlanSample, isPlaying: false))
+    broadcast(PlaybackPosition(sample: startPlanSample, isPlaying: false))
   }
 
   /// Reads the node's played-frame count, maps it back to a plan sample, and yields it.
@@ -188,7 +205,7 @@ private actor LivePlayerBox {
     else { return }
     let framesPlayed = max(0, playerTime.sampleTime)
     let planSample = startPlanSample + Int(Double(framesPlayed) / max(playRatio, .ulpOfOne))
-    positionContinuation?.yield(PlaybackPosition(sample: planSample, isPlaying: true))
+    broadcast(PlaybackPosition(sample: planSample, isPlaying: true))
   }
 
   private func stopNode() {

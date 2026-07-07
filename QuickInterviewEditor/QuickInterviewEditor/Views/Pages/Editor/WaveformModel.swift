@@ -114,7 +114,10 @@ final class WaveformModel: ViewModel {
   }
 
   // MARK: - User Actions
+  /// Idempotent: a second call (e.g. the view re-appearing on a tab switch) is a no-op
+  /// once the pyramid is built or while it's building, so long files aren't re-decoded.
   func load(url: URL, planSampleRate: Int, durationSamples: Int) async {
+    guard waveform == nil, !isLoading else { return }
     sampleRate = planSampleRate
     totalSamples = durationSamples
     isLoading = true

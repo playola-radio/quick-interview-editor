@@ -194,4 +194,22 @@ struct WaveformTests {
     #expect(model.totalSamples == 1000)
     #expect(model.samplesPerPixel == 10)  // fit: 1000 / 100
   }
+
+  @Test func loadIsIdempotentOnceLoaded() async {
+    let calls = LockIsolated(0)
+    let fixture = Waveform.pyramid(
+      baseMins: [0], baseMaxs: [0.5], sampleRate: 44100, totalSamples: 500)
+    let model = withDependencies {
+      $0.waveform = WaveformClient(loadWaveform: { _, _, _ in
+        calls.withValue { $0 += 1 }
+        return fixture
+      })
+    } operation: {
+      WaveformModel()
+    }
+    let url = URL(fileURLWithPath: "/x")
+    await model.load(url: url, planSampleRate: 44100, durationSamples: 500)
+    await model.load(url: url, planSampleRate: 44100, durationSamples: 500)
+    #expect(calls.value == 1)  // second call is a no-op — no re-decode
+  }
 }

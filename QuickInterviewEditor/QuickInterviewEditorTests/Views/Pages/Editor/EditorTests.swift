@@ -345,6 +345,7 @@ struct EditorTests {
 
   @Test func observePlaybackMapsPositionToWaveformPlayhead() async {
     let model = editor()
+    model.playingSliceID = UUID()  // this editor owns playback
     await withDependencies {
       $0.audioPlayer.positions = {
         AsyncStream { continuation in
@@ -358,8 +359,24 @@ struct EditorTests {
     #expect(model.waveform.playheadSample == 1000)
   }
 
+  @Test func observePlaybackIgnoresTicksWhenThisEditorIsNotPlaying() async {
+    let model = editor()  // playingSliceID is nil — another tab owns playback
+    await withDependencies {
+      $0.audioPlayer.positions = {
+        AsyncStream { continuation in
+          continuation.yield(PlaybackPosition(sample: 5000, isPlaying: true))
+          continuation.finish()
+        }
+      }
+    } operation: {
+      await model.observePlayback()
+    }
+    #expect(model.waveform.playheadSample == nil)
+  }
+
   @Test func observePlaybackClearsPlayheadWhenStopped() async {
     let model = editor()
+    model.playingSliceID = UUID()  // this editor owns playback
     await withDependencies {
       $0.audioPlayer.positions = {
         AsyncStream { continuation in

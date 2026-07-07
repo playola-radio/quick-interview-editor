@@ -54,6 +54,28 @@ final class EditorModel: ViewModel {
   let exportAllLabel = "Export all"
   let cancelExportLabel = "Cancel export"
 
+  // MARK: - Waveform sync
+  /// The selected audio range, mirrored from the transcript selection.
+  var highlightedSampleRange: Range<Int>? { transcript.selectedSampleRange }
+
+  /// Sample ranges of the run-together (tight-join) words to paint red — derived from the
+  /// SAME gap-based function and live sensitivity the transcript uses, so the waveform's
+  /// red always matches the transcript's. Words missing sample bounds are excluded.
+  var redRanges: [Range<Int>] {
+    let redIDs = runTogetherWordIDs(editPlan.words, maxGapMs: transcript.runTogetherMaxGapMs)
+    return editPlan.words.compactMap { word in
+      guard redIDs.contains(word.id), let start = word.startSample, let end = word.endSample,
+        start < end
+      else { return nil }
+      return start..<end
+    }
+  }
+
+  /// Waveform render data, geometry delegated to the child and combined with the
+  /// transcript-derived ranges here (the view reads these; it decides nothing).
+  var waveformHighlightSpan: WaveformSpan? { highlightedSampleRange.flatMap(waveform.span(for:)) }
+  var waveformRedSpans: [WaveformSpan] { redRanges.compactMap(waveform.span(for:)) }
+
   // MARK: - View Helpers
   var canAddSlice: Bool { transcript.selectedSampleRange != nil }
 
@@ -117,12 +139,34 @@ final class EditorModel: ViewModel {
   }
 
   // MARK: - User Actions
-  /// Streams playback positions from the player into the waveform playhead (plan
-  /// samples while playing, cleared on stop). Runs for the editor's lifetime.
+  /// Builds the waveform peak pyramid for the source audio, in plan-sample coordinates.
+  func loadWaveform() async {
+    await waveform.load(
+      url: sourceURL, planSampleRate: editPlan.source.sampleRate,
+      durationSamples: editPlan.source.durationSamples)
+  }
+
+  /// Streams playback positions from the (shared) player into the waveform playhead.
+  /// The player is global — only one slice plays at a time — so ticks are applied only
+  /// when THIS editor owns the playback (`playingSliceID != nil`); otherwise this editor
+  /// clears its playhead, so another tab's playback never drives the wrong waveform.
   func observePlayback() async {
     for await position in audioPlayer.positions() {
+      guard playingSliceID != nil else {
+        waveform.playheadSample = nil
+        continue
+      }
       waveform.playheadSample = position.isPlaying ? position.sample : nil
     }
+  }
+
+  /// Waveform → transcript: a click at view-x selects the word whose audio contains that
+  /// point. A click landing in a gap (or exactly on a word's end, which is exclusive)
+  /// selects nothing and leaves the current selection untouched.
+  func waveformTapped(atX positionX: CGFloat) {
+    let sample = waveform.xToSample(positionX)
+    guard let wordID = wordID(atSample: sample) else { return }
+    transcript.selectWord(wordID)
   }
 
   func addSliceTapped() {
@@ -203,6 +247,16 @@ final class EditorModel: ViewModel {
   }
 
   // MARK: - Private Helpers
+  /// The word whose half-open sample range `[startSample, endSample)` contains `sample`.
+  /// Words missing sample bounds are skipped, never guessed from seconds.
+  private func wordID(atSample sample: Int) -> Word.ID? {
+    for word in editPlan.words {
+      guard let start = word.startSample, let end = word.endSample, start < end else { continue }
+      if sample >= start, sample < end { return word.id }
+    }
+    return nil
+  }
+
   private func displaySnippet(_ text: String) -> String {
     "“\(middleTruncatedSnippet(text, maxLength: 68))”"
   }
