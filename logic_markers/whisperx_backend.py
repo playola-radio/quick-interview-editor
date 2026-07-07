@@ -15,6 +15,7 @@ import tempfile
 import wave
 from pathlib import Path
 
+from .model_config import load_from_env
 from .transcribe import Word
 from .words import Segment, Transcript
 from .words import Word as RichWord
@@ -50,13 +51,26 @@ def _load_audio_16k_mono(source: Path):
 def _aligned_segments(
     source: Path, model_name: str, device: str, compute_type: str
 ) -> list[dict]:
+    # Resolve model locations + offline flags from QIE_* env. In dev (no env)
+    # this is a no-op and models download to the default caches as before; in
+    # the packaged app it forces loading from pre-downloaded local dirs offline.
+    config = load_from_env()
+    config.validate()
+    config.apply_offline_env()  # must run before `import whisperx` (reads HF_HUB_OFFLINE)
+
     import whisperx  # imported lazily; heavy import
 
+    # A configured absolute model dir is loaded directly by faster-whisper (no
+    # download); otherwise the caller's named model (e.g. "large-v2").
+    whisper_arch = config.whisper_model_dir or model_name
+
     audio = _load_audio_16k_mono(source)
-    model = whisperx.load_model(model_name, device, compute_type=compute_type)
+    model = whisperx.load_model(
+        whisper_arch, device, compute_type=compute_type, local_files_only=config.offline
+    )
     result = model.transcribe(audio, batch_size=16)
     align_model, metadata = whisperx.load_align_model(
-        language_code=result["language"], device=device
+        language_code=result["language"], device=device, model_dir=config.align_model_dir
     )
     aligned = whisperx.align(
         result["segments"], align_model, metadata, audio, device,
