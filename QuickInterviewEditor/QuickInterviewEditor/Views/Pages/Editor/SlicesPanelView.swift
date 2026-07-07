@@ -22,6 +22,9 @@ struct SlicesPanelView: View {
         List {
           ForEach(model.sliceRows) { row in
             SliceCard(model: model, row: row)
+              .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+              .listRowSeparator(.hidden)
+              .listRowBackground(Color.clear)
           }
           .onMove { model.moveSlices(fromOffsets: $0, toOffset: $1) }
           .onDelete { indexSet in
@@ -30,6 +33,8 @@ struct SlicesPanelView: View {
           }
         }
         .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .animation(.default, value: model.sliceRows.map(\.id))
       }
     }
     .padding(12)
@@ -39,6 +44,8 @@ struct SlicesPanelView: View {
 private struct SliceCard: View {
   @Bindable var model: EditorModel
   let row: SliceRowState
+  @FocusState private var nameFocused: Bool
+  @State private var nameHovering = false
 
   var body: some View {
     VStack(alignment: .leading, spacing: 6) {
@@ -46,10 +53,18 @@ private struct SliceCard: View {
         TextField(
           "",
           text: Binding(
-            get: { row.name },
+            get: { model.slices[id: row.id]?.name ?? row.name },
             set: { model.renameSlice(row.id, to: $0) })
         )
         .textFieldStyle(.plain).font(.system(size: 14, weight: .semibold))
+        .focused($nameFocused)
+        .padding(.horizontal, 6).padding(.vertical, 3)
+        .background(
+          RoundedRectangle(cornerRadius: 5)
+            .fill(Color.white.opacity(nameFocused ? 0.14 : (nameHovering ? 0.07 : 0)))
+        )
+        .onHover { nameHovering = $0 }
+        .help("Click to rename")
         Spacer()
         Text(row.durationLabel).font(.system(size: 11))
           .foregroundStyle(Color(white: 0.54))
