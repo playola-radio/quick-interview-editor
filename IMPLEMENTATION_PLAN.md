@@ -20,7 +20,7 @@ result keyed by id, nothing written beside the source, progress in order.
 decodes result on exit 0, cleans up work-dir on failure/cancel only.
 **Success**: testValue fails cleanly; previewValue yields fixture; decode maps results by id.
 **Tests**: `EngineClientTests` render cases (testValue/previewValue).
-**Status**: Not Started
+**Status**: Complete
 
 ## Stage 3: `WorkspaceClient` + pure export-naming function
 **Goal**: `Core/WorkspaceClient.swift` (`chooseDirectory` + `reveal`, Sendable, mockable);
@@ -28,7 +28,7 @@ decodes result on exit 0, cleans up work-dir on failure/cancel only.
 zero-padded `Slice NNN` fallback, collision suffixes ` 2`, ` 3`, … case-insensitively.
 **Success**: sanitization strips separators/illegal chars; collisions resolved vs a taken set.
 **Tests**: `Models/ExportNamingTests.swift` (pure).
-**Status**: Not Started
+**Status**: Complete
 
 ## Stage 4: `EditorModel` export flow
 **Goal**: `ExportPhase`, `destinationURL`, `exportSliceTapped`, `exportAllTapped`,
@@ -38,11 +38,11 @@ tight-join warnings into the summary; cancel kills the group + deletes temp, rep
 **Success**: exportPhase walks exporting→done; results mapped by id; reveal called with
 copied URLs; missing-destination prompts; throwing stream → failed.
 **Tests**: `EditorTests` export cases (engine + workspace mocked; real temp-dir copy).
-**Status**: Not Started
+**Status**: Complete
 
 ## Stage 5: Wire Export / "Export all" buttons + full gate
 **Goal**: per-slice **Export** + **"Export all"** + cancel/progress into
 `SlicesPanelView`/`EditorView` (all copy/flags from the model); `xcodegen generate`;
 green `xcodebuild test`, `make lint`, `make format-check`, `python3 -m pytest -q`.
 **Success**: no dead controls; all local gates green; Codex adversarial pass clean.
-**Status**: Not Started
+**Status**: Complete

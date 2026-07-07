@@ -10,6 +10,8 @@ final class EditorModel: ViewModel {
 
   // MARK: - Dependencies
   @ObservationIgnored @Dependency(\.audioPlayer) var audioPlayer
+  @ObservationIgnored @Dependency(\.engine) var engine
+  @ObservationIgnored @Dependency(\.workspace) var workspace
 
   // MARK: - Initialization
   let sourceURL: URL
@@ -23,10 +25,22 @@ final class EditorModel: ViewModel {
     super.init()
   }
 
+  // MARK: - Export Phase
+  enum ExportPhase: Equatable {
+    case idle
+    case exporting(current: Int, total: Int)
+    case done(count: Int)
+    case failed(String)
+  }
+
   // MARK: - Properties
   var slices: IdentifiedArrayOf<Slice> = []
   var playingSliceID: Slice.ID?
+  var exportPhase: ExportPhase = .idle
+  var destinationURL: URL?
   private var nextSliceNumber = 1
+  private var lastExportTightNames: [String] = []
+  @ObservationIgnored private(set) var exportTask: Task<Void, Never>?
 
   // MARK: - Display Text
   let addSliceLabel = "Add slice"
@@ -34,6 +48,9 @@ final class EditorModel: ViewModel {
   let playLabel = "Play"
   let stopLabel = "Stop"
   let deleteLabel = "Delete slice"
+  let exportLabel = "Export"
+  let exportAllLabel = "Export all"
+  let cancelExportLabel = "Cancel export"
 
   // MARK: - View Helpers
   var canAddSlice: Bool { transcript.selectedSampleRange != nil }
@@ -41,6 +58,41 @@ final class EditorModel: ViewModel {
   var sliceCountLabel: String {
     "\(slices.count) \(slices.count == 1 ? "clip" : "clips")"
   }
+
+  var isExporting: Bool {
+    if case .exporting = exportPhase { return true }
+    return false
+  }
+  var canExportAll: Bool { !slices.isEmpty && !isExporting }
+  var canExportSlice: Bool { !isExporting }
+
+  var exportStatusMessage: String {
+    switch exportPhase {
+    case .idle:
+      return ""
+    case .exporting(let current, let total):
+      return current <= 0 ? "Preparing export…" : "Exporting slice \(current) of \(total)…"
+    case .done(let count):
+      let clips = count == 1 ? "clip" : "clips"
+      let location = destinationURL.map { " to \($0.lastPathComponent)" } ?? ""
+      return "Exported \(count) \(clips)\(location)."
+    case .failed(let message):
+      return message
+    }
+  }
+
+  /// After a successful export, names the exported slices whose cut points weren't in
+  /// silence — the user's cue to add a fade in Logic. Empty otherwise. This carries the
+  /// tight-join warning into the summary; it is never written into the AIFF markers.
+  var exportTightWarning: String {
+    guard case .done = exportPhase, !lastExportTightNames.isEmpty else { return "" }
+    let names = lastExportTightNames.joined(separator: ", ")
+    let verb = lastExportTightNames.count == 1 ? "has a tight join" : "have tight joins"
+    return "\(names) \(verb) — add a fade in Logic."
+  }
+
+  var showsExportStatus: Bool { !exportStatusMessage.isEmpty }
+  var showsCancelExport: Bool { isExporting }
 
   var sliceRows: IdentifiedArrayOf<SliceRowState> {
     let sampleRate = editPlan.source.sampleRate
@@ -125,9 +177,127 @@ final class EditorModel: ViewModel {
     }
   }
 
+  // MARK: - Export Actions
+  func exportSliceTapped(_ id: Slice.ID) {
+    guard !isExporting, let slice = slices[id: id] else { return }
+    startExport([slice])
+  }
+
+  func exportAllTapped() {
+    guard !isExporting, !slices.isEmpty else { return }
+    startExport(Array(slices))
+  }
+
+  func cancelExportTapped() {
+    exportTask?.cancel()
+  }
+
   // MARK: - Private Helpers
   private func displaySnippet(_ text: String) -> String {
     "“\(middleTruncatedSnippet(text, maxLength: 68))”"
+  }
+
+  /// Marks the export as running synchronously (so the buttons disable immediately
+  /// and a rapid second tap can't start a parallel export) and spawns the worker,
+  /// keeping a handle so `cancelExportTapped` can kill the process group.
+  private func startExport(_ targets: [Slice]) {
+    exportTask?.cancel()
+    exportPhase = .exporting(current: 0, total: targets.count)
+    exportTask = Task { await performExport(targets) }
+  }
+
+  func performExport(_ targets: [Slice]) async {
+    guard let destination = await resolvedDestination() else {
+      exportPhase = .idle
+      return
+    }
+    exportPhase = .exporting(current: 0, total: targets.count)
+
+    var rendered: [RenderedSlice] = []
+    var workDir: URL?
+    do {
+      for try await event in engine.renderSlices(renderRequest(for: targets)) {
+        switch event {
+        case .progress(let progress):
+          exportPhase = .exporting(
+            current: progress.index,
+            total: progress.total == 0 ? targets.count : progress.total)
+        case .completed(let slices):
+          rendered = slices
+          workDir = slices.first?.url.deletingLastPathComponent()
+        }
+      }
+      if Task.isCancelled {
+        cleanUp(workDir)
+        exportPhase = .failed(cancelMessage(copied: 0, total: targets.count))
+        return
+      }
+      let copied = try copyToDestination(rendered, targets: targets, destination: destination)
+      cleanUp(workDir)
+      workspace.reveal(copied)
+      lastExportTightNames = targets.filter { !$0.warnings.isEmpty }.map(\.name)
+      exportPhase = .done(count: copied.count)
+    } catch is CancellationError {
+      cleanUp(workDir)
+      exportPhase = .failed(cancelMessage(copied: 0, total: targets.count))
+    } catch {
+      cleanUp(workDir)
+      exportPhase = .failed(error.localizedDescription)
+    }
+  }
+
+  private func resolvedDestination() async -> URL? {
+    if let destinationURL { return destinationURL }
+    guard let chosen = await workspace.chooseDirectory() else { return nil }
+    destinationURL = chosen
+    return chosen
+  }
+
+  private func renderRequest(for targets: [Slice]) -> RenderRequest {
+    let sampleRate = editPlan.source.sampleRate
+    let markers = editPlan.words.map { word in
+      RenderMarker(
+        position: word.startSample ?? Int(word.start * Double(sampleRate)), name: word.text)
+    }
+    let specs = targets.map {
+      RenderSliceSpec(id: $0.id, startSample: $0.startSample, endSample: $0.endSample)
+    }
+    return RenderRequest(
+      sourceURL: sourceURL, sampleRate: sampleRate, markers: markers, slices: specs)
+  }
+
+  /// Copies each rendered temp AIFF to the destination under a unique, sanitized name.
+  /// Returns the copied destination URLs (in `targets` order).
+  private func copyToDestination(
+    _ rendered: [RenderedSlice], targets: [Slice], destination: URL
+  ) throws -> [URL] {
+    let byID = Dictionary(rendered.map { ($0.id, $0.url) }, uniquingKeysWith: { first, _ in first })
+    let stem = sourceURL.deletingPathExtension().lastPathComponent
+    var taken = Set(existingFileNames(in: destination))
+    var copied: [URL] = []
+    for (offset, slice) in targets.enumerated() {
+      guard let source = byID[slice.id] else { continue }
+      let name = exportFileName(
+        sourceStem: stem, sliceName: slice.name, index: offset + 1, taken: &taken)
+      let target = destination.appendingPathComponent(name)
+      try FileManager.default.copyItem(at: source, to: target)
+      copied.append(target)
+    }
+    return copied
+  }
+
+  private func existingFileNames(in directory: URL) -> [String] {
+    ((try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? [])
+      .map { $0.lowercased() }
+  }
+
+  private func cleanUp(_ workDir: URL?) {
+    guard let workDir else { return }
+    try? FileManager.default.removeItem(at: workDir)
+  }
+
+  private func cancelMessage(copied: Int, total: Int) -> String {
+    "Export cancelled — \(copied) of \(total) exported."
   }
 }
 

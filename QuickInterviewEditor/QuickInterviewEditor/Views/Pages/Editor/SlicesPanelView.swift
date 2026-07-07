@@ -13,6 +13,11 @@ struct SlicesPanelView: View {
         Spacer()
         Button(model.addSliceLabel) { model.addSliceTapped() }
           .disabled(!model.canAddSlice)
+        Button(model.exportAllLabel) { model.exportAllTapped() }
+          .disabled(!model.canExportAll)
+      }
+      if model.showsExportStatus {
+        ExportStatus(model: model)
       }
       if model.sliceRows.isEmpty {
         Text(model.emptyStateMessage)
@@ -82,6 +87,11 @@ private struct SliceCard: View {
         Button(row.playButtonLabel) {
           Task { await model.playStopTapped(row.id) }
         }
+        Button(model.exportLabel) {
+          model.exportSliceTapped(row.id)
+        }
+        .disabled(!model.canExportSlice)
+        Spacer()
         Button {
           Task { await model.deleteSlice(row.id) }
         } label: {
@@ -93,5 +103,27 @@ private struct SliceCard: View {
     .padding(12)
     .background(Color(white: 0.08))
     .clipShape(RoundedRectangle(cornerRadius: 11))
+  }
+}
+
+private struct ExportStatus: View {
+  @Bindable var model: EditorModel
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 4) {
+      HStack(spacing: 8) {
+        Text(model.exportStatusMessage)
+          .font(.system(size: 11.5)).foregroundStyle(Color(white: 0.6))
+          .frame(maxWidth: .infinity, alignment: .leading)
+        if model.showsCancelExport {
+          Button(model.cancelExportLabel) { model.cancelExportTapped() }
+            .font(.system(size: 11))
+        }
+      }
+      if !model.exportTightWarning.isEmpty {
+        Text(model.exportTightWarning).font(.system(size: 11))
+          .foregroundStyle(Color(red: 0.89, green: 0.58, blue: 0.58))
+      }
+    }
   }
 }

@@ -1,0 +1,51 @@
+import Foundation
+
+/// Builds the on-disk filename for an exported slice: `<source stem> - <name>.aiff`.
+///
+/// The slice name is **sanitized** (path separators / illegal chars stripped) so a
+/// user-typed name can never escape the destination folder, and falls back to a
+/// zero-padded `Slice NNN` when it sanitizes to nothing. Collisions — against files
+/// already in the folder and against names assigned earlier in the same export — are
+/// resolved with ` 2`, ` 3`, … suffixes, compared case-insensitively (the macOS
+/// filesystem is case-insensitive by default). `taken` is updated with the chosen
+/// name (lowercased) so a batch export never assigns the same name twice.
+func exportFileName(
+  sourceStem: String, sliceName: String, index: Int, taken: inout Set<String>
+) -> String {
+  let name = sanitizedSliceName(sliceName, fallbackIndex: index)
+  let stem = "\(sanitizedStem(sourceStem)) - \(name)"
+  var candidate = "\(stem).aiff"
+  var suffix = 2
+  while taken.contains(candidate.lowercased()) {
+    candidate = "\(stem) \(suffix).aiff"
+    suffix += 1
+  }
+  taken.insert(candidate.lowercased())
+  return candidate
+}
+
+private let illegalFilenameCharacters = CharacterSet(charactersIn: "/\\:\u{0}")
+
+/// Sanitize a slice name into a safe path component. Illegal characters become `-`,
+/// whitespace is collapsed, and leading dots are stripped (no dotfiles / `..`). An
+/// empty result falls back to `Slice NNN`.
+private func sanitizedSliceName(_ name: String, fallbackIndex: Int) -> String {
+  var cleaned = name.components(separatedBy: illegalFilenameCharacters).joined(separator: "-")
+  cleaned = cleaned.components(separatedBy: .whitespacesAndNewlines)
+    .filter { !$0.isEmpty }.joined(separator: " ")
+  while cleaned.hasPrefix(".") { cleaned.removeFirst() }
+  cleaned = cleaned.trimmingCharacters(in: .whitespaces)
+  guard !cleaned.isEmpty else { return "Slice \(String(format: "%03d", fallbackIndex))" }
+  return cleaned
+}
+
+/// Sanitize the source stem the same way, so a pathological source name can't break
+/// out either. Falls back to `Export` if it sanitizes to nothing.
+private func sanitizedStem(_ stem: String) -> String {
+  var cleaned = stem.components(separatedBy: illegalFilenameCharacters).joined(separator: "-")
+  cleaned = cleaned.components(separatedBy: .whitespacesAndNewlines)
+    .filter { !$0.isEmpty }.joined(separator: " ")
+  while cleaned.hasPrefix(".") { cleaned.removeFirst() }
+  cleaned = cleaned.trimmingCharacters(in: .whitespaces)
+  return cleaned.isEmpty ? "Export" : cleaned
+}
