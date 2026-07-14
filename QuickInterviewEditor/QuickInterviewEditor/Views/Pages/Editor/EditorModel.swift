@@ -225,12 +225,8 @@ final class EditorModel: ViewModel {
   }
 
   func deleteSlice(_ id: Slice.ID) async {
-    let wasPlaying = playingSliceID == id
     mutateSlices { $0.remove(id: id) }
-    if wasPlaying {
-      playingSliceID = nil
-      await audioPlayer.stop()
-    }
+    await reconcilePlayback()
   }
 
   // MARK: - Undo / Redo
@@ -240,22 +236,23 @@ final class EditorModel: ViewModel {
   func undoTapped() async {
     guard let restored = sliceUndo.undo(current: slices) else { return }
     slices = restored
-    await reconcileAfterHistoryChange()
+    await reconcilePlayback()
   }
 
   /// Reapplies the next `slices` snapshot on the redo branch, then reconciles playback.
   func redoTapped() async {
     guard let restored = sliceUndo.redo(current: slices) else { return }
     slices = restored
-    await reconcileAfterHistoryChange()
+    await reconcilePlayback()
   }
 
-  /// After an undo/redo swaps the whole `slices` array, stop playback if the slice that
-  /// was playing no longer exists (its range is gone, so the running player is orphaned).
+  /// Stops playback if the slice that was playing no longer exists in `slices` (its range
+  /// is gone, so the running player is orphaned). Centralized here so every path that can
+  /// remove the playing slice — explicit delete, undo, redo — reconciles the same way.
   ///
   /// TODO(PR 3): when `activeSliceID` and the fine-tune draft land, also clear them here
   /// if the active slice is no longer present in `slices`.
-  private func reconcileAfterHistoryChange() async {
+  private func reconcilePlayback() async {
     if let playing = playingSliceID, slices[id: playing] == nil {
       playingSliceID = nil
       await audioPlayer.stop()
