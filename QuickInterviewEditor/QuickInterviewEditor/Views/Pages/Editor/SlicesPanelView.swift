@@ -5,18 +5,31 @@ struct SlicesPanelView: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
-      HStack {
+      HStack(spacing: 8) {
         Text("SLICES").font(.system(size: 11, weight: .semibold))
           .kerning(1).foregroundStyle(Color(white: 0.44))
         Text(model.sliceCountLabel).font(.system(size: 11))
           .foregroundStyle(Color(white: 0.34))
         Spacer()
-        Button(model.undoLabel) { Task { await model.undoTapped() } }
-          .disabled(!model.canUndo)
-        Button(model.redoLabel) { Task { await model.redoTapped() } }
-          .disabled(!model.canRedo)
+        Button {
+          Task { await model.undoTapped() }
+        } label: {
+          Image(systemName: "arrow.uturn.backward")
+        }
+        .disabled(!model.canUndo)
+        .help(model.undoLabel).accessibilityLabel(model.undoLabel)
+        Button {
+          Task { await model.redoTapped() }
+        } label: {
+          Image(systemName: "arrow.uturn.forward")
+        }
+        .disabled(!model.canRedo)
+        .help(model.redoLabel).accessibilityLabel(model.redoLabel)
+      }
+      HStack(spacing: 8) {
         Button(model.addSliceLabel) { model.addSliceTapped() }
           .disabled(!model.canAddSlice)
+        Spacer()
         Button(model.exportAllLabel) { model.exportAllTapped() }
           .disabled(!model.canExportAll)
       }
