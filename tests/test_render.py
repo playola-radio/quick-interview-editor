@@ -183,6 +183,59 @@ def test_render_rejects_rate_mismatch(tmp_path):
     assert not (work / f"{slice_id}.aiff").exists()
 
 
+def test_render_rejects_frame_count_mismatch(tmp_path):
+    # `duration_samples` in the request is the plan's frame count. A canonical AIFF
+    # whose actual frame count differs (stale/truncated/swapped file) must fail loud
+    # rather than render silently from the wrong audio.
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    src = _write_canonical_aiff(src_dir / "clip.plan.aiff", 44100)  # 44100 frames
+    work = tmp_path / "work"
+    work.mkdir()
+    slice_id = "EEEEEEEE-1111-2222-3333-444444444444"
+    request = {
+        "sample_rate": SR,
+        "duration_samples": 40000,  # != the AIFF's 44100 frames
+        "markers": MARKERS,
+        "slices": [{"id": slice_id, "start_sample": 0, "end_sample": 100}],
+    }
+    req_path = work / "request.json"
+    req_path.write_text(json.dumps(request))
+    proc = subprocess.run(
+        [sys.executable, "-m", "logic_markers.cli", "render", str(src),
+         "--request", str(req_path), "--work-dir", str(work)],
+        capture_output=True, text=True, check=False,
+    )
+    assert proc.returncode != 0
+    assert "frame count" in proc.stderr
+    assert not (work / f"{slice_id}.aiff").exists()
+
+
+def test_render_accepts_matching_frame_count(tmp_path):
+    # The happy path: request carries the correct duration_samples, render succeeds.
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    src = _write_canonical_aiff(src_dir / "clip.plan.aiff", 44100)
+    work = tmp_path / "work"
+    work.mkdir()
+    slice_id = "FFFFFFFF-1111-2222-3333-444444444444"
+    request = {
+        "sample_rate": SR,
+        "duration_samples": 44100,
+        "markers": MARKERS,
+        "slices": [{"id": slice_id, "start_sample": 0, "end_sample": 100}],
+    }
+    req_path = work / "request.json"
+    req_path.write_text(json.dumps(request))
+    proc = subprocess.run(
+        [sys.executable, "-m", "logic_markers.cli", "render", str(src),
+         "--request", str(req_path), "--work-dir", str(work)],
+        capture_output=True, text=True, check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert (work / f"{slice_id}.aiff").exists()
+
+
 def test_render_rejects_non_aiff_input(tmp_path):
     # Passing a raw (non-AIFF) source must fail loud — render only ever slices the
     # canonical AIFF; it no longer reconverts arbitrary audio.

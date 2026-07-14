@@ -370,7 +370,8 @@ final class EditorModel: ViewModel {
       RenderSliceSpec(id: $0.id, startSample: $0.startSample, endSample: $0.endSample)
     }
     return RenderRequest(
-      audioURL: canonicalAudioURL, sampleRate: sampleRate, markers: markers, slices: specs)
+      audioURL: canonicalAudioURL, sampleRate: sampleRate,
+      durationSamples: editPlan.source.durationSamples, markers: markers, slices: specs)
   }
 
   /// The result of copying rendered slices to the destination, computed off the main

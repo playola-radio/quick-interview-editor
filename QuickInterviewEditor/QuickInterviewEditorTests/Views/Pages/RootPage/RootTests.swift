@@ -194,6 +194,10 @@ struct RootTests {
       for _ in 0..<1000 where model.tabs[id: tabID]?.editor == nil { await Task.yield() }
       #expect(FileManager.default.fileExists(atPath: canonical.path))
       model.closeTab(tabID)
+      // Removal happens after playback teardown, on a detached task — let it run.
+      for _ in 0..<1000 where FileManager.default.fileExists(atPath: canonical.path) {
+        await Task.yield()
+      }
       #expect(!FileManager.default.fileExists(atPath: canonical.path))
     }
   }

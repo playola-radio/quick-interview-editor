@@ -373,6 +373,7 @@ enum LiveEngine {
   private static func writeRequest(_ request: RenderRequest, to url: URL) throws {
     let wire = RenderWireRequest(
       sampleRate: request.sampleRate,
+      durationSamples: request.durationSamples,
       markers: request.markers.map {
         RenderWireRequest.Marker(position: $0.position, name: $0.name)
       },
@@ -434,10 +435,12 @@ enum LiveEngine {
 /// file Swift writes and the result/progress it reads back.
 private struct RenderWireRequest: Encodable {
   var sampleRate: Int
+  var durationSamples: Int
   var markers: [Marker]
   var slices: [Slice]
   enum CodingKeys: String, CodingKey {
     case sampleRate = "sample_rate"
+    case durationSamples = "duration_samples"
     case markers, slices
   }
   struct Marker: Encodable {

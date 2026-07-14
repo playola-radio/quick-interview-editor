@@ -10,6 +10,9 @@ struct RenderRequest: Equatable, Sendable {
   /// sample the app displayed. The export filename stem comes from elsewhere.
   var audioURL: URL
   var sampleRate: Int
+  /// The plan's `source.durationSamples`. The engine requires the canonical AIFF's
+  /// frame count to equal this exactly, so a stale/wrong file can't render silently.
+  var durationSamples: Int
   var markers: [RenderMarker]
   var slices: [RenderSliceSpec]
 }

@@ -50,6 +50,7 @@ struct EngineClientTests {
   private static let sampleRequest = RenderRequest(
     audioURL: URL(fileURLWithPath: "/clip.m4a"),
     sampleRate: 44100,
+    durationSamples: 44100,
     markers: [RenderMarker(position: 0, name: "So")],
     slices: [RenderSliceSpec(id: UUID(), startSample: 0, endSample: 100)]
   )

@@ -560,8 +560,11 @@ struct EditorTests {
 
     expectNoDifference(model.exportPhase, .done(count: 2))
     expectNoDifference(Set(capturedRequest.value?.slices.map(\.id) ?? []), Set(ids))
-    // Render is driven from the canonical AIFF, not the original source file.
+    // Render is driven from the canonical AIFF, not the original source file, and
+    // carries the plan's duration so the engine can verify the exact file.
     expectNoDifference(capturedRequest.value?.audioURL, model.canonicalAudioURL)
+    expectNoDifference(
+      capturedRequest.value?.durationSamples, model.editPlan.source.durationSamples)
     let contents = try FileManager.default.contentsOfDirectory(atPath: destination.path).sorted()
     expectNoDifference(contents.count, 2)
     expectNoDifference(revealed.value.count, 2)

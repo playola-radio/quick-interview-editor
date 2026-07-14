@@ -381,6 +381,14 @@ def run_render(source: Path, request_path: Path, work_dir: Path, sample_rate: in
             f"canonical audio sample rate {actual_rate} Hz != requested {req_rate} Hz"
         )
     frame_count = aiff_markers.read_frame_count(aiff_bytes)
+    # The app sends the plan's duration so we can confirm this is the exact file it
+    # analyzed. A same-rate-but-wrong AIFF (stale/truncated/swapped) would otherwise
+    # render silently from the wrong audio; require an exact frame-count match.
+    expected_frames = request.get("duration_samples")
+    if expected_frames is not None and int(expected_frames) != frame_count:
+        raise ValueError(
+            f"canonical audio frame count {frame_count} != expected {int(expected_frames)}"
+        )
 
     out_slices = []
     for i, spec in enumerate(slices):

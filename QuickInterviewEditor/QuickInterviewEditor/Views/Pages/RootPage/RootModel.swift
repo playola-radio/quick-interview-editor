@@ -53,8 +53,13 @@ final class RootModel: ViewModel {
     tab?.cancel()
     if let editor = tab?.editor {
       editor.cancelExportTapped()  // don't let an export outlive its closed tab
-      editor.discardCanonicalAudio()  // its cached canonical AIFF is no longer needed
-      Task { await editor.stopPlaybackTapped() }
+      // Stop playback FIRST, then delete the cached canonical AIFF — so the file is
+      // never removed while the player still holds it open. (A cancelled export is
+      // being torn down regardless, so its brief read of the file is harmless.)
+      Task {
+        await editor.stopPlaybackTapped()
+        editor.discardCanonicalAudio()
+      }
     }
     let wasSelected = selectedTabID == id
     tabs.remove(id: id)
