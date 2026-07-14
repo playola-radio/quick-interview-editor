@@ -11,6 +11,10 @@ struct SlicesPanelView: View {
         Text(model.sliceCountLabel).font(.system(size: 11))
           .foregroundStyle(Color(white: 0.34))
         Spacer()
+        Button(model.undoLabel) { Task { await model.undoTapped() } }
+          .disabled(!model.canUndo)
+        Button(model.redoLabel) { Task { await model.redoTapped() } }
+          .disabled(!model.canRedo)
         Button(model.addSliceLabel) { model.addSliceTapped() }
           .disabled(!model.canAddSlice)
         Button(model.exportAllLabel) { model.exportAllTapped() }

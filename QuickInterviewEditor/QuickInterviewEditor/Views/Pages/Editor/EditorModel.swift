@@ -42,6 +42,9 @@ final class EditorModel: ViewModel {
 
   // MARK: - Properties
   var slices: IdentifiedArrayOf<Slice> = []
+  /// Undo/redo history over `slices` only — never selection, zoom, playback, or export
+  /// phase. Every slice mutation routes through `mutateSlices`, which records here.
+  var sliceUndo = UndoStack<IdentifiedArrayOf<Slice>>()
   var playingSliceID: Slice.ID?
   var exportPhase: ExportPhase = .idle
   var destinationURL: URL?
@@ -58,6 +61,8 @@ final class EditorModel: ViewModel {
   let exportLabel = "Export"
   let exportAllLabel = "Export all"
   let cancelExportLabel = "Cancel export"
+  let undoLabel = "Undo"
+  let redoLabel = "Redo"
 
   // MARK: - Waveform sync
   /// The selected audio range, mirrored from the transcript selection.
@@ -83,6 +88,8 @@ final class EditorModel: ViewModel {
 
   // MARK: - View Helpers
   var canAddSlice: Bool { transcript.selectedSampleRange != nil }
+  var canUndo: Bool { sliceUndo.canUndo }
+  var canRedo: Bool { sliceUndo.canRedo }
 
   var sliceCountLabel: String {
     "\(slices.count) \(slices.count == 1 ? "clip" : "clips")"
@@ -179,6 +186,16 @@ final class EditorModel: ViewModel {
     transcript.selectWord(wordID)
   }
 
+  /// The single funnel for every `slices` mutation: snapshots before/after and records
+  /// the change on the undo stack (a no-op when nothing changed). Restoring history via
+  /// `undoTapped`/`redoTapped` deliberately bypasses this — it assigns `slices` directly
+  /// so replaying the stack never records a new entry.
+  func mutateSlices(_ body: (inout IdentifiedArrayOf<Slice>) -> Void) {
+    let old = slices
+    body(&slices)
+    sliceUndo.record(before: old, after: slices)
+  }
+
   func addSliceTapped() {
     guard let range = transcript.selectedSampleRange else { return }
     let wordIDs = transcript.orderedSelectedWordIDs
@@ -194,23 +211,52 @@ final class EditorModel: ViewModel {
         startSample: range.lowerBound, endSample: range.upperBound,
         durationSamples: editPlan.source.durationSamples, silences: editPlan.silences)
     )
-    slices.append(slice)
+    mutateSlices { $0.append(slice) }
     nextSliceNumber += 1
     transcript.clearSelectionTapped()
   }
 
   func renameSlice(_ id: Slice.ID, to name: String) {
-    slices[id: id]?.name = name
+    mutateSlices { $0[id: id]?.name = name }
   }
 
   func moveSlices(fromOffsets source: IndexSet, toOffset destination: Int) {
-    slices.move(fromOffsets: source, toOffset: destination)
+    mutateSlices { $0.move(fromOffsets: source, toOffset: destination) }
   }
 
   func deleteSlice(_ id: Slice.ID) async {
     let wasPlaying = playingSliceID == id
-    slices.remove(id: id)
+    mutateSlices { $0.remove(id: id) }
     if wasPlaying {
+      playingSliceID = nil
+      await audioPlayer.stop()
+    }
+  }
+
+  // MARK: - Undo / Redo
+  /// Restores the previous `slices` snapshot, then reconciles playback. History stores
+  /// only `slices`, so anything derived (selection, zoom, export phase, playback) is left
+  /// as-is except where reconciliation demands otherwise.
+  func undoTapped() async {
+    guard let restored = sliceUndo.undo(current: slices) else { return }
+    slices = restored
+    await reconcileAfterHistoryChange()
+  }
+
+  /// Reapplies the next `slices` snapshot on the redo branch, then reconciles playback.
+  func redoTapped() async {
+    guard let restored = sliceUndo.redo(current: slices) else { return }
+    slices = restored
+    await reconcileAfterHistoryChange()
+  }
+
+  /// After an undo/redo swaps the whole `slices` array, stop playback if the slice that
+  /// was playing no longer exists (its range is gone, so the running player is orphaned).
+  ///
+  /// TODO(PR 3): when `activeSliceID` and the fine-tune draft land, also clear them here
+  /// if the active slice is no longer present in `slices`.
+  private func reconcileAfterHistoryChange() async {
+    if let playing = playingSliceID, slices[id: playing] == nil {
       playingSliceID = nil
       await audioPlayer.stop()
     }
