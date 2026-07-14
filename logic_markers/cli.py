@@ -381,11 +381,22 @@ def run_render(source: Path, request_path: Path, work_dir: Path, sample_rate: in
             f"canonical audio sample rate {actual_rate} Hz != requested {req_rate} Hz"
         )
     frame_count = aiff_markers.read_frame_count(aiff_bytes)
+    # COMM can declare more frames than SSND actually holds (a truncated file). The
+    # slicer clamps to the real SSND length, which would silently export a short/empty
+    # slice while reporting the requested range — so verify the audio is all there.
+    ssnd_frames = aiff_markers.read_ssnd_frame_count(aiff_bytes)
+    if ssnd_frames != frame_count:
+        raise ValueError(
+            f"canonical audio is truncated: SSND holds {ssnd_frames} frames but COMM "
+            f"declares {frame_count}"
+        )
     # The app sends the plan's duration so we can confirm this is the exact file it
-    # analyzed. A same-rate-but-wrong AIFF (stale/truncated/swapped) would otherwise
-    # render silently from the wrong audio; require an exact frame-count match.
+    # analyzed. A same-rate-but-wrong AIFF (stale/swapped) would otherwise render
+    # silently from the wrong audio; require the field and an exact frame-count match.
     expected_frames = request.get("duration_samples")
-    if expected_frames is not None and int(expected_frames) != frame_count:
+    if expected_frames is None:
+        raise ValueError("render request is missing required 'duration_samples'")
+    if int(expected_frames) != frame_count:
         raise ValueError(
             f"canonical audio frame count {frame_count} != expected {int(expected_frames)}"
         )

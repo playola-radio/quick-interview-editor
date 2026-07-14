@@ -80,7 +80,9 @@ def _run_render(tmp_path: Path, frames: int, markers, slices):
     src = _write_canonical_aiff(src_dir / "clip.plan.aiff", frames)
     work = tmp_path / "work"
     work.mkdir()
-    request = {"sample_rate": SR, "markers": markers, "slices": slices}
+    request = {
+        "sample_rate": SR, "duration_samples": frames, "markers": markers, "slices": slices,
+    }
     req_path = work / "request.json"
     req_path.write_text(json.dumps(request))
     proc = subprocess.run(
@@ -168,6 +170,7 @@ def test_render_rejects_rate_mismatch(tmp_path):
     slice_id = "DDDDDDDD-1111-2222-3333-444444444444"
     request = {
         "sample_rate": 48000,  # != the AIFF's 44100
+        "duration_samples": 44100,
         "markers": MARKERS,
         "slices": [{"id": slice_id, "start_sample": 0, "end_sample": 100}],
     }
@@ -236,6 +239,66 @@ def test_render_accepts_matching_frame_count(tmp_path):
     assert (work / f"{slice_id}.aiff").exists()
 
 
+def test_render_requires_duration_samples(tmp_path):
+    # `duration_samples` is part of the contract; a request that omits it must fail
+    # loud rather than skip the frame-count integrity check.
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    src = _write_canonical_aiff(src_dir / "clip.plan.aiff", 44100)
+    work = tmp_path / "work"
+    work.mkdir()
+    slice_id = "12121212-1111-2222-3333-444444444444"
+    request = {
+        "sample_rate": SR,
+        "markers": MARKERS,
+        "slices": [{"id": slice_id, "start_sample": 0, "end_sample": 100}],
+    }
+    req_path = work / "request.json"
+    req_path.write_text(json.dumps(request))
+    proc = subprocess.run(
+        [sys.executable, "-m", "logic_markers.cli", "render", str(src),
+         "--request", str(req_path), "--work-dir", str(work)],
+        capture_output=True, text=True, check=False,
+    )
+    assert proc.returncode != 0
+    assert "duration_samples" in proc.stderr
+    assert not (work / f"{slice_id}.aiff").exists()
+
+
+def test_render_rejects_truncated_ssnd(tmp_path):
+    # A file whose COMM still declares the full length but whose SSND (audio) was
+    # truncated would otherwise slice to a short/empty output. The slicer clamps to
+    # the real SSND length, so render must reject the mismatch before slicing.
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    good = _write_canonical_aiff(src_dir / "clip.plan.aiff", 44100)
+    form_type, chunks = aiff_markers.parse_chunks(good.read_bytes())
+    truncated_chunks = [
+        (cid, data[: 8 + (len(data) - 8) // 2] if cid == b"SSND" else data)
+        for cid, data in chunks
+    ]
+    good.write_bytes(aiff_markers.build_form(form_type, truncated_chunks))
+    work = tmp_path / "work"
+    work.mkdir()
+    slice_id = "13131313-1111-2222-3333-444444444444"
+    request = {
+        "sample_rate": SR,
+        "duration_samples": 44100,  # matches the intact COMM
+        "markers": MARKERS,
+        "slices": [{"id": slice_id, "start_sample": 0, "end_sample": 40000}],
+    }
+    req_path = work / "request.json"
+    req_path.write_text(json.dumps(request))
+    proc = subprocess.run(
+        [sys.executable, "-m", "logic_markers.cli", "render", str(good),
+         "--request", str(req_path), "--work-dir", str(work)],
+        capture_output=True, text=True, check=False,
+    )
+    assert proc.returncode != 0
+    assert "truncated" in proc.stderr
+    assert not (work / f"{slice_id}.aiff").exists()
+
+
 def test_render_rejects_non_aiff_input(tmp_path):
     # Passing a raw (non-AIFF) source must fail loud — render only ever slices the
     # canonical AIFF; it no longer reconverts arbitrary audio.
@@ -291,6 +354,7 @@ def test_render_rejects_non_uuid_slice_id_and_writes_nothing_outside(tmp_path):
     outside = tmp_path / "outside.aiff"
     request = {
         "sample_rate": SR,
+        "duration_samples": 44100,
         "markers": MARKERS,
         "slices": [{"id": f"../{outside.stem}", "start_sample": 0, "end_sample": 100}],
     }
@@ -318,6 +382,7 @@ def test_render_rejects_out_of_range_slice(tmp_path):
     slice_id = "CCCCCCCC-1111-2222-3333-444444444444"
     request = {
         "sample_rate": SR,
+        "duration_samples": 44100,
         "markers": MARKERS,
         "slices": [{"id": slice_id, "start_sample": 0, "end_sample": 99999}],
     }
