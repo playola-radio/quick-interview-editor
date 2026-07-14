@@ -111,7 +111,12 @@ def read_ssnd_frame_count(data: bytes) -> int:
     bytes_per_frame = channels * (sample_size // 8)
     if bytes_per_frame <= 0:
         raise ValueError(f"invalid COMM: {channels} channels, {sample_size}-bit")
-    audio_bytes = max(0, len(ssnd) - 8)  # skip the 8-byte offset + blockSize header
+    # SSND = offset(4) + blockSize(4) + `offset` bytes of alignment padding + audio.
+    # The padding is not sample data, so exclude it (canonical AIFFs from afconvert
+    # use offset 0, but honoring it keeps a valid non-zero-offset file from being
+    # miscounted and wrongly rejected).
+    offset = struct.unpack(">I", ssnd[0:4])[0]
+    audio_bytes = max(0, len(ssnd) - 8 - offset)
     return audio_bytes // bytes_per_frame
 
 
