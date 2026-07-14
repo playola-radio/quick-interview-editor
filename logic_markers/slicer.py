@@ -28,7 +28,10 @@ def slice_aiff(
     sample_size = struct.unpack(">h", comm[6:8])[0]
     bytes_per_frame = channels * (sample_size // 8)
 
-    audio = ssnd[8:]  # skip SSND offset + blockSize
+    # SSND = offset(4) + blockSize(4) + `offset` bytes of alignment padding + audio.
+    # Skip the padding so slices start on a real frame (matches read_ssnd_frame_count).
+    ssnd_offset = struct.unpack(">I", ssnd[0:4])[0]
+    audio = ssnd[8 + ssnd_offset :]
     total_frames = len(audio) // bytes_per_frame
 
     start = max(0, min(start_sample, total_frames))

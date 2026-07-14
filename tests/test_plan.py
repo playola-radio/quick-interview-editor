@@ -71,7 +71,7 @@ def test_plan_keeps_canonical_aiff_in_work_dir_at_plan_rate(tmp_path):
     # The canonical AIFF (`<stem>.plan.aiff`) is left in the work dir for the app to
     # copy into its cache, and the plan's source metadata is derived from its bytes:
     # its COMM rate must equal the requested plan rate (44100).
-    src, work, proc = _run_plan(tmp_path)
+    _src, work, proc = _run_plan(tmp_path)
     aiff = work / "clip.plan.aiff"
     assert aiff.exists()
     rate = aiff_markers.read_sample_rate(aiff.read_bytes())

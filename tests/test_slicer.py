@@ -16,11 +16,15 @@ def _ext80(value: int) -> bytes:
     return struct.pack(">H", exponent) + struct.pack(">Q", mantissa)
 
 
-def _ramp_aiff(frames: int, sr: int = 44100) -> bytes:
-    """Stereo 16-bit AIFF where frame i holds sample value i in both channels."""
+def _ramp_aiff(frames: int, sr: int = 44100, offset: int = 0) -> bytes:
+    """Stereo 16-bit AIFF where frame i holds sample value i in both channels.
+
+    `offset` sets the SSND `offset` field and prepends that many padding bytes
+    before the audio (a valid, if rare, AIFF layout).
+    """
     comm = struct.pack(">h", 2) + struct.pack(">I", frames) + struct.pack(">h", 16) + _ext80(sr)
     audio = b"".join(struct.pack(">hh", i, i) for i in range(frames))
-    ssnd = struct.pack(">I", 0) + struct.pack(">I", 0) + audio
+    ssnd = struct.pack(">I", offset) + struct.pack(">I", 0) + b"\x00" * offset + audio
     body = b"AIFF"
     for cid, cdata in ((b"COMM", comm), (b"SSND", ssnd)):
         body += cid + struct.pack(">I", len(cdata)) + cdata
@@ -77,6 +81,17 @@ def test_markers_are_filtered_to_the_slice_and_rebased():
 def test_slice_clamps_out_of_range_bounds():
     out = slice_aiff(_ramp_aiff(100), 50, 5000, [])
     assert len(_read_frames(out)) == 50  # clamped to available frames
+
+
+def test_slice_honors_nonzero_ssnd_offset():
+    # With a non-zero SSND offset, the audio starts after the padding. The slicer
+    # must skip it so frame 100 is still sample value 100, not padding.
+    src = _ramp_aiff(1000, offset=8)
+    out = slice_aiff(src, 100, 200, [])
+    frames = _read_frames(out)
+    assert len(frames) == 100
+    assert frames[0] == (100, 100)
+    assert frames[-1] == (199, 199)
 
 
 def test_cut_markers_stay_distinct_through_the_slicer():

@@ -48,7 +48,7 @@ struct EngineClientTests {
   }
 
   private static let sampleRequest = RenderRequest(
-    audioURL: URL(fileURLWithPath: "/clip.m4a"),
+    audioURL: URL(fileURLWithPath: "/clip.aiff"),
     sampleRate: 44100,
     durationSamples: 44100,
     markers: [RenderMarker(position: 0, name: "So")],
