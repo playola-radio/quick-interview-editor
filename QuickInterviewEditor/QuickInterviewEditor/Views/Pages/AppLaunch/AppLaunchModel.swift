@@ -26,6 +26,9 @@ final class AppLaunchModel: ViewModel {
   ///   engine), which gates on model setup; `false` for dev, which goes straight
   ///   to the editor. Defaults to `LiveEngine.isPackaged`.
   init(requiresManagedModels: Bool = LiveEngine.isPackaged) {
+    // Canonical audio caches are per-session derived data. On launch no editor
+    // references any prior-run dir, so prune them all before any new one is created.
+    CanonicalAudioStore.pruneAll()
     self.root = RootModel()
     self.phase = requiresManagedModels ? .modelSetup : .ready
     if requiresManagedModels {

@@ -53,6 +53,7 @@ final class RootModel: ViewModel {
     tab?.cancel()
     if let editor = tab?.editor {
       editor.cancelExportTapped()  // don't let an export outlive its closed tab
+      editor.discardCanonicalAudio()  // its cached canonical AIFF is no longer needed
       Task { await editor.stopPlaybackTapped() }
     }
     let wasSelected = selectedTabID == id

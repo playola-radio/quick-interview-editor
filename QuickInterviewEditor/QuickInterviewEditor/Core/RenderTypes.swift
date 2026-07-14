@@ -5,7 +5,10 @@ import Foundation
 /// straight from the loaded `EditPlan` words — the engine never rebuilds them from
 /// seconds (no rounding drift).
 struct RenderRequest: Equatable, Sendable {
-  var sourceURL: URL
+  /// The **canonical PCM AIFF** the engine slices directly (never the raw source): the
+  /// same file that backs the waveform and playback, so a cut renders on the exact
+  /// sample the app displayed. The export filename stem comes from elsewhere.
+  var audioURL: URL
   var sampleRate: Int
   var markers: [RenderMarker]
   var slices: [RenderSliceSpec]

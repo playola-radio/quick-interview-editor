@@ -18,12 +18,13 @@ private func stream(_ events: [EngineEvent], throwing error: Error? = nil)
 struct SongTabTests {
   @Test func progressThenCompletedWalksToLoaded() async {
     let plan = Fixtures.editPlan()
+    let canonical = URL(fileURLWithPath: "/tmp/qie-songtab-canonical.aiff")
     let model = SongTabModel(sourceURL: URL(fileURLWithPath: "/clip.m4a"))
     await withDependencies {
       $0.engine.transcribe = { _ in
         stream([
           .progress(.init(phase: .transcribing, message: "Transcribing")),
-          .completed(plan),
+          .completed(Fixtures.transcriptionResult(plan, canonicalAudioURL: canonical)),
         ])
       }
     } operation: {
@@ -31,6 +32,8 @@ struct SongTabTests {
     }
     #expect(model.isLoaded)
     expectNoDifference(model.editor?.transcript.words.count, 122)
+    // The canonical AIFF from the completion is handed to the editor.
+    expectNoDifference(model.editor?.canonicalAudioURL, canonical)
   }
 
   @Test func progressUpdatesMessageBeforeCompletion() async {
@@ -78,7 +81,7 @@ struct SongTabTests {
     var readyCalled = false
     model.onReadyForNext = { readyCalled = true }
     await withDependencies {
-      $0.engine.transcribe = { _ in stream([.completed(plan)]) }
+      $0.engine.transcribe = { _ in stream([.completed(Fixtures.transcriptionResult(plan))]) }
     } operation: {
       await model.startTranscription()
     }

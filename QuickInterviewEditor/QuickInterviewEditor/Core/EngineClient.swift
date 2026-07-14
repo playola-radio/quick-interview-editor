@@ -41,7 +41,11 @@ extension EngineClient: TestDependencyKey {
     loadPlan: { _ in .fixture },
     transcribe: { _ in
       AsyncThrowingStream { continuation in
-        continuation.yield(.completed(.fixture))
+        continuation.yield(
+          .completed(
+            TranscriptionResult(
+              editPlan: .fixture,
+              canonicalAudioURL: URL(fileURLWithPath: "/preview/canonical.aiff"))))
         continuation.finish()
       }
     },

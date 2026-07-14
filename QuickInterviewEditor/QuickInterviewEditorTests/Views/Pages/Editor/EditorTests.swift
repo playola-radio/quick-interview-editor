@@ -53,7 +53,9 @@ private final class PlayerGate: @unchecked Sendable {
 @MainActor
 struct EditorTests {
   private func editor(_ plan: EditPlan = Fixtures.editPlan()) -> EditorModel {
-    EditorModel(sourceURL: URL(fileURLWithPath: "/clip.m4a"), editPlan: plan)
+    EditorModel(
+      sourceURL: URL(fileURLWithPath: "/clip.m4a"),
+      canonicalAudioURL: Fixtures.canonicalAudioURL, editPlan: plan)
   }
 
   @Test func addSliceFromSelectionCreatesSlice() {
@@ -187,7 +189,8 @@ struct EditorTests {
       let task = Task { await model.playSliceTapped(slice.id) }
       await gate.awaitStarted()
       expectNoDifference(model.playingSliceID, slice.id)
-      expectNoDifference(recorded.value?.0, model.sourceURL)
+      // Playback reads the canonical AIFF, not the original source.
+      expectNoDifference(recorded.value?.0, model.canonicalAudioURL)
       expectNoDifference(recorded.value?.1, slice.startSample..<slice.endSample)
       expectNoDifference(recorded.value?.2, model.editPlan.source.sampleRate)
       gate.release()  // natural completion
@@ -466,19 +469,28 @@ struct EditorTests {
     for range in model.redRanges { #expect(range.lowerBound < range.upperBound) }
   }
 
-  @Test func loadWaveformPopulatesChildViaClient() async {
+  @Test func loadWaveformPopulatesChildViaClientFromCanonicalURL() async {
     let plan = Fixtures.editPlan()
     let fixture = Waveform.pyramid(
       baseMins: [0], baseMaxs: [0.5], sampleRate: plan.source.sampleRate,
       totalSamples: plan.source.durationSamples)
+    let canonical = URL(fileURLWithPath: "/tmp/qie-canonical-load.aiff")
+    let loadedURL = LockIsolated<URL?>(nil)
     let model = withDependencies {
-      $0.waveform = WaveformClient(loadWaveform: { _, _, _ in fixture })
+      $0.waveform = WaveformClient(loadWaveform: { url, _, _ in
+        loadedURL.setValue(url)
+        return fixture
+      })
     } operation: {
-      EditorModel(sourceURL: URL(fileURLWithPath: "/clip.m4a"), editPlan: plan)
+      EditorModel(
+        sourceURL: URL(fileURLWithPath: "/clip.m4a"),
+        canonicalAudioURL: canonical, editPlan: plan)
     }
     await model.loadWaveform()
     expectNoDifference(model.waveform.waveform, fixture)
     #expect(model.waveform.totalSamples == plan.source.durationSamples)
+    // The waveform is built from the canonical AIFF, not the original source.
+    expectNoDifference(loadedURL.value, canonical)
   }
 
   // MARK: - Export
@@ -548,6 +560,8 @@ struct EditorTests {
 
     expectNoDifference(model.exportPhase, .done(count: 2))
     expectNoDifference(Set(capturedRequest.value?.slices.map(\.id) ?? []), Set(ids))
+    // Render is driven from the canonical AIFF, not the original source file.
+    expectNoDifference(capturedRequest.value?.audioURL, model.canonicalAudioURL)
     let contents = try FileManager.default.contentsOfDirectory(atPath: destination.path).sorted()
     expectNoDifference(contents.count, 2)
     expectNoDifference(revealed.value.count, 2)

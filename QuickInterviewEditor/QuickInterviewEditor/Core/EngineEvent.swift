@@ -2,7 +2,16 @@ import Foundation
 
 enum EngineEvent: Equatable, Sendable {
   case progress(EngineProgress)
-  case completed(EditPlan)
+  case completed(TranscriptionResult)
+}
+
+/// A finished transcription: the decoded plan plus the canonical PCM AIFF the engine
+/// produced (copied into an app-owned cache). Every downstream coordinate — waveform,
+/// playhead, cut — is a sample of this one file, so nothing drifts through a second
+/// native→plan resample (roadmap decision 4).
+struct TranscriptionResult: Equatable, Sendable {
+  var editPlan: EditPlan
+  var canonicalAudioURL: URL
 }
 
 struct EngineProgress: Equatable, Sendable {
