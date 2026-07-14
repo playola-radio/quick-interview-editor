@@ -299,10 +299,20 @@ def run_plan(source: Path, work_dir: Path, sample_rate: int, refresh: bool = Fal
     transcript = _load_or_transcribe_transcript_in(source, work_dir, refresh)
 
     _progress("converting", "Converting audio")
+    # The canonical PCM AIFF that backs the app's waveform, playback, and render
+    # (roadmap decision 4). It is left on disk in `work_dir` for the app to copy
+    # into its own cache before the scratch dir is cleaned up.
     aiff_path = work_dir / (source.stem + ".plan.aiff")
     convert_to_aiff(source, aiff_path, sample_rate)
     aiff_bytes = aiff_path.read_bytes()
     sr = aiff_markers.read_sample_rate(aiff_bytes)
+    # Source metadata below is derived from the canonical AIFF's own bytes. It must
+    # be at exactly the requested plan rate so every downstream coordinate is a
+    # canonical sample; a mismatch would silently drift the app, so fail loud.
+    if sr != sample_rate:
+        raise RuntimeError(
+            f"canonical AIFF sample rate {sr} Hz != requested plan rate {sample_rate} Hz"
+        )
     _, chunks = aiff_markers.parse_chunks(aiff_bytes)
     channels = struct.unpack(">h", dict(chunks)[b"COMM"][0:2])[0]
     mono, _ = read_aiff_mono(aiff_bytes)
@@ -335,14 +345,16 @@ def run_plan(source: Path, work_dir: Path, sample_rate: int, refresh: bool = Fal
 
 
 def run_render(source: Path, request_path: Path, work_dir: Path, sample_rate: int) -> dict:
-    """Stateless render: convert the source once, then slice per request.
+    """Stateless render: slice the canonical AIFF per request (no reconversion).
 
-    The request (written by the app) carries canonical-rate word markers with
-    ABSOLUTE sample positions and the slices to cut ({id, start_sample, end_sample}).
-    Markers are taken as-is — the engine never rebuilds them from seconds, so no
-    rounding drift is reintroduced. Each slice becomes `<work-dir>/<id>.aiff`; the
-    returned dict is keyed by slice id (not request order). Writes only into
-    `work_dir`.
+    `source` is the canonical PCM AIFF the app already analyzed at the plan rate
+    (roadmap decision 4), so the engine slices it directly rather than reconverting
+    — a dragged cut lands on the exact sample the app showed. The request (written
+    by the app) carries canonical-rate word markers with ABSOLUTE sample positions
+    and the slices to cut ({id, start_sample, end_sample}). Markers are taken as-is —
+    the engine never rebuilds them from seconds, so no rounding drift is reintroduced.
+    Each slice becomes `<work-dir>/<id>.aiff`; the returned dict is keyed by slice id
+    (not request order). Writes only into `work_dir`.
     """
     work_dir.mkdir(parents=True, exist_ok=True)
     request = json.loads(request_path.read_text())
@@ -357,15 +369,37 @@ def run_render(source: Path, request_path: Path, work_dir: Path, sample_rate: in
     slices = request.get("slices", [])
     total = len(slices)
 
-    _emit_event({"type": "progress", "phase": "rendering", "message": "Converting audio",
+    _emit_event({"type": "progress", "phase": "rendering", "message": "Loading audio",
                  "index": 0, "total": total})
-    aiff_path = work_dir / "render.aiff"
-    convert_to_aiff(source, aiff_path, req_rate)
-    aiff_bytes = aiff_path.read_bytes()
-    # Slices are cut from the in-memory bytes; free the (possibly several-hundred-MB)
-    # converted AIFF now so it doesn't sit alongside the per-slice outputs.
-    aiff_path.unlink(missing_ok=True)
+    # Slice the canonical AIFF directly — never reconvert. Verify its COMM rate and
+    # frame count so a wrong/mismatched file fails loud instead of drifting the cuts.
+    # (A non-AIFF input raises in parse_chunks, which is the intended fail-loud path.)
+    aiff_bytes = source.read_bytes()
+    actual_rate = aiff_markers.read_sample_rate(aiff_bytes)
+    if actual_rate != req_rate:
+        raise ValueError(
+            f"canonical audio sample rate {actual_rate} Hz != requested {req_rate} Hz"
+        )
     frame_count = aiff_markers.read_frame_count(aiff_bytes)
+    # COMM can declare more frames than SSND actually holds (a truncated file). The
+    # slicer clamps to the real SSND length, which would silently export a short/empty
+    # slice while reporting the requested range — so verify the audio is all there.
+    ssnd_frames = aiff_markers.read_ssnd_frame_count(aiff_bytes)
+    if ssnd_frames != frame_count:
+        raise ValueError(
+            f"canonical audio is truncated: SSND holds {ssnd_frames} frames but COMM "
+            f"declares {frame_count}"
+        )
+    # The app sends the plan's duration so we can confirm this is the exact file it
+    # analyzed. A same-rate-but-wrong AIFF (stale/swapped) would otherwise render
+    # silently from the wrong audio; require the field and an exact frame-count match.
+    expected_frames = request.get("duration_samples")
+    if expected_frames is None:
+        raise ValueError("render request is missing required 'duration_samples'")
+    if int(expected_frames) != frame_count:
+        raise ValueError(
+            f"canonical audio frame count {frame_count} != expected {int(expected_frames)}"
+        )
 
     out_slices = []
     for i, spec in enumerate(slices):

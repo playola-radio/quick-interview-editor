@@ -83,9 +83,11 @@ final class SongTabModel: ViewModel, Identifiable {
       for try await event in engine.transcribe(sourceURL) {
         switch event {
         case .progress(let progress): phase = .transcribing(progress)
-        case .completed(let plan):
+        case .completed(let result):
           editor = withDependencies(from: self) {
-            EditorModel(sourceURL: sourceURL, editPlan: plan)
+            EditorModel(
+              sourceURL: sourceURL, canonicalAudioURL: result.canonicalAudioURL,
+              editPlan: result.editPlan)
           }
           phase = .loaded
         }

@@ -92,6 +92,34 @@ def read_frame_count(data: bytes) -> int:
     raise ValueError("no COMM chunk found; not a valid AIFF")
 
 
+def read_ssnd_frame_count(data: bytes) -> int:
+    """Frames actually present in the SSND (audio) chunk.
+
+    COMM declares a frame count, but the real audio lives in SSND. A truncated file
+    can keep an intact COMM while SSND holds fewer frames; callers compare this
+    against `read_frame_count` to catch that before slicing (which would otherwise
+    silently clamp to a shorter output).
+    """
+    _, chunks = parse_chunks(data)
+    by_id = dict(chunks)
+    comm = by_id.get(b"COMM")
+    ssnd = by_id.get(b"SSND")
+    if comm is None or ssnd is None:
+        raise ValueError("missing COMM/SSND chunk; not a valid AIFF")
+    channels = struct.unpack(">h", comm[0:2])[0]
+    sample_size = struct.unpack(">h", comm[6:8])[0]
+    bytes_per_frame = channels * (sample_size // 8)
+    if bytes_per_frame <= 0:
+        raise ValueError(f"invalid COMM: {channels} channels, {sample_size}-bit")
+    # SSND = offset(4) + blockSize(4) + `offset` bytes of alignment padding + audio.
+    # The padding is not sample data, so exclude it (canonical AIFFs from afconvert
+    # use offset 0, but honoring it keeps a valid non-zero-offset file from being
+    # miscounted and wrongly rejected).
+    offset = struct.unpack(">I", ssnd[0:4])[0]
+    audio_bytes = max(0, len(ssnd) - 8 - offset)
+    return audio_bytes // bytes_per_frame
+
+
 def read_sample_rate(data: bytes) -> int:
     """Read the sample rate (Hz) from the COMM chunk's 80-bit extended float."""
     _, chunks = parse_chunks(data)

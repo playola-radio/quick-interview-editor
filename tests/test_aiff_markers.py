@@ -11,7 +11,9 @@ from logic_markers.aiff_markers import (
     add_markers,
     build_mark_chunk,
     parse_chunks,
+    read_frame_count,
     read_sample_rate,
+    read_ssnd_frame_count,
 )
 
 
@@ -30,7 +32,7 @@ def _float_to_extended80(value: float) -> bytes:
     return struct.pack(">H", exponent) + struct.pack(">Q", int(mantissa))
 
 
-def _synthetic_aiff(sample_rate: int = 44100, frames: int = 1000) -> bytes:
+def _synthetic_aiff(sample_rate: int = 44100, frames: int = 1000, offset: int = 0) -> bytes:
     comm = (
         struct.pack(">h", 2)                        # channels
         + struct.pack(">I", frames)                 # numSampleFrames
@@ -38,7 +40,8 @@ def _synthetic_aiff(sample_rate: int = 44100, frames: int = 1000) -> bytes:
         + _float_to_extended80(sample_rate)         # sampleRate (ext80)
     )
     audio = b"\x00" * (frames * 2 * 2)              # stereo 16-bit
-    ssnd = struct.pack(">I", 0) + struct.pack(">I", 0) + audio  # offset, blockSize
+    # offset, blockSize, then `offset` bytes of alignment padding before the audio.
+    ssnd = struct.pack(">I", offset) + struct.pack(">I", 0) + b"\x00" * offset + audio
     body = b"AIFF"
     for ck_id, ck_data in ((b"COMM", comm), (b"SSND", ssnd)):
         body += ck_id + struct.pack(">I", len(ck_data)) + ck_data
@@ -49,6 +52,37 @@ def _synthetic_aiff(sample_rate: int = 44100, frames: int = 1000) -> bytes:
 
 def test_read_sample_rate():
     assert read_sample_rate(_synthetic_aiff(sample_rate=48000)) == 48000
+
+
+def test_ssnd_frame_count_matches_comm_for_intact_file():
+    assert read_ssnd_frame_count(_synthetic_aiff(frames=1000)) == 1000
+    assert read_frame_count(_synthetic_aiff(frames=1000)) == 1000
+
+
+def test_ssnd_frame_count_excludes_nonzero_offset_padding():
+    # A valid AIFF may use a non-zero SSND offset (alignment padding before the
+    # audio). That padding must NOT be counted as sample data, else an intact file
+    # would look longer than its COMM and be wrongly rejected on render.
+    aiff = _synthetic_aiff(frames=1000, offset=8)
+    assert read_frame_count(aiff) == 1000
+    assert read_ssnd_frame_count(aiff) == 1000
+
+
+def test_ssnd_frame_count_detects_truncated_audio():
+    # Drop the last 100 stereo-16-bit frames (400 bytes) from SSND while leaving COMM
+    # untouched: the real audio is now shorter than COMM declares.
+    form_type, chunks = parse_chunks(_synthetic_aiff(frames=1000))
+    truncated = [
+        (cid, data[:-400] if cid == b"SSND" else data) for cid, data in chunks
+    ]
+    body = form_type
+    for cid, data in truncated:
+        body += cid + struct.pack(">I", len(data)) + data
+        if len(data) & 1:
+            body += b"\x00"
+    aiff = b"FORM" + struct.pack(">I", len(body)) + body
+    assert read_frame_count(aiff) == 1000
+    assert read_ssnd_frame_count(aiff) == 900
 
 
 def test_form_size_is_rewritten_correctly():

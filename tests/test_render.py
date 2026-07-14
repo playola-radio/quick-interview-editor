@@ -1,12 +1,13 @@
 """The `render` subcommand: stateless slice rendering driven by a request file.
 
-Swift writes a request.json (canonical-rate markers + slice sample ranges), the
-engine converts the source to a canonical AIFF once, slices it per request, writes
-`<id>.aiff` into the work-dir, and emits a result JSON keyed by slice id on stdout
-plus `QIE_EVENT` progress on stderr. No WhisperX, no models — a tiny real WAV and a
-hand-built request drive the whole path.
+Swift writes a request.json (canonical-rate markers + slice sample ranges) and hands
+the engine the canonical PCM AIFF it already analyzed. The engine slices that AIFF
+directly (no reconversion), writes `<id>.aiff` into the work-dir, and emits a result
+JSON keyed by slice id on stdout plus `QIE_EVENT` progress on stderr. No WhisperX, no
+models — a tiny real AIFF and a hand-built request drive the whole path.
 
-`render` uses afconvert (macOS-only), so this suite skips on Linux like test_plan.py.
+The canonical AIFF is produced here with afconvert (macOS-only), so this suite skips
+on Linux like test_plan.py.
 """
 
 import json
@@ -20,6 +21,7 @@ from pathlib import Path
 import pytest
 
 from logic_markers import aiff_markers
+from logic_markers.audio import convert_to_aiff
 
 pytestmark = pytest.mark.skipif(
     shutil.which("afconvert") is None,
@@ -36,6 +38,15 @@ def _write_wav(path: Path, frames: int, sr: int = SR):
         w.setsampwidth(2)
         w.setframerate(sr)
         w.writeframes(b"\x00\x00" * frames)
+
+
+def _write_canonical_aiff(path: Path, frames: int, sr: int = SR) -> Path:
+    """A canonical linear-PCM AIFF of `frames` samples at `sr` — what the app hands render."""
+    wav = path.with_suffix(".wav")
+    _write_wav(wav, frames, sr)
+    convert_to_aiff(wav, path, sr)
+    wav.unlink()
+    return path
 
 
 def _read_frame_count(aiff: bytes) -> int:
@@ -66,11 +77,12 @@ def _read_markers(aiff: bytes):
 def _run_render(tmp_path: Path, frames: int, markers, slices):
     src_dir = tmp_path / "src"
     src_dir.mkdir()
-    src = src_dir / "clip.wav"
-    _write_wav(src, frames)
+    src = _write_canonical_aiff(src_dir / "clip.plan.aiff", frames)
     work = tmp_path / "work"
     work.mkdir()
-    request = {"sample_rate": SR, "markers": markers, "slices": slices}
+    request = {
+        "sample_rate": SR, "duration_samples": frames, "markers": markers, "slices": slices,
+    }
     req_path = work / "request.json"
     req_path.write_text(json.dumps(request))
     proc = subprocess.run(
@@ -136,7 +148,176 @@ def test_render_markers_are_rebased_and_renumbered_within_each_slice(tmp_path):
 def test_render_writes_nothing_beside_source(tmp_path):
     src, _work, _proc = _run_render(tmp_path, 44100, MARKERS, SLICES)
     siblings = sorted(p.name for p in src.parent.iterdir())
-    assert siblings == ["clip.wav"]
+    assert siblings == ["clip.plan.aiff"]  # no per-slice outputs beside the input
+
+
+def test_render_slices_canonical_aiff_without_reconversion(tmp_path):
+    # The input is already a canonical AIFF; render slices it directly. A
+    # frame-exact result (no resample) is the observable proof of no reconversion.
+    _src, work, _proc = _run_render(tmp_path, 44100, MARKERS, SLICES)
+    # No intermediate `render.aiff` is left behind — render never wrote one.
+    assert not (work / "render.aiff").exists()
+
+
+def test_render_rejects_rate_mismatch(tmp_path):
+    # The canonical AIFF's COMM rate must equal the request's sample_rate; otherwise
+    # cuts would land on the wrong samples. Fail loud rather than drift.
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    src = _write_canonical_aiff(src_dir / "clip.plan.aiff", 44100, SR)
+    work = tmp_path / "work"
+    work.mkdir()
+    slice_id = "DDDDDDDD-1111-2222-3333-444444444444"
+    request = {
+        "sample_rate": 48000,  # != the AIFF's 44100
+        "duration_samples": 44100,
+        "markers": MARKERS,
+        "slices": [{"id": slice_id, "start_sample": 0, "end_sample": 100}],
+    }
+    req_path = work / "request.json"
+    req_path.write_text(json.dumps(request))
+    proc = subprocess.run(
+        [sys.executable, "-m", "logic_markers.cli", "render", str(src),
+         "--request", str(req_path), "--work-dir", str(work)],
+        capture_output=True, text=True, check=False,
+    )
+    assert proc.returncode != 0
+    assert "sample rate" in proc.stderr
+    assert not (work / f"{slice_id}.aiff").exists()
+
+
+def test_render_rejects_frame_count_mismatch(tmp_path):
+    # `duration_samples` in the request is the plan's frame count. A canonical AIFF
+    # whose actual frame count differs (stale/truncated/swapped file) must fail loud
+    # rather than render silently from the wrong audio.
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    src = _write_canonical_aiff(src_dir / "clip.plan.aiff", 44100)  # 44100 frames
+    work = tmp_path / "work"
+    work.mkdir()
+    slice_id = "EEEEEEEE-1111-2222-3333-444444444444"
+    request = {
+        "sample_rate": SR,
+        "duration_samples": 40000,  # != the AIFF's 44100 frames
+        "markers": MARKERS,
+        "slices": [{"id": slice_id, "start_sample": 0, "end_sample": 100}],
+    }
+    req_path = work / "request.json"
+    req_path.write_text(json.dumps(request))
+    proc = subprocess.run(
+        [sys.executable, "-m", "logic_markers.cli", "render", str(src),
+         "--request", str(req_path), "--work-dir", str(work)],
+        capture_output=True, text=True, check=False,
+    )
+    assert proc.returncode != 0
+    assert "frame count" in proc.stderr
+    assert not (work / f"{slice_id}.aiff").exists()
+
+
+def test_render_accepts_matching_frame_count(tmp_path):
+    # The happy path: request carries the correct duration_samples, render succeeds.
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    src = _write_canonical_aiff(src_dir / "clip.plan.aiff", 44100)
+    work = tmp_path / "work"
+    work.mkdir()
+    slice_id = "FFFFFFFF-1111-2222-3333-444444444444"
+    request = {
+        "sample_rate": SR,
+        "duration_samples": 44100,
+        "markers": MARKERS,
+        "slices": [{"id": slice_id, "start_sample": 0, "end_sample": 100}],
+    }
+    req_path = work / "request.json"
+    req_path.write_text(json.dumps(request))
+    proc = subprocess.run(
+        [sys.executable, "-m", "logic_markers.cli", "render", str(src),
+         "--request", str(req_path), "--work-dir", str(work)],
+        capture_output=True, text=True, check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert (work / f"{slice_id}.aiff").exists()
+
+
+def test_render_requires_duration_samples(tmp_path):
+    # `duration_samples` is part of the contract; a request that omits it must fail
+    # loud rather than skip the frame-count integrity check.
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    src = _write_canonical_aiff(src_dir / "clip.plan.aiff", 44100)
+    work = tmp_path / "work"
+    work.mkdir()
+    slice_id = "12121212-1111-2222-3333-444444444444"
+    request = {
+        "sample_rate": SR,
+        "markers": MARKERS,
+        "slices": [{"id": slice_id, "start_sample": 0, "end_sample": 100}],
+    }
+    req_path = work / "request.json"
+    req_path.write_text(json.dumps(request))
+    proc = subprocess.run(
+        [sys.executable, "-m", "logic_markers.cli", "render", str(src),
+         "--request", str(req_path), "--work-dir", str(work)],
+        capture_output=True, text=True, check=False,
+    )
+    assert proc.returncode != 0
+    assert "duration_samples" in proc.stderr
+    assert not (work / f"{slice_id}.aiff").exists()
+
+
+def test_render_rejects_truncated_ssnd(tmp_path):
+    # A file whose COMM still declares the full length but whose SSND (audio) was
+    # truncated would otherwise slice to a short/empty output. The slicer clamps to
+    # the real SSND length, so render must reject the mismatch before slicing.
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    good = _write_canonical_aiff(src_dir / "clip.plan.aiff", 44100)
+    form_type, chunks = aiff_markers.parse_chunks(good.read_bytes())
+    truncated_chunks = [
+        (cid, data[: 8 + (len(data) - 8) // 2] if cid == b"SSND" else data)
+        for cid, data in chunks
+    ]
+    good.write_bytes(aiff_markers.build_form(form_type, truncated_chunks))
+    work = tmp_path / "work"
+    work.mkdir()
+    slice_id = "13131313-1111-2222-3333-444444444444"
+    request = {
+        "sample_rate": SR,
+        "duration_samples": 44100,  # matches the intact COMM
+        "markers": MARKERS,
+        "slices": [{"id": slice_id, "start_sample": 0, "end_sample": 40000}],
+    }
+    req_path = work / "request.json"
+    req_path.write_text(json.dumps(request))
+    proc = subprocess.run(
+        [sys.executable, "-m", "logic_markers.cli", "render", str(good),
+         "--request", str(req_path), "--work-dir", str(work)],
+        capture_output=True, text=True, check=False,
+    )
+    assert proc.returncode != 0
+    assert "truncated" in proc.stderr
+    assert not (work / f"{slice_id}.aiff").exists()
+
+
+def test_render_rejects_non_aiff_input(tmp_path):
+    # Passing a raw (non-AIFF) source must fail loud — render only ever slices the
+    # canonical AIFF; it no longer reconverts arbitrary audio.
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    src = src_dir / "clip.wav"
+    _write_wav(src, 44100)
+    work = tmp_path / "work"
+    work.mkdir()
+    request = {"sample_rate": SR, "markers": MARKERS, "slices": SLICES}
+    req_path = work / "request.json"
+    req_path.write_text(json.dumps(request))
+    proc = subprocess.run(
+        [sys.executable, "-m", "logic_markers.cli", "render", str(src),
+         "--request", str(req_path), "--work-dir", str(work)],
+        capture_output=True, text=True, check=False,
+    )
+    assert proc.returncode != 0
+    assert "AIFF" in proc.stderr
 
 
 def test_render_emits_progress_events_on_stderr(tmp_path):
@@ -167,13 +348,13 @@ def test_render_rejects_non_uuid_slice_id_and_writes_nothing_outside(tmp_path):
     # so a malformed request can't escape the work-dir.
     src_dir = tmp_path / "src"
     src_dir.mkdir()
-    src = src_dir / "clip.wav"
-    _write_wav(src, 44100)
+    src = _write_canonical_aiff(src_dir / "clip.plan.aiff", 44100)
     work = tmp_path / "work"
     work.mkdir()
     outside = tmp_path / "outside.aiff"
     request = {
         "sample_rate": SR,
+        "duration_samples": 44100,
         "markers": MARKERS,
         "slices": [{"id": f"../{outside.stem}", "start_sample": 0, "end_sample": 100}],
     }
@@ -195,13 +376,13 @@ def test_render_rejects_out_of_range_slice(tmp_path):
     # clamped to a shorter AIFF while the result reports the requested range.
     src_dir = tmp_path / "src"
     src_dir.mkdir()
-    src = src_dir / "clip.wav"
-    _write_wav(src, 44100)
+    src = _write_canonical_aiff(src_dir / "clip.plan.aiff", 44100)
     work = tmp_path / "work"
     work.mkdir()
     slice_id = "CCCCCCCC-1111-2222-3333-444444444444"
     request = {
         "sample_rate": SR,
+        "duration_samples": 44100,
         "markers": MARKERS,
         "slices": [{"id": slice_id, "start_sample": 0, "end_sample": 99999}],
     }

@@ -27,11 +27,12 @@ struct EngineClientTests {
   }
 
   @Test func previewValueYieldsFixture() async throws {
-    var got: EditPlan?
+    var got: TranscriptionResult?
     for try await event in EngineClient.previewValue.transcribe(URL(fileURLWithPath: "/x")) {
-      if case .completed(let plan) = event { got = plan }
+      if case .completed(let result) = event { got = result }
     }
-    expectNoDifference(got?.words.count, 122)
+    expectNoDifference(got?.editPlan.words.count, 122)
+    #expect(got?.canonicalAudioURL != nil)
   }
 
   @Test func testValueRenderSlicesFailsCleanlyWithoutOverride() async {
@@ -47,8 +48,9 @@ struct EngineClientTests {
   }
 
   private static let sampleRequest = RenderRequest(
-    sourceURL: URL(fileURLWithPath: "/clip.m4a"),
+    audioURL: URL(fileURLWithPath: "/clip.aiff"),
     sampleRate: 44100,
+    durationSamples: 44100,
     markers: [RenderMarker(position: 0, name: "So")],
     slices: [RenderSliceSpec(id: UUID(), startSample: 0, endSample: 100)]
   )

@@ -90,6 +90,18 @@ enum LiveEngine {
     return base
   }
 
+  /// The canonical `<stem>.plan.aiff` the engine's `plan` step left in `work`. Found
+  /// by suffix (there is exactly one) so Swift never has to re-derive the stem the
+  /// same way Python did. Throws if the engine didn't leave it.
+  private static func planAIFF(in work: URL) throws -> URL {
+    let names = (try? FileManager.default.contentsOfDirectory(atPath: work.path)) ?? []
+    guard let name = names.first(where: { $0.hasSuffix(".plan.aiff") }) else {
+      throw EngineClientError.decodeFailed(
+        "the engine did not leave a canonical .plan.aiff in its work directory")
+    }
+    return work.appendingPathComponent(name)
+  }
+
   // MARK: Logging
 
   /// Where per-run engine logs land (Application Support/…/Logs), for QA/inspection.
@@ -226,10 +238,9 @@ enum LiveEngine {
           guard code == 0 else {
             throw EngineClientError.engineFailed(proc.stderrTail() + logHint(logURL))
           }
+          let plan: EditPlan
           do {
-            let plan = try JSONDecoder().decode(EditPlan.self, from: out)
-            continuation.yield(.completed(plan))
-            continuation.finish()
+            plan = try JSONDecoder().decode(EditPlan.self, from: out)
           } catch {
             // Include a preview of what the engine actually emitted — a decode
             // failure almost always means non-JSON leaked onto stdout.
@@ -239,6 +250,14 @@ enum LiveEngine {
               "\(error)\n\nEngine output was not valid JSON. It began with:\n\(preview)"
                 + logHint(logURL))
           }
+          // Copy the engine's canonical `<stem>.plan.aiff` into an app-owned cache
+          // BEFORE the `defer` above deletes the scratch dir, so the returned URL
+          // never points at a file we're about to remove. One canonical file then
+          // backs the waveform, playback, and render for this session.
+          let canonical = try CanonicalAudioStore.store(planAIFF: planAIFF(in: work))
+          continuation.yield(
+            .completed(TranscriptionResult(editPlan: plan, canonicalAudioURL: canonical)))
+          continuation.finish()
         } catch is CancellationError {
           continuation.finish()
         } catch {
@@ -291,7 +310,7 @@ enum LiveEngine {
             arguments: launch.arguments(
               subcommand: "render",
               [
-                request.sourceURL.path, "--request", requestURL.path,
+                request.audioURL.path, "--request", requestURL.path,
                 "--work-dir", work.path, "--sample-rate", String(request.sampleRate),
               ]
             ),
@@ -320,7 +339,7 @@ enum LiveEngine {
           let out = await stdoutData
           let code = await exitCode
           let logURL = writeJobLog(
-            kind: "render", audio: request.sourceURL, exitCode: code, stdout: out,
+            kind: "render", audio: request.audioURL, exitCode: code, stdout: out,
             stderr: proc.stderrTail())
 
           if Task.isCancelled {
@@ -354,6 +373,7 @@ enum LiveEngine {
   private static func writeRequest(_ request: RenderRequest, to url: URL) throws {
     let wire = RenderWireRequest(
       sampleRate: request.sampleRate,
+      durationSamples: request.durationSamples,
       markers: request.markers.map {
         RenderWireRequest.Marker(position: $0.position, name: $0.name)
       },
@@ -415,10 +435,12 @@ enum LiveEngine {
 /// file Swift writes and the result/progress it reads back.
 private struct RenderWireRequest: Encodable {
   var sampleRate: Int
+  var durationSamples: Int
   var markers: [Marker]
   var slices: [Slice]
   enum CodingKeys: String, CodingKey {
     case sampleRate = "sample_rate"
+    case durationSamples = "duration_samples"
     case markers, slices
   }
   struct Marker: Encodable {

@@ -36,18 +36,21 @@ struct LiveEngineIntegrationTests {
     let clip = try #require(sampleClip, "no sample clip found (set QIE_SAMPLE_CLIP)")
 
     var sawProgress = false
-    var completedPlan: EditPlan?
+    var completedResult: TranscriptionResult?
     for try await event in LiveEngine.transcribe(audio: URL(fileURLWithPath: clip)) {
       switch event {
       case .progress:
         sawProgress = true
-      case .completed(let plan):
-        completedPlan = plan
+      case .completed(let result):
+        completedResult = result
       }
     }
 
     #expect(sawProgress)
-    let plan = try #require(completedPlan, "engine produced no completed EditPlan")
-    #expect(!plan.words.isEmpty)
+    let result = try #require(completedResult, "engine produced no completed result")
+    #expect(!result.editPlan.words.isEmpty)
+    // The canonical AIFF was copied into the app cache and exists on disk.
+    #expect(FileManager.default.fileExists(atPath: result.canonicalAudioURL.path))
+    CanonicalAudioStore.remove(result.canonicalAudioURL)
   }
 }

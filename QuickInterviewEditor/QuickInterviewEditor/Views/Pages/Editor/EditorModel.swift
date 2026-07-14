@@ -14,13 +14,18 @@ final class EditorModel: ViewModel {
   @ObservationIgnored @Dependency(\.workspace) var workspace
 
   // MARK: - Initialization
+  /// The user's original file — used **only** to name exported clips (its stem).
   let sourceURL: URL
+  /// The canonical PCM AIFF backing waveform, playback, and render. Every coordinate
+  /// is a sample of this one file, so the playhead sits exactly on the pyramid.
+  let canonicalAudioURL: URL
   let editPlan: EditPlan
   var transcript: TranscriptPageModel
   var waveform: WaveformModel
 
-  init(sourceURL: URL, editPlan: EditPlan) {
+  init(sourceURL: URL, canonicalAudioURL: URL, editPlan: EditPlan) {
     self.sourceURL = sourceURL
+    self.canonicalAudioURL = canonicalAudioURL
     self.editPlan = editPlan
     self.transcript = TranscriptPageModel(editPlan: editPlan)
     self.waveform = WaveformModel()
@@ -139,10 +144,12 @@ final class EditorModel: ViewModel {
   }
 
   // MARK: - User Actions
-  /// Builds the waveform peak pyramid for the source audio, in plan-sample coordinates.
+  /// Builds the waveform peak pyramid for the canonical audio, in plan-sample
+  /// coordinates. Reading the canonical AIFF (already at the plan rate) means the
+  /// pyramid, playhead, and cuts share one sample grid — no native→plan resample.
   func loadWaveform() async {
     await waveform.load(
-      url: sourceURL, planSampleRate: editPlan.source.sampleRate,
+      url: canonicalAudioURL, planSampleRate: editPlan.source.sampleRate,
       durationSamples: editPlan.source.durationSamples)
   }
 
@@ -214,7 +221,7 @@ final class EditorModel: ViewModel {
     playingSliceID = id
     do {
       try await audioPlayer.play(
-        sourceURL, slice.startSample..<slice.endSample, editPlan.source.sampleRate)
+        canonicalAudioURL, slice.startSample..<slice.endSample, editPlan.source.sampleRate)
     } catch {
       reportIssue(error)
     }
@@ -247,6 +254,13 @@ final class EditorModel: ViewModel {
 
   func cancelExportTapped() {
     exportTask?.cancel()
+  }
+
+  // MARK: - Lifecycle
+  /// Removes this session's canonical audio cache dir. Called when the tab closes:
+  /// the AIFF is derived data, rebuildable by re-transcribing, so it shouldn't linger.
+  func discardCanonicalAudio() {
+    CanonicalAudioStore.remove(canonicalAudioURL)
   }
 
   // MARK: - Private Helpers
@@ -356,7 +370,8 @@ final class EditorModel: ViewModel {
       RenderSliceSpec(id: $0.id, startSample: $0.startSample, endSample: $0.endSample)
     }
     return RenderRequest(
-      sourceURL: sourceURL, sampleRate: sampleRate, markers: markers, slices: specs)
+      audioURL: canonicalAudioURL, sampleRate: sampleRate,
+      durationSamples: editPlan.source.durationSamples, markers: markers, slices: specs)
   }
 
   /// The result of copying rendered slices to the destination, computed off the main

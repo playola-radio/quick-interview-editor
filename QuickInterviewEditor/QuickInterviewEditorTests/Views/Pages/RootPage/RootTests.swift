@@ -119,7 +119,7 @@ struct RootTests {
     try await withDependencies {
       $0.engine.transcribe = { _ in
         AsyncThrowingStream {
-          $0.yield(.completed(plan))
+          $0.yield(.completed(Fixtures.transcriptionResult(plan)))
           $0.finish()
         }
       }
@@ -166,6 +166,39 @@ struct RootTests {
       expectNoDifference(model.tabs.count, 2)
       expectNoDifference(model.tabs.filter(\.isTranscribing).count, 2)  // queued one promoted
       expectNoDifference(model.tabs.filter(\.isQueued).count, 0)
+    }
+  }
+
+  @Test func closingATabRemovesItsCanonicalAudio() async throws {
+    // Seed a real cached canonical AIFF, then drive a tab whose completion carries
+    // its URL; closing the tab must delete the cache dir.
+    let planAIFF = FileManager.default.temporaryDirectory
+      .appendingPathComponent("qie-root-canonical-\(UUID().uuidString).aiff")
+    try Data("canonical".utf8).write(to: planAIFF)
+    defer { try? FileManager.default.removeItem(at: planAIFF) }
+    let canonical = try CanonicalAudioStore.store(planAIFF: planAIFF)
+    let plan = Fixtures.editPlan()
+
+    await withDependencies {
+      $0.engine.transcribe = { _ in
+        AsyncThrowingStream {
+          $0.yield(.completed(Fixtures.transcriptionResult(plan, canonicalAudioURL: canonical)))
+          $0.finish()
+        }
+      }
+      $0.audioPlayer.stop = {}  // closeTab also stops playback
+    } operation: {
+      let model = RootModel()
+      model.filePicked(URL(fileURLWithPath: "/clip.m4a"))
+      let tabID = model.tabs.first!.id
+      for _ in 0..<1000 where model.tabs[id: tabID]?.editor == nil { await Task.yield() }
+      #expect(FileManager.default.fileExists(atPath: canonical.path))
+      model.closeTab(tabID)
+      // Removal happens after playback teardown, on a detached task — let it run.
+      for _ in 0..<1000 where FileManager.default.fileExists(atPath: canonical.path) {
+        await Task.yield()
+      }
+      #expect(!FileManager.default.fileExists(atPath: canonical.path))
     }
   }
 }
