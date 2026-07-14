@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from logic_markers import aiff_markers
 from logic_markers.words import Segment, Transcript, Word
 
 # The `plan` pipeline converts audio via afconvert (macOS-only; the engine uses it
@@ -64,6 +65,19 @@ def test_plan_emits_editplan_json_with_empty_segments(tmp_path):
                for w in plan["words"])
     assert plan["source"]["sample_rate"] > 0
     assert plan["source"]["duration_samples"] > 0
+
+
+def test_plan_keeps_canonical_aiff_in_work_dir_at_plan_rate(tmp_path):
+    # The canonical AIFF (`<stem>.plan.aiff`) is left in the work dir for the app to
+    # copy into its cache, and the plan's source metadata is derived from its bytes:
+    # its COMM rate must equal the requested plan rate (44100).
+    src, work, proc = _run_plan(tmp_path)
+    aiff = work / "clip.plan.aiff"
+    assert aiff.exists()
+    rate = aiff_markers.read_sample_rate(aiff.read_bytes())
+    plan = json.loads(proc.stdout)
+    assert rate == 44100 == plan["source"]["sample_rate"]
+    assert plan["source"]["duration_samples"] == aiff_markers.read_frame_count(aiff.read_bytes())
 
 
 def test_plan_writes_nothing_beside_source(tmp_path):
