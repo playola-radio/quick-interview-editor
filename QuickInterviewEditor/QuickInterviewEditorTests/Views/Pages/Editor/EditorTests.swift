@@ -150,6 +150,136 @@ struct EditorTests {
     expectNoDifference(model.slices.count, 2)
   }
 
+  // MARK: - Undo / Redo
+
+  @Test func addThenUndoRemovesSliceAndRedoRestores() async {
+    let model = editor()
+    #expect(!model.canUndo)
+    addSlices(model, [(0, 1)])
+    let slice = model.slices[0]
+    expectNoDifference(model.slices.count, 1)
+    #expect(model.canUndo)
+
+    await model.undoTapped()
+    expectNoDifference(model.slices, [])
+    #expect(!model.canUndo)
+    #expect(model.canRedo)
+
+    await model.redoTapped()
+    expectNoDifference(model.slices, [slice])
+    #expect(!model.canRedo)
+  }
+
+  @Test func deleteThenUndoRestoresSlice() async {
+    let model = editor()
+    addSlices(model, [(0, 1)])
+    let slice = model.slices[0]
+    await model.deleteSlice(slice.id)
+    expectNoDifference(model.slices, [])
+
+    await model.undoTapped()
+    expectNoDifference(model.slices, [slice])
+  }
+
+  @Test func renameThenUndoRestoresPreviousName() async {
+    let model = editor()
+    addSlices(model, [(0, 1)])
+    let id = model.slices[0].id
+    model.renameSlice(id, to: "Intro")
+    expectNoDifference(model.slices[id: id]?.name, "Intro")
+
+    await model.undoTapped()
+    expectNoDifference(model.slices[id: id]?.name, "Slice 1")
+  }
+
+  @Test func reorderThenUndoRestoresOrder() async {
+    let model = editor()
+    addSlices(model, [(0, 1), (2, 3), (4, 5)])
+    let originalOrder = model.slices.map(\.id)
+    model.moveSlices(fromOffsets: IndexSet(integer: 0), toOffset: 3)
+    #expect(model.slices.map(\.id) != originalOrder)
+
+    await model.undoTapped()
+    expectNoDifference(model.slices.map(\.id), originalOrder)
+  }
+
+  @Test func editAfterUndoTruncatesRedoBranch() async {
+    let model = editor()
+    addSlices(model, [(0, 1)])  // Slice 1
+    addSlices(model, [(2, 3)])  // Slice 2
+    await model.undoTapped()  // removes Slice 2
+    #expect(model.canRedo)
+
+    addSlices(model, [(4, 5)])  // Slice 3 — new branch, redo gone
+    #expect(!model.canRedo)
+    expectNoDifference(model.slices.map(\.name), ["Slice 1", "Slice 3"])
+  }
+
+  @Test func undoRemovingPlayingSliceReconcilesPlayback() async {
+    let gate = PlayerGate()
+    let stopped = LockIsolated(false)
+    let model = editor()
+    addSlices(model, [(0, 1)])  // one undo entry: the add
+    let slice = model.slices[0]
+    await withDependencies {
+      $0.audioPlayer.play = { _, _, _ in await gate.play() }
+      $0.audioPlayer.stop = {
+        stopped.setValue(true)
+        gate.release()
+      }
+    } operation: {
+      let task = Task { await model.playSliceTapped(slice.id) }
+      await gate.awaitStarted()
+      expectNoDifference(model.playingSliceID, slice.id)
+      // Undoing the add removes the currently-playing slice; reconcile must stop playback.
+      await model.undoTapped()
+      await task.value
+      expectNoDifference(model.slices, [])
+      expectNoDifference(model.playingSliceID, nil)
+      #expect(stopped.value)
+    }
+  }
+
+  @Test func undoLeavesUnrelatedPlaybackRunning() async {
+    let gate = PlayerGate()
+    let stopped = LockIsolated(false)
+    let model = editor()
+    addSlices(model, [(0, 1)])  // Slice 1 — the slice we'll keep playing
+    addSlices(model, [(2, 3)])  // Slice 2 — the mutation we'll undo
+    let playing = model.slices[0]
+    await withDependencies {
+      $0.audioPlayer.play = { _, _, _ in await gate.play() }
+      $0.audioPlayer.stop = {
+        stopped.setValue(true)
+        gate.release()
+      }
+    } operation: {
+      let task = Task { await model.playSliceTapped(playing.id) }
+      await gate.awaitStarted()
+      // Undoing the Slice 2 add leaves the playing Slice 1 intact — playback continues.
+      await model.undoTapped()
+      expectNoDifference(model.playingSliceID, playing.id)
+      #expect(!stopped.value)
+      gate.release()  // finish the test cleanly
+      await task.value
+    }
+  }
+
+  @Test func multiRowDeleteIsOneUndoEntry() async {
+    let model = editor()
+    addSlices(model, [(0, 1), (2, 3), (4, 5)])
+    let all = model.slices
+    let toDelete = [model.slices[0].id, model.slices[2].id]
+
+    await model.deleteSlices(toDelete)
+    expectNoDifference(model.slices.map(\.id), [all[1].id])
+
+    // A single Delete of multiple rows undoes in one step: one undo restores BOTH removed
+    // slices (two entries would restore only one), proving the batch recorded once.
+    await model.undoTapped()
+    expectNoDifference(model.slices, all)
+  }
+
   @Test func sliceRowsFormatDurationAndRange() {
     let model = editor()
     model.transcript.wordTapped(model.transcript.words[0].id)

@@ -14,6 +14,7 @@
 		126AA389AEE6CF5A1E9AD569 /* ModelSetupTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04566AE1A3FFC7D6EFAC9D72 /* ModelSetupTests.swift */; };
 		1C33FAA7D602889FC8F8C348 /* EditPlanDecodingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B0A5D7C62A370DE8DD21807 /* EditPlanDecodingTests.swift */; };
 		1DA6160F26D3935018786C8B /* QuickInterviewEditorApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75C599ECDAD50A6F0A522C6B /* QuickInterviewEditorApp.swift */; };
+		1FDCD5A562E7D5D71D0520EC /* UndoStackTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E8C670A36FEE48ECE336F3D /* UndoStackTests.swift */; };
 		2DFA0D8ACC93BD4DA8AA589C /* LiveEngineCancelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D070569A63CB32AC401C34C /* LiveEngineCancelTests.swift */; };
 		36ACC1000EDBD0CD29C53315 /* ModelDownloadClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F78302A08FD972343EFFF51 /* ModelDownloadClient.swift */; };
 		39A76766629B8F1693F8CC83 /* WaveformClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD1B99A2D5B94CC2C0AA3C17 /* WaveformClient.swift */; };
@@ -21,6 +22,7 @@
 		3CF64A819B85A3932084EAFF /* EngineClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4EA854547ED6426A4ABD6E8E /* EngineClient.swift */; };
 		3E0D23A6109F0336AC4166EB /* IdentifiedCollections in Frameworks */ = {isa = PBXBuildFile; productRef = C6F6FFAF4946EF45EF1AE24D /* IdentifiedCollections */; };
 		4821AD4B53662749E9F966B9 /* AppLaunchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C584101861B497D434BD5F00 /* AppLaunchView.swift */; };
+		4AFF2827764CCC77924DC508 /* UndoStack.swift in Sources */ = {isa = PBXBuildFile; fileRef = 883C283A1A6BDA1EDDA1CFF9 /* UndoStack.swift */; };
 		51666548577B391FC8BB6E0D /* AppLaunchModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 237246D26C6AC1E25A5A279E /* AppLaunchModel.swift */; };
 		5CE1AC00C89D05B7E2D7EF0B /* IssueReporting in Frameworks */ = {isa = PBXBuildFile; productRef = 16FA185EFC57ACE1DEE1A570 /* IssueReporting */; };
 		5F634B357789FFEFA223ACF1 /* Dependencies in Frameworks */ = {isa = PBXBuildFile; productRef = A1E5EE198133D28AA4F8C697 /* Dependencies */; };
@@ -96,6 +98,7 @@
 		31B6DC4CF89461DF2F621CC4 /* AppLaunchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLaunchTests.swift; sourceTree = "<group>"; };
 		327A6CD4A25A47E502C44C60 /* ExportNaming.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportNaming.swift; sourceTree = "<group>"; };
 		340DF12DDCE384A3A7FAFF4F /* ViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewModel.swift; sourceTree = "<group>"; };
+		3E8C670A36FEE48ECE336F3D /* UndoStackTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UndoStackTests.swift; sourceTree = "<group>"; };
 		470CF49FC658B4E9FDD4AD51 /* EngineEventTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EngineEventTests.swift; sourceTree = "<group>"; };
 		4816E2A0C0EC0B46A9168AC0 /* edit-plan.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "edit-plan.json"; sourceTree = "<group>"; };
 		48930A836912299557952308 /* Slice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Slice.swift; sourceTree = "<group>"; };
@@ -113,6 +116,7 @@
 		824F30A18339A12C0DA70F81 /* EngineClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EngineClientTests.swift; sourceTree = "<group>"; };
 		82AAC742DA272C6E61C080A3 /* Fixtures.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Fixtures.swift; sourceTree = "<group>"; };
 		82D23233EF5C7E92BC597F9C /* ModelSetupModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelSetupModel.swift; sourceTree = "<group>"; };
+		883C283A1A6BDA1EDDA1CFF9 /* UndoStack.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UndoStack.swift; sourceTree = "<group>"; };
 		89BCD2B81DFD4899212F05EB /* TranscriptPageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptPageView.swift; sourceTree = "<group>"; };
 		8A8D3E1944317B3EFEE5C170 /* EditPlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditPlan.swift; sourceTree = "<group>"; };
 		9892BB9839BE8C69DC214C5D /* SlicesPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SlicesPanelView.swift; sourceTree = "<group>"; };
@@ -372,6 +376,7 @@
 				C7C4BC51CF02F763C1A466B2 /* ExportNamingTests.swift */,
 				A0CD6F173A8779985CCABC01 /* RunTogetherTests.swift */,
 				6133EE6AF1867B8B9120A027 /* SliceWarningsTests.swift */,
+				3E8C670A36FEE48ECE336F3D /* UndoStackTests.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -445,6 +450,7 @@
 				DDA36FAD7A5A15024FC73AB3 /* RunTogether.swift */,
 				48930A836912299557952308 /* Slice.swift */,
 				A07879F92F7BB45A4D1BE448 /* SliceWarnings.swift */,
+				883C283A1A6BDA1EDDA1CFF9 /* UndoStack.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -585,6 +591,7 @@
 				CCF4DB94DE0C173EDD3365AE /* SmokeTests.swift in Sources */,
 				B504A08BE32820D2E7B8F7BF /* SongTabTests.swift in Sources */,
 				CD09E8D65F5968AAE96A85AD /* TranscriptPageTests.swift in Sources */,
+				1FDCD5A562E7D5D71D0520EC /* UndoStackTests.swift in Sources */,
 				D48EC3DED2EB8A824377E142 /* WaveformClientTests.swift in Sources */,
 				F4B2A1B1BFFF6834D69B5658 /* WaveformTests.swift in Sources */,
 			);
@@ -624,6 +631,7 @@
 				3BD760F25135C28E6E0870F6 /* SongTabView.swift in Sources */,
 				F89547D7DD5C6573803BD544 /* TranscriptPageModel.swift in Sources */,
 				98386774F113F6107A9A3E2C /* TranscriptPageView.swift in Sources */,
+				4AFF2827764CCC77924DC508 /* UndoStack.swift in Sources */,
 				7742FDC7D65B2788C36D6522 /* ViewModel.swift in Sources */,
 				39A76766629B8F1693F8CC83 /* WaveformClient.swift in Sources */,
 				954B4523C2CBDCC535B41129 /* WaveformModel.swift in Sources */,
