@@ -12,7 +12,14 @@ struct UndoStack<State: Equatable> {
   private(set) var undo: [State] = []
   private(set) var redo: [State] = []
   /// Maximum entries kept on the undo stack; the oldest are evicted past this.
-  var limit = 30
+  /// Immutable and validated at construction so history trimming can never call
+  /// `removeFirst` past the array bounds (a negative limit would).
+  let limit: Int
+
+  init(limit: Int = 30) {
+    precondition(limit >= 0, "UndoStack limit must be non-negative")
+    self.limit = limit
+  }
 
   var canUndo: Bool { !undo.isEmpty }
   var canRedo: Bool { !redo.isEmpty }

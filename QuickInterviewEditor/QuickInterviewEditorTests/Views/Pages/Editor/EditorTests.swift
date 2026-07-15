@@ -265,6 +265,21 @@ struct EditorTests {
     }
   }
 
+  @Test func multiRowDeleteIsOneUndoEntry() async {
+    let model = editor()
+    addSlices(model, [(0, 1), (2, 3), (4, 5)])
+    let all = model.slices
+    let toDelete = [model.slices[0].id, model.slices[2].id]
+
+    await model.deleteSlices(toDelete)
+    expectNoDifference(model.slices.map(\.id), [all[1].id])
+
+    // A single Delete of multiple rows undoes in one step: one undo restores BOTH removed
+    // slices (two entries would restore only one), proving the batch recorded once.
+    await model.undoTapped()
+    expectNoDifference(model.slices, all)
+  }
+
   @Test func sliceRowsFormatDurationAndRange() {
     let model = editor()
     model.transcript.wordTapped(model.transcript.words[0].id)

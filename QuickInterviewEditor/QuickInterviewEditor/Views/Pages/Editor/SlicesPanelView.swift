@@ -51,7 +51,7 @@ struct SlicesPanelView: View {
           .onMove { model.moveSlices(fromOffsets: $0, toOffset: $1) }
           .onDelete { indexSet in
             let ids = indexSet.map { model.sliceRows[$0].id }
-            Task { for id in ids { await model.deleteSlice(id) } }
+            Task { await model.deleteSlices(ids) }
           }
         }
         .listStyle(.plain)
@@ -60,6 +60,7 @@ struct SlicesPanelView: View {
       }
     }
     .padding(12)
+    .frame(maxHeight: .infinity, alignment: .top)
   }
 }
 

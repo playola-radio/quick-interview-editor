@@ -225,7 +225,16 @@ final class EditorModel: ViewModel {
   }
 
   func deleteSlice(_ id: Slice.ID) async {
-    mutateSlices { $0.remove(id: id) }
+    await deleteSlices([id])
+  }
+
+  /// Deletes one or more slices as a **single** undo entry. A multi-row Delete in the
+  /// panel is one user action, so it records once and reconciles playback once — undoing
+  /// it restores every removed slice in one step.
+  func deleteSlices(_ ids: [Slice.ID]) async {
+    mutateSlices { slices in
+      for id in ids { slices.remove(id: id) }
+    }
     await reconcilePlayback()
   }
 

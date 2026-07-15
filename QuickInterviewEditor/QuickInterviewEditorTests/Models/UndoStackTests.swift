@@ -64,8 +64,7 @@ struct UndoStackTests {
   }
 
   @Test func limitEvictsOldestUndoEntries() {
-    var stack = UndoStack<Int>()
-    stack.limit = 2
+    var stack = UndoStack<Int>(limit: 2)
     stack.record(before: 0, after: 1)
     stack.record(before: 1, after: 2)
     stack.record(before: 2, after: 3)  // evicts the oldest (before: 0)
