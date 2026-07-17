@@ -385,9 +385,10 @@ final class EditorModel: ViewModel {
   /// range. Choosing the slice explicitly (rather than from ambient state) is what makes it
   /// the edit target.
   func sliceSelected(_ id: Slice.ID) {
-    // Switching slices would abandon an unsaved cut edit; require Save or Cancel first, matching
-    // how export and undo/redo are gated. Re-selecting the already-active slice is a no-op.
-    guard !hasUncommittedSliceEdit || activeSliceID == id else { return }
+    // Switching away would abandon an unsaved cut edit — of either an existing slice OR a tuned
+    // pending selection — so require Save or Cancel first. Re-selecting the active slice is a
+    // no-op that must not trip the guard.
+    guard !fineTune.hasUnsavedChange || activeSliceID == id else { return }
     // Clear any live selection so the slice — not a lingering selection — drives the pane.
     transcript.clearSelectionTapped()
     activeSliceID = id

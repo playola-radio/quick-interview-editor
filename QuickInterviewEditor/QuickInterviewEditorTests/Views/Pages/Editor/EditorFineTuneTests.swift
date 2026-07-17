@@ -308,6 +308,31 @@ struct EditorFineTuneTests {
     expectNoDifference(model.activeSliceID, second.id)
   }
 
+  @Test func switchingToASliceIsBlockedWhileAPendingDraftIsUnsaved() {
+    let model = editor()
+    addSlice(model, 0, 1)  // a slice we might switch to
+    let existing = model.slices[0]
+
+    // Tune a pending selection without saving.
+    model.transcript.wordTapped(model.transcript.words[4].id)
+    model.transcript.wordTapped(model.transcript.words[6].id)
+    model.syncEditSession()
+    model.cutOutNudged(byMs: 10)
+    #expect(model.fineTune.hasUnsavedChange)
+    let draft = model.fineTune.draftRange
+
+    // Clicking a slice's fine-tune button must not silently discard the pending tuning.
+    model.sliceSelected(existing.id)
+    expectNoDifference(model.fineTune.target, .pendingSelection)
+    expectNoDifference(model.fineTune.draftRange, draft)
+    expectNoDifference(model.activeSliceID, nil)
+
+    // Once resolved, switching works.
+    model.cancelEditTapped()
+    model.sliceSelected(existing.id)
+    expectNoDifference(model.activeSliceID, existing.id)
+  }
+
   @Test func reorderingSurvivesActiveSession() {
     let model = editor()
     addSlice(model, 0, 1)
