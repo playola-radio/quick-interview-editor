@@ -333,6 +333,28 @@ struct EditorFineTuneTests {
     expectNoDifference(model.activeSliceID, existing.id)
   }
 
+  @Test func reselectingTheActiveSliceKeepsAHeldPendingSelection() {
+    let model = editor()
+    addSlice(model, 0, 3)
+    let slice = model.slices[0]
+    model.sliceSelected(slice.id)
+    model.cutOutNudged(byMs: 10)  // dirty slice edit
+    // A selection made mid-edit is held behind the dirty slice draft.
+    model.transcript.wordTapped(model.transcript.words[5].id)
+    model.transcript.wordTapped(model.transcript.words[7].id)
+    model.syncEditSession()
+    let held = model.transcript.selectedSampleRange
+
+    // Re-clicking the active slice's button must not drop that held selection.
+    model.sliceSelected(slice.id)
+    expectNoDifference(model.transcript.selectedSampleRange, held)
+    expectNoDifference(model.fineTune.target, .slice(slice.id))  // still the slice session
+
+    // Cancel then retargets the pane to the held selection.
+    model.cancelEditTapped()
+    expectNoDifference(model.fineTune.target, .pendingSelection)
+  }
+
   @Test func reorderingSurvivesActiveSession() {
     let model = editor()
     addSlice(model, 0, 1)
