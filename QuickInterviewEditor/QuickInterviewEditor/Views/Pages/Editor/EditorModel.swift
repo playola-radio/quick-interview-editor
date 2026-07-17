@@ -435,12 +435,18 @@ final class EditorModel: ViewModel {
   }
 
   /// Stops an in-progress draft preview when the session retargets away from it. Clears the flag
-  /// synchronously so the pane label and playhead ownership update at once, then stops the audio.
+  /// synchronously so the pane label and playhead ownership update at once, then stops the audio
+  /// on a task. The stop is generation-scoped: if a newer preview has started by the time it
+  /// runs, it skips, so a stale cancel can never stop the newer playback.
   private func cancelPreviewIfNeeded() {
     guard isPreviewingDraft else { return }
     previewGeneration &+= 1
+    let generation = previewGeneration
     isPreviewingDraft = false
-    Task { await audioPlayer.stop() }
+    Task {
+      guard previewGeneration == generation else { return }
+      await audioPlayer.stop()
+    }
   }
 
   func cutInDragged(toInsetX positionX: CGFloat) {
