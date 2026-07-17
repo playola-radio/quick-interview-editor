@@ -22,6 +22,7 @@ final class EditorModel: ViewModel {
   let editPlan: EditPlan
   var transcript: TranscriptPageModel
   var waveform: WaveformModel
+  var fineTune: FineTuneModel
 
   init(sourceURL: URL, canonicalAudioURL: URL, editPlan: EditPlan) {
     self.sourceURL = sourceURL
@@ -29,6 +30,9 @@ final class EditorModel: ViewModel {
     self.editPlan = editPlan
     self.transcript = TranscriptPageModel(editPlan: editPlan)
     self.waveform = WaveformModel()
+    self.fineTune = FineTuneModel(
+      sampleRate: editPlan.source.sampleRate, durationSamples: editPlan.source.durationSamples,
+      silences: editPlan.silences)
     super.init()
   }
 
@@ -46,6 +50,12 @@ final class EditorModel: ViewModel {
   /// phase. Every slice mutation routes through `mutateSlices`, which records here.
   var sliceUndo = UndoStack<IdentifiedArrayOf<Slice>>()
   var playingSliceID: Slice.ID?
+  /// The slice currently open in the fine-tune pane. Distinct from `playingSliceID` — a
+  /// slice can be active (being edited) without playing, and vice versa.
+  var activeSliceID: Slice.ID?
+  /// True while the fine-tune pane's "preview edit" is playing the draft range, so the
+  /// waveform playhead follows it even though no slice is "playing" in the panel sense.
+  var isPreviewingDraft = false
   var exportPhase: ExportPhase = .idle
   var destinationURL: URL?
   private var nextSliceNumber = 1
@@ -63,6 +73,45 @@ final class EditorModel: ViewModel {
   let cancelExportLabel = "Cancel export"
   let undoLabel = "Undo"
   let redoLabel = "Redo"
+
+  // MARK: - Fine-tune session
+  /// The active slice's committed range, if a slice is open in the pane.
+  var activeSliceRange: Range<Int>? {
+    guard let activeSliceID, let slice = slices[id: activeSliceID] else { return nil }
+    return slice.startSample..<slice.endSample
+  }
+  /// The range a fresh edit session would start from: the active slice, else the transcript
+  /// selection.
+  var activeOrSelectedRange: Range<Int>? { activeSliceRange ?? transcript.selectedSampleRange }
+  /// The one range the main waveform overlay tracks — the live draft while dragging, else the
+  /// active/selected range. The waveform doesn't care whether it's pending, slice-backed, or
+  /// mid-drag.
+  var activeEditingRange: Range<Int>? { fineTune.draftRange ?? activeOrSelectedRange }
+
+  /// What the fine-tune pane binds to: an active slice takes precedence over a live selection.
+  var fineTuneTarget: FineTuneModel.Target? {
+    if let activeSliceID { return .slice(activeSliceID) }
+    if transcript.selectedSampleRange != nil { return .pendingSelection }
+    return nil
+  }
+  var showsFineTunePane: Bool { fineTuneTarget != nil }
+
+  /// True only while an EXISTING slice has an unsaved cut edit — the user must Save or Cancel
+  /// before exporting or undo/redo (a pending-selection draft is a new slice, not a mutation,
+  /// and export never renders it, so it doesn't gate).
+  var hasUncommittedSliceEdit: Bool {
+    fineTune.isEditingExistingSlice && fineTune.hasUnsavedChange
+  }
+
+  /// Min/max columns for each fine-tune inset silhouette, delegated to the waveform pyramid.
+  var cutInColumns: [WaveformColumn] {
+    fineTune.cutInWindow.map { waveform.columns(in: $0, pixelWidth: fineTune.insetWidthPixels) }
+      ?? []
+  }
+  var cutOutColumns: [WaveformColumn] {
+    fineTune.cutOutWindow.map { waveform.columns(in: $0, pixelWidth: fineTune.insetWidthPixels) }
+      ?? []
+  }
 
   // MARK: - Waveform sync
   /// The selected audio range, mirrored from the transcript selection.
@@ -82,14 +131,17 @@ final class EditorModel: ViewModel {
   }
 
   /// Waveform render data, geometry delegated to the child and combined with the
-  /// transcript-derived ranges here (the view reads these; it decides nothing).
-  var waveformHighlightSpan: WaveformSpan? { highlightedSampleRange.flatMap(waveform.span(for:)) }
+  /// transcript-derived ranges here (the view reads these; it decides nothing). The highlight
+  /// tracks `activeEditingRange`, so it follows a fine-tune drag live.
+  var waveformHighlightSpan: WaveformSpan? { activeEditingRange.flatMap(waveform.span(for:)) }
   var waveformRedSpans: [WaveformSpan] { redRanges.compactMap(waveform.span(for:)) }
 
   // MARK: - View Helpers
   var canAddSlice: Bool { transcript.selectedSampleRange != nil }
-  var canUndo: Bool { sliceUndo.canUndo }
-  var canRedo: Bool { sliceUndo.canRedo }
+  // Undo/redo restore `slices` wholesale; doing that under an open cut edit would leave the
+  // draft anchored to a stale committed range, so gate on Save/Cancel first.
+  var canUndo: Bool { sliceUndo.canUndo && !hasUncommittedSliceEdit }
+  var canRedo: Bool { sliceUndo.canRedo && !hasUncommittedSliceEdit }
 
   var sliceCountLabel: String {
     "\(slices.count) \(slices.count == 1 ? "clip" : "clips")"
@@ -99,8 +151,8 @@ final class EditorModel: ViewModel {
     if case .exporting = exportPhase { return true }
     return false
   }
-  var canExportAll: Bool { !slices.isEmpty && !isExporting }
-  var canExportSlice: Bool { !isExporting }
+  var canExportAll: Bool { !slices.isEmpty && !isExporting && !hasUncommittedSliceEdit }
+  var canExportSlice: Bool { !isExporting && !hasUncommittedSliceEdit }
 
   var exportStatusMessage: String {
     switch exportPhase {
@@ -166,7 +218,7 @@ final class EditorModel: ViewModel {
   /// clears its playhead, so another tab's playback never drives the wrong waveform.
   func observePlayback() async {
     for await position in audioPlayer.positions() {
-      guard playingSliceID != nil else {
+      guard playingSliceID != nil || isPreviewingDraft else {
         if waveform.playheadSample != nil { waveform.playheadSample = nil }
         continue
       }
@@ -255,16 +307,18 @@ final class EditorModel: ViewModel {
     await reconcilePlayback()
   }
 
-  /// Stops playback if the slice that was playing no longer exists in `slices` (its range
-  /// is gone, so the running player is orphaned). Centralized here so every path that can
-  /// remove the playing slice — explicit delete, undo, redo — reconciles the same way.
-  ///
-  /// TODO(PR 3): when `activeSliceID` and the fine-tune draft land, also clear them here
-  /// if the active slice is no longer present in `slices`.
+  /// Reconciles derived state after any slice list change (explicit delete, undo, redo):
+  /// stops playback if the playing slice is gone, and closes the fine-tune pane if the active
+  /// slice is gone (clearing its target + draft). Centralized so every removal path behaves
+  /// the same.
   private func reconcilePlayback() async {
     if let playing = playingSliceID, slices[id: playing] == nil {
       playingSliceID = nil
       await audioPlayer.stop()
+    }
+    if let active = activeSliceID, slices[id: active] == nil {
+      activeSliceID = nil
+      fineTune.clear()
     }
   }
 
@@ -291,6 +345,95 @@ final class EditorModel: ViewModel {
     } else {
       await playSliceTapped(id)
     }
+  }
+
+  // MARK: - Fine-tune editing
+  /// Opens the fine-tune pane on a slice and starts an edit session anchored to its current
+  /// range. Choosing the slice explicitly (rather than from ambient state) is what makes it
+  /// the edit target.
+  func sliceSelected(_ id: Slice.ID) {
+    activeSliceID = id
+    syncEditSession()
+  }
+
+  /// Reconciles the fine-tune session to the current target/range. Called by the view when the
+  /// active slice or selection changes, and lazily before any edit gesture. Preserves an
+  /// in-progress draft: it only (re)begins when the target changed, no session is open, or the
+  /// committed range drifted (e.g. an undo moved the active slice) with no unsaved edit.
+  func syncEditSession() {
+    guard let target = fineTuneTarget, let range = activeOrSelectedRange else {
+      if fineTune.target != nil { fineTune.clear() }
+      return
+    }
+    let shouldBegin =
+      fineTune.target != target || fineTune.committedRange == nil
+      || (!fineTune.hasUnsavedChange && fineTune.committedRange != range)
+    if shouldBegin { fineTune.begin(target: target, range: range) }
+  }
+
+  func cutInDragged(toInsetX positionX: CGFloat) {
+    beginEditIfNeeded()
+    fineTune.dragCutIn(toInsetX: positionX)
+  }
+  func cutOutDragged(toInsetX positionX: CGFloat) {
+    beginEditIfNeeded()
+    fineTune.dragCutOut(toInsetX: positionX)
+  }
+  func cutInNudged(byMs deltaMs: Double) {
+    beginEditIfNeeded()
+    fineTune.nudgeCutIn(byMs: deltaMs)
+  }
+  func cutOutNudged(byMs deltaMs: Double) {
+    beginEditIfNeeded()
+    fineTune.nudgeCutOut(byMs: deltaMs)
+  }
+
+  /// Commits the draft as exactly ONE `mutateSlices` (one undo entry) for a whole drag: an
+  /// existing slice's cut points are updated (word IDs + snippet + warnings re-derived from
+  /// the new range); a pending selection becomes a new slice. No-op when nothing changed.
+  func commitEditTapped() {
+    guard fineTune.hasUnsavedChange, let draft = fineTune.draftRange, let target = fineTune.target
+    else { return }
+    switch target {
+    case .slice(let id):
+      guard slices[id: id] != nil else { return }
+      mutateSlices { slices in
+        if let slice = slices[id: id] { slices[id: id] = updatedSlice(slice, to: draft) }
+      }
+      fineTune.markCommitted(draft)
+    case .pendingSelection:
+      let slice = makeSlice(range: draft)
+      mutateSlices { $0.append(slice) }
+      nextSliceNumber += 1
+      fineTune.clear()
+      transcript.clearSelectionTapped()
+    }
+  }
+
+  /// Drops the unsaved change, leaving the pane open on the committed range.
+  func cancelEditTapped() { fineTune.resetDraft() }
+
+  /// Preview the in-progress draft (falls back to the committed range). Uses a distinct
+  /// playback identity so slice-panel rows don't flip to "Stop".
+  func previewEditTapped() async {
+    guard let range = fineTune.draftRange ?? fineTune.committedRange else { return }
+    playingSliceID = nil
+    isPreviewingDraft = true
+    do {
+      try await audioPlayer.play(canonicalAudioURL, range, editPlan.source.sampleRate)
+    } catch {
+      reportIssue(error)
+    }
+    isPreviewingDraft = false
+  }
+
+  func stopPreviewTapped() async {
+    isPreviewingDraft = false
+    await audioPlayer.stop()
+  }
+
+  private func beginEditIfNeeded() {
+    if fineTune.committedRange == nil { syncEditSession() }
   }
 
   // MARK: - Export Actions
@@ -328,6 +471,34 @@ final class EditorModel: ViewModel {
 
   private func displaySnippet(_ text: String) -> String {
     "“\(middleTruncatedSnippet(text, maxLength: 68))”"
+  }
+
+  /// Re-derives a slice's word membership, snippet, and warnings for a new sample range once
+  /// the cut points move. Word membership is by midpoint — the old, selection-time word IDs go
+  /// stale under an arbitrary cut.
+  private func updatedSlice(_ slice: Slice, to range: Range<Int>) -> Slice {
+    var updated = slice
+    updated.startSample = range.lowerBound
+    updated.endSample = range.upperBound
+    updated.wordIDs = wordIDs(overlapping: range, words: editPlan.words)
+    updated.snippet = displaySnippet(sliceSnippet(for: updated.wordIDs, words: editPlan.words))
+    updated.warnings = sliceWarnings(
+      startSample: range.lowerBound, endSample: range.upperBound,
+      durationSamples: editPlan.source.durationSamples, silences: editPlan.silences)
+    return updated
+  }
+
+  /// Builds a brand-new slice from a fine-tuned sample range, deriving word membership by
+  /// midpoint (not the raw transcript selection) so a dragged cut owns the right words.
+  private func makeSlice(range: Range<Int>) -> Slice {
+    let ids = wordIDs(overlapping: range, words: editPlan.words)
+    return Slice(
+      id: UUID(), name: "Slice \(nextSliceNumber)", startSample: range.lowerBound,
+      endSample: range.upperBound, wordIDs: ids,
+      snippet: displaySnippet(sliceSnippet(for: ids, words: editPlan.words)),
+      warnings: sliceWarnings(
+        startSample: range.lowerBound, endSample: range.upperBound,
+        durationSamples: editPlan.source.durationSamples, silences: editPlan.silences))
   }
 
   /// Marks the export as running synchronously (so the buttons disable immediately
