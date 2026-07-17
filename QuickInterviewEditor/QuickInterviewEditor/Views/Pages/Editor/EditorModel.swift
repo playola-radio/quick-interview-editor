@@ -80,18 +80,20 @@ final class EditorModel: ViewModel {
     guard let activeSliceID, let slice = slices[id: activeSliceID] else { return nil }
     return slice.startSample..<slice.endSample
   }
-  /// The range a fresh edit session would start from: the active slice, else the transcript
-  /// selection.
-  var activeOrSelectedRange: Range<Int>? { activeSliceRange ?? transcript.selectedSampleRange }
+  /// The range a fresh edit session would start from — aligned with `fineTuneTarget`: the
+  /// transcript selection takes precedence, else the active slice.
+  var activeOrSelectedRange: Range<Int>? { transcript.selectedSampleRange ?? activeSliceRange }
   /// The one range the main waveform overlay tracks — the live draft while dragging, else the
   /// active/selected range. The waveform doesn't care whether it's pending, slice-backed, or
   /// mid-drag.
   var activeEditingRange: Range<Int>? { fineTune.draftRange ?? activeOrSelectedRange }
 
-  /// What the fine-tune pane binds to: an active slice takes precedence over a live selection.
+  /// What the fine-tune pane binds to: a live transcript selection takes precedence (a fresh
+  /// selection is a new-slice intent that retargets the pane), else the active slice.
+  /// `sliceSelected` clears the selection so an edited slice cleanly becomes the driver.
   var fineTuneTarget: FineTuneModel.Target? {
-    if let activeSliceID { return .slice(activeSliceID) }
     if transcript.selectedSampleRange != nil { return .pendingSelection }
+    if let activeSliceID { return .slice(activeSliceID) }
     return nil
   }
   var showsFineTunePane: Bool { fineTuneTarget != nil }
@@ -386,6 +388,8 @@ final class EditorModel: ViewModel {
     // Switching slices would abandon an unsaved cut edit; require Save or Cancel first, matching
     // how export and undo/redo are gated. Re-selecting the already-active slice is a no-op.
     guard !hasUncommittedSliceEdit || activeSliceID == id else { return }
+    // Clear any live selection so the slice — not a lingering selection — drives the pane.
+    transcript.clearSelectionTapped()
     activeSliceID = id
     syncEditSession()
   }
@@ -393,21 +397,29 @@ final class EditorModel: ViewModel {
   /// Reconciles the fine-tune session to the current target/range. Called by the view when the
   /// active slice or selection changes, and lazily before any edit gesture. Preserves an
   /// in-progress draft: it only (re)begins when the target changed, no session is open, or the
-  /// committed range drifted (e.g. an undo moved the active slice) with no unsaved edit.
+  /// committed range drifted (e.g. an undo moved the active slice).
   func syncEditSession() {
     guard let target = fineTuneTarget, let range = activeOrSelectedRange else {
-      if fineTune.target != nil { fineTune.clear() }
+      // Don't tear down an unsaved existing-slice edit just because the target went nil.
+      if fineTune.target != nil, !hasUncommittedSliceEdit { fineTune.clear() }
       return
     }
+    // Never abandon an unsaved existing-slice edit by retargeting (e.g. a new transcript
+    // selection arriving mid-edit); the user must Save or Cancel first.
+    if hasUncommittedSliceEdit, fineTune.target != target { return }
     // Re-anchor when the target changed, no session is open, or the anchor range drifted from
-    // the committed baseline. A drifted range is the source of truth moving: a pending
-    // selection changing (reset the stale draft) or the active slice being restored by undo. An
-    // in-progress draft only changes `draftRange`, never `committedRange`, so a live drag never
-    // trips this — `committedRange == range` throughout.
+    // the committed baseline. A drifted range is the source of truth moving: a pending selection
+    // changing (reset the stale draft) or the active slice being restored by undo. An in-progress
+    // draft only changes `draftRange`, never `committedRange`, so a live drag never trips this.
     let shouldBegin =
       fineTune.target != target || fineTune.committedRange == nil
       || fineTune.committedRange != range
-    if shouldBegin { fineTune.begin(target: target, range: range) }
+    if shouldBegin {
+      // A transcript selection taking over releases the previously active slice, so clearing the
+      // selection later doesn't silently reopen the pane on a stale slice.
+      if case .pendingSelection = target { activeSliceID = nil }
+      fineTune.begin(target: target, range: range)
+    }
   }
 
   func cutInDragged(toInsetX positionX: CGFloat) {
@@ -447,10 +459,15 @@ final class EditorModel: ViewModel {
       fineTune.clear()
       transcript.clearSelectionTapped()
     }
+    syncEditSession()
   }
 
-  /// Drops the unsaved change, leaving the pane open on the committed range.
-  func cancelEditTapped() { fineTune.resetDraft() }
+  /// Drops the unsaved change, leaving the pane open on the committed range. Re-syncs so a
+  /// selection made (but ignored) during the edit can now take over the pane.
+  func cancelEditTapped() {
+    fineTune.resetDraft()
+    syncEditSession()
+  }
 
   /// The preview button reflects playback state so a single control both starts and stops it.
   var previewButtonLabel: String {

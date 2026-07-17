@@ -249,6 +249,44 @@ struct EditorFineTuneTests {
     #expect(model.fineTune.hasUnsavedChange)  // the draft is untouched
   }
 
+  @Test func aFreshTranscriptSelectionRetargetsThePaneToPending() {
+    let model = editor()
+    addSlice(model, 0, 1)
+    let slice = model.slices[0]
+    model.sliceSelected(slice.id)
+    expectNoDifference(model.fineTuneTarget, .slice(slice.id))
+
+    // Selecting new words is a new-slice intent: it takes over the pane and releases the slice,
+    // so the user isn't stuck editing the old slice forever.
+    model.transcript.wordTapped(model.transcript.words[4].id)
+    model.transcript.wordTapped(model.transcript.words[6].id)
+    model.syncEditSession()
+    expectNoDifference(model.fineTuneTarget, .pendingSelection)
+    expectNoDifference(model.activeSliceID, nil)
+    expectNoDifference(model.fineTune.committedRange, model.transcript.selectedSampleRange)
+  }
+
+  @Test func aSelectionDoesNotDropAnUnsavedSliceEditUntilResolved() {
+    let model = editor()
+    addSlice(model, 0, 3)
+    let slice = model.slices[0]
+    model.sliceSelected(slice.id)
+    model.cutOutNudged(byMs: 10)  // unsaved slice edit
+    let draft = model.fineTune.draftRange
+
+    // A selection arriving mid-edit is held off — the slice draft is preserved.
+    model.transcript.wordTapped(model.transcript.words[5].id)
+    model.transcript.wordTapped(model.transcript.words[7].id)
+    model.syncEditSession()
+    expectNoDifference(model.fineTune.target, .slice(slice.id))
+    expectNoDifference(model.fineTune.draftRange, draft)
+
+    // Once cancelled, the waiting selection takes over the pane.
+    model.cancelEditTapped()
+    expectNoDifference(model.fineTune.target, .pendingSelection)
+    expectNoDifference(model.activeSliceID, nil)
+  }
+
   @Test func switchingSlicesIsBlockedWhileAnEditIsUnsaved() {
     let model = editor()
     addSlice(model, 0, 1)
