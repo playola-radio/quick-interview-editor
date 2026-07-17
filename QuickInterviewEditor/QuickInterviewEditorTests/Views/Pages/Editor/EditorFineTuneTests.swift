@@ -430,7 +430,43 @@ struct EditorFineTuneTests {
     expectNoDifference(model.slices[0].startSample..<model.slices[0].endSample, draft)
   }
 
+  @Test func addSliceIsDisabledWhileASliceEditIsDirtyWithAHeldSelection() {
+    let model = editor()
+    addSlice(model, 0, 3)
+    let slice = model.slices[0]
+    model.sliceSelected(slice.id)
+    model.cutOutNudged(byMs: 10)  // dirty existing-slice edit
+    // A selection made mid-edit is held; the plain Add slice must stay disabled.
+    model.transcript.wordTapped(model.transcript.words[5].id)
+    model.transcript.wordTapped(model.transcript.words[7].id)
+    model.syncEditSession()
+    #expect(!model.canAddSlice)
+    let before = model.slices
+    model.addSliceTapped()  // guarded no-op
+    expectNoDifference(model.slices, before)
+  }
+
   // MARK: - Preview edit
+
+  @Test func savingAPendingEditStopsAnInProgressPreview() async {
+    let model = editor()
+    model.transcript.wordTapped(model.transcript.words[0].id)
+    model.transcript.wordTapped(model.transcript.words[2].id)
+    model.syncEditSession()
+    model.cutOutNudged(byMs: 10)  // tuned pending draft
+    model.isPreviewingDraft = true  // preview in flight
+    let stopped = LockIsolated(false)
+
+    await withDependencies {
+      $0.audioPlayer.stop = { stopped.setValue(true) }
+    } operation: {
+      model.commitEditTapped()  // pending Save closes the pane
+      #expect(!model.isPreviewingDraft)  // flag cleared with the pane
+      for _ in 0..<100 where !stopped.value { await Task.yield() }
+    }
+    #expect(stopped.value)  // audio stopped, not orphaned
+    expectNoDifference(model.slices.count, 1)
+  }
 
   @Test func previewButtonTogglesToStopWhilePreviewing() async {
     let model = editor()

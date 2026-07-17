@@ -152,14 +152,10 @@ final class EditorModel: ViewModel {
   var waveformRedSpans: [WaveformSpan] { redRanges.compactMap(waveform.span(for:)) }
 
   // MARK: - View Helpers
-  /// A pending selection that's been fine-tuned but not saved. The panel's plain "Add slice"
-  /// builds from the raw selection and would discard those adjustments, so it's disabled until
-  /// the draft is saved (via "Save cut") or cancelled.
-  var hasUncommittedPendingDraft: Bool {
-    if case .pendingSelection = fineTune.target { return fineTune.hasUnsavedChange }
-    return false
-  }
-  var canAddSlice: Bool { transcript.selectedSampleRange != nil && !hasUncommittedPendingDraft }
+  /// The panel's plain "Add slice" builds from the raw selection, so it's disabled whenever any
+  /// fine-tune draft is unsaved — a tuned pending selection (whose adjustments it would discard)
+  /// or a dirty existing-slice edit with a held selection (which requires Save/Cancel first).
+  var canAddSlice: Bool { transcript.selectedSampleRange != nil && !fineTune.hasUnsavedChange }
   // Undo/redo restore `slices` wholesale; doing that under an open cut edit would leave the
   // draft anchored to a stale committed range, so gate on Save/Cancel first.
   var canUndo: Bool { sliceUndo.canUndo && !hasUncommittedSliceEdit }
@@ -411,7 +407,10 @@ final class EditorModel: ViewModel {
   func syncEditSession() {
     guard let target = fineTuneTarget, let range = activeOrSelectedRange else {
       // Don't tear down an unsaved existing-slice edit just because the target went nil.
-      if fineTune.target != nil, !hasUncommittedSliceEdit { fineTune.clear() }
+      if fineTune.target != nil, !hasUncommittedSliceEdit {
+        cancelPreviewIfNeeded()  // closing the pane removes the Stop-preview control
+        fineTune.clear()
+      }
       return
     }
     // Never abandon an unsaved existing-slice edit by retargeting (e.g. a new transcript
@@ -478,6 +477,8 @@ final class EditorModel: ViewModel {
       let slice = makeSlice(range: draft)
       mutateSlices { $0.append(slice) }
       nextSliceNumber += 1
+      // Closing the pane removes the Stop-preview control, so stop any preview first.
+      cancelPreviewIfNeeded()
       fineTune.clear()
       transcript.clearSelectionTapped()
     }
