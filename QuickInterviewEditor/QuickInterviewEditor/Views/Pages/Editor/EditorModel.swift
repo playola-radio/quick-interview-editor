@@ -389,9 +389,14 @@ final class EditorModel: ViewModel {
       if fineTune.target != nil { fineTune.clear() }
       return
     }
+    // Re-anchor when the target changed, no session is open, or the anchor range drifted from
+    // the committed baseline. A drifted range is the source of truth moving: a pending
+    // selection changing (reset the stale draft) or the active slice being restored by undo. An
+    // in-progress draft only changes `draftRange`, never `committedRange`, so a live drag never
+    // trips this — `committedRange == range` throughout.
     let shouldBegin =
       fineTune.target != target || fineTune.committedRange == nil
-      || (!fineTune.hasUnsavedChange && fineTune.committedRange != range)
+      || fineTune.committedRange != range
     if shouldBegin { fineTune.begin(target: target, range: range) }
   }
 

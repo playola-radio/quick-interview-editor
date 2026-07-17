@@ -46,6 +46,31 @@ struct EditorFineTuneTests {
     expectNoDifference(model.fineTune.committedRange, model.transcript.selectedSampleRange)
   }
 
+  @Test func changingSelectionResetsAPendingDraft() {
+    let model = editor()
+    model.transcript.wordTapped(model.transcript.words[0].id)
+    model.transcript.wordTapped(model.transcript.words[2].id)
+    model.syncEditSession()
+    model.cutOutNudged(byMs: 10)  // unsaved pending draft on selection A
+    #expect(model.fineTune.hasUnsavedChange)
+
+    // The user picks different words before saving — the pending draft must re-anchor to the
+    // new selection, not silently save the old range.
+    model.transcript.wordTapped(model.transcript.words[4].id)
+    model.transcript.wordTapped(model.transcript.words[6].id)
+    model.syncEditSession()
+    #expect(!model.fineTune.hasUnsavedChange)  // the stale draft was dropped
+    let newSelection = model.transcript.selectedSampleRange!
+    expectNoDifference(model.fineTune.committedRange, newSelection)
+
+    model.cutOutNudged(byMs: -10)  // tune the NEW selection
+    let draft = model.fineTune.draftRange!
+    expectNoDifference(draft.lowerBound, newSelection.lowerBound)  // anchored to the new range
+    model.commitEditTapped()
+    let added = model.slices.last!
+    expectNoDifference(added.startSample..<added.endSample, draft)  // saved the new range, not A
+  }
+
   // MARK: - Commit = one undo entry, re-derived membership
 
   @Test func commitEditIsOneUndoEntryAndRederivesWords() async {
