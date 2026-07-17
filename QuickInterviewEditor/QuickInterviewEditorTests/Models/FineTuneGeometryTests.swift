@@ -64,6 +64,15 @@ struct FineTuneGeometryTests {
       clampedBoundary(-50, moving: .start, opposite: 1000, constraints: limits), 0)
   }
 
+  @Test func endBoundaryNeverExceedsDurationWhenMinDurationImpossibleNearEOF() {
+    // Slice starts 500 samples before EOF, shorter than min-duration already: the legal end
+    // must clamp to the file length, never past it (the engine rejects an out-of-range cut).
+    let range = legalBoundaryRange(
+      moving: .end, opposite: 9500, constraints: constraints(0...20000, 10000, 2205))
+    #expect(range.upperBound <= 10000)
+    expectNoDifference(range, 10000...10000)
+  }
+
   @Test func clampedEndBoundaryRespectsDurationAndMinDuration() {
     let limits = constraints(0...10000, 8000)
     expectNoDifference(

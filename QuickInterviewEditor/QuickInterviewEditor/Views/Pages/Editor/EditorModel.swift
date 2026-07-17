@@ -308,14 +308,16 @@ final class EditorModel: ViewModel {
   /// only `slices`, so anything derived (selection, zoom, export phase, playback) is left
   /// as-is except where reconciliation demands otherwise.
   func undoTapped() async {
-    guard let restored = sliceUndo.undo(current: slices) else { return }
+    // Guard here too, not just on `canUndo`: a menu item or keyboard shortcut could fire this
+    // while an existing-slice edit is open, which would rewind `slices` under a live draft.
+    guard !hasUncommittedSliceEdit, let restored = sliceUndo.undo(current: slices) else { return }
     slices = restored
     await reconcilePlayback()
   }
 
   /// Reapplies the next `slices` snapshot on the redo branch, then reconciles playback.
   func redoTapped() async {
-    guard let restored = sliceUndo.redo(current: slices) else { return }
+    guard !hasUncommittedSliceEdit, let restored = sliceUndo.redo(current: slices) else { return }
     slices = restored
     await reconcilePlayback()
   }
@@ -329,9 +331,18 @@ final class EditorModel: ViewModel {
       playingSliceID = nil
       await audioPlayer.stop()
     }
-    if let active = activeSliceID, slices[id: active] == nil {
-      activeSliceID = nil
-      fineTune.clear()
+    if let active = activeSliceID {
+      if let slice = slices[id: active] {
+        // The active slice survived but undo/redo may have moved its cut points; re-anchor the
+        // session at the model level (not only via the view's onChange) when nothing is unsaved.
+        let range = slice.startSample..<slice.endSample
+        if !fineTune.hasUnsavedChange, fineTune.committedRange != range {
+          fineTune.begin(target: .slice(active), range: range)
+        }
+      } else {
+        activeSliceID = nil
+        fineTune.clear()
+      }
     }
   }
 
@@ -451,12 +462,12 @@ final class EditorModel: ViewModel {
 
   // MARK: - Export Actions
   func exportSliceTapped(_ id: Slice.ID) {
-    guard !isExporting, let slice = slices[id: id] else { return }
+    guard !isExporting, !hasUncommittedSliceEdit, let slice = slices[id: id] else { return }
     startExport([slice])
   }
 
   func exportAllTapped() {
-    guard !isExporting, !slices.isEmpty else { return }
+    guard !isExporting, !hasUncommittedSliceEdit, !slices.isEmpty else { return }
     startExport(Array(slices))
   }
 

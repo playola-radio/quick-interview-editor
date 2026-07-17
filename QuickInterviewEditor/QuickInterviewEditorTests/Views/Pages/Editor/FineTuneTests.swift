@@ -167,6 +167,17 @@ struct FineTuneTests {
     expectNoDifference(model.draftRange?.upperBound, duration)
   }
 
+  @Test func draftEndClampsToFileWhenSliceIsTooShortNearEOF() {
+    // A slice already shorter than min-duration, hard up against EOF: dragging out must not
+    // push the draft past the file length.
+    let model = model()
+    let start = duration - 500
+    model.begin(target: .slice(UUID()), range: start..<duration)
+    model.dragCutOut(toInsetX: model.insetWidthPixels)  // drag hard right
+    expectNoDifference(model.draftRange?.upperBound, duration)
+    #expect(model.draftRange!.upperBound <= duration)
+  }
+
   // MARK: - Live warnings
 
   @Test func draftWarningsRedactPerBoundary() {

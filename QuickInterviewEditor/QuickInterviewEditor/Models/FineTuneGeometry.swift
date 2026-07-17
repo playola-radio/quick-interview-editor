@@ -36,7 +36,13 @@ func legalBoundaryRange(
     lower = max(0, window.lowerBound, opposite + constraints.minDurationSamples)
     upper = min(window.upperBound, constraints.durationSamples)
   }
-  return lower...max(lower, upper)
+  // Clamp both ends into the file before ordering: near EOF the min-duration lower can exceed
+  // `durationSamples` (an unsatisfiably short slice), and it must never let a draft run past
+  // the file — the engine rejects an out-of-range cut. The anchor stays `lower` so a window /
+  // min-duration contradiction still collapses to the window edge rather than inverting.
+  let boundedLower = min(max(lower, 0), constraints.durationSamples)
+  let boundedUpper = min(max(upper, 0), constraints.durationSamples)
+  return boundedLower...max(boundedLower, boundedUpper)
 }
 
 /// Clamps a proposed boundary sample into its legal interval. Side-aware on purpose: a

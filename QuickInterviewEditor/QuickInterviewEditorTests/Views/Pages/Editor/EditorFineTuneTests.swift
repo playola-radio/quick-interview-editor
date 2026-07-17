@@ -198,12 +198,30 @@ struct EditorFineTuneTests {
 
     let keyBeforeUndo = model.fineTuneSessionKey
     await model.undoTapped()  // slice restored to `originalRange`, active slice unchanged
-    // The session key must change so the view re-fires syncEditSession…
-    #expect(model.fineTuneSessionKey != keyBeforeUndo)
-    model.syncEditSession()
-    // …and the draft re-anchors to the restored range, not the stale edited one.
+    // The session re-anchors at the MODEL level via reconcile — no view round-trip needed…
     expectNoDifference(model.fineTune.committedRange, originalRange)
     expectNoDifference(model.fineTune.draftRange, originalRange)
+    // …and the session key also changed, so the view's onChange path stays consistent.
+    #expect(model.fineTuneSessionKey != keyBeforeUndo)
+  }
+
+  @Test func undoAndExportAreBlockedWhileASliceEditIsUncommitted() async {
+    let model = editor()
+    addSlice(model, 0, 3)
+    let slice = model.slices[0]
+    model.sliceSelected(slice.id)
+    model.cutOutNudged(byMs: 10)  // uncommitted existing-slice edit
+    let before = model.slices
+
+    // Direct action calls (menu/keyboard bypassing the disabled buttons) must no-op.
+    await model.undoTapped()
+    await model.redoTapped()
+    model.exportAllTapped()
+    model.exportSliceTapped(slice.id)
+    expectNoDifference(model.slices, before)  // nothing rewound
+    expectNoDifference(model.exportPhase, .idle)  // nothing exported
+    #expect(model.exportTask == nil)
+    #expect(model.fineTune.hasUnsavedChange)  // the draft is untouched
   }
 
   @Test func reorderingSurvivesActiveSession() {
