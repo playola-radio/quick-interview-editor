@@ -3,7 +3,7 @@
 Living status doc. Pairs with `plans/roadmap-macos-app.md` (the phase plan) — this
 tracks what's actually shipped and what's next. Update as PRs land.
 
-_Last updated: 2026-07-14 (main @ `56972cc`)._
+_Last updated: 2026-07-17 (Phase 5 PR 3 — fine-tune drag — implemented)._
 
 ---
 
@@ -32,7 +32,7 @@ _Last updated: 2026-07-14 (main @ `56972cc`)._
 Design: `docs/superpowers/specs/2026-07-07-phase5-interactive-cut-editing-design.md` (Codex-reviewed). Three PRs:
 - [x] **PR 1 — Canonical AIFF foundation.** (PR #10, merged)
 - [x] **PR 2 — Undo/redo over slice mutations.** (PR #11) `UndoStack<IdentifiedArrayOf<Slice>>` value type (bounded, validated limit); every slice mutation routed through one `mutateSlices` helper that snapshots + records; add/delete/rename/reorder rewritten through it; multi-row delete batched into one entry; redo cleared on new record; `undoTapped`/`redoTapped` + `reconcilePlayback` (stops playback if the playing slice is gone); Undo/Redo buttons in the panel. **`activeSliceID` reconcile deliberately deferred to PR 3** — a `TODO(PR 3)` seam is left in `reconcilePlayback`.
-- [ ] **PR 3 — Fine-tune drag editing.** ← **next.** Pure snap/range helpers + `FineTuneModel` (two-inset geometry, magnetic snap to silence edges, live red via `sliceWarnings`, ±10 ms nudge, midpoint word re-derivation) + the two-inset views. New `activeSliceID` (distinct from `playingSliceID`); wire its cleanup into the existing `reconcilePlayback` seam. Export disabled during an uncommitted draft; preview-edit plays the draft range. Full detail + traps in the design doc's "PR 3" section.
+- [x] **PR 3 — Fine-tune drag editing.** Pure snap/range/clamp/word helpers (`FineTuneGeometry`); `FineTuneModel` (fixed committed-centered ±0.5 s inset geometry, magnetic snap to silence edges filtered to the legal boundary interval, live red via `sliceWarnings`, ±10 ms nudge, safe-zone spans, midpoint word re-derivation); two dumb inset views (Cut in / Cut out). `EditorModel` glue: new `activeSliceID` (distinct from `playingSliceID`) wired into the PR-2 `reconcilePlayback` seam; a whole drag commits as exactly one `mutateSlices` (one undo entry) with re-derived `wordIDs`/`snippet`; export + undo/redo gated on an uncommitted existing-slice edit; transcript selection retargets the pane; preview-edit plays the draft range with a distinct playback identity. Hardened via 13 rounds of Codex adversarial review (session/preview lifecycle, EOF clamp, generation-guarded preview).
 
 ### Phase 6 — Distribution hardening (ship to real users)
 - [ ] **Notarization** — the only step between the packaging spike and a clean-Mac Gatekeeper pass. `packaging/notarize-app.sh` is written; needs notarytool credentials (App Store Connect API key or app-specific pw) configured. `spctl` currently reports `Unnotarized Developer ID`. **Small, high-value, independent — can be done anytime.**
