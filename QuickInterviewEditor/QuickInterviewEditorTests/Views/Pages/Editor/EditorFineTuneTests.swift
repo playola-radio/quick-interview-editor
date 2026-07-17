@@ -184,6 +184,28 @@ struct EditorFineTuneTests {
     expectNoDifference(model.fineTune.target, nil)
   }
 
+  @Test func undoingAnActiveSliceEditReanchorsTheSession() async {
+    let model = editor()
+    addSlice(model, 0, 3)
+    let slice = model.slices[0]
+    let originalRange = slice.startSample..<slice.endSample
+
+    model.sliceSelected(slice.id)
+    model.cutOutNudged(byMs: 10)
+    let edited = model.fineTune.draftRange!
+    model.commitEditTapped()  // slice now at `edited`; committed baseline advanced
+    expectNoDifference(model.fineTune.committedRange, edited)
+
+    let keyBeforeUndo = model.fineTuneSessionKey
+    await model.undoTapped()  // slice restored to `originalRange`, active slice unchanged
+    // The session key must change so the view re-fires syncEditSession…
+    #expect(model.fineTuneSessionKey != keyBeforeUndo)
+    model.syncEditSession()
+    // …and the draft re-anchors to the restored range, not the stale edited one.
+    expectNoDifference(model.fineTune.committedRange, originalRange)
+    expectNoDifference(model.fineTune.draftRange, originalRange)
+  }
+
   @Test func reorderingSurvivesActiveSession() {
     let model = editor()
     addSlice(model, 0, 1)

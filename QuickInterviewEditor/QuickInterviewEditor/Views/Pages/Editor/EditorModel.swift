@@ -98,8 +98,12 @@ final class EditorModel: ViewModel {
 
   /// The inputs that define which edit session should be open. The view watches this and
   /// calls `syncEditSession()` when it changes, so opening a session stays a model decision.
+  /// Includes the active slice's *range* so an undo/redo that moves the active slice (without
+  /// removing it) re-fires the sync and re-anchors the draft to the restored cut points.
   var fineTuneSessionKey: FineTuneSessionKey {
-    FineTuneSessionKey(activeSliceID: activeSliceID, selection: transcript.selectedSampleRange)
+    FineTuneSessionKey(
+      activeSliceID: activeSliceID, activeSliceRange: activeSliceRange,
+      selection: transcript.selectedSampleRange)
   }
 
   /// True only while an EXISTING slice has an unsaved cut edit — the user must Save or Cancel
@@ -713,5 +717,6 @@ struct SliceRowState: Identifiable, Equatable {
 /// selection. When this changes the view asks the model to reconcile the open session.
 struct FineTuneSessionKey: Equatable {
   var activeSliceID: Slice.ID?
+  var activeSliceRange: Range<Int>?
   var selection: Range<Int>?
 }
