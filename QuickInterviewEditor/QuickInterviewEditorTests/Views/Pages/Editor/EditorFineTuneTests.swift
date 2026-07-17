@@ -5,6 +5,50 @@ import Testing
 
 @testable import QuickInterviewEditor
 
+/// A play stand-in that suspends each call until released, in call order, and reports starts —
+/// enough to interleave two preview tasks deterministically.
+private final class PreviewPlayGate: @unchecked Sendable {
+  private let lock = NSLock()
+  private var continuations: [CheckedContinuation<Void, Never>] = []
+  private let startedContinuation: AsyncStream<Void>.Continuation
+  let started: AsyncStream<Void>
+
+  init() {
+    var continuation: AsyncStream<Void>.Continuation!
+    started = AsyncStream { continuation = $0 }
+    startedContinuation = continuation
+  }
+
+  func play() async {
+    startedContinuation.yield(())
+    await withCheckedContinuation { cont in
+      lock.lock()
+      continuations.append(cont)
+      lock.unlock()
+    }
+  }
+
+  func releaseFirst() {
+    lock.lock()
+    let cont = continuations.isEmpty ? nil : continuations.removeFirst()
+    lock.unlock()
+    cont?.resume()
+  }
+
+  func releaseAll() {
+    lock.lock()
+    let conts = continuations
+    continuations = []
+    lock.unlock()
+    for cont in conts { cont.resume() }
+  }
+
+  func awaitStarted() async {
+    var iterator = started.makeAsyncIterator()
+    _ = await iterator.next()
+  }
+}
+
 @MainActor
 struct EditorFineTuneTests {
   private func editor(_ plan: EditPlan = Fixtures.editPlan()) -> EditorModel {
@@ -422,6 +466,35 @@ struct EditorFineTuneTests {
       for _ in 0..<100 where !stopped.value { await Task.yield() }
     }
     #expect(stopped.value)  // audio stopped
+  }
+
+  @Test func aSupersededPreviewDoesNotClearTheNewerPreviewFlag() async {
+    let model = editor()
+    addSlice(model, 0, 1)
+    model.sliceSelected(model.slices[0].id)
+    let gate = PreviewPlayGate()
+
+    await withDependencies {
+      $0.audioPlayer.play = { _, _, _ in await gate.play() }
+      $0.audioPlayer.stop = {}
+    } operation: {
+      let first = Task { await model.previewEditTapped() }  // generation 1, suspends
+      await gate.awaitStarted()
+      #expect(model.isPreviewingDraft)
+
+      let second = Task { await model.previewEditTapped() }  // generation 2, suspends
+      await gate.awaitStarted()
+      #expect(model.isPreviewingDraft)
+
+      gate.releaseFirst()  // the OLD preview completes — must not clear the newer one's flag
+      for _ in 0..<100 { await Task.yield() }
+      #expect(model.isPreviewingDraft)  // generation 2 still owns the preview
+
+      gate.releaseAll()
+      await first.value
+      await second.value
+      #expect(!model.isPreviewingDraft)  // generation 2 completes → cleared
+    }
   }
 
   @Test func previewEditPlaysDraftRange() async {

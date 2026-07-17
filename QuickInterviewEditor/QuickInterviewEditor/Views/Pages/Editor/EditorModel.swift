@@ -56,6 +56,9 @@ final class EditorModel: ViewModel {
   /// True while the fine-tune pane's "preview edit" is playing the draft range, so the
   /// waveform playhead follows it even though no slice is "playing" in the panel sense.
   var isPreviewingDraft = false
+  /// Bumped each time preview playback starts or is superseded, so a stale completing preview
+  /// task can't clear a newer one's state.
+  @ObservationIgnored private var previewGeneration = 0
   var exportPhase: ExportPhase = .idle
   var destinationURL: URL?
   private var nextSliceNumber = 1
@@ -436,6 +439,7 @@ final class EditorModel: ViewModel {
   /// synchronously so the pane label and playhead ownership update at once, then stops the audio.
   private func cancelPreviewIfNeeded() {
     guard isPreviewingDraft else { return }
+    previewGeneration &+= 1
     isPreviewingDraft = false
     Task { await audioPlayer.stop() }
   }
@@ -501,20 +505,25 @@ final class EditorModel: ViewModel {
   }
 
   /// Preview the in-progress draft (falls back to the committed range). Uses a distinct
-  /// playback identity so slice-panel rows don't flip to "Stop".
+  /// playback identity so slice-panel rows don't flip to "Stop". A generation token guards the
+  /// completion: only the latest preview clears the flag, so a superseded older task can't turn
+  /// off a newer preview (mirrors `playSliceTapped`'s id check).
   func previewEditTapped() async {
     guard let range = fineTune.draftRange ?? fineTune.committedRange else { return }
     playingSliceID = nil
+    previewGeneration &+= 1
+    let generation = previewGeneration
     isPreviewingDraft = true
     do {
       try await audioPlayer.play(canonicalAudioURL, range, editPlan.source.sampleRate)
     } catch {
       reportIssue(error)
     }
-    isPreviewingDraft = false
+    if previewGeneration == generation { isPreviewingDraft = false }
   }
 
   func stopPreviewTapped() async {
+    previewGeneration &+= 1
     isPreviewingDraft = false
     await audioPlayer.stop()
   }
