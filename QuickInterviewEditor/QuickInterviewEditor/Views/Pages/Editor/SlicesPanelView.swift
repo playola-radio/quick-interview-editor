@@ -110,7 +110,8 @@ private struct SliceCard: View {
         } label: {
           Image(systemName: "slider.horizontal.below.rectangle")
         }
-        .buttonStyle(.plain).help(model.fineTuneLabel).accessibilityLabel(model.fineTuneLabel)
+        .buttonStyle(.plain).disabled(!row.canFineTune)
+        .help(model.fineTuneLabel).accessibilityLabel(model.fineTuneLabel)
         Button(model.exportLabel) {
           model.exportSliceTapped(row.id)
         }

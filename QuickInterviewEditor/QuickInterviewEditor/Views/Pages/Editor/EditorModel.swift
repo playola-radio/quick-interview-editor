@@ -99,7 +99,10 @@ final class EditorModel: ViewModel {
     if let activeSliceID { return .slice(activeSliceID) }
     return nil
   }
-  var showsFineTunePane: Bool { fineTuneTarget != nil }
+  // The pane also stays visible while a held draft is unsaved even if the target briefly reads
+  // nil (e.g. the selection was cleared), so a tuned pending draft isn't hidden out from under
+  // the user before they Save or Cancel.
+  var showsFineTunePane: Bool { fineTuneTarget != nil || fineTune.hasUnsavedChange }
 
   /// The inputs that define which edit session should be open. The view watches this and
   /// calls `syncEditSession()` when it changes, so opening a session stays a model decision.
@@ -216,7 +219,10 @@ final class EditorModel: ViewModel {
           warningLabel: slice.warnings.isEmpty ? "" : "Tight join — add a fade in Logic",
           isPlaying: playingSliceID == slice.id,
           playButtonLabel: playingSliceID == slice.id ? stopLabel : playLabel,
-          isActive: activeSliceID == slice.id
+          isActive: activeSliceID == slice.id,
+          // The fine-tune button switches the edit target, which `sliceSelected` rejects while
+          // another draft is unsaved — disable it then so it doesn't look broken when clicked.
+          canFineTune: !fineTune.hasUnsavedChange || activeSliceID == slice.id
         )
       })
   }
@@ -412,20 +418,24 @@ final class EditorModel: ViewModel {
   /// committed range drifted (e.g. an undo moved the active slice).
   func syncEditSession() {
     guard let target = fineTuneTarget, let range = activeOrSelectedRange else {
-      // Don't tear down an unsaved existing-slice edit just because the target went nil.
-      if fineTune.target != nil, !hasUncommittedSliceEdit {
+      // Don't tear down ANY unsaved edit (existing-slice or tuned pending selection) just because
+      // the target went nil — the user must Save or Cancel first.
+      if fineTune.target != nil, !fineTune.hasUnsavedChange {
         cancelPreviewIfNeeded()  // closing the pane removes the Stop-preview control
         fineTune.clear()
       }
       return
     }
-    // Never abandon an unsaved existing-slice edit by retargeting (e.g. a new transcript
-    // selection arriving mid-edit); the user must Save or Cancel first.
-    if hasUncommittedSliceEdit, fineTune.target != target { return }
-    // Re-anchor when the target changed, no session is open, or the anchor range drifted from
-    // the committed baseline. A drifted range is the source of truth moving: a pending selection
-    // changing (reset the stale draft) or the active slice being restored by undo. An in-progress
-    // draft only changes `draftRange`, never `committedRange`, so a live drag never trips this.
+    // Never abandon an unsaved edit by retargeting — a new transcript selection arriving mid-edit,
+    // for either a slice edit (target changes) or a tuned pending draft (the anchor range drifts).
+    // The held draft is preserved until the user Saves or Cancels.
+    if fineTune.hasUnsavedChange, fineTune.target != target || fineTune.committedRange != range {
+      return
+    }
+    // Re-anchor when the target changed, no session is open, or the anchor range drifted from the
+    // committed baseline with nothing unsaved (a casual re-selection before any tuning, or the
+    // active slice restored by undo). An in-progress draft only changes `draftRange`, never
+    // `committedRange`, so a live drag never trips this.
     let shouldBegin =
       fineTune.target != target || fineTune.committedRange == nil
       || fineTune.committedRange != range
@@ -442,15 +452,16 @@ final class EditorModel: ViewModel {
 
   /// Stops an in-progress draft preview when the session retargets away from it. Clears the flag
   /// synchronously so the pane label and playhead ownership update at once, then stops the audio
-  /// on a task. The stop is generation-scoped: if a newer preview has started by the time it
-  /// runs, it skips, so a stale cancel can never stop the newer playback.
+  /// on a task. The stop is guarded so a stale cancel can never stop newer playback: it fires only
+  /// if no newer preview (generation unchanged) AND no slice playback (`playingSliceID == nil`)
+  /// has taken over this editor's player in the meantime.
   private func cancelPreviewIfNeeded() {
     guard isPreviewingDraft else { return }
     previewGeneration &+= 1
     let generation = previewGeneration
     isPreviewingDraft = false
     Task {
-      guard previewGeneration == generation else { return }
+      guard previewGeneration == generation, playingSliceID == nil else { return }
       await audioPlayer.stop()
     }
   }
@@ -809,6 +820,7 @@ struct SliceRowState: Identifiable, Equatable {
   var isPlaying: Bool
   var playButtonLabel: String
   var isActive: Bool
+  var canFineTune: Bool
 }
 
 /// The identity of a fine-tune edit session — the active slice, or a live transcript

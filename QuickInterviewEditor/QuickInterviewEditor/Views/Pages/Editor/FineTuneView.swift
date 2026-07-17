@@ -72,6 +72,7 @@ private struct BoundaryInset: View {
   let onDrag: (CGFloat) -> Void
 
   private let boxHeight: CGFloat = 86
+  private let cutLineHandle: CGFloat = 9
   private let waveColor = Color(white: 0.42)
   private let keptColor = Color(red: 0.8, green: 0.4, blue: 0.4)
   private let safeColor = Color(red: 0.96, green: 0.86, blue: 0.4)
@@ -104,7 +105,9 @@ private struct BoundaryInset: View {
         Rectangle().fill(Color(white: 0.16)).frame(width: 1, height: boxHeight)
           .offset(x: width / 2)
         if let lineX {
-          CutLine().offset(x: lineX)
+          // The handle is `cutLineHandle` wide and centered in its ZStack, so shift left by half
+          // its width to sit the visible line exactly on the boundary rather than 4.5pt right.
+          CutLine(handleSize: cutLineHandle).offset(x: lineX - cutLineHandle / 2)
         }
       }
       .frame(width: width, height: boxHeight)
@@ -156,13 +159,16 @@ private struct InsetSilhouette: View {
   }
 }
 
-/// The draggable white cut line with a red-ringed handle dot.
+/// The draggable white cut line with a red-ringed handle dot. `handleSize` is the dot diameter,
+/// which sets the view's width; the caller shifts by half of it to center the line on the cut.
 private struct CutLine: View {
+  let handleSize: CGFloat
+
   var body: some View {
     ZStack(alignment: .top) {
       Rectangle().fill(Color.white).frame(width: 2)
       Circle().fill(Color.white)
-        .frame(width: 9, height: 9)
+        .frame(width: handleSize, height: handleSize)
         .overlay(Circle().stroke(Color(red: 0.8, green: 0.4, blue: 0.4), lineWidth: 2))
         .offset(y: -2)
     }

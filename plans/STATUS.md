@@ -54,9 +54,10 @@ Design: `docs/superpowers/specs/2026-07-07-phase5-interactive-cut-editing-design
 ---
 
 ## Recommendation
-1. **Phase 5 PR 2 — Undo/redo** — next; ships value on its own and de-risks the stack before drag.
-2. **Phase 5 PR 3 — Fine-tune drag editing** — the marquee interaction; needs PR 2's undo stack.
-3. **(Anytime, independent) Finish notarization** — turns the packaging spike into an actually-installable app.
+**Phase 5 is complete** (PRs #10–#12). Next up is Phase 6 — distribution hardening:
+1. **Finish notarization** — small, high-value, independent; turns the packaging spike into an actually-installable app.
+2. **Sparkle auto-update + crash/error reporting.**
+3. **Model-manager UI + onboarding UX**, then a licensing audit before commercial distribution.
 
 Phase 6 (distribution hardening) is independent of Phase 5 and could run in parallel
 (separate worktree), same as Phase 1 ‖ Phase 4 did.

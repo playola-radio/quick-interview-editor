@@ -90,29 +90,44 @@ struct EditorFineTuneTests {
     expectNoDifference(model.fineTune.committedRange, model.transcript.selectedSampleRange)
   }
 
-  @Test func changingSelectionResetsAPendingDraft() {
+  @Test func changingSelectionHoldsAnUnsavedPendingDraft() {
     let model = editor()
     model.transcript.wordTapped(model.transcript.words[0].id)
     model.transcript.wordTapped(model.transcript.words[2].id)
     model.syncEditSession()
-    model.cutOutNudged(byMs: 10)  // unsaved pending draft on selection A
+    model.cutOutNudged(byMs: 10)  // tuned pending draft on selection A
+    let draftA = model.fineTune.draftRange
     #expect(model.fineTune.hasUnsavedChange)
 
-    // The user picks different words before saving — the pending draft must re-anchor to the
-    // new selection, not silently save the old range.
+    // Picking different words before saving must NOT silently discard the tuning — the draft is
+    // held (symmetric with an unsaved slice edit) until the user Saves or Cancels.
     model.transcript.wordTapped(model.transcript.words[4].id)
     model.transcript.wordTapped(model.transcript.words[6].id)
     model.syncEditSession()
-    #expect(!model.fineTune.hasUnsavedChange)  // the stale draft was dropped
-    let newSelection = model.transcript.selectedSampleRange!
-    expectNoDifference(model.fineTune.committedRange, newSelection)
+    expectNoDifference(model.fineTune.draftRange, draftA)  // still the tuned A
+    #expect(model.fineTune.hasUnsavedChange)
+    #expect(model.showsFineTunePane)
 
-    model.cutOutNudged(byMs: -10)  // tune the NEW selection
-    let draft = model.fineTune.draftRange!
-    expectNoDifference(draft.lowerBound, newSelection.lowerBound)  // anchored to the new range
+    // Cancel releases the hold; the pane then retargets to the new selection.
+    model.cancelEditTapped()
+    expectNoDifference(model.fineTune.committedRange, model.transcript.selectedSampleRange)
+  }
+
+  @Test func savingAHeldPendingDraftUsesTheTunedRangeNotTheNewSelection() {
+    let model = editor()
+    model.transcript.wordTapped(model.transcript.words[0].id)
+    model.transcript.wordTapped(model.transcript.words[2].id)
+    model.syncEditSession()
+    model.cutOutNudged(byMs: 10)  // tuned pending draft on selection A
+    let draftA = model.fineTune.draftRange!
+
+    // A different selection arrives; the draft is held. Save cut commits the tuned A, not B.
+    model.transcript.wordTapped(model.transcript.words[4].id)
+    model.transcript.wordTapped(model.transcript.words[6].id)
+    model.syncEditSession()
     model.commitEditTapped()
     let added = model.slices.last!
-    expectNoDifference(added.startSample..<added.endSample, draft)  // saved the new range, not A
+    expectNoDifference(added.startSample..<added.endSample, draftA)
   }
 
   // MARK: - Commit = one undo entry, re-derived membership
