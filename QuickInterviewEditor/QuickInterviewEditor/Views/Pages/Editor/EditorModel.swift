@@ -485,9 +485,11 @@ final class EditorModel: ViewModel {
     syncEditSession()
   }
 
-  /// Drops the unsaved change, leaving the pane open on the committed range. Re-syncs so a
-  /// selection made (but ignored) during the edit can now take over the pane.
+  /// Drops the unsaved change, leaving the pane open on the committed range. Stops any preview
+  /// first — it was playing the now-discarded draft — then re-syncs so a selection made (but
+  /// held) during the edit can take over the pane.
   func cancelEditTapped() {
+    cancelPreviewIfNeeded()
     fineTune.resetDraft()
     syncEditSession()
   }

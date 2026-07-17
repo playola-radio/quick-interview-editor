@@ -448,6 +448,25 @@ struct EditorFineTuneTests {
 
   // MARK: - Preview edit
 
+  @Test func cancellingADraftStopsAnInProgressPreview() async {
+    let model = editor()
+    addSlice(model, 0, 3)
+    let slice = model.slices[0]
+    model.sliceSelected(slice.id)
+    model.cutOutNudged(byMs: 10)  // dirty slice edit
+    model.isPreviewingDraft = true  // preview in flight
+    let stopped = LockIsolated(false)
+
+    await withDependencies {
+      $0.audioPlayer.stop = { stopped.setValue(true) }
+    } operation: {
+      model.cancelEditTapped()  // must fully abandon the edit, including the preview
+      #expect(!model.isPreviewingDraft)
+      for _ in 0..<100 where !stopped.value { await Task.yield() }
+    }
+    #expect(stopped.value)
+  }
+
   @Test func savingAPendingEditStopsAnInProgressPreview() async {
     let model = editor()
     model.transcript.wordTapped(model.transcript.words[0].id)
