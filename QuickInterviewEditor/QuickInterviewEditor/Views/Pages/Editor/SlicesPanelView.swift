@@ -105,6 +105,13 @@ private struct SliceCard: View {
         Button(row.playButtonLabel) {
           Task { await model.playStopTapped(row.id) }
         }
+        Button {
+          model.sliceSelected(row.id)
+        } label: {
+          Image(systemName: "slider.horizontal.below.rectangle")
+        }
+        .buttonStyle(.plain).disabled(!row.canFineTune)
+        .help(model.fineTuneLabel).accessibilityLabel(model.fineTuneLabel)
         Button(model.exportLabel) {
           model.exportSliceTapped(row.id)
         }
@@ -121,6 +128,10 @@ private struct SliceCard: View {
     .padding(12)
     .background(Color(white: 0.08))
     .clipShape(RoundedRectangle(cornerRadius: 11))
+    .overlay(
+      RoundedRectangle(cornerRadius: 11)
+        .stroke(Color(red: 0.8, green: 0.4, blue: 0.4), lineWidth: row.isActive ? 1.5 : 0)
+    )
   }
 }
 
