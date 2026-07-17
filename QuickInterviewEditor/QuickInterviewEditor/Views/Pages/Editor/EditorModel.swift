@@ -96,6 +96,12 @@ final class EditorModel: ViewModel {
   }
   var showsFineTunePane: Bool { fineTuneTarget != nil }
 
+  /// The inputs that define which edit session should be open. The view watches this and
+  /// calls `syncEditSession()` when it changes, so opening a session stays a model decision.
+  var fineTuneSessionKey: FineTuneSessionKey {
+    FineTuneSessionKey(activeSliceID: activeSliceID, selection: transcript.selectedSampleRange)
+  }
+
   /// True only while an EXISTING slice has an unsaved cut edit — the user must Save or Cancel
   /// before exporting or undo/redo (a pending-selection draft is a new slice, not a mutation,
   /// and export never renders it, so it doesn't gate).
@@ -197,10 +203,13 @@ final class EditorModel: ViewModel {
           isTight: !slice.warnings.isEmpty,
           warningLabel: slice.warnings.isEmpty ? "" : "Tight join — add a fade in Logic",
           isPlaying: playingSliceID == slice.id,
-          playButtonLabel: playingSliceID == slice.id ? stopLabel : playLabel
+          playButtonLabel: playingSliceID == slice.id ? stopLabel : playLabel,
+          isActive: activeSliceID == slice.id
         )
       })
   }
+
+  let fineTuneLabel = "Fine-tune cuts"
 
   // MARK: - User Actions
   /// Builds the waveform peak pyramid for the canonical audio, in plan-sample
@@ -697,4 +706,12 @@ struct SliceRowState: Identifiable, Equatable {
   var warningLabel: String
   var isPlaying: Bool
   var playButtonLabel: String
+  var isActive: Bool
+}
+
+/// The identity of a fine-tune edit session — the active slice, or a live transcript
+/// selection. When this changes the view asks the model to reconcile the open session.
+struct FineTuneSessionKey: Equatable {
+  var activeSliceID: Slice.ID?
+  var selection: Range<Int>?
 }

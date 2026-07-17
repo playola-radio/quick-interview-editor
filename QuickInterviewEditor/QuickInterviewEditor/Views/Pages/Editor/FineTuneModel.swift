@@ -119,6 +119,13 @@ final class FineTuneModel: ViewModel {
   var cutOutKeptSpan: WaveformSpan? {
     cutOutLineX.map { WaveformSpan(positionX: 0, width: max(0, $0)) }
   }
+  /// The discarded (dimmed) portion of each inset — the complement of the kept span.
+  var cutInDiscardedSpan: WaveformSpan? {
+    cutInLineX.map { WaveformSpan(positionX: 0, width: max(0, $0)) }
+  }
+  var cutOutDiscardedSpan: WaveformSpan? {
+    cutOutLineX.map { WaveformSpan(positionX: $0, width: max(0, insetWidthPixels - $0)) }
+  }
 
   /// Silence regions inside each inset window, as inset-x spans, so the view can shade the
   /// "you can cut cleanly here" zones. Silence ends are inclusive (matching `sliceWarnings`).

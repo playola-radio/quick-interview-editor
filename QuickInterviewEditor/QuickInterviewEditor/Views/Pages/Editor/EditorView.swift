@@ -10,6 +10,9 @@ struct EditorView: View {
           .frame(maxWidth: .infinity, maxHeight: .infinity)
         Divider()
         WaveformView(model: model)
+        if model.showsFineTunePane {
+          FineTuneView(model: model)
+        }
       }
       Divider()
       SlicesPanelView(model: model)
@@ -18,5 +21,6 @@ struct EditorView: View {
     .background(Color.black)
     .task { await model.loadWaveform() }
     .task { await model.observePlayback() }
+    .onChange(of: model.fineTuneSessionKey, initial: true) { _, _ in model.syncEditSession() }
   }
 }
