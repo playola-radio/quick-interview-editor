@@ -35,7 +35,7 @@ struct FineTuneView: View {
         Spacer(minLength: 0)
       }
       HStack(spacing: 8) {
-        Button(model.fineTune.previewEditLabel) { Task { await model.previewEditTapped() } }
+        Button(model.previewButtonLabel) { Task { await model.previewToggleTapped() } }
         Spacer()
         Button(model.fineTune.cancelLabel) { model.cancelEditTapped() }
           .disabled(!model.fineTune.hasUnsavedChange)

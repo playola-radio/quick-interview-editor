@@ -50,6 +50,7 @@ final class FineTuneModel: ViewModel {
   let nudgeBackLabel = "−10 ms"
   let nudgeForwardLabel = "+10 ms"
   let previewEditLabel = "Preview edit"
+  let previewStopLabel = "Stop preview"
   let commitLabel = "Save cut"
   let cancelLabel = "Cancel"
 

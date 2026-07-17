@@ -147,7 +147,14 @@ final class EditorModel: ViewModel {
   var waveformRedSpans: [WaveformSpan] { redRanges.compactMap(waveform.span(for:)) }
 
   // MARK: - View Helpers
-  var canAddSlice: Bool { transcript.selectedSampleRange != nil }
+  /// A pending selection that's been fine-tuned but not saved. The panel's plain "Add slice"
+  /// builds from the raw selection and would discard those adjustments, so it's disabled until
+  /// the draft is saved (via "Save cut") or cancelled.
+  var hasUncommittedPendingDraft: Bool {
+    if case .pendingSelection = fineTune.target { return fineTune.hasUnsavedChange }
+    return false
+  }
+  var canAddSlice: Bool { transcript.selectedSampleRange != nil && !hasUncommittedPendingDraft }
   // Undo/redo restore `slices` wholesale; doing that under an open cut edit would leave the
   // draft anchored to a stale committed range, so gate on Save/Cancel first.
   var canUndo: Bool { sliceUndo.canUndo && !hasUncommittedSliceEdit }
@@ -262,7 +269,7 @@ final class EditorModel: ViewModel {
   }
 
   func addSliceTapped() {
-    guard let range = transcript.selectedSampleRange else { return }
+    guard canAddSlice, let range = transcript.selectedSampleRange else { return }
     let wordIDs = transcript.orderedSelectedWordIDs
     guard !wordIDs.isEmpty else { return }
     let slice = Slice(
@@ -444,6 +451,19 @@ final class EditorModel: ViewModel {
 
   /// Drops the unsaved change, leaving the pane open on the committed range.
   func cancelEditTapped() { fineTune.resetDraft() }
+
+  /// The preview button reflects playback state so a single control both starts and stops it.
+  var previewButtonLabel: String {
+    isPreviewingDraft ? fineTune.previewStopLabel : fineTune.previewEditLabel
+  }
+
+  func previewToggleTapped() async {
+    if isPreviewingDraft {
+      await stopPreviewTapped()
+    } else {
+      await previewEditTapped()
+    }
+  }
 
   /// Preview the in-progress draft (falls back to the committed range). Uses a distinct
   /// playback identity so slice-panel rows don't flip to "Stop".

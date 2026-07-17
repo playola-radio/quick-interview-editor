@@ -282,7 +282,42 @@ struct EditorFineTuneTests {
     #expect(model.fineTune.target == .slice(first.id))
   }
 
+  @Test func addSliceIsDisabledWhileAPendingDraftIsTuned() {
+    let model = editor()
+    model.transcript.wordTapped(model.transcript.words[0].id)
+    model.transcript.wordTapped(model.transcript.words[2].id)
+    model.syncEditSession()
+    #expect(model.canAddSlice)  // selection made, nothing tuned yet
+
+    model.cutOutNudged(byMs: 10)  // tune the pending selection
+    #expect(!model.canAddSlice)  // plain Add slice would discard the tuning → disabled
+    model.addSliceTapped()  // action-level guard: no-op
+    expectNoDifference(model.slices.count, 0)
+
+    // Save cut adds the tuned range instead.
+    let draft = model.fineTune.draftRange!
+    model.commitEditTapped()
+    expectNoDifference(model.slices.count, 1)
+    expectNoDifference(model.slices[0].startSample..<model.slices[0].endSample, draft)
+  }
+
   // MARK: - Preview edit
+
+  @Test func previewButtonTogglesToStopWhilePreviewing() async {
+    let model = editor()
+    expectNoDifference(model.previewButtonLabel, model.fineTune.previewEditLabel)
+    model.isPreviewingDraft = true
+    expectNoDifference(model.previewButtonLabel, model.fineTune.previewStopLabel)
+
+    let stopped = LockIsolated(false)
+    await withDependencies {
+      $0.audioPlayer.stop = { stopped.setValue(true) }
+    } operation: {
+      await model.previewToggleTapped()  // toggles to stop while previewing
+    }
+    #expect(stopped.value)
+    #expect(!model.isPreviewingDraft)
+  }
 
   @Test func previewEditPlaysDraftRange() async {
     let model = editor()
