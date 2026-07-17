@@ -376,6 +376,9 @@ final class EditorModel: ViewModel {
   /// range. Choosing the slice explicitly (rather than from ambient state) is what makes it
   /// the edit target.
   func sliceSelected(_ id: Slice.ID) {
+    // Switching slices would abandon an unsaved cut edit; require Save or Cancel first, matching
+    // how export and undo/redo are gated. Re-selecting the already-active slice is a no-op.
+    guard !hasUncommittedSliceEdit || activeSliceID == id else { return }
     activeSliceID = id
     syncEditSession()
   }

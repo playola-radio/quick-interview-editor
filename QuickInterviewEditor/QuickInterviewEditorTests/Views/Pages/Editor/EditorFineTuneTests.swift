@@ -249,6 +249,27 @@ struct EditorFineTuneTests {
     #expect(model.fineTune.hasUnsavedChange)  // the draft is untouched
   }
 
+  @Test func switchingSlicesIsBlockedWhileAnEditIsUnsaved() {
+    let model = editor()
+    addSlice(model, 0, 1)
+    addSlice(model, 2, 3)
+    let first = model.slices[0]
+    let second = model.slices[1]
+
+    model.sliceSelected(first.id)
+    model.cutOutNudged(byMs: 10)
+    let draft = model.fineTune.draftRange
+    // Clicking another slice's fine-tune button must not silently drop the unsaved edit.
+    model.sliceSelected(second.id)
+    expectNoDifference(model.activeSliceID, first.id)
+    expectNoDifference(model.fineTune.draftRange, draft)
+
+    // Once the edit is resolved, switching works.
+    model.cancelEditTapped()
+    model.sliceSelected(second.id)
+    expectNoDifference(model.activeSliceID, second.id)
+  }
+
   @Test func reorderingSurvivesActiveSession() {
     let model = editor()
     addSlice(model, 0, 1)
