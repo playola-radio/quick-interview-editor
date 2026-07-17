@@ -467,6 +467,25 @@ struct EditorFineTuneTests {
     #expect(stopped.value)
   }
 
+  @Test func undoReanchoringTheActiveSliceStopsAnInProgressPreview() async {
+    let model = editor()
+    addSlice(model, 0, 3)
+    let slice = model.slices[0]
+    model.sliceSelected(slice.id)
+    model.cutOutNudged(byMs: 10)
+    model.commitEditTapped()  // slice now at the edited range, committed
+    model.isPreviewingDraft = true  // preview the committed slice
+    let stopped = LockIsolated(false)
+
+    await withDependencies {
+      $0.audioPlayer.stop = { stopped.setValue(true) }
+    } operation: {
+      await model.undoTapped()  // restores the original range → reconcile re-anchors the pane
+      #expect(!model.isPreviewingDraft)  // preview of the stale range was stopped
+    }
+    #expect(stopped.value)
+  }
+
   @Test func savingAPendingEditStopsAnInProgressPreview() async {
     let model = editor()
     model.transcript.wordTapped(model.transcript.words[0].id)

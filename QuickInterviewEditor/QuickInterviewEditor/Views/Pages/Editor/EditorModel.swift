@@ -345,17 +345,23 @@ final class EditorModel: ViewModel {
         // session at the model level (not only via the view's onChange) when nothing is unsaved.
         let range = slice.startSample..<slice.endSample
         if !fineTune.hasUnsavedChange, fineTune.committedRange != range {
+          await stopPreviewIfPlaying()  // the preview was of the old range; the pane now differs
           fineTune.begin(target: .slice(active), range: range)
         }
       } else {
         activeSliceID = nil
         fineTune.clear()
-        if isPreviewingDraft {
-          isPreviewingDraft = false
-          await audioPlayer.stop()
-        }
+        await stopPreviewIfPlaying()
       }
     }
+  }
+
+  /// Stops draft preview from an async context, ordered (awaited) rather than fire-and-forget.
+  private func stopPreviewIfPlaying() async {
+    guard isPreviewingDraft else { return }
+    previewGeneration &+= 1
+    isPreviewingDraft = false
+    await audioPlayer.stop()
   }
 
   func playSliceTapped(_ id: Slice.ID) async {
