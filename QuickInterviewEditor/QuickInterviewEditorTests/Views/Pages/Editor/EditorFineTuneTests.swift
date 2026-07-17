@@ -404,6 +404,26 @@ struct EditorFineTuneTests {
     #expect(!model.isPreviewingDraft)
   }
 
+  @Test func retargetingTheSessionStopsAnInProgressPreview() async {
+    let model = editor()
+    addSlice(model, 0, 1)
+    model.sliceSelected(model.slices[0].id)
+    model.isPreviewingDraft = true  // stand in for a preview in flight
+    let stopped = LockIsolated(false)
+
+    await withDependencies {
+      $0.audioPlayer.stop = { stopped.setValue(true) }
+    } operation: {
+      // Retarget to a new transcript selection.
+      model.transcript.wordTapped(model.transcript.words[5].id)
+      model.transcript.wordTapped(model.transcript.words[7].id)
+      model.syncEditSession()
+      #expect(!model.isPreviewingDraft)  // flag cleared synchronously
+      for _ in 0..<100 where !stopped.value { await Task.yield() }
+    }
+    #expect(stopped.value)  // audio stopped
+  }
+
   @Test func previewEditPlaysDraftRange() async {
     let model = editor()
     addSlice(model, 0, 3)

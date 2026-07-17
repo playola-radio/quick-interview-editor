@@ -351,6 +351,10 @@ final class EditorModel: ViewModel {
       } else {
         activeSliceID = nil
         fineTune.clear()
+        if isPreviewingDraft {
+          isPreviewingDraft = false
+          await audioPlayer.stop()
+        }
       }
     }
   }
@@ -418,11 +422,22 @@ final class EditorModel: ViewModel {
       fineTune.target != target || fineTune.committedRange == nil
       || fineTune.committedRange != range
     if shouldBegin {
+      // Retargeting to a different session must not leave an old preview playing — the new pane
+      // would show "Stop preview" and the playhead would follow the stale range.
+      cancelPreviewIfNeeded()
       // A transcript selection taking over releases the previously active slice, so clearing the
       // selection later doesn't silently reopen the pane on a stale slice.
       if case .pendingSelection = target { activeSliceID = nil }
       fineTune.begin(target: target, range: range)
     }
+  }
+
+  /// Stops an in-progress draft preview when the session retargets away from it. Clears the flag
+  /// synchronously so the pane label and playhead ownership update at once, then stops the audio.
+  private func cancelPreviewIfNeeded() {
+    guard isPreviewingDraft else { return }
+    isPreviewingDraft = false
+    Task { await audioPlayer.stop() }
   }
 
   func cutInDragged(toInsetX positionX: CGFloat) {
