@@ -16,7 +16,9 @@
 		1C33FAA7D602889FC8F8C348 /* EditPlanDecodingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B0A5D7C62A370DE8DD21807 /* EditPlanDecodingTests.swift */; };
 		1DA6160F26D3935018786C8B /* QuickInterviewEditorApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75C599ECDAD50A6F0A522C6B /* QuickInterviewEditorApp.swift */; };
 		1FDCD5A562E7D5D71D0520EC /* UndoStackTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E8C670A36FEE48ECE336F3D /* UndoStackTests.swift */; };
+		227D6F7F6905446643F42287 /* FineTuneTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4290C69F37093A3967E52FF /* FineTuneTests.swift */; };
 		2DFA0D8ACC93BD4DA8AA589C /* LiveEngineCancelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D070569A63CB32AC401C34C /* LiveEngineCancelTests.swift */; };
+		36862DD72E5319C2366AD84E /* FineTuneModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 557B8204C55CD77EEE5B3192 /* FineTuneModel.swift */; };
 		36ACC1000EDBD0CD29C53315 /* ModelDownloadClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F78302A08FD972343EFFF51 /* ModelDownloadClient.swift */; };
 		39A76766629B8F1693F8CC83 /* WaveformClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD1B99A2D5B94CC2C0AA3C17 /* WaveformClient.swift */; };
 		3BD760F25135C28E6E0870F6 /* SongTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE1984F062A56A845A2364F4 /* SongTabView.swift */; };
@@ -106,6 +108,7 @@
 		48930A836912299557952308 /* Slice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Slice.swift; sourceTree = "<group>"; };
 		4EA854547ED6426A4ABD6E8E /* EngineClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EngineClient.swift; sourceTree = "<group>"; };
 		4F3B3549446B80CE6BA09245 /* EngineResolution.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EngineResolution.swift; sourceTree = "<group>"; };
+		557B8204C55CD77EEE5B3192 /* FineTuneModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FineTuneModel.swift; sourceTree = "<group>"; };
 		5865237D9AEA083F3D2A75A0 /* WaveformView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WaveformView.swift; sourceTree = "<group>"; };
 		5FCB607F8627656FE4DEA0CD /* FineTuneGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FineTuneGeometry.swift; sourceTree = "<group>"; };
 		6133EE6AF1867B8B9120A027 /* SliceWarningsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SliceWarningsTests.swift; sourceTree = "<group>"; };
@@ -146,6 +149,7 @@
 		CF59032A8FB779A2205DB749 /* EditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorView.swift; sourceTree = "<group>"; };
 		DA8E9F67D9C59C32823C2500 /* SongTabModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SongTabModel.swift; sourceTree = "<group>"; };
 		DDA36FAD7A5A15024FC73AB3 /* RunTogether.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunTogether.swift; sourceTree = "<group>"; };
+		E4290C69F37093A3967E52FF /* FineTuneTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FineTuneTests.swift; sourceTree = "<group>"; };
 		EB660238C92EB5872A9BA235 /* QuickInterviewEditorTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = QuickInterviewEditorTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		F120260251DEBF3A9BC28ED2 /* RenderTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RenderTypes.swift; sourceTree = "<group>"; };
 		F1E29A237821D79F1F395D04 /* WaveformModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WaveformModel.swift; sourceTree = "<group>"; };
@@ -180,6 +184,7 @@
 			children = (
 				7BD517DB17FCCECB191BA3EE /* EditorModel.swift */,
 				CF59032A8FB779A2205DB749 /* EditorView.swift */,
+				557B8204C55CD77EEE5B3192 /* FineTuneModel.swift */,
 				9892BB9839BE8C69DC214C5D /* SlicesPanelView.swift */,
 				F1E29A237821D79F1F395D04 /* WaveformModel.swift */,
 				5865237D9AEA083F3D2A75A0 /* WaveformView.swift */,
@@ -199,6 +204,7 @@
 			isa = PBXGroup;
 			children = (
 				72761D21D94A9475B670E0CA /* EditorTests.swift */,
+				E4290C69F37093A3967E52FF /* FineTuneTests.swift */,
 				AEAAD47D27412B903572FE49 /* WaveformTests.swift */,
 			);
 			path = Editor;
@@ -588,6 +594,7 @@
 				AB7BC4CE0D6D2FED506AEBDF /* EngineResolverTests.swift in Sources */,
 				E01515F04116C5606DA2224C /* ExportNamingTests.swift in Sources */,
 				C7758C80DB9BBE2699C015A5 /* FineTuneGeometryTests.swift in Sources */,
+				227D6F7F6905446643F42287 /* FineTuneTests.swift in Sources */,
 				E96C33EEFA11E1600464E36B /* Fixtures.swift in Sources */,
 				2DFA0D8ACC93BD4DA8AA589C /* LiveEngineCancelTests.swift in Sources */,
 				B235E9479CCA3E14AE46A5B7 /* LiveEngineIntegrationTests.swift in Sources */,
@@ -620,6 +627,7 @@
 				9981CF15926B616AA1B3BFBA /* EngineResolution.swift in Sources */,
 				612400EB7125669478AA6BED /* ExportNaming.swift in Sources */,
 				0AEBF0DB3F4B7F18B18BF4B1 /* FineTuneGeometry.swift in Sources */,
+				36862DD72E5319C2366AD84E /* FineTuneModel.swift in Sources */,
 				D9C4768EAE67DC98FCA42E18 /* ImportPageView.swift in Sources */,
 				86C19FC155AEB31428F42B95 /* LiveEngine.swift in Sources */,
 				B17F1D970A965716B4315F6C /* LiveModelDownloader.swift in Sources */,
