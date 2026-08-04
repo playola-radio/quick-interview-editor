@@ -98,13 +98,24 @@ private struct SliceCard: View {
       Text(row.snippet).font(.system(size: 12.5))
         .foregroundStyle(Color(white: 0.6)).lineLimit(2)
       if row.isTight {
-        Text(row.warningLabel).font(.system(size: 11))
+        Text(row.warningLabel)
+          .font(.system(size: 10, weight: .semibold)).tracking(0.3)
           .foregroundStyle(Color(red: 0.89, green: 0.58, blue: 0.58))
+          .padding(.horizontal, 7).padding(.vertical, 2)
+          .background(
+            Capsule().fill(Color(red: 0.89, green: 0.58, blue: 0.58).opacity(0.16))
+          )
+          .help(row.warningHelp).accessibilityLabel(row.warningHelp)
       }
       HStack(spacing: 8) {
         Button(row.playButtonLabel) {
           Task { await model.playStopTapped(row.id) }
         }
+        Button(model.fineTuneLabel) {
+          model.sliceSelected(row.id)
+        }
+        .disabled(!row.canFineTune)
+        .help(model.fineTuneLabel).accessibilityLabel(model.fineTuneLabel)
         Button(model.exportLabel) {
           model.exportSliceTapped(row.id)
         }
@@ -121,6 +132,10 @@ private struct SliceCard: View {
     .padding(12)
     .background(Color(white: 0.08))
     .clipShape(RoundedRectangle(cornerRadius: 11))
+    .overlay(
+      RoundedRectangle(cornerRadius: 11)
+        .stroke(Color(red: 0.8, green: 0.4, blue: 0.4), lineWidth: row.isActive ? 1.5 : 0)
+    )
   }
 }
 

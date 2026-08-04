@@ -88,6 +88,32 @@ final class WaveformModel: ViewModel {
     return columns
   }
 
+  /// One min/max column per pixel across an arbitrary plan-sample `window`, rendered at a
+  /// fixed `pixelWidth` (independent of the main viewport/zoom). Used by the fine-tune insets:
+  /// the window is a fixed ±0.5 s span, so samples-per-pixel is constant, and pixels whose
+  /// sample range falls past the file edge are omitted (they render blank, not rescaled).
+  func columns(in window: Range<Int>, pixelWidth: CGFloat) -> [WaveformColumn] {
+    guard let waveform, waveform.baseLevel != nil, totalSamples > 0, pixelWidth >= 1,
+      window.lowerBound < window.upperBound
+    else { return [] }
+    let spp = Double(window.count) / Double(pixelWidth)
+    guard spp > 0 else { return [] }
+    let level = pyramidLevel(for: spp, in: waveform)
+    let columnCount = Int(pixelWidth.rounded(.up))
+    var columns: [WaveformColumn] = []
+    columns.reserveCapacity(columnCount)
+    for pixel in 0..<columnCount {
+      let start = window.lowerBound + Int((Double(pixel) * spp).rounded(.down))
+      let end = window.lowerBound + Int((Double(pixel + 1) * spp).rounded(.down))
+      let lo = max(0, min(start, totalSamples))
+      let hi = max(0, min(end, totalSamples))
+      guard hi > lo else { continue }
+      let peak = level.peak(in: lo..<hi)
+      columns.append(WaveformColumn(positionX: CGFloat(pixel), min: peak.min, max: peak.max))
+    }
+    return columns
+  }
+
   /// Horizontal extent of a plan-sample range in view coordinates, clipped to the
   /// viewport; nil when the range is empty or entirely off-screen.
   func span(for range: Range<Int>) -> WaveformSpan? {
