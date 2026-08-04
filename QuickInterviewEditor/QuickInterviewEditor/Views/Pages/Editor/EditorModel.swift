@@ -106,6 +106,17 @@ final class EditorModel: ViewModel {
   // the user before they Save or Cancel.
   var showsFineTunePane: Bool { fineTuneTarget != nil || fineTune.hasUnsavedChange }
 
+  /// "Save cut" is enabled whenever there's something to commit: a pending selection can always
+  /// be saved as a slice — even with the untouched, auto-detected cut points — while an existing
+  /// slice only commits when its cut points actually changed.
+  var canCommitEdit: Bool {
+    switch fineTune.target {
+    case .pendingSelection: return fineTune.draftRange != nil
+    case .slice: return fineTune.hasUnsavedChange
+    case .none: return false
+    }
+  }
+
   /// The inputs that define which edit session should be open. The view watches this and
   /// calls `syncEditSession()` when it changes, so opening a session stays a model decision.
   /// Includes the active slice's *range* so an undo/redo that moves the active slice (without
@@ -490,7 +501,7 @@ final class EditorModel: ViewModel {
   /// existing slice's cut points are updated (word IDs + snippet + warnings re-derived from
   /// the new range); a pending selection becomes a new slice. No-op when nothing changed.
   func commitEditTapped() {
-    guard fineTune.hasUnsavedChange, let draft = fineTune.draftRange, let target = fineTune.target
+    guard canCommitEdit, let draft = fineTune.draftRange, let target = fineTune.target
     else { return }
     switch target {
     case .slice(let id):

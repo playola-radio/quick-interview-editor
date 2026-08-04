@@ -183,9 +183,33 @@ struct EditorFineTuneTests {
     let slice = model.slices[0]
     model.sliceSelected(slice.id)
     #expect(model.canUndo)  // add is undoable; no unsaved edit yet
+    #expect(!model.canCommitEdit)  // nothing to save on an unchanged slice
     let before = model.slices
     model.commitEditTapped()  // draft == committed → no-op
     expectNoDifference(model.slices, before)
+  }
+
+  @Test func savingAnUntouchedPendingSelectionAddsItAsASlice() {
+    let model = editor()
+    model.transcript.wordTapped(model.transcript.words[0].id)
+    model.transcript.wordTapped(model.transcript.words[2].id)
+    model.syncEditSession()
+    // Save is enabled immediately — no need to nudge first when the auto-cut is already good.
+    #expect(model.canCommitEdit)
+    let selection = model.transcript.selectedSampleRange!
+
+    model.commitEditTapped()
+    expectNoDifference(model.slices.count, 1)
+    expectNoDifference(model.slices[0].startSample..<model.slices[0].endSample, selection)
+  }
+
+  @Test func saveEnablesOnceAnExistingSliceEditIsTuned() {
+    let model = editor()
+    addSlice(model, 0, 3)
+    model.sliceSelected(model.slices[0].id)
+    #expect(!model.canCommitEdit)  // opening the pane on a slice: nothing to save yet
+    model.cutOutNudged(byMs: 10)
+    #expect(model.canCommitEdit)  // now there's a real change
   }
 
   // MARK: - Cancel restores

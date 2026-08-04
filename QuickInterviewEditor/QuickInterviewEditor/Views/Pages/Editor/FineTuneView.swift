@@ -40,7 +40,7 @@ struct FineTuneView: View {
         Button(model.fineTune.cancelLabel) { model.cancelEditTapped() }
           .disabled(!model.fineTune.hasUnsavedChange)
         Button(model.fineTune.commitLabel) { model.commitEditTapped() }
-          .disabled(!model.fineTune.hasUnsavedChange)
+          .disabled(!model.canCommitEdit)
       }
       .buttonStyle(.borderless)
     }
