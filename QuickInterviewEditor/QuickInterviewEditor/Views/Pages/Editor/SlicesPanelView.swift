@@ -98,8 +98,14 @@ private struct SliceCard: View {
       Text(row.snippet).font(.system(size: 12.5))
         .foregroundStyle(Color(white: 0.6)).lineLimit(2)
       if row.isTight {
-        Text(row.warningLabel).font(.system(size: 11))
+        Text(row.warningLabel)
+          .font(.system(size: 10, weight: .semibold)).tracking(0.3)
           .foregroundStyle(Color(red: 0.89, green: 0.58, blue: 0.58))
+          .padding(.horizontal, 7).padding(.vertical, 2)
+          .background(
+            Capsule().fill(Color(red: 0.89, green: 0.58, blue: 0.58).opacity(0.16))
+          )
+          .help(row.warningHelp).accessibilityLabel(row.warningHelp)
       }
       HStack(spacing: 8) {
         Button(row.playButtonLabel) {

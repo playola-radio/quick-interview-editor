@@ -76,6 +76,8 @@ final class EditorModel: ViewModel {
   let cancelExportLabel = "Cancel export"
   let undoLabel = "Undo"
   let redoLabel = "Redo"
+  let tightBadgeLabel = "Tight join"
+  let tightBadgeHelp = "A cut point isn't in a silence — add a fade in Logic."
 
   // MARK: - Fine-tune session
   /// The active slice's committed range, if a slice is open in the pane.
@@ -216,7 +218,8 @@ final class EditorModel: ViewModel {
             + sampleTimecodeLabel(slice.endSample, sampleRate: sampleRate),
           snippet: slice.snippet,
           isTight: !slice.warnings.isEmpty,
-          warningLabel: slice.warnings.isEmpty ? "" : "Tight join — add a fade in Logic",
+          warningLabel: slice.warnings.isEmpty ? "" : tightBadgeLabel,
+          warningHelp: slice.warnings.isEmpty ? "" : tightBadgeHelp,
           isPlaying: playingSliceID == slice.id,
           playButtonLabel: playingSliceID == slice.id ? stopLabel : playLabel,
           isActive: activeSliceID == slice.id,
@@ -817,6 +820,7 @@ struct SliceRowState: Identifiable, Equatable {
   var snippet: String
   var isTight: Bool
   var warningLabel: String
+  var warningHelp: String
   var isPlaying: Bool
   var playButtonLabel: String
   var isActive: Bool
