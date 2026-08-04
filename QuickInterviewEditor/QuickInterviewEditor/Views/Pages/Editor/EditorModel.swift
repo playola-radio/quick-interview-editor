@@ -227,7 +227,7 @@ final class EditorModel: ViewModel {
       })
   }
 
-  let fineTuneLabel = "Fine-tune cuts"
+  let fineTuneLabel = "Edit cuts"
 
   // MARK: - User Actions
   /// Builds the waveform peak pyramid for the canonical audio, in plan-sample

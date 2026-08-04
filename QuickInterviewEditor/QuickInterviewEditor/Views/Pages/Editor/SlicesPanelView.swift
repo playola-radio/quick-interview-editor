@@ -105,12 +105,10 @@ private struct SliceCard: View {
         Button(row.playButtonLabel) {
           Task { await model.playStopTapped(row.id) }
         }
-        Button {
+        Button(model.fineTuneLabel) {
           model.sliceSelected(row.id)
-        } label: {
-          Image(systemName: "slider.horizontal.below.rectangle")
         }
-        .buttonStyle(.plain).disabled(!row.canFineTune)
+        .disabled(!row.canFineTune)
         .help(model.fineTuneLabel).accessibilityLabel(model.fineTuneLabel)
         Button(model.exportLabel) {
           model.exportSliceTapped(row.id)
