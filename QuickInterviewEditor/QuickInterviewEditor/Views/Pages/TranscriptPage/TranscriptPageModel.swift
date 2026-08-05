@@ -90,15 +90,20 @@ class TranscriptPageModel: ViewModel {
   var runTogetherCount: Int { runTogetherWordIDSet.count }
   var runTogetherCountLabel: String { "\(runTogetherCount) run-together" }
   /// Sample ranges of the run-together words, ordered by transcript position. Words
-  /// missing sample bounds (or with inverted/zero-width bounds) are excluded.
+  /// missing sample bounds (or with inverted/zero-width bounds) are excluded. A duplicate
+  /// word ID emits only its first occurrence's range, matching the dedup semantics of the
+  /// `words` array this replaces (`uniquingIDsWith: { first, _ in first }`).
   var runTogetherSampleRanges: [Range<Int>] {
     guard let plan = editPlan else { return [] }
-    return plan.words.compactMap { word in
-      guard runTogetherWordIDSet.contains(word.id),
+    var seenIDs: Set<Word.ID> = []
+    var ranges: [Range<Int>] = []
+    for word in plan.words {
+      guard runTogetherWordIDSet.contains(word.id), seenIDs.insert(word.id).inserted,
         let start = word.startSample, let end = word.endSample, start < end
-      else { return nil }
-      return start..<end
+      else { continue }
+      ranges.append(start..<end)
     }
+    return ranges
   }
   var orderedSelectedWordIDs: [Word.ID] { selectedWords.map(\.id) }
   var selectionSnippet: String {
