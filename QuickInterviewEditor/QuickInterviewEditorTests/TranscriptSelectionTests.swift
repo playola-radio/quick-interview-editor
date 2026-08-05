@@ -1,5 +1,6 @@
-import Testing
 import CustomDump
+import Testing
+
 @testable import QuickInterviewEditor
 
 @MainActor
@@ -33,8 +34,8 @@ struct TranscriptSelectionTests {
 
   @Test func dragPaintsContiguousRun() {
     let model = TranscriptPageModel(editPlan: plan)
-    model.transcriptDragBegan(atUTF16Offset: 0)   // "one"
-    model.transcriptDragged(toUTF16Offset: 10)    // into "three"
+    model.transcriptDragBegan(atUTF16Offset: 0)  // "one"
+    model.transcriptDragged(toUTF16Offset: 10)  // into "three"
     expectNoDifference(model.selectedWordIDSet, [1, 2, 3])
     expectNoDifference(model.selectedSampleRange, 0..<1500)
   }
@@ -42,7 +43,7 @@ struct TranscriptSelectionTests {
   @Test func dragBackwardStaysContiguous() {
     let model = TranscriptPageModel(editPlan: plan)
     model.transcriptDragBegan(atUTF16Offset: 10)  // "three"
-    model.transcriptDragged(toUTF16Offset: 0)     // back to "one"
+    model.transcriptDragged(toUTF16Offset: 0)  // back to "one"
     expectNoDifference(model.selectedWordIDSet, [1, 2, 3])
   }
 }

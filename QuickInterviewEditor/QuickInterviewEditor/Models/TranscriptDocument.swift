@@ -19,7 +19,8 @@ struct TranscriptDocument: Equatable {
     for (index, word) in words.enumerated() {
       if index > 0 { location += 1 }  // the joining space
       let length = (word.text as NSString).length
-      ranges.append(TranscriptWordRange(wordID: word.id, range: NSRange(location: location, length: length)))
+      ranges.append(
+        TranscriptWordRange(wordID: word.id, range: NSRange(location: location, length: length)))
       location += length
       pieces.append(word.text)
     }

@@ -3,6 +3,13 @@ import Foundation
 import IdentifiedCollections
 import IssueReporting
 import Observation
+import Sharing
+
+extension SharedKey where Self == AppStorageKey<Double>.Default {
+  static var transcriptFontSize: Self {
+    Self[.appStorage("transcriptFontSize"), default: 17]
+  }
+}
 
 @MainActor
 @Observable
@@ -10,6 +17,9 @@ class TranscriptPageModel: ViewModel {
 
   // MARK: - Dependencies
   @ObservationIgnored @Dependency(\.engine) var engine
+
+  // MARK: - Shared State
+  @ObservationIgnored @Shared(.transcriptFontSize) var fontSize: Double
 
   // MARK: - Initialization
   let planURL: URL?
@@ -33,6 +43,9 @@ class TranscriptPageModel: ViewModel {
   var selectionFocusID: Word.ID?
   var document = TranscriptDocument(words: [])
   var plainTranscriptText: String { document.text }
+  let minFontSize = 11.0
+  let maxFontSize = 36.0
+  let fontStep = 2.0
 
   // MARK: - Display Text
   let transcriptCaption = "TRANSCRIPT"
@@ -69,6 +82,8 @@ class TranscriptPageModel: ViewModel {
   }
   /// Public selection set for the renderer to diff (the private `selectedWordIDs` stays internal).
   var selectedWordIDSet: Set<Word.ID> { selectedWordIDs }
+  var canZoomIn: Bool { fontSize < maxFontSize }
+  var canZoomOut: Bool { fontSize > minFontSize }
 
   // MARK: - User Actions
   func viewAppeared() async {
@@ -139,7 +154,15 @@ class TranscriptPageModel: ViewModel {
 
   func transcriptDragEnded() {}
 
+  func zoomInTapped() { setFontSize(fontSize + fontStep) }
+  func zoomOutTapped() { setFontSize(fontSize - fontStep) }
+  func zoomResetTapped() { setFontSize(17) }
+  func zoomChanged(_ size: Double) { setFontSize(size) }
+
   // MARK: - Private Helpers
+  private func setFontSize(_ size: Double) {
+    $fontSize.withLock { $0 = min(max(size, minFontSize), maxFontSize) }
+  }
   private func recomputeWords() {
     guard let plan = editPlan else {
       words = []
