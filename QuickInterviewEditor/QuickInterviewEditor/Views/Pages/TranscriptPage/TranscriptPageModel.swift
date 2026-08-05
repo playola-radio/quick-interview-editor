@@ -31,6 +31,8 @@ class TranscriptPageModel: ViewModel {
   var isLoading = false
   var selectionAnchorID: Word.ID?
   var selectionFocusID: Word.ID?
+  var document = TranscriptDocument(words: [])
+  var plainTranscriptText: String { document.text }
 
   // MARK: - Display Text
   let transcriptCaption = "TRANSCRIPT"
@@ -117,6 +119,7 @@ class TranscriptPageModel: ViewModel {
       words = []
       return
     }
+    document = TranscriptDocument(words: plan.words)
     let red = runTogetherWordIDs(plan.words, maxGapMs: runTogetherMaxGapMs)
     let selected = selectedWordIDs
     let states = plan.words.map { word in
