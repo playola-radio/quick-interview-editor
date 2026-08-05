@@ -11,6 +11,11 @@ extension SharedKey where Self == AppStorageKey<Double>.Default {
   }
 }
 
+enum TranscriptFollowMode: Equatable {
+  case following
+  case userPaused
+}
+
 @MainActor
 @Observable
 class TranscriptPageModel: ViewModel {
@@ -46,6 +51,9 @@ class TranscriptPageModel: ViewModel {
   let minFontSize = 11.0
   let maxFontSize = 36.0
   let fontStep = 2.0
+  var followMode: TranscriptFollowMode = .following
+  var scrollTargetWordID: Word.ID?
+  @ObservationIgnored private var wasPlaying = false
 
   // MARK: - Display Text
   let transcriptCaption = "TRANSCRIPT"
@@ -158,6 +166,25 @@ class TranscriptPageModel: ViewModel {
   func zoomOutTapped() { setFontSize(fontSize - fontStep) }
   func zoomResetTapped() { setFontSize(17) }
   func zoomChanged(_ size: Double) { setFontSize(size) }
+
+  /// Derives the auto-scroll target from the playhead. A playback rising edge
+  /// (false→true) always resumes following, even if the user had scrolled away.
+  /// While following and playing, the target becomes the word containing `sample`
+  /// (kept unchanged if the playhead sits in a gap between words).
+  func playheadChanged(sample: Int?, isPlaying: Bool) {
+    if isPlaying, !wasPlaying { followMode = .following }
+    wasPlaying = isPlaying
+    guard isPlaying, followMode == .following, let sample, let plan = editPlan else { return }
+    scrollTargetWordID =
+      plan.words.first { word in
+        guard let start = word.startSample, let end = word.endSample else { return false }
+        return sample >= start && sample < end
+      }?.id ?? scrollTargetWordID
+  }
+
+  /// The renderer calls this when the user scrolls the transcript by hand, so
+  /// subsequent playhead ticks stop moving the scroll target until playback restarts.
+  func transcriptUserScrolled() { followMode = .userPaused }
 
   // MARK: - Private Helpers
   private func setFontSize(_ size: Double) {
