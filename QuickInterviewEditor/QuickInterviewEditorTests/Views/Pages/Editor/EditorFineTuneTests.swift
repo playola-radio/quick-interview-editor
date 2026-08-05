@@ -57,9 +57,15 @@ struct EditorFineTuneTests {
       canonicalAudioURL: Fixtures.canonicalAudioURL, editPlan: plan)
   }
 
+  private func selectWords(_ transcript: TranscriptPageModel, _ first: Int, _ last: Int) {
+    transcript.transcriptDragBegan(
+      atUTF16Offset: transcript.document.wordRanges[first].range.location)
+    transcript.transcriptDragged(
+      toUTF16Offset: transcript.document.wordRanges[last].range.location)
+  }
+
   private func addSlice(_ model: EditorModel, _ first: Int, _ last: Int) {
-    model.transcript.wordTapped(model.transcript.words[first].id)
-    model.transcript.wordTapped(model.transcript.words[last].id)
+    selectWords(model.transcript, first, last)
     model.addSliceTapped()
   }
 
@@ -82,8 +88,7 @@ struct EditorFineTuneTests {
 
   @Test func pendingSelectionBindsPaneWithoutAnActiveSlice() {
     let model = editor()
-    model.transcript.wordTapped(model.transcript.words[0].id)
-    model.transcript.wordTapped(model.transcript.words[2].id)
+    selectWords(model.transcript, 0, 2)
     expectNoDifference(model.fineTuneTarget, .pendingSelection)
     #expect(model.showsFineTunePane)
     model.syncEditSession()
@@ -92,8 +97,7 @@ struct EditorFineTuneTests {
 
   @Test func changingSelectionHoldsAnUnsavedPendingDraft() {
     let model = editor()
-    model.transcript.wordTapped(model.transcript.words[0].id)
-    model.transcript.wordTapped(model.transcript.words[2].id)
+    selectWords(model.transcript, 0, 2)
     model.syncEditSession()
     model.cutOutNudged(byMs: 10)  // tuned pending draft on selection A
     let draftA = model.fineTune.draftRange
@@ -101,8 +105,7 @@ struct EditorFineTuneTests {
 
     // Picking different words before saving must NOT silently discard the tuning — the draft is
     // held (symmetric with an unsaved slice edit) until the user Saves or Cancels.
-    model.transcript.wordTapped(model.transcript.words[4].id)
-    model.transcript.wordTapped(model.transcript.words[6].id)
+    selectWords(model.transcript, 4, 6)
     model.syncEditSession()
     expectNoDifference(model.fineTune.draftRange, draftA)  // still the tuned A
     #expect(model.fineTune.hasUnsavedChange)
@@ -115,15 +118,13 @@ struct EditorFineTuneTests {
 
   @Test func savingAHeldPendingDraftUsesTheTunedRangeNotTheNewSelection() {
     let model = editor()
-    model.transcript.wordTapped(model.transcript.words[0].id)
-    model.transcript.wordTapped(model.transcript.words[2].id)
+    selectWords(model.transcript, 0, 2)
     model.syncEditSession()
     model.cutOutNudged(byMs: 10)  // tuned pending draft on selection A
     let draftA = model.fineTune.draftRange!
 
     // A different selection arrives; the draft is held. Save cut commits the tuned A, not B.
-    model.transcript.wordTapped(model.transcript.words[4].id)
-    model.transcript.wordTapped(model.transcript.words[6].id)
+    selectWords(model.transcript, 4, 6)
     model.syncEditSession()
     model.commitEditTapped()
     let added = model.slices.last!
@@ -163,8 +164,7 @@ struct EditorFineTuneTests {
 
   @Test func commitPendingSelectionAddsSliceFromDraft() {
     let model = editor()
-    model.transcript.wordTapped(model.transcript.words[0].id)
-    model.transcript.wordTapped(model.transcript.words[2].id)
+    selectWords(model.transcript, 0, 2)
     model.syncEditSession()
     model.cutOutNudged(byMs: -10)
     let draft = model.fineTune.draftRange!
@@ -191,8 +191,7 @@ struct EditorFineTuneTests {
 
   @Test func savingAnUntouchedPendingSelectionAddsItAsASlice() {
     let model = editor()
-    model.transcript.wordTapped(model.transcript.words[0].id)
-    model.transcript.wordTapped(model.transcript.words[2].id)
+    selectWords(model.transcript, 0, 2)
     model.syncEditSession()
     // Save is enabled immediately — no need to nudge first when the auto-cut is already good.
     #expect(model.canCommitEdit)
@@ -256,8 +255,7 @@ struct EditorFineTuneTests {
     addSlice(model, 0, 1)  // an exportable slice exists
     #expect(model.canExportAll)
     // Open a pending draft on a different selection and change it.
-    model.transcript.wordTapped(model.transcript.words[4].id)
-    model.transcript.wordTapped(model.transcript.words[6].id)
+    selectWords(model.transcript, 4, 6)
     model.syncEditSession()
     model.cutOutNudged(byMs: 10)
     #expect(model.fineTune.hasUnsavedChange)
@@ -341,8 +339,7 @@ struct EditorFineTuneTests {
 
     // Selecting new words is a new-slice intent: it takes over the pane and releases the slice,
     // so the user isn't stuck editing the old slice forever.
-    model.transcript.wordTapped(model.transcript.words[4].id)
-    model.transcript.wordTapped(model.transcript.words[6].id)
+    selectWords(model.transcript, 4, 6)
     model.syncEditSession()
     expectNoDifference(model.fineTuneTarget, .pendingSelection)
     expectNoDifference(model.activeSliceID, nil)
@@ -358,8 +355,7 @@ struct EditorFineTuneTests {
     let draft = model.fineTune.draftRange
 
     // A selection arriving mid-edit is held off — the slice draft is preserved.
-    model.transcript.wordTapped(model.transcript.words[5].id)
-    model.transcript.wordTapped(model.transcript.words[7].id)
+    selectWords(model.transcript, 5, 7)
     model.syncEditSession()
     expectNoDifference(model.fineTune.target, .slice(slice.id))
     expectNoDifference(model.fineTune.draftRange, draft)
@@ -397,8 +393,7 @@ struct EditorFineTuneTests {
     let existing = model.slices[0]
 
     // Tune a pending selection without saving.
-    model.transcript.wordTapped(model.transcript.words[4].id)
-    model.transcript.wordTapped(model.transcript.words[6].id)
+    selectWords(model.transcript, 4, 6)
     model.syncEditSession()
     model.cutOutNudged(byMs: 10)
     #expect(model.fineTune.hasUnsavedChange)
@@ -423,8 +418,7 @@ struct EditorFineTuneTests {
     model.sliceSelected(slice.id)
     model.cutOutNudged(byMs: 10)  // dirty slice edit
     // A selection made mid-edit is held behind the dirty slice draft.
-    model.transcript.wordTapped(model.transcript.words[5].id)
-    model.transcript.wordTapped(model.transcript.words[7].id)
+    selectWords(model.transcript, 5, 7)
     model.syncEditSession()
     let held = model.transcript.selectedSampleRange
 
@@ -452,8 +446,7 @@ struct EditorFineTuneTests {
 
   @Test func addSliceIsDisabledWhileAPendingDraftIsTuned() {
     let model = editor()
-    model.transcript.wordTapped(model.transcript.words[0].id)
-    model.transcript.wordTapped(model.transcript.words[2].id)
+    selectWords(model.transcript, 0, 2)
     model.syncEditSession()
     #expect(model.canAddSlice)  // selection made, nothing tuned yet
 
@@ -476,8 +469,7 @@ struct EditorFineTuneTests {
     model.sliceSelected(slice.id)
     model.cutOutNudged(byMs: 10)  // dirty existing-slice edit
     // A selection made mid-edit is held; the plain Add slice must stay disabled.
-    model.transcript.wordTapped(model.transcript.words[5].id)
-    model.transcript.wordTapped(model.transcript.words[7].id)
+    selectWords(model.transcript, 5, 7)
     model.syncEditSession()
     #expect(!model.canAddSlice)
     let before = model.slices
@@ -527,8 +519,7 @@ struct EditorFineTuneTests {
 
   @Test func savingAPendingEditStopsAnInProgressPreview() async {
     let model = editor()
-    model.transcript.wordTapped(model.transcript.words[0].id)
-    model.transcript.wordTapped(model.transcript.words[2].id)
+    selectWords(model.transcript, 0, 2)
     model.syncEditSession()
     model.cutOutNudged(byMs: 10)  // tuned pending draft
     model.isPreviewingDraft = true  // preview in flight
@@ -572,8 +563,7 @@ struct EditorFineTuneTests {
       $0.audioPlayer.stop = { stopped.setValue(true) }
     } operation: {
       // Retarget to a new transcript selection.
-      model.transcript.wordTapped(model.transcript.words[5].id)
-      model.transcript.wordTapped(model.transcript.words[7].id)
+      selectWords(model.transcript, 5, 7)
       model.syncEditSession()
       #expect(!model.isPreviewingDraft)  // flag cleared synchronously
       for _ in 0..<100 where !stopped.value { await Task.yield() }

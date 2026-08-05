@@ -7,10 +7,14 @@ import Testing
 
 @MainActor
 struct TranscriptPageTests {
+  private func runTogetherID(_ model: TranscriptPageModel, text: String) -> Word.ID {
+    model.editPlan!.words.first { $0.text == text }!.id
+  }
+
   @Test func initWithEditPlanPopulatesWordsImmediately() {
     let model = TranscriptPageModel(editPlan: Fixtures.editPlan())
-    expectNoDifference(model.words.count, 122)
-    #expect(model.words.first { $0.text == "want" }?.isRunTogether == true)
+    expectNoDifference(model.document.wordRanges.count, 122)
+    #expect(model.runTogetherWordIDSet.contains(runTogetherID(model, text: "want")))
   }
 
   @Test func viewAppearedLoadsWords() async {
@@ -19,8 +23,8 @@ struct TranscriptPageTests {
     } operation: {
       let model = TranscriptPageModel(planURL: URL(fileURLWithPath: "/unused"))
       await model.viewAppeared()
-      expectNoDifference(model.words.count, 122)
-      #expect(model.words.first { $0.text == "want" }?.isRunTogether == true)
+      expectNoDifference(model.document.wordRanges.count, 122)
+      #expect(model.runTogetherWordIDSet.contains(runTogetherID(model, text: "want")))
     }
   }
 
@@ -34,51 +38,32 @@ struct TranscriptPageTests {
     return model
   }
 
-  @Test func firstClickSelectsSingleWord() async {
-    let model = await loadedModel()
-    model.wordTapped(1)
-    #expect(model.words[id: 1]?.isSelected == true)
-    #expect(model.words[id: 2]?.isSelected == false)
-    expectNoDifference(model.selectionSummary, "1 word selected")
+  private func offset(_ model: TranscriptPageModel, wordIndex: Int) -> Int {
+    model.document.wordRanges[wordIndex].range.location
   }
 
-  @Test func secondClickExtendsInclusiveRange() async {
+  @Test func clickSelectsSingleWordSummary() async {
     let model = await loadedModel()
-    model.wordTapped(1)
-    model.wordTapped(3)
-    #expect(model.words[id: 1]?.isSelected == true)
-    #expect(model.words[id: 2]?.isSelected == true)
-    #expect(model.words[id: 3]?.isSelected == true)
-    #expect(model.words[id: 4]?.isSelected == false)
-    expectNoDifference(model.selectionSummary, "3 words selected")
-  }
-
-  @Test func thirdClickResetsSelection() async {
-    let model = await loadedModel()
-    model.wordTapped(1)
-    model.wordTapped(3)
-    model.wordTapped(5)
-    #expect(model.words[id: 1]?.isSelected == false)
-    #expect(model.words[id: 5]?.isSelected == true)
+    model.transcriptClicked(atUTF16Offset: offset(model, wordIndex: 0))
     expectNoDifference(model.selectionSummary, "1 word selected")
   }
 
   @Test func selectedSampleRangeMatchesBoundaryWords() async {
     let model = await loadedModel()
-    model.wordTapped(1)
-    model.wordTapped(3)
     let plan = model.editPlan!
+    model.transcriptDragBegan(atUTF16Offset: offset(model, wordIndex: 0))
+    model.transcriptDragged(toUTF16Offset: offset(model, wordIndex: 2))
     let expected = plan.words[0].startSample!..<plan.words[2].endSample!
     expectNoDifference(model.selectedSampleRange, expected)
   }
 
   @Test func clearSelectionEmptiesIt() async {
     let model = await loadedModel()
-    model.wordTapped(1)
-    model.wordTapped(3)
+    model.transcriptDragBegan(atUTF16Offset: offset(model, wordIndex: 0))
+    model.transcriptDragged(toUTF16Offset: offset(model, wordIndex: 2))
     model.clearSelectionTapped()
     #expect(!model.hasSelection)
-    #expect(model.words[id: 2]?.isSelected == false)
+    expectNoDifference(model.selectedWordIDSet, [])
   }
 
   @Test func sensitivityChangesRunTogetherCount() async {
@@ -130,7 +115,8 @@ struct TranscriptPageTests {
       word(1, "alpha", start: 0, end: 0.2),
       word(2, "beta", start: 0.4, end: 0.6),
     ])
-    expectNoDifference(model.words.map(\.text), ["alpha", "beta"])
+    expectNoDifference(
+      model.plainTranscriptText.split(separator: " ").map(String.init), ["alpha", "beta"])
   }
 
   /// Selection counts words by POSITION, not by ID span. With sparse IDs the
@@ -143,12 +129,10 @@ struct TranscriptPageTests {
       word(90, "c", start: 0.4, end: 0.5),
     ]
     let model = await modelLoaded(with: words)
-    model.wordTapped(10)
-    model.wordTapped(50)
+    model.transcriptDragBegan(atUTF16Offset: offset(model, wordIndex: 0))
+    model.transcriptDragged(toUTF16Offset: offset(model, wordIndex: 1))
     expectNoDifference(model.selectionSummary, "2 words selected")
-    #expect(model.words[id: 10]?.isSelected == true)
-    #expect(model.words[id: 50]?.isSelected == true)
-    #expect(model.words[id: 90]?.isSelected == false)
+    expectNoDifference(model.selectedWordIDSet, [10, 50])
     expectNoDifference(model.selectedSampleRange, words[0].startSample!..<words[1].endSample!)
   }
 
@@ -159,18 +143,17 @@ struct TranscriptPageTests {
       word(1, "dup", start: 0.2, end: 0.3),
       word(2, "b", start: 0.4, end: 0.5),
     ])
-    expectNoDifference(model.words.count, 2)
-    expectNoDifference(model.words[id: 1]?.text, "a")
+    expectNoDifference(model.document.wordRanges.count, 3)
+    expectNoDifference(model.plainTranscriptText, "a dup b")
   }
 
   @Test func orderedSelectionExposesIDsAndSnippet() {
     let model = TranscriptPageModel(editPlan: Fixtures.editPlan())
-    let first = model.words[2].id
-    let last = model.words[4].id
-    model.wordTapped(first)
-    model.wordTapped(last)
+    let planWords = model.editPlan!.words
+    model.transcriptDragBegan(atUTF16Offset: offset(model, wordIndex: 2))
+    model.transcriptDragged(toUTF16Offset: offset(model, wordIndex: 4))
     expectNoDifference(
-      model.orderedSelectedWordIDs, [model.words[2].id, model.words[3].id, model.words[4].id])
+      model.orderedSelectedWordIDs, [planWords[2].id, planWords[3].id, planWords[4].id])
     #expect(!model.selectionSnippet.isEmpty)
     #expect(model.selectionSnippet == model.selectionSnippet.trimmingCharacters(in: .whitespaces))
   }

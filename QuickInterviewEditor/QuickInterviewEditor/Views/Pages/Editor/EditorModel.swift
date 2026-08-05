@@ -148,18 +148,11 @@ final class EditorModel: ViewModel {
   /// The selected audio range, mirrored from the transcript selection.
   var highlightedSampleRange: Range<Int>? { transcript.selectedSampleRange }
 
-  /// Sample ranges of the run-together (tight-join) words to paint red. Reuses the
-  /// transcript's already-computed `isRunTogether` (same gap function + live sensitivity),
-  /// so the waveform's red always matches the transcript's without recomputing it. Words
-  /// missing sample bounds are excluded.
-  var redRanges: [Range<Int>] {
-    transcript.words.compactMap { word in
-      guard word.isRunTogether, let start = word.startSample, let end = word.endSample,
-        start < end
-      else { return nil }
-      return start..<end
-    }
-  }
+  /// Sample ranges of the run-together (tight-join) words to paint red. Reads the
+  /// transcript's already-computed `runTogetherSampleRanges` (same gap function + live
+  /// sensitivity), so the waveform's red always matches the transcript's without
+  /// recomputing it. Words missing sample bounds are excluded.
+  var redRanges: [Range<Int>] { transcript.runTogetherSampleRanges }
 
   /// Waveform render data, geometry delegated to the child and combined with the
   /// transcript-derived ranges here (the view reads these; it decides nothing). The highlight
@@ -264,6 +257,8 @@ final class EditorModel: ViewModel {
         continue
       }
       waveform.playheadSample = position.isPlaying ? position.sample : nil
+      transcript.playheadChanged(
+        sample: position.sample, isPlaying: position.isPlaying && playingSliceID != nil)
     }
     // The loop also exits when the view's task is cancelled (tab switch / disappear);
     // clear the playhead so a stale marker doesn't linger when the tab reactivates.
@@ -357,6 +352,7 @@ final class EditorModel: ViewModel {
   private func reconcilePlayback() async {
     if let playing = playingSliceID, slices[id: playing] == nil {
       playingSliceID = nil
+      endTranscriptFollow()
       await audioPlayer.stop()
     }
     if let active = activeSliceID {
@@ -386,6 +382,9 @@ final class EditorModel: ViewModel {
 
   func playSliceTapped(_ id: Slice.ID) async {
     guard let slice = slices[id: id] else { return }
+    // Superseding a different slice's playback: end its follow so the new slice's first tick
+    // is a clean rising edge (false→true) and the transcript resumes following it.
+    if let playing = playingSliceID, playing != id { endTranscriptFollow() }
     playingSliceID = id
     do {
       try await audioPlayer.play(
@@ -393,12 +392,24 @@ final class EditorModel: ViewModel {
     } catch {
       reportIssue(error)
     }
-    if playingSliceID == id { playingSliceID = nil }
+    if playingSliceID == id {
+      playingSliceID = nil
+      endTranscriptFollow()
+    }
   }
 
   func stopPlaybackTapped() async {
     playingSliceID = nil
+    endTranscriptFollow()
     await audioPlayer.stop()
+  }
+
+  /// Tells the transcript a slice's playback has ended or been superseded. `observePlayback`
+  /// stops pushing ticks the moment `playingSliceID` clears, so without this the transcript's
+  /// `wasPlaying` would stay true and the next slice's start wouldn't read as a rising edge —
+  /// leaving follow parked in `.userPaused` if the user had scrolled away.
+  private func endTranscriptFollow() {
+    transcript.playheadChanged(sample: nil, isPlaying: false)
   }
 
   func playStopTapped(_ id: Slice.ID) async {
