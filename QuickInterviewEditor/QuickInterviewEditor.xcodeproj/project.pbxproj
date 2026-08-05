@@ -81,6 +81,7 @@
 		EA3B490C21BE968DCE015A9E /* RootTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25B50A86F8D81F12045ABB2A /* RootTests.swift */; };
 		EDE0D9411AF24E29700C4927 /* WaveformView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5865237D9AEA083F3D2A75A0 /* WaveformView.swift */; };
 		F4B2A1B1BFFF6834D69B5658 /* WaveformTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AEAAD47D27412B903572FE49 /* WaveformTests.swift */; };
+		F791AF306A91A62A0F50C881 /* TranscriptSensitivityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44844505A5C5C627D35FBE3B /* TranscriptSensitivityTests.swift */; };
 		F89547D7DD5C6573803BD544 /* TranscriptPageModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 238BBB22C13D9B5453A89ECD /* TranscriptPageModel.swift */; };
 		FA8D74962D8AAAAB60F93AF2 /* RootModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71CD050254B47F84F32EF54 /* RootModel.swift */; };
 /* End PBXBuildFile section */
@@ -111,6 +112,7 @@
 		327A6CD4A25A47E502C44C60 /* ExportNaming.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportNaming.swift; sourceTree = "<group>"; };
 		340DF12DDCE384A3A7FAFF4F /* ViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewModel.swift; sourceTree = "<group>"; };
 		3E8C670A36FEE48ECE336F3D /* UndoStackTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UndoStackTests.swift; sourceTree = "<group>"; };
+		44844505A5C5C627D35FBE3B /* TranscriptSensitivityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptSensitivityTests.swift; sourceTree = "<group>"; };
 		470CF49FC658B4E9FDD4AD51 /* EngineEventTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EngineEventTests.swift; sourceTree = "<group>"; };
 		4816E2A0C0EC0B46A9168AC0 /* edit-plan.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "edit-plan.json"; sourceTree = "<group>"; };
 		48930A836912299557952308 /* Slice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Slice.swift; sourceTree = "<group>"; };
@@ -449,6 +451,7 @@
 				6CAD1460177B012578235ABA /* TranscriptDocumentTests.swift */,
 				54E9FE45209FBE3C0EB9A0C7 /* TranscriptFollowTests.swift */,
 				5F284A324342432A94B7C54E /* TranscriptSelectionTests.swift */,
+				44844505A5C5C627D35FBE3B /* TranscriptSensitivityTests.swift */,
 				4C40E6B73686C05888B4C2F5 /* TranscriptZoomTests.swift */,
 				2D32336CE0E89EA8B6419A5F /* Core */,
 				C57D387AA418F41BCE29B851 /* Models */,
@@ -630,6 +633,7 @@
 				4D00CCB5F70CE4F33654F20A /* TranscriptFollowTests.swift in Sources */,
 				CD09E8D65F5968AAE96A85AD /* TranscriptPageTests.swift in Sources */,
 				4D1576A5D4828CB3E1BA4773 /* TranscriptSelectionTests.swift in Sources */,
+				F791AF306A91A62A0F50C881 /* TranscriptSensitivityTests.swift in Sources */,
 				A34777D900F1EE661BDAE392 /* TranscriptZoomTests.swift in Sources */,
 				1FDCD5A562E7D5D71D0520EC /* UndoStackTests.swift in Sources */,
 				D48EC3DED2EB8A824377E142 /* WaveformClientTests.swift in Sources */,

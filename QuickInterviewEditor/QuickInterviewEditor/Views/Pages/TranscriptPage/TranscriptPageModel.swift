@@ -22,6 +22,7 @@ class TranscriptPageModel: ViewModel {
 
   // MARK: - Dependencies
   @ObservationIgnored @Dependency(\.engine) var engine
+  @ObservationIgnored @Dependency(\.continuousClock) var clock
 
   // MARK: - Shared State
   @ObservationIgnored @Shared(.transcriptFontSize) var fontSize: Double
@@ -43,6 +44,9 @@ class TranscriptPageModel: ViewModel {
   var editPlan: EditPlan?
   var words: IdentifiedArrayOf<WordViewState> = []
   var runTogetherMaxGapMs: Double = 30
+  var draftGapMs: Double = 30
+  @ObservationIgnored private var gaps: [WordGap] = []
+  @ObservationIgnored private var sensitivityCommitTask: Task<Void, Never>?
   var isLoading = false
   var selectionAnchorID: Word.ID?
   var selectionFocusID: Word.ID?
@@ -92,6 +96,7 @@ class TranscriptPageModel: ViewModel {
   var selectedWordIDSet: Set<Word.ID> { selectedWordIDs }
   var canZoomIn: Bool { fontSize < maxFontSize }
   var canZoomOut: Bool { fontSize > minFontSize }
+  var sensitivityValueLabel: String { "\(Int(draftGapMs)) ms" }
 
   // MARK: - User Actions
   func viewAppeared() async {
@@ -136,6 +141,18 @@ class TranscriptPageModel: ViewModel {
   func sensitivityChanged(_ ms: Double) {
     runTogetherMaxGapMs = ms
     recomputeWords()
+  }
+
+  /// Live slider drag: update the label immediately, debounce the expensive recompute.
+  func sensitivityDragChanged(_ ms: Double) {
+    draftGapMs = ms
+    sensitivityCommitTask?.cancel()
+    sensitivityCommitTask = Task { [weak self] in
+      guard let self else { return }
+      try? await self.clock.sleep(for: .milliseconds(150))
+      guard !Task.isCancelled else { return }
+      self.commitSensitivity(ms)
+    }
   }
 
   func transcriptClicked(atUTF16Offset offset: Int) {
@@ -190,13 +207,18 @@ class TranscriptPageModel: ViewModel {
   private func setFontSize(_ size: Double) {
     $fontSize.withLock { $0 = min(max(size, minFontSize), maxFontSize) }
   }
+  private func commitSensitivity(_ ms: Double) {
+    runTogetherMaxGapMs = ms
+    recomputeWords()
+  }
   private func recomputeWords() {
     guard let plan = editPlan else {
       words = []
       return
     }
     document = TranscriptDocument(words: plan.words)
-    let red = runTogetherWordIDs(plan.words, maxGapMs: runTogetherMaxGapMs)
+    if gaps.isEmpty { gaps = wordGaps(plan.words) }
+    let red = runTogetherWordIDs(gaps: gaps, maxGapMs: runTogetherMaxGapMs)
     let selected = selectedWordIDs
     let states = plan.words.map { word in
       WordViewState(
