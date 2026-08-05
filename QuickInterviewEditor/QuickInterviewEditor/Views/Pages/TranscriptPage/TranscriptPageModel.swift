@@ -4,9 +4,13 @@ import IssueReporting
 import Observation
 import Sharing
 
+/// Single source of truth for the default transcript font size, shared by the
+/// `@Shared(.transcriptFontSize)` key default and the model's `defaultFontSize`.
+private let defaultTranscriptFontSize = 17.0
+
 extension SharedKey where Self == AppStorageKey<Double>.Default {
   static var transcriptFontSize: Self {
-    Self[.appStorage("transcriptFontSize"), default: 17]
+    Self[.appStorage("transcriptFontSize"), default: defaultTranscriptFontSize]
   }
 }
 
@@ -36,11 +40,14 @@ class TranscriptPageModel: ViewModel {
   convenience init(editPlan: EditPlan) {
     self.init(planURL: nil)
     self.editPlan = editPlan
-    recomputeWords()
+    rebuildForLoadedPlan()
   }
 
   // MARK: - Properties
-  var editPlan: EditPlan?
+  /// Set only through the two load paths (convenience init + `viewAppeared`), each of
+  /// which calls `rebuildForLoadedPlan()`. `private(set)` keeps `document`, `gaps`, and
+  /// `runTogetherWordIDSet` from ever going stale behind an external plan assignment.
+  private(set) var editPlan: EditPlan?
   /// Public run-together set for the renderer to diff.
   var runTogetherWordIDSet: Set<Word.ID> = []
   var runTogetherMaxGapMs: Double = 30
@@ -55,6 +62,7 @@ class TranscriptPageModel: ViewModel {
   let minFontSize = 11.0
   let maxFontSize = 36.0
   let fontStep = 2.0
+  let defaultFontSize = defaultTranscriptFontSize
   var followMode: TranscriptFollowMode = .following
   var scrollTargetWordID: Word.ID?
   @ObservationIgnored private var wasPlaying = false
@@ -124,13 +132,12 @@ class TranscriptPageModel: ViewModel {
     await withErrorReporting {
       editPlan = try await engine.loadPlan(planURL)
     }
-    recomputeWords()
+    rebuildForLoadedPlan()
   }
 
   func clearSelectionTapped() {
     selectionAnchorID = nil
     selectionFocusID = nil
-    recomputeWords()
   }
 
   /// Selects exactly one word (anchor == focus). Used by the waveform→transcript sync
@@ -138,12 +145,11 @@ class TranscriptPageModel: ViewModel {
   func selectWord(_ id: Word.ID) {
     selectionAnchorID = id
     selectionFocusID = id
-    recomputeWords()
   }
 
   func sensitivityChanged(_ ms: Double) {
     runTogetherMaxGapMs = ms
-    recomputeWords()
+    recomputeRunTogether()
   }
 
   /// Live slider drag: update the label immediately, debounce the expensive recompute.
@@ -171,20 +177,18 @@ class TranscriptPageModel: ViewModel {
     guard let id = document.wordID(atUTF16Offset: offset) else { return }
     selectionAnchorID = id
     selectionFocusID = id
-    recomputeWords()
   }
 
   func transcriptDragged(toUTF16Offset offset: Int) {
     guard let id = document.wordID(atUTF16Offset: offset) else { return }
     selectionFocusID = id
-    recomputeWords()
   }
 
   func transcriptDragEnded() {}
 
   func zoomInTapped() { setFontSize(fontSize + fontStep) }
   func zoomOutTapped() { setFontSize(fontSize - fontStep) }
-  func zoomResetTapped() { setFontSize(17) }
+  func zoomResetTapped() { setFontSize(defaultFontSize) }
   func zoomChanged(_ size: Double) { setFontSize(size) }
 
   /// Derives the auto-scroll target from the playhead. A playback rising edge
@@ -212,12 +216,21 @@ class TranscriptPageModel: ViewModel {
   }
   private func commitSensitivity(_ ms: Double) {
     runTogetherMaxGapMs = ms
-    recomputeWords()
+    recomputeRunTogether()
   }
-  private func recomputeWords() {
+  /// Rebuilds everything derived from the plan's words: the document (space-joined
+  /// text + UTF-16 range map), the adjacent-gap cache, and the run-together set. This
+  /// is the single place the plan is materialized, so it runs only when the plan is
+  /// set (convenience init + `viewAppeared`), never on the selection/drag path.
+  private func rebuildForLoadedPlan() {
     guard let plan = editPlan else { return }
     document = TranscriptDocument(words: plan.words)
-    if gaps.isEmpty { gaps = wordGaps(plan.words) }
+    gaps = wordGaps(plan.words)
+    recomputeRunTogether()
+  }
+  /// Recomputes only the run-together set from the cached gaps. Cheap relative to
+  /// rebuilding the document; runs at plan load and on sensitivity commit.
+  private func recomputeRunTogether() {
     runTogetherWordIDSet = runTogetherWordIDs(gaps: gaps, maxGapMs: runTogetherMaxGapMs)
   }
 

@@ -49,4 +49,20 @@ struct TranscriptSensitivityTests {
       expectNoDifference(model.runTogetherMaxGapMs, 80)  // committed after debounce
     }
   }
+
+  @Test func rapidDragCommitsOnlyTheLastValue() async {
+    let clock = TestClock()
+    await withDependencies {
+      $0.continuousClock = clock
+    } operation: {
+      let model = TranscriptPageModel(editPlan: plan)
+      model.sensitivityDragChanged(50)
+      await clock.advance(by: .milliseconds(100))  // still inside the 150ms window
+      model.sensitivityDragChanged(80)  // cancels the pending 50ms commit
+      expectNoDifference(model.draftGapMs, 80)
+      expectNoDifference(model.runTogetherMaxGapMs, 30)  // neither value committed yet
+      await clock.advance(by: .milliseconds(200))  // past the second commit's window
+      expectNoDifference(model.runTogetherMaxGapMs, 80)  // only the last value commits
+    }
+  }
 }

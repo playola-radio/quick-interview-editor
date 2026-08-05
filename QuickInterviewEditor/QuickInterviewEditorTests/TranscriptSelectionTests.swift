@@ -46,4 +46,22 @@ struct TranscriptSelectionTests {
     model.transcriptDragged(toUTF16Offset: 0)  // back to "one"
     expectNoDifference(model.selectedWordIDSet, [1, 2, 3])
   }
+
+  // A drag mutates only the selection; it must not rebuild the document or the
+  // run-together set (those are materialized once when the plan loads).
+  @Test func dragLeavesDocumentAndRunTogetherUntouched() {
+    let model = TranscriptPageModel(editPlan: plan)
+    let documentBefore = model.document
+    let plainTextBefore = model.plainTranscriptText
+    let runTogetherBefore = model.runTogetherWordIDSet
+
+    model.transcriptDragBegan(atUTF16Offset: 0)  // "one"
+    model.transcriptDragged(toUTF16Offset: 10)  // into "three"
+
+    expectNoDifference(model.selectedWordIDSet, [1, 2, 3])
+    expectNoDifference(model.selectedSampleRange, 0..<1500)
+    expectNoDifference(model.document, documentBefore)
+    expectNoDifference(model.plainTranscriptText, plainTextBefore)
+    expectNoDifference(model.runTogetherWordIDSet, runTogetherBefore)
+  }
 }

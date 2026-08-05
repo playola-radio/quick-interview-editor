@@ -148,10 +148,10 @@ final class EditorModel: ViewModel {
   /// The selected audio range, mirrored from the transcript selection.
   var highlightedSampleRange: Range<Int>? { transcript.selectedSampleRange }
 
-  /// Sample ranges of the run-together (tight-join) words to paint red. Reuses the
-  /// transcript's already-computed `isRunTogether` (same gap function + live sensitivity),
-  /// so the waveform's red always matches the transcript's without recomputing it. Words
-  /// missing sample bounds are excluded.
+  /// Sample ranges of the run-together (tight-join) words to paint red. Reads the
+  /// transcript's already-computed `runTogetherSampleRanges` (same gap function + live
+  /// sensitivity), so the waveform's red always matches the transcript's without
+  /// recomputing it. Words missing sample bounds are excluded.
   var redRanges: [Range<Int>] { transcript.runTogetherSampleRanges }
 
   /// Waveform render data, geometry delegated to the child and combined with the
