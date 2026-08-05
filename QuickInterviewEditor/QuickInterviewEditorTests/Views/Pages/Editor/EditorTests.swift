@@ -509,6 +509,27 @@ struct EditorTests {
     }
   }
 
+  @Test func stoppingPlaybackResetsTranscriptFollowForNextSlice() async {
+    let model = editor()
+    let word = model.editPlan.words.first { $0.startSample != nil && $0.endSample != nil }!
+    // A slice is playing and the transcript is following it, then the user scrolls away.
+    model.transcript.playheadChanged(sample: word.startSample!, isPlaying: true)
+    model.transcript.transcriptUserScrolled()
+    expectNoDifference(model.transcript.followMode, .userPaused)
+    model.playingSliceID = UUID()
+
+    await withDependencies {
+      $0.audioPlayer.stop = {}
+    } operation: {
+      await model.stopPlaybackTapped()
+    }
+
+    // Stopping reset the transcript's playing flag, so the next slice's first tick is a
+    // clean rising edge (false→true) and follow resumes instead of staying paused.
+    model.transcript.playheadChanged(sample: word.startSample!, isPlaying: true)
+    expectNoDifference(model.transcript.followMode, .following)
+  }
+
   // MARK: - Waveform sync
 
   /// Sets identity geometry (1 sample per pixel, no scroll) so xToSample(x) == x.

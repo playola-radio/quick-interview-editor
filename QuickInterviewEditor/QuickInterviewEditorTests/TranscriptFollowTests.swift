@@ -40,4 +40,20 @@ struct TranscriptFollowTests {
     expectNoDifference(model.followMode, .following)
     expectNoDifference(model.scrollTargetWordID, 1)
   }
+
+  /// Regression for the follow-restart bug: after the user pauses follow, a slice ending
+  /// (the `sample: nil, isPlaying: false` signal EditorModel now sends) must reset the
+  /// internal `wasPlaying` flag so the next slice's first tick is a clean rising edge and
+  /// following resumes on the new slice.
+  @Test func nilStopThenNewSliceResumesFollowingOnNewWord() {
+    let model = TranscriptPageModel(editPlan: plan)
+    model.playheadChanged(sample: 500, isPlaying: true)  // following word one
+    expectNoDifference(model.scrollTargetWordID, 1)
+    model.transcriptUserScrolled()
+    expectNoDifference(model.followMode, .userPaused)
+    model.playheadChanged(sample: nil, isPlaying: false)  // slice ends / superseded
+    model.playheadChanged(sample: 2500, isPlaying: true)  // new slice starts on word three
+    expectNoDifference(model.followMode, .following)
+    expectNoDifference(model.scrollTargetWordID, 3)
+  }
 }

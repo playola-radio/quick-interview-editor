@@ -352,6 +352,7 @@ final class EditorModel: ViewModel {
   private func reconcilePlayback() async {
     if let playing = playingSliceID, slices[id: playing] == nil {
       playingSliceID = nil
+      endTranscriptFollow()
       await audioPlayer.stop()
     }
     if let active = activeSliceID {
@@ -381,6 +382,9 @@ final class EditorModel: ViewModel {
 
   func playSliceTapped(_ id: Slice.ID) async {
     guard let slice = slices[id: id] else { return }
+    // Superseding a different slice's playback: end its follow so the new slice's first tick
+    // is a clean rising edge (false→true) and the transcript resumes following it.
+    if let playing = playingSliceID, playing != id { endTranscriptFollow() }
     playingSliceID = id
     do {
       try await audioPlayer.play(
@@ -388,12 +392,24 @@ final class EditorModel: ViewModel {
     } catch {
       reportIssue(error)
     }
-    if playingSliceID == id { playingSliceID = nil }
+    if playingSliceID == id {
+      playingSliceID = nil
+      endTranscriptFollow()
+    }
   }
 
   func stopPlaybackTapped() async {
     playingSliceID = nil
+    endTranscriptFollow()
     await audioPlayer.stop()
+  }
+
+  /// Tells the transcript a slice's playback has ended or been superseded. `observePlayback`
+  /// stops pushing ticks the moment `playingSliceID` clears, so without this the transcript's
+  /// `wasPlaying` would stay true and the next slice's start wouldn't read as a rising edge —
+  /// leaving follow parked in `.userPaused` if the user had scrolled away.
+  private func endTranscriptFollow() {
+    transcript.playheadChanged(sample: nil, isPlaying: false)
   }
 
   func playStopTapped(_ id: Slice.ID) async {

@@ -17,6 +17,14 @@ struct TranscriptTextView: NSViewRepresentable {
   func makeCoordinator() -> Coordinator { Coordinator(model: model) }
 
   func makeNSView(context: Context) -> NSScrollView {
+    let scroll = NSScrollView()
+    scroll.hasVerticalScroller = true
+    scroll.drawsBackground = false
+
+    // Canonical TextKit-1 "text view in a scroll view" configuration: the text view grows
+    // vertically with its content while its width tracks the clip view, so a long transcript
+    // wraps to the viewport width and scrolls instead of being clipped.
+    let contentSize = scroll.contentSize
     let textView = HitTestingTextView()
     textView.coordinator = context.coordinator
     textView.isEditable = false
@@ -24,11 +32,17 @@ struct TranscriptTextView: NSViewRepresentable {
     textView.drawsBackground = true
     textView.backgroundColor = .black
     textView.textContainerInset = NSSize(width: 4, height: 8)
+    textView.isVerticallyResizable = true
+    textView.isHorizontallyResizable = false
     textView.autoresizingMask = [.width]
+    textView.minSize = NSSize(width: 0, height: 0)
+    textView.maxSize = NSSize(
+      width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+    textView.frame = NSRect(origin: .zero, size: contentSize)
+    textView.textContainer?.widthTracksTextView = true
+    textView.textContainer?.containerSize = NSSize(
+      width: contentSize.width, height: CGFloat.greatestFiniteMagnitude)
 
-    let scroll = NSScrollView()
-    scroll.hasVerticalScroller = true
-    scroll.drawsBackground = false
     scroll.documentView = textView
 
     context.coordinator.model = model
@@ -203,10 +217,11 @@ struct TranscriptTextView: NSViewRepresentable {
         y: point.y - textView.textContainerInset.height)
       let glyph = lm.glyphIndex(for: local, in: container)
       // TextKit clamps out-of-bounds points to the nearest glyph, so a click on blank
-      // space (below the last line or right of a ragged line's end) would toggle a stray
-      // word. Reject clicks past the resolved line's drawn text so they no-op instead.
+      // space (below the last line, above the first, or in the left inset / right of a
+      // ragged line's end) would toggle a stray word. Require the point to fall inside the
+      // resolved line fragment's drawn text so only genuine word clicks resolve.
       let lineRect = lm.lineFragmentUsedRect(forGlyphAt: glyph, effectiveRange: nil)
-      guard local.y <= lineRect.maxY, local.x <= lineRect.maxX else { return nil }
+      guard lineRect.contains(local) else { return nil }
       return lm.characterIndexForGlyph(at: glyph)
     }
   }

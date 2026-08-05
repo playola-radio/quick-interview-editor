@@ -30,13 +30,25 @@ struct TranscriptDocument: Equatable {
 
   /// The word an offset lands in, or the nearest preceding word when the offset is on a
   /// separator or past the end. Nil only when there are no words.
+  ///
+  /// `wordRanges` is sorted by ascending, non-overlapping `range.location`, so the answer is
+  /// always the rightmost word whose range starts at or before `offset` (that word either
+  /// contains the offset or is the nearest preceding one). Binary search finds it without a
+  /// linear scan; when the offset is before the first word we fall back to the first word.
   func wordID(atUTF16Offset offset: Int) -> Word.ID? {
-    guard !wordRanges.isEmpty else { return nil }
-    var candidate: Word.ID?
-    for entry in wordRanges {
-      if NSLocationInRange(offset, entry.range) { return entry.wordID }
-      if entry.range.location <= offset { candidate = entry.wordID } else { break }
+    guard let first = wordRanges.first else { return nil }
+    var low = 0
+    var high = wordRanges.count - 1
+    var candidate = -1
+    while low <= high {
+      let mid = (low + high) / 2
+      if wordRanges[mid].range.location <= offset {
+        candidate = mid
+        low = mid + 1
+      } else {
+        high = mid - 1
+      }
     }
-    return candidate ?? wordRanges.first?.wordID
+    return candidate >= 0 ? wordRanges[candidate].wordID : first.wordID
   }
 }
