@@ -148,6 +148,7 @@ class TranscriptPageModel: ViewModel {
   }
 
   func sensitivityChanged(_ ms: Double) {
+    sensitivityCommitTask?.cancel()
     runTogetherMaxGapMs = ms
     recomputeRunTogether()
   }

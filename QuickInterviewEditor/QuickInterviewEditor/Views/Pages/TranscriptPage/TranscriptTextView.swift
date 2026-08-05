@@ -57,6 +57,7 @@ struct TranscriptTextView: NSViewRepresentable {
     private var lastRunTogether: Set<Word.ID> = []
     private var lastFontSize: Double = 0
     private var lastScrollTarget: Word.ID?
+    private var lastFollowMode: TranscriptFollowMode = .following
 
     init(model: TranscriptPageModel) { self.model = model }
 
@@ -118,6 +119,15 @@ struct TranscriptTextView: NSViewRepresentable {
       let selRemoved = lastSelected.subtracting(selected)
       applySelection(added: selAdded, removed: selRemoved, currentRunTogether: runTogether)
       lastSelected = selected
+
+      // Resuming follow (userPaused → following) must re-scroll to the current target
+      // even if its ID is unchanged: playback can stop and restart while the playhead
+      // sits in the same word, and without this the view would stay parked where the
+      // user left it. Clearing `lastScrollTarget` lets the guard below re-apply.
+      if followMode == .following, lastFollowMode == .userPaused {
+        lastScrollTarget = nil
+      }
+      lastFollowMode = followMode
 
       if let target = scrollTarget, target != lastScrollTarget,
         followMode == .following, let range = range(for: target)
@@ -184,10 +194,19 @@ struct TranscriptTextView: NSViewRepresentable {
     func utf16Offset(at point: NSPoint) -> Int? {
       guard let textView, let lm = textView.layoutManager, let container = textView.textContainer
       else { return nil }
+      lm.ensureLayout(for: container)
+      // Empty/failed-load document: no glyphs means `glyphIndex(for:)` returns 0 and
+      // `characterIndexForGlyph(at: 0)` would trap. Returning nil no-ops the handlers.
+      guard lm.numberOfGlyphs > 0 else { return nil }
       let local = NSPoint(
         x: point.x - textView.textContainerInset.width,
         y: point.y - textView.textContainerInset.height)
       let glyph = lm.glyphIndex(for: local, in: container)
+      // TextKit clamps out-of-bounds points to the nearest glyph, so a click on blank
+      // space (below the last line or right of a ragged line's end) would toggle a stray
+      // word. Reject clicks past the resolved line's drawn text so they no-op instead.
+      let lineRect = lm.lineFragmentUsedRect(forGlyphAt: glyph, effectiveRange: nil)
+      guard local.y <= lineRect.maxY, local.x <= lineRect.maxX else { return nil }
       return lm.characterIndexForGlyph(at: glyph)
     }
   }

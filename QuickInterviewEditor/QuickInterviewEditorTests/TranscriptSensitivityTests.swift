@@ -65,4 +65,18 @@ struct TranscriptSensitivityTests {
       expectNoDifference(model.runTogetherMaxGapMs, 80)  // only the last value commits
     }
   }
+
+  @Test func immediateSetterCancelsPendingDebouncedCommit() async {
+    let clock = TestClock()
+    await withDependencies {
+      $0.continuousClock = clock
+    } operation: {
+      let model = TranscriptPageModel(editPlan: plan)
+      model.sensitivityDragChanged(80)  // schedules a debounced commit of 80
+      model.sensitivityChanged(10)  // immediate set to 10 must cancel the pending 80
+      expectNoDifference(model.runTogetherMaxGapMs, 10)
+      await clock.advance(by: .milliseconds(200))  // the stale 80 commit must not fire
+      expectNoDifference(model.runTogetherMaxGapMs, 10)
+    }
+  }
 }
