@@ -6,14 +6,36 @@ struct TranscriptPageView: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
       header
-      transcriptFlow
-      Spacer()
+      TranscriptTextView(
+        model: model,
+        text: model.plainTranscriptText,
+        fontSize: model.fontSize,
+        selected: model.selectedWordIDSet,
+        runTogether: model.runTogetherWordIDSet,
+        scrollTarget: model.scrollTargetWordID,
+        followMode: model.followMode
+      )
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
       controls
     }
     .padding(20)
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     .background(Color.black)
+    .background { zoomShortcuts }
     .task { await model.viewAppeared() }
+  }
+
+  private var zoomShortcuts: some View {
+    // Hidden buttons carry the ⌘+/⌘-/⌘0 shortcuts without cluttering the UI. ⌘+ is
+    // physically ⌘-shift-=, so zoom-in is bound to both "=" and "+".
+    Group {
+      Button("", action: model.zoomInTapped).keyboardShortcut("=", modifiers: .command)
+      Button("", action: model.zoomInTapped).keyboardShortcut("+", modifiers: .command)
+      Button("", action: model.zoomOutTapped).keyboardShortcut("-", modifiers: .command)
+      Button("", action: model.zoomResetTapped).keyboardShortcut("0", modifiers: .command)
+    }
+    .opacity(0)
+    .frame(width: 0, height: 0)
   }
 
   private var header: some View {
@@ -22,34 +44,25 @@ struct TranscriptPageView: View {
         .font(.system(size: 11, weight: .semibold)).tracking(1.5)
         .foregroundStyle(Color(white: 0.44))
       Spacer()
+      zoomControls
       Text(model.runTogetherLegend)
         .font(.system(size: 11)).foregroundStyle(Color(white: 0.48))
     }
   }
 
-  private var transcriptFlow: some View {
-    // Simple wrapping layout of tappable word chips.
-    FlowLayout(spacing: 4, lineSpacing: 8) {
-      ForEach(model.words) { word in
-        Text(word.text)
-          .font(.system(size: 17))
-          .foregroundStyle(color(for: word))
-          .padding(.horizontal, 3).padding(.vertical, 1)
-          .background(
-            word.isSelected ? Color(red: 0.80, green: 0.40, blue: 0.40).opacity(0.30) : .clear
-          )
-          .clipShape(RoundedRectangle(cornerRadius: 3))
-          .onTapGesture { model.wordTapped(word.id) }
-      }
+  private var zoomControls: some View {
+    HStack(spacing: 6) {
+      Button { model.zoomOutTapped() } label: { Image(systemName: "textformat.size.smaller") }
+        .disabled(!model.canZoomOut)
+      Slider(
+        value: Binding(get: { model.fontSize }, set: { model.zoomChanged($0) }),
+        in: model.minFontSize...model.maxFontSize
+      )
+      .frame(width: 120)
+      Button { model.zoomInTapped() } label: { Image(systemName: "textformat.size.larger") }
+        .disabled(!model.canZoomIn)
     }
-  }
-
-  private func color(for word: WordViewState) -> Color {
-    switch word.displayRole {
-    case .selected: return .white
-    case .runTogether: return Color(red: 0.89, green: 0.58, blue: 0.58)
-    case .normal: return Color(white: 0.56)
-    }
+    .buttonStyle(.borderless)
   }
 
   private var controls: some View {
@@ -61,10 +74,7 @@ struct TranscriptPageView: View {
       Text(model.runTogetherCountLabel).foregroundStyle(Color(white: 0.6))
       Text(model.sensitivityLabel).foregroundStyle(Color(white: 0.6))
       Slider(
-        value: Binding(
-          get: { model.runTogetherMaxGapMs },
-          set: { model.sensitivityChanged($0) }
-        ),
+        value: Binding(get: { model.draftGapMs }, set: { model.sensitivityDragChanged($0) }),
         in: model.sensitivityMinMs...model.sensitivityMaxMs
       )
       .frame(width: 180)
@@ -73,6 +83,8 @@ struct TranscriptPageView: View {
   }
 }
 
+// Retained (unused) until Task 8 removes the eager word-chip layout. The transcript now
+// renders via `TranscriptTextView`; this no longer participates in the view hierarchy.
 struct FlowLayout: Layout {
   var spacing: CGFloat = 4
   var lineSpacing: CGFloat = 8

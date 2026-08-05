@@ -41,6 +41,7 @@
 		6CF66ABEF861C819CE8F3741 /* AudioPlayerClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00963F1364155C35EB721702 /* AudioPlayerClientTests.swift */; };
 		7742FDC7D65B2788C36D6522 /* ViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 340DF12DDCE384A3A7FAFF4F /* ViewModel.swift */; };
 		7E56FEC9DE02981429DAF9DE /* CanonicalAudioStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0BD0C997619379A57E176AC /* CanonicalAudioStoreTests.swift */; };
+		8236F0BF72D6690BFFBBAE06 /* TranscriptTextView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7A511F2FE1806A3BA6DF28F /* TranscriptTextView.swift */; };
 		8556704810F445FB50F79DC2 /* EditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF59032A8FB779A2205DB749 /* EditorView.swift */; };
 		85D76B6FC103726F41325345 /* ModelManifest.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3335A4B6448C813FCFE40F8 /* ModelManifest.swift */; };
 		86C19FC155AEB31428F42B95 /* LiveEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 653287A59343E1420B1B9E90 /* LiveEngine.swift */; };
@@ -161,6 +162,7 @@
 		BE1984F062A56A845A2364F4 /* SongTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SongTabView.swift; sourceTree = "<group>"; };
 		C3335A4B6448C813FCFE40F8 /* ModelManifest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelManifest.swift; sourceTree = "<group>"; };
 		C584101861B497D434BD5F00 /* AppLaunchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLaunchView.swift; sourceTree = "<group>"; };
+		C7A511F2FE1806A3BA6DF28F /* TranscriptTextView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptTextView.swift; sourceTree = "<group>"; };
 		C7C4BC51CF02F763C1A466B2 /* ExportNamingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportNamingTests.swift; sourceTree = "<group>"; };
 		CDB2B2989C30934A0043C8DC /* SmokeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmokeTests.swift; sourceTree = "<group>"; };
 		CEFAC7D37A8CD8BCE6C5F178 /* CanonicalAudioStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanonicalAudioStore.swift; sourceTree = "<group>"; };
@@ -314,6 +316,7 @@
 			children = (
 				238BBB22C13D9B5453A89ECD /* TranscriptPageModel.swift */,
 				89BCD2B81DFD4899212F05EB /* TranscriptPageView.swift */,
+				C7A511F2FE1806A3BA6DF28F /* TranscriptTextView.swift */,
 			);
 			path = TranscriptPage;
 			sourceTree = "<group>";
@@ -683,6 +686,7 @@
 				30221A20518EEBD15C46AAB2 /* TranscriptDocument.swift in Sources */,
 				F89547D7DD5C6573803BD544 /* TranscriptPageModel.swift in Sources */,
 				98386774F113F6107A9A3E2C /* TranscriptPageView.swift in Sources */,
+				8236F0BF72D6690BFFBBAE06 /* TranscriptTextView.swift in Sources */,
 				4AFF2827764CCC77924DC508 /* UndoStack.swift in Sources */,
 				7742FDC7D65B2788C36D6522 /* ViewModel.swift in Sources */,
 				39A76766629B8F1693F8CC83 /* WaveformClient.swift in Sources */,
