@@ -1,6 +1,5 @@
 import Dependencies
 import Foundation
-import IdentifiedCollections
 import IssueReporting
 import Observation
 import Sharing
@@ -42,7 +41,6 @@ class TranscriptPageModel: ViewModel {
 
   // MARK: - Properties
   var editPlan: EditPlan?
-  var words: IdentifiedArrayOf<WordViewState> = []
   /// Public run-together set for the renderer to diff.
   var runTogetherWordIDSet: Set<Word.ID> = []
   var runTogetherMaxGapMs: Double = 30
@@ -125,19 +123,6 @@ class TranscriptPageModel: ViewModel {
     // failure editPlan stays nil and the view shows the empty state.
     await withErrorReporting {
       editPlan = try await engine.loadPlan(planURL)
-    }
-    recomputeWords()
-  }
-
-  func wordTapped(_ id: Word.ID) {
-    if selectionAnchorID == nil {
-      selectionAnchorID = id
-      selectionFocusID = id  // first click
-    } else if selectionAnchorID == selectionFocusID {
-      selectionFocusID = id  // second click extends
-    } else {
-      selectionAnchorID = id
-      selectionFocusID = id  // third click resets
     }
     recomputeWords()
   }
@@ -230,25 +215,10 @@ class TranscriptPageModel: ViewModel {
     recomputeWords()
   }
   private func recomputeWords() {
-    guard let plan = editPlan else {
-      words = []
-      return
-    }
+    guard let plan = editPlan else { return }
     document = TranscriptDocument(words: plan.words)
     if gaps.isEmpty { gaps = wordGaps(plan.words) }
-    let red = runTogetherWordIDs(gaps: gaps, maxGapMs: runTogetherMaxGapMs)
-    runTogetherWordIDSet = red
-    let selected = selectedWordIDs
-    let states = plan.words.map { word in
-      WordViewState(
-        id: word.id, text: word.text,
-        startSample: word.startSample, endSample: word.endSample,
-        isSelected: selected.contains(word.id),
-        isRunTogether: red.contains(word.id)
-      )
-    }
-    // A malformed plan with duplicate word IDs must not trap the app on load.
-    words = IdentifiedArray(states, uniquingIDsWith: { first, _ in first })
+    runTogetherWordIDSet = runTogetherWordIDs(gaps: gaps, maxGapMs: runTogetherMaxGapMs)
   }
 
   /// The contiguous run of words between anchor and focus, by POSITION in the

@@ -52,15 +52,23 @@ struct TranscriptPageView: View {
 
   private var zoomControls: some View {
     HStack(spacing: 6) {
-      Button { model.zoomOutTapped() } label: { Image(systemName: "textformat.size.smaller") }
-        .disabled(!model.canZoomOut)
+      Button {
+        model.zoomOutTapped()
+      } label: {
+        Image(systemName: "textformat.size.smaller")
+      }
+      .disabled(!model.canZoomOut)
       Slider(
         value: Binding(get: { model.fontSize }, set: { model.zoomChanged($0) }),
         in: model.minFontSize...model.maxFontSize
       )
       .frame(width: 120)
-      Button { model.zoomInTapped() } label: { Image(systemName: "textformat.size.larger") }
-        .disabled(!model.canZoomIn)
+      Button {
+        model.zoomInTapped()
+      } label: {
+        Image(systemName: "textformat.size.larger")
+      }
+      .disabled(!model.canZoomIn)
     }
     .buttonStyle(.borderless)
   }
@@ -80,49 +88,5 @@ struct TranscriptPageView: View {
       .frame(width: 180)
     }
     .font(.system(size: 12))
-  }
-}
-
-// Retained (unused) until Task 8 removes the eager word-chip layout. The transcript now
-// renders via `TranscriptTextView`; this no longer participates in the view hierarchy.
-struct FlowLayout: Layout {
-  var spacing: CGFloat = 4
-  var lineSpacing: CGFloat = 8
-
-  func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-    let maxWidth = proposal.width ?? .infinity
-    var cursorX: CGFloat = 0
-    var cursorY: CGFloat = 0
-    var lineHeight: CGFloat = 0
-    for view in subviews {
-      let size = view.sizeThatFits(.unspecified)
-      if cursorX + size.width > maxWidth, cursorX > 0 {
-        cursorX = 0
-        cursorY += lineHeight + lineSpacing
-        lineHeight = 0
-      }
-      cursorX += size.width + spacing
-      lineHeight = max(lineHeight, size.height)
-    }
-    return CGSize(width: maxWidth == .infinity ? cursorX : maxWidth, height: cursorY + lineHeight)
-  }
-
-  func placeSubviews(
-    in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
-  ) {
-    var cursorX = bounds.minX
-    var cursorY = bounds.minY
-    var lineHeight: CGFloat = 0
-    for view in subviews {
-      let size = view.sizeThatFits(.unspecified)
-      if cursorX + size.width > bounds.maxX, cursorX > bounds.minX {
-        cursorX = bounds.minX
-        cursorY += lineHeight + lineSpacing
-        lineHeight = 0
-      }
-      view.place(at: CGPoint(x: cursorX, y: cursorY), proposal: ProposedViewSize(size))
-      cursorX += size.width + spacing
-      lineHeight = max(lineHeight, size.height)
-    }
   }
 }

@@ -60,8 +60,7 @@ struct EditorTests {
 
   @Test func addSliceFromSelectionCreatesSlice() {
     let model = editor()
-    model.transcript.wordTapped(model.transcript.words[0].id)
-    model.transcript.wordTapped(model.transcript.words[3].id)
+    selectWords(model.transcript, 0, 3)
     let selectedWordIDs = model.transcript.orderedSelectedWordIDs
     model.addSliceTapped()
     expectNoDifference(model.slices.count, 1)
@@ -105,9 +104,8 @@ struct EditorTests {
 
   @Test func sliceSnippetShowsFirstAndLastWordsOfSelection() {
     let model = editor()
-    let words = model.transcript.words
-    model.transcript.wordTapped(words[0].id)  // "So"
-    model.transcript.wordTapped(words[words.count - 1].id)  // last word: "Carl"
+    let lastIndex = model.transcript.document.wordRanges.count - 1
+    selectWords(model.transcript, 0, lastIndex)  // "So" … "Carl"
     model.addSliceTapped()
     let snippet = model.slices[0].snippet
     #expect(snippet.hasPrefix("“So"))
@@ -124,11 +122,9 @@ struct EditorTests {
 
   @Test func addSliceNamesSequentially() {
     let model = editor()
-    model.transcript.wordTapped(model.transcript.words[0].id)
-    model.transcript.wordTapped(model.transcript.words[1].id)
+    selectWords(model.transcript, 0, 1)
     model.addSliceTapped()
-    model.transcript.wordTapped(model.transcript.words[2].id)
-    model.transcript.wordTapped(model.transcript.words[3].id)
+    selectWords(model.transcript, 2, 3)
     model.addSliceTapped()
     expectNoDifference(model.slices.map(\.name), ["Slice 1", "Slice 2"])
   }
@@ -136,8 +132,7 @@ struct EditorTests {
   @Test func renameReorderDeleteMutateSlices() async {
     let model = editor()
     for pair in [(0, 1), (2, 3), (4, 5)] {
-      model.transcript.wordTapped(model.transcript.words[pair.0].id)
-      model.transcript.wordTapped(model.transcript.words[pair.1].id)
+      selectWords(model.transcript, pair.0, pair.1)
       model.addSliceTapped()
     }
     let firstID = model.slices[0].id
@@ -282,8 +277,7 @@ struct EditorTests {
 
   @Test func sliceRowsFormatDurationAndRange() {
     let model = editor()
-    model.transcript.wordTapped(model.transcript.words[0].id)
-    model.transcript.wordTapped(model.transcript.words[2].id)
+    selectWords(model.transcript, 0, 2)
     model.addSliceTapped()
     let row = model.sliceRows[0]
     #expect(row.durationLabel.hasSuffix("s"))
@@ -294,8 +288,7 @@ struct EditorTests {
   @Test func sliceCountLabelPluralises() {
     let model = editor()
     expectNoDifference(model.sliceCountLabel, "0 clips")
-    model.transcript.wordTapped(model.transcript.words[0].id)
-    model.transcript.wordTapped(model.transcript.words[1].id)
+    selectWords(model.transcript, 0, 1)
     model.addSliceTapped()
     expectNoDifference(model.sliceCountLabel, "1 clip")
   }
@@ -305,8 +298,7 @@ struct EditorTests {
     // swiftlint:disable:next large_tuple
     let recorded = LockIsolated<(URL, Range<Int>, Int)?>(nil)
     let model = editor()
-    model.transcript.wordTapped(model.transcript.words[0].id)
-    model.transcript.wordTapped(model.transcript.words[2].id)
+    selectWords(model.transcript, 0, 2)
     model.addSliceTapped()
     let slice = model.slices[0]
     await withDependencies {
@@ -332,8 +324,7 @@ struct EditorTests {
   @Test func stopPlaybackClearsPlayingSlice() async {
     let gate = PlayerGate()
     let model = editor()
-    model.transcript.wordTapped(model.transcript.words[0].id)
-    model.transcript.wordTapped(model.transcript.words[1].id)
+    selectWords(model.transcript, 0, 1)
     model.addSliceTapped()
     let slice = model.slices[0]
     await withDependencies {
@@ -351,8 +342,7 @@ struct EditorTests {
   @Test func playStopTappedTogglesPlayback() async {
     let gate = PlayerGate()
     let model = editor()
-    model.transcript.wordTapped(model.transcript.words[0].id)
-    model.transcript.wordTapped(model.transcript.words[1].id)
+    selectWords(model.transcript, 0, 1)
     model.addSliceTapped()
     let slice = model.slices[0]
     await withDependencies {
@@ -370,8 +360,7 @@ struct EditorTests {
 
   @Test func playSliceRollsBackPlayingIDOnError() async {
     let model = editor()
-    model.transcript.wordTapped(model.transcript.words[0].id)
-    model.transcript.wordTapped(model.transcript.words[1].id)
+    selectWords(model.transcript, 0, 1)
     model.addSliceTapped()
     let slice = model.slices[0]
     await withDependencies {
@@ -388,8 +377,7 @@ struct EditorTests {
     let gate = PlayerGate()
     let model = editor()
     for pair in [(0, 1), (2, 3)] {
-      model.transcript.wordTapped(model.transcript.words[pair.0].id)
-      model.transcript.wordTapped(model.transcript.words[pair.1].id)
+      selectWords(model.transcript, pair.0, pair.1)
       model.addSliceTapped()
     }
     let first = model.slices[0]
@@ -412,8 +400,7 @@ struct EditorTests {
     let gate = PlayerGate()
     let stopped = LockIsolated(false)
     let model = editor()
-    model.transcript.wordTapped(model.transcript.words[0].id)
-    model.transcript.wordTapped(model.transcript.words[2].id)
+    selectWords(model.transcript, 0, 2)
     model.addSliceTapped()
     let slice = model.slices[0]
     await withDependencies {
@@ -435,8 +422,7 @@ struct EditorTests {
 
   @Test func renameSlicePreservesInternalSpaces() {
     let model = editor()
-    model.transcript.wordTapped(model.transcript.words[0].id)
-    model.transcript.wordTapped(model.transcript.words[1].id)
+    selectWords(model.transcript, 0, 1)
     model.addSliceTapped()
     let slice = model.slices[0]
     model.renameSlice(slice.id, to: "My Clip")
@@ -448,15 +434,13 @@ struct EditorTests {
   @Test func addSliceDoesNotReuseNumberAfterDeletion() async {
     let model = editor()
     for pair in [(0, 1), (2, 3), (4, 5)] {
-      model.transcript.wordTapped(model.transcript.words[pair.0].id)
-      model.transcript.wordTapped(model.transcript.words[pair.1].id)
+      selectWords(model.transcript, pair.0, pair.1)
       model.addSliceTapped()
     }
     expectNoDifference(model.slices.map(\.name), ["Slice 1", "Slice 2", "Slice 3"])
     let middleID = model.slices[1].id
     await model.deleteSlice(middleID)
-    model.transcript.wordTapped(model.transcript.words[6].id)
-    model.transcript.wordTapped(model.transcript.words[7].id)
+    selectWords(model.transcript, 6, 7)
     model.addSliceTapped()
     expectNoDifference(model.slices.map(\.name), ["Slice 1", "Slice 3", "Slice 4"])
   }
@@ -464,8 +448,7 @@ struct EditorTests {
   @Test func multiRowDeleteRemovesExactlyTheSelectedRows() async {
     let model = editor()
     for pair in [(0, 1), (2, 3), (4, 5)] {
-      model.transcript.wordTapped(model.transcript.words[pair.0].id)
-      model.transcript.wordTapped(model.transcript.words[pair.1].id)
+      selectWords(model.transcript, pair.0, pair.1)
       model.addSliceTapped()
     }
     let middleID = model.slices[1].id
@@ -564,7 +547,7 @@ struct EditorTests {
   @Test func waveformTapInEmptyAreaLeavesSelectionUntouched() {
     let model = editor()
     identityGeometry(model)
-    model.transcript.wordTapped(model.transcript.words[0].id)
+    selectWords(model.transcript, 0, 0)
     let before = model.transcript.orderedSelectedWordIDs
     // a sample far beyond the audio belongs to no word
     model.waveformTapped(atX: CGFloat(model.editPlan.source.durationSamples + 10_000))
@@ -574,8 +557,7 @@ struct EditorTests {
   @Test func highlightedSampleRangeMirrorsTranscriptSelection() {
     let model = editor()
     #expect(model.highlightedSampleRange == nil)
-    model.transcript.wordTapped(model.transcript.words[0].id)
-    model.transcript.wordTapped(model.transcript.words[2].id)
+    selectWords(model.transcript, 0, 2)
     expectNoDifference(model.highlightedSampleRange, model.transcript.selectedSampleRange)
     #expect(model.highlightedSampleRange != nil)
   }
@@ -583,7 +565,7 @@ struct EditorTests {
   @Test func waveformHighlightSpanCombinesSelectionWithGeometry() {
     let model = editor()
     identityGeometry(model)
-    model.transcript.selectWord(model.transcript.words[0].id)
+    model.transcript.selectWord(model.editPlan.words[0].id)
     let range = model.highlightedSampleRange!
     expectNoDifference(model.waveformHighlightSpan, model.waveform.span(for: range))
     #expect(model.waveformHighlightSpan != nil)
@@ -625,10 +607,16 @@ struct EditorTests {
 
   // MARK: - Export
 
+  private func selectWords(_ transcript: TranscriptPageModel, _ first: Int, _ last: Int) {
+    transcript.transcriptDragBegan(
+      atUTF16Offset: transcript.document.wordRanges[first].range.location)
+    transcript.transcriptDragged(
+      toUTF16Offset: transcript.document.wordRanges[last].range.location)
+  }
+
   private func addSlices(_ model: EditorModel, _ pairs: [(Int, Int)]) {
     for pair in pairs {
-      model.transcript.wordTapped(model.transcript.words[pair.0].id)
-      model.transcript.wordTapped(model.transcript.words[pair.1].id)
+      selectWords(model.transcript, pair.0, pair.1)
       model.addSliceTapped()
     }
   }

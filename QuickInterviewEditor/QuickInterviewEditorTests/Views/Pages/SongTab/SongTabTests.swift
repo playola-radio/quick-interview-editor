@@ -31,7 +31,7 @@ struct SongTabTests {
       await model.startTranscription()
     }
     #expect(model.isLoaded)
-    expectNoDifference(model.editor?.transcript.words.count, 122)
+    expectNoDifference(model.editor?.transcript.document.wordRanges.count, 122)
     // The canonical AIFF from the completion is handed to the editor.
     expectNoDifference(model.editor?.canonicalAudioURL, canonical)
   }

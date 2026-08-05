@@ -62,9 +62,11 @@ struct TranscriptTextView: NSViewRepresentable {
 
     deinit { NotificationCenter.default.removeObserver(self) }
 
-    private static let selectedBG = NSColor(calibratedRed: 0.80, green: 0.40, blue: 0.40, alpha: 0.30)
+    private static let selectedBG = NSColor(
+      calibratedRed: 0.80, green: 0.40, blue: 0.40, alpha: 0.30)
     private static let selectedFG = NSColor.white
-    private static let runTogetherFG = NSColor(calibratedRed: 0.89, green: 0.58, blue: 0.58, alpha: 1)
+    private static let runTogetherFG = NSColor(
+      calibratedRed: 0.89, green: 0.58, blue: 0.58, alpha: 1)
     private static let normalFG = NSColor(calibratedWhite: 0.56, alpha: 1)
 
     func rebuildText(
@@ -86,6 +88,7 @@ struct TranscriptTextView: NSViewRepresentable {
       lastSelected = selected
     }
 
+    // swiftlint:disable:next function_parameter_count
     func apply(
       text: String, fontSize: Double, selected: Set<Word.ID>, runTogether: Set<Word.ID>,
       scrollTarget: Word.ID?, followMode: TranscriptFollowMode
@@ -117,7 +120,8 @@ struct TranscriptTextView: NSViewRepresentable {
       lastSelected = selected
 
       if let target = scrollTarget, target != lastScrollTarget,
-        followMode == .following, let range = range(for: target) {
+        followMode == .following, let range = range(for: target)
+      {
         // Programmatic auto-scroll goes through neither `scrollWheel` nor live-scroll,
         // so it can never be mistaken for a user scroll — no guard flag needed.
         textView.scrollRangeToVisible(range)
@@ -137,7 +141,9 @@ struct TranscriptTextView: NSViewRepresentable {
       guard let storage = textView?.textStorage else { return }
       let color = role == .runTogether ? Self.runTogetherFG : Self.normalFG
       for id in added where !currentSelected.contains(id) {
-        if let r = range(for: id) { storage.addAttribute(.foregroundColor, value: color, range: r) }
+        if let wordRange = range(for: id) {
+          storage.addAttribute(.foregroundColor, value: color, range: wordRange)
+        }
       }
     }
 
@@ -146,15 +152,15 @@ struct TranscriptTextView: NSViewRepresentable {
     ) {
       guard let storage = textView?.textStorage else { return }
       for id in removed {
-        guard let r = range(for: id) else { continue }
-        storage.removeAttribute(.backgroundColor, range: r)
+        guard let wordRange = range(for: id) else { continue }
+        storage.removeAttribute(.backgroundColor, range: wordRange)
         let fg = currentRunTogether.contains(id) ? Self.runTogetherFG : Self.normalFG
-        storage.addAttribute(.foregroundColor, value: fg, range: r)
+        storage.addAttribute(.foregroundColor, value: fg, range: wordRange)
       }
       for id in added {
-        guard let r = range(for: id) else { continue }
-        storage.addAttribute(.backgroundColor, value: Self.selectedBG, range: r)
-        storage.addAttribute(.foregroundColor, value: Self.selectedFG, range: r)
+        guard let wordRange = range(for: id) else { continue }
+        storage.addAttribute(.backgroundColor, value: Self.selectedBG, range: wordRange)
+        storage.addAttribute(.foregroundColor, value: Self.selectedFG, range: wordRange)
       }
     }
 
@@ -195,15 +201,15 @@ final class HitTestingTextView: NSTextView {
   private var didDrag = false
 
   override func mouseDown(with event: NSEvent) {
-    let p = convert(event.locationInWindow, from: nil)
-    anchorOffset = coordinator?.utf16Offset(at: p)
+    let point = convert(event.locationInWindow, from: nil)
+    anchorOffset = coordinator?.utf16Offset(at: point)
     didDrag = false
   }
 
   override func mouseDragged(with event: NSEvent) {
     guard let coordinator, let anchor = anchorOffset else { return }
-    let p = convert(event.locationInWindow, from: nil)
-    guard let offset = coordinator.utf16Offset(at: p) else { return }
+    let point = convert(event.locationInWindow, from: nil)
+    guard let offset = coordinator.utf16Offset(at: point) else { return }
     if !didDrag {
       didDrag = true
       coordinator.model.transcriptDragBegan(atUTF16Offset: anchor)
