@@ -57,9 +57,10 @@ struct TranscriptTextView: NSViewRepresentable {
     private var lastRunTogether: Set<Word.ID> = []
     private var lastFontSize: Double = 0
     private var lastScrollTarget: Word.ID?
-    private var isProgrammaticScroll = false
 
     init(model: TranscriptPageModel) { self.model = model }
+
+    deinit { NotificationCenter.default.removeObserver(self) }
 
     private static let selectedBG = NSColor(calibratedRed: 0.80, green: 0.40, blue: 0.40, alpha: 0.30)
     private static let selectedFG = NSColor.white
@@ -117,9 +118,9 @@ struct TranscriptTextView: NSViewRepresentable {
 
       if let target = scrollTarget, target != lastScrollTarget,
         followMode == .following, let range = range(for: target) {
-        isProgrammaticScroll = true
+        // Programmatic auto-scroll goes through neither `scrollWheel` nor live-scroll,
+        // so it can never be mistaken for a user scroll — no guard flag needed.
         textView.scrollRangeToVisible(range)
-        isProgrammaticScroll = false
         lastScrollTarget = target
       }
     }
@@ -158,16 +159,18 @@ struct TranscriptTextView: NSViewRepresentable {
     }
 
     // MARK: Scroll observation
+    // User scroll is detected from actual user input, not bounds changes: `scrollWheel`
+    // (trackpad/mouse-wheel) is forwarded from the text view, and live-scroll (trackpad
+    // gesture / scroller drag) is observed here. TextKit's deferred layout can post bounds
+    // changes after a programmatic auto-scroll, so bounds are NOT a reliable user signal.
     func observeScroll() {
-      guard let clip = scrollView?.contentView else { return }
-      clip.postsBoundsChangedNotifications = true
+      guard let scrollView else { return }
       NotificationCenter.default.addObserver(
-        self, selector: #selector(boundsChanged),
-        name: NSView.boundsDidChangeNotification, object: clip)
+        self, selector: #selector(userDidLiveScroll),
+        name: NSScrollView.willStartLiveScrollNotification, object: scrollView)
     }
 
-    @objc private func boundsChanged() {
-      guard !isProgrammaticScroll else { return }
+    @objc private func userDidLiveScroll() {
       model.transcriptUserScrolled()
     }
 
@@ -216,5 +219,10 @@ final class HitTestingTextView: NSTextView {
     coordinator.model.transcriptDragEnded()
     anchorOffset = nil
     didDrag = false
+  }
+
+  override func scrollWheel(with event: NSEvent) {
+    coordinator?.model.transcriptUserScrolled()
+    super.scrollWheel(with: event)
   }
 }
