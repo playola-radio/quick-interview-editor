@@ -27,6 +27,7 @@
 		3E0D23A6109F0336AC4166EB /* IdentifiedCollections in Frameworks */ = {isa = PBXBuildFile; productRef = C6F6FFAF4946EF45EF1AE24D /* IdentifiedCollections */; };
 		4821AD4B53662749E9F966B9 /* AppLaunchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C584101861B497D434BD5F00 /* AppLaunchView.swift */; };
 		4AFF2827764CCC77924DC508 /* UndoStack.swift in Sources */ = {isa = PBXBuildFile; fileRef = 883C283A1A6BDA1EDDA1CFF9 /* UndoStack.swift */; };
+		4D1576A5D4828CB3E1BA4773 /* TranscriptSelectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F284A324342432A94B7C54E /* TranscriptSelectionTests.swift */; };
 		51666548577B391FC8BB6E0D /* AppLaunchModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 237246D26C6AC1E25A5A279E /* AppLaunchModel.swift */; };
 		5CE1AC00C89D05B7E2D7EF0B /* IssueReporting in Frameworks */ = {isa = PBXBuildFile; productRef = 16FA185EFC57ACE1DEE1A570 /* IssueReporting */; };
 		5F634B357789FFEFA223ACF1 /* Dependencies in Frameworks */ = {isa = PBXBuildFile; productRef = A1E5EE198133D28AA4F8C697 /* Dependencies */; };
@@ -115,6 +116,7 @@
 		4F3B3549446B80CE6BA09245 /* EngineResolution.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EngineResolution.swift; sourceTree = "<group>"; };
 		557B8204C55CD77EEE5B3192 /* FineTuneModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FineTuneModel.swift; sourceTree = "<group>"; };
 		5865237D9AEA083F3D2A75A0 /* WaveformView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WaveformView.swift; sourceTree = "<group>"; };
+		5F284A324342432A94B7C54E /* TranscriptSelectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptSelectionTests.swift; sourceTree = "<group>"; };
 		5FCB607F8627656FE4DEA0CD /* FineTuneGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FineTuneGeometry.swift; sourceTree = "<group>"; };
 		6133EE6AF1867B8B9120A027 /* SliceWarningsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SliceWarningsTests.swift; sourceTree = "<group>"; };
 		6269F8643FFABC51DD9244ED /* AudioPlayerClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioPlayerClient.swift; sourceTree = "<group>"; };
@@ -441,6 +443,7 @@
 			children = (
 				CDB2B2989C30934A0043C8DC /* SmokeTests.swift */,
 				6CAD1460177B012578235ABA /* TranscriptDocumentTests.swift */,
+				5F284A324342432A94B7C54E /* TranscriptSelectionTests.swift */,
 				2D32336CE0E89EA8B6419A5F /* Core */,
 				C57D387AA418F41BCE29B851 /* Models */,
 				5D117DE2268EB31385107955 /* Support */,
@@ -619,6 +622,7 @@
 				B504A08BE32820D2E7B8F7BF /* SongTabTests.swift in Sources */,
 				A1CCD3AFC32F650FF010B6F3 /* TranscriptDocumentTests.swift in Sources */,
 				CD09E8D65F5968AAE96A85AD /* TranscriptPageTests.swift in Sources */,
+				4D1576A5D4828CB3E1BA4773 /* TranscriptSelectionTests.swift in Sources */,
 				1FDCD5A562E7D5D71D0520EC /* UndoStackTests.swift in Sources */,
 				D48EC3DED2EB8A824377E142 /* WaveformClientTests.swift in Sources */,
 				F4B2A1B1BFFF6834D69B5658 /* WaveformTests.swift in Sources */,

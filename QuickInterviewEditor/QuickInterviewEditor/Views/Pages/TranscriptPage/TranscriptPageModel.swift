@@ -67,6 +67,8 @@ class TranscriptPageModel: ViewModel {
     selectedWords.map(\.text).joined(separator: " ")
       .trimmingCharacters(in: .whitespaces)
   }
+  /// Public selection set for the renderer to diff (the private `selectedWordIDs` stays internal).
+  var selectedWordIDSet: Set<Word.ID> { selectedWordIDs }
 
   // MARK: - User Actions
   func viewAppeared() async {
@@ -112,6 +114,30 @@ class TranscriptPageModel: ViewModel {
     runTogetherMaxGapMs = ms
     recomputeWords()
   }
+
+  func transcriptClicked(atUTF16Offset offset: Int) {
+    guard let id = document.wordID(atUTF16Offset: offset) else { return }
+    if selectionAnchorID == id, selectionFocusID == id {
+      clearSelectionTapped()
+    } else {
+      selectWord(id)
+    }
+  }
+
+  func transcriptDragBegan(atUTF16Offset offset: Int) {
+    guard let id = document.wordID(atUTF16Offset: offset) else { return }
+    selectionAnchorID = id
+    selectionFocusID = id
+    recomputeWords()
+  }
+
+  func transcriptDragged(toUTF16Offset offset: Int) {
+    guard let id = document.wordID(atUTF16Offset: offset) else { return }
+    selectionFocusID = id
+    recomputeWords()
+  }
+
+  func transcriptDragEnded() {}
 
   // MARK: - Private Helpers
   private func recomputeWords() {
