@@ -152,14 +152,7 @@ final class EditorModel: ViewModel {
   /// transcript's already-computed `isRunTogether` (same gap function + live sensitivity),
   /// so the waveform's red always matches the transcript's without recomputing it. Words
   /// missing sample bounds are excluded.
-  var redRanges: [Range<Int>] {
-    transcript.words.compactMap { word in
-      guard word.isRunTogether, let start = word.startSample, let end = word.endSample,
-        start < end
-      else { return nil }
-      return start..<end
-    }
-  }
+  var redRanges: [Range<Int>] { transcript.runTogetherSampleRanges }
 
   /// Waveform render data, geometry delegated to the child and combined with the
   /// transcript-derived ranges here (the view reads these; it decides nothing). The highlight

@@ -43,6 +43,8 @@ class TranscriptPageModel: ViewModel {
   // MARK: - Properties
   var editPlan: EditPlan?
   var words: IdentifiedArrayOf<WordViewState> = []
+  /// Public run-together set for the renderer to diff.
+  var runTogetherWordIDSet: Set<Word.ID> = []
   var runTogetherMaxGapMs: Double = 30
   var draftGapMs: Double = 30
   @ObservationIgnored private var gaps: [WordGap] = []
@@ -85,8 +87,19 @@ class TranscriptPageModel: ViewModel {
     guard lower < upper else { return nil }
     return lower..<upper
   }
-  var runTogetherCount: Int { words.filter(\.isRunTogether).count }
+  var runTogetherCount: Int { runTogetherWordIDSet.count }
   var runTogetherCountLabel: String { "\(runTogetherCount) run-together" }
+  /// Sample ranges of the run-together words, ordered by transcript position. Words
+  /// missing sample bounds (or with inverted/zero-width bounds) are excluded.
+  var runTogetherSampleRanges: [Range<Int>] {
+    guard let plan = editPlan else { return [] }
+    return plan.words.compactMap { word in
+      guard runTogetherWordIDSet.contains(word.id),
+        let start = word.startSample, let end = word.endSample, start < end
+      else { return nil }
+      return start..<end
+    }
+  }
   var orderedSelectedWordIDs: [Word.ID] { selectedWords.map(\.id) }
   var selectionSnippet: String {
     selectedWords.map(\.text).joined(separator: " ")
@@ -219,6 +232,7 @@ class TranscriptPageModel: ViewModel {
     document = TranscriptDocument(words: plan.words)
     if gaps.isEmpty { gaps = wordGaps(plan.words) }
     let red = runTogetherWordIDs(gaps: gaps, maxGapMs: runTogetherMaxGapMs)
+    runTogetherWordIDSet = red
     let selected = selectedWordIDs
     let states = plan.words.map { word in
       WordViewState(
