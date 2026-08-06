@@ -8,14 +8,17 @@ transcript fixtures + shipped-product labels. Product-type-agnostic (spotlights
 
 ```
 evals/cut_suggestions/
-├── datasets/joe_miller/
-│   ├── transcript.json      # committed WhisperX transcript (raw audio is NOT committed)
-│   └── labels.json          # 11 shipped spotlight topics + intros: []
+├── datasets/
+│   ├── joe_miller/          # SPOTLIGHT (11 shipped topics)
+│   ├── willy_spotlights/    # SPOTLIGHT, 2nd artist (14 topics; Willy 1.m4a is reel 1/6)
+│   └── joe_intros/          # INTRO, first test (20 shipped song labels)
+│       ├── transcript.json  # committed WhisperX transcript (raw audio is NOT committed)
+│       └── labels.json      # shipped labels; spotlights: [...] and/or intros: [...]
 ├── cache/                   # committed raw LLM responses -> deterministic cached mode
 ├── metrics.py               # recall@K, duration compliance, fragment rate, overlap, cands/hr
 ├── aligner.py               # semantic label match: LLMAligner (cached) + rule_align fallback
-├── runner.py                # cached / live run modes + CLI
-├── baseline.json            # checked-in baseline (machine-readable)
+├── runner.py                # cached / live run modes + CLI (intros scored by song)
+├── baseline.json            # checked-in baseline (aggregate: {"datasets": {name: report}})
 └── BASELINE.md              # checked-in baseline (human-readable) — updating it is reviewed
 ```
 
@@ -37,11 +40,9 @@ fragment rate (<15s), duplicate/overlap burden, candidates per interview-hour.
 
 ## Follow-ups (not in this PR)
 
-- **Intros dataset.** Seed a Cody song-intros dataset (514 shipped song labels)
-  as a fast-follow. The harness is already product-type-agnostic:
-  `labels.json` carries an `intros` list, `ProductType.INTRO` has a spec, and the
-  runner reports intros separately — a new dataset dir with `intros: [...]` drops
-  straight in. Intro **song correctness** becomes a metric once that lands.
+- **Intro trimming + type disambiguation.** The `joe_intros` baseline surfaces two
+  intro failure modes (durations run long vs the 15–45s target; occasional
+  intro→spotlight type leakage). See BASELINE.md; fix in PR 5.
 - **Time-IoU metric.** Matching candidates to shipped clips by time overlap needs
   the shipped `.m4a` products transcribed and located back onto the raw
   transcript. Out of scope here; the next eval enhancement.

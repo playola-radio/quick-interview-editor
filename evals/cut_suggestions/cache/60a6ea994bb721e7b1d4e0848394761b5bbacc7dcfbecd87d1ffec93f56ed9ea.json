@@ -1,0 +1,30 @@
+{
+ "model": "gpt-4o",
+ "product_spec_version": "v1",
+ "prompt": "Two lists describe topic clips from the same recording. GROUND TRUTH is what was actually shipped; PROPOSED is what a model suggested. Match them semantically (labels differ in wording). Return STRICT JSON: {\"matches\": [{\"shipped\": \"<gt>\", \"proposed\": \"<prop or null>\"}], \"missed\": [\"<gt not found>\"], \"extra\": [\"<proposed not in gt>\"]}.\n\nGROUND TRUTH:\n[\"Family Holidays\", \"Being An Introvert\", \"On Our Own Terms\", \"Becoming The Singer\", \"Being Good at Entertaining\", \"Friendship Dynamics\", \"Scaling Back On Touring\", \"A Day in the Life\", \"Record Concepts\", \"Bob Dylan and Writing Hits\", \"New Music\", \"Producing the Records\", \"Thoughts on Streaming\", \"Favorite Songwriters\"]\n\nPROPOSED:\n[\"Life in Idaho\", \"Touring and Lifestyle Change\", \"Introversion and Performing\", \"Great Performers\", \"Becoming a Lead Singer\", \"Desolation Angels\", \"Songwriting Magic\", \"Influences in Songwriting\", \"Touring Less and Enjoying More\"]",
+ "prompt_version": "v1",
+ "purpose": "align",
+ "response": {
+  "model": "gpt-4o",
+  "text": "{\n    \"matches\": [\n        {\"shipped\": \"Family Holidays\", \"proposed\": \"Life in Idaho\"},\n        {\"shipped\": \"Being An Introvert\", \"proposed\": \"Introversion and Performing\"},\n        {\"shipped\": \"On Our Own Terms\", \"proposed\": null},\n        {\"shipped\": \"Becoming The Singer\", \"proposed\": \"Becoming a Lead Singer\"},\n        {\"shipped\": \"Being Good at Entertaining\", \"proposed\": \"Great Performers\"},\n        {\"shipped\": \"Friendship Dynamics\", \"proposed\": null},\n        {\"shipped\": \"Scaling Back On Touring\", \"proposed\": \"Touring Less and Enjoying More\"},\n        {\"shipped\": \"A Day in the Life\", \"proposed\": null},\n        {\"shipped\": \"Record Concepts\", \"proposed\": null},\n        {\"shipped\": \"Bob Dylan and Writing Hits\", \"proposed\": \"Songwriting Magic\"},\n        {\"shipped\": \"New Music\", \"proposed\": null},\n        {\"shipped\": \"Producing the Records\", \"proposed\": null},\n        {\"shipped\": \"Thoughts on Streaming\", \"proposed\": null},\n        {\"shipped\": \"Favorite Songwriters\", \"proposed\": \"Influences in Songwriting\"}\n    ],\n    \"missed\": [\n        \"On Our Own Terms\",\n        \"Friendship Dynamics\",\n        \"A Day in the Life\",\n        \"Record Concepts\",\n        \"New Music\",\n        \"Producing the Records\",\n        \"Thoughts on Streaming\"\n    ],\n    \"extra\": [\n        \"Desolation Angels\"\n    ]\n}",
+  "usage": {
+   "completion_tokens": 339,
+   "completion_tokens_details": {
+    "accepted_prediction_tokens": 0,
+    "audio_tokens": 0,
+    "reasoning_tokens": 0,
+    "rejected_prediction_tokens": 0
+   },
+   "prompt_tokens": 240,
+   "prompt_tokens_details": {
+    "audio_tokens": 0,
+    "cached_tokens": 0
+   },
+   "total_tokens": 579
+  }
+ },
+ "window_params": {
+  "step": 110,
+  "window": 130
+ }
+}

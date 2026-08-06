@@ -113,7 +113,13 @@ def run_eval(
     for ptype in (ProductType.SPOTLIGHT, ProductType.INTRO):
         cands = [c for c in result.candidates if c.product_type is ptype]
         shipped = labels.get(_LABEL_KEY[ptype], [])
-        proposed = [c.label for c in cands]
+        # Intros are scored by the named song (shipped intro labels ARE song
+        # names); the free-text label is a topic description, not the song, so it
+        # would spuriously miss. Spotlights stay on the topic label.
+        if ptype is ProductType.INTRO:
+            proposed = [(c.song or c.label) for c in cands]
+        else:
+            proposed = [c.label for c in cands]
         recall = semantic_recall(proposed, shipped, aligner) if shipped else None
         per_product[ptype.value] = {
             "n_candidates": len(cands),

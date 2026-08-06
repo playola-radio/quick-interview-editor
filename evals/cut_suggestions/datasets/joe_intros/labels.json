@@ -1,0 +1,31 @@
+{
+  "artist": "Joe Miller",
+  "band": "Reckless Kelly",
+  "source": "joe_intros",
+  "transcript": "transcript.json",
+  "duration_minutes": 30,
+  "notes": "Ground-truth song names from the shipped-product filenames (mastered intros, 'Joe Miller - <song> - INTRO_1.m4a'). Raw audio is NOT committed. This is the FIRST test of the INTRO product; labels are song names and belong to the 'intros' key so the runner scores them as ProductType.INTRO.",
+  "spotlights": [],
+  "intros": [
+    "Crazy Arms",
+    "Drown",
+    "Early Morning Rain",
+    "Even When I'm Blue",
+    "God Is Here Tonight",
+    "I Was Too Blind",
+    "Jackpot",
+    "Juke Joint Jumpin'",
+    "Little Drops of My Heart",
+    "Lost Highway",
+    "Love's Gonna Live Here",
+    "Miles and Miles of Texas",
+    "Rattle Trap",
+    "Rock This Town",
+    "She's Crying",
+    "Slow",
+    "Stranger Things",
+    "Sunset BLVD",
+    "Texas In 1880",
+    "Ways to Be Wicked"
+  ]
+}

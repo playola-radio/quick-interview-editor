@@ -1,0 +1,30 @@
+{
+ "model": "gpt-4o",
+ "product_spec_version": "v1",
+ "prompt": "Two lists describe topic clips from the same recording. GROUND TRUTH is what was actually shipped; PROPOSED is what a model suggested. Match them semantically (labels differ in wording). Return STRICT JSON: {\"matches\": [{\"shipped\": \"<gt>\", \"proposed\": \"<prop or null>\"}], \"missed\": [\"<gt not found>\"], \"extra\": [\"<proposed not in gt>\"]}.\n\nGROUND TRUTH:\n[\"Crazy Arms\", \"Drown\", \"Early Morning Rain\", \"Even When I'm Blue\", \"God Is Here Tonight\", \"I Was Too Blind\", \"Jackpot\", \"Juke Joint Jumpin'\", \"Little Drops of My Heart\", \"Lost Highway\", \"Love's Gonna Live Here\", \"Miles and Miles of Texas\", \"Rattle Trap\", \"Rock This Town\", \"She's Crying\", \"Slow\", \"Stranger Things\", \"Sunset BLVD\", \"Texas In 1880\", \"Ways to Be Wicked\"]\n\nPROPOSED:\n[\"Buck Owens and Love's Gonna Live Here\", \"1980s Music Favorites\", \"Tribute to Joe Ely\", \"Lost Highway by Jason and the Scorchers\", \"Bass Influence\", \"Musical heritage of Reckless Kelly members\", \"Austin Compilation CD\", \"Austin Roots Music\", \"Austin and The Derailers\", \"Rockabilly Revival\", \"Western Swing Influence\", \"1986 in Country Music and Foster and Lloyd\"]",
+ "prompt_version": "v1",
+ "purpose": "align",
+ "response": {
+  "model": "gpt-4o",
+  "text": "{\n    \"matches\": [\n        {\"shipped\": \"Love's Gonna Live Here\", \"proposed\": \"Buck Owens and Love's Gonna Live Here\"},\n        {\"shipped\": \"Lost Highway\", \"proposed\": \"Lost Highway by Jason and the Scorchers\"}\n    ],\n    \"missed\": [\n        \"Crazy Arms\",\n        \"Drown\",\n        \"Early Morning Rain\",\n        \"Even When I'm Blue\",\n        \"God Is Here Tonight\",\n        \"I Was Too Blind\",\n        \"Jackpot\",\n        \"Juke Joint Jumpin'\",\n        \"Little Drops of My Heart\",\n        \"Miles and Miles of Texas\",\n        \"Rattle Trap\",\n        \"Rock This Town\",\n        \"She's Crying\",\n        \"Slow\",\n        \"Stranger Things\",\n        \"Sunset BLVD\",\n        \"Texas In 1880\",\n        \"Ways to Be Wicked\"\n    ],\n    \"extra\": [\n        \"1980s Music Favorites\",\n        \"Tribute to Joe Ely\",\n        \"Bass Influence\",\n        \"Musical heritage of Reckless Kelly members\",\n        \"Austin Compilation CD\",\n        \"Austin Roots Music\",\n        \"Austin and The Derailers\",\n        \"Rockabilly Revival\",\n        \"Western Swing Influence\",\n        \"1986 in Country Music and Foster and Lloyd\"\n    ]\n}",
+  "usage": {
+   "completion_tokens": 270,
+   "completion_tokens_details": {
+    "accepted_prediction_tokens": 0,
+    "audio_tokens": 0,
+    "reasoning_tokens": 0,
+    "rejected_prediction_tokens": 0
+   },
+   "prompt_tokens": 304,
+   "prompt_tokens_details": {
+    "audio_tokens": 0,
+    "cached_tokens": 0
+   },
+   "total_tokens": 574
+  }
+ },
+ "window_params": {
+  "step": 110,
+  "window": 130
+ }
+}

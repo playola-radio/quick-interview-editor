@@ -1,0 +1,30 @@
+{
+ "model": "gpt-4o",
+ "product_spec_version": "v1",
+ "prompt": "Two lists describe topic clips from the same recording. GROUND TRUTH is what was actually shipped; PROPOSED is what a model suggested. Match them semantically (labels differ in wording). Return STRICT JSON: {\"matches\": [{\"shipped\": \"<gt>\", \"proposed\": \"<prop or null>\"}], \"missed\": [\"<gt not found>\"], \"extra\": [\"<proposed not in gt>\"]}.\n\nGROUND TRUTH:\n[\"Crazy Arms\", \"Drown\", \"Early Morning Rain\", \"Even When I'm Blue\", \"God Is Here Tonight\", \"I Was Too Blind\", \"Jackpot\", \"Juke Joint Jumpin'\", \"Little Drops of My Heart\", \"Lost Highway\", \"Love's Gonna Live Here\", \"Miles and Miles of Texas\", \"Rattle Trap\", \"Rock This Town\", \"She's Crying\", \"Slow\", \"Stranger Things\", \"Sunset BLVD\", \"Texas In 1880\", \"Ways to Be Wicked\"]\n\nPROPOSED:\n[\"Love's Gonna Live Here\", \"Ways to Be Wicked\", \"Early Morning Rain\", \"Lost Highway\", \"Slow\", \"I Was Too Blind\", \"Sunset Boulevard\", \"Juke Joint Jumpin'\", \"Jackpot\", \"Rock This Town\", \"Miles and Miles of Texas\", \"Texas in 1880\"]",
+ "prompt_version": "v1",
+ "purpose": "align",
+ "response": {
+  "model": "gpt-4o",
+  "text": "{\n    \"matches\": [\n        {\"shipped\": \"Early Morning Rain\", \"proposed\": \"Early Morning Rain\"},\n        {\"shipped\": \"I Was Too Blind\", \"proposed\": \"I Was Too Blind\"},\n        {\"shipped\": \"Jackpot\", \"proposed\": \"Jackpot\"},\n        {\"shipped\": \"Juke Joint Jumpin'\", \"proposed\": \"Juke Joint Jumpin'\"},\n        {\"shipped\": \"Lost Highway\", \"proposed\": \"Lost Highway\"},\n        {\"shipped\": \"Love's Gonna Live Here\", \"proposed\": \"Love's Gonna Live Here\"},\n        {\"shipped\": \"Miles and Miles of Texas\", \"proposed\": \"Miles and Miles of Texas\"},\n        {\"shipped\": \"Rock This Town\", \"proposed\": \"Rock This Town\"},\n        {\"shipped\": \"Slow\", \"proposed\": \"Slow\"},\n        {\"shipped\": \"Sunset BLVD\", \"proposed\": \"Sunset Boulevard\"},\n        {\"shipped\": \"Texas In 1880\", \"proposed\": \"Texas in 1880\"},\n        {\"shipped\": \"Ways to Be Wicked\", \"proposed\": \"Ways to Be Wicked\"}\n    ],\n    \"missed\": [\n        \"Crazy Arms\",\n        \"Drown\",\n        \"Even When I'm Blue\",\n        \"God Is Here Tonight\",\n        \"Little Drops of My Heart\",\n        \"Rattle Trap\",\n        \"She's Crying\",\n        \"Stranger Things\"\n    ],\n    \"extra\": []\n}",
+  "usage": {
+   "completion_tokens": 316,
+   "completion_tokens_details": {
+    "accepted_prediction_tokens": 0,
+    "audio_tokens": 0,
+    "reasoning_tokens": 0,
+    "rejected_prediction_tokens": 0
+   },
+   "prompt_tokens": 281,
+   "prompt_tokens_details": {
+    "audio_tokens": 0,
+    "cached_tokens": 0
+   },
+   "total_tokens": 597
+  }
+ },
+ "window_params": {
+  "step": 110,
+  "window": 130
+ }
+}
