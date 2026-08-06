@@ -1,0 +1,30 @@
+{
+ "model": "gpt-4o",
+ "product_spec_version": "v1",
+ "prompt": "Partition this slice of an interview transcript into CONTIGUOUS topical paragraphs that cover EVERY sentence (no gaps, no overlaps). A paragraph is a run of sentences on one subject. Return STRICT JSON: {\"paragraphs\": [{\"start\": <global idx>, \"end\": <global idx incl>, \"label\": \"<short topic>\"}]} spanning exactly 220..264.\n\n220: And one video on CMT that I can remember and I saw it and like\n221: My guitar player and I at the time had this really crappy job working at a poultry hatchery handling eggs and day-old baby chicks.\n222: Dirty work.\n223: But like the next day, he's like, man, have you heard this Gattis guy?\n224: I'm like, yeah, I saw this.\n225: It's amazing.\n226: And it's like, oh, this guy's an Austin guy.\n227: I found out later, you know, and he became my friend.\n228: Gave me a real shot in the arm one time at a session when I was needing it.\n229: You know, I mean, I know we're not supposed to seek validation, but\n230: you know, when a player you love, you know, I can only guess and I hate to make assumptions, but if Rodney Crowell goes, great baseline, Rachel, I'm like, you know, the, the tingly's come on, you know, and, and Gattis kind of did that for me at a time when I really needed it.\n231: And, and of course that, what was a big city blues album, I'm guessing\n232: I'm guessing you'll hear something from that from Cody or Willie, and I would have gladly chosen a lot of things off of that, but this was a song that got me into him.\n233: And I think he thought it was cool, because I'm like, I think I started playing the riff on bass, and he's like, how the fuck do you know that, man?\n234: I'm like, CMT, actually.\n235: Okay.\n236: Um, what else do I do here?\n237: I don't, some of this, I don't know what to say again.\n238: Um, Oh, geez.\n239: Okay.\n240: Um, I think this is the last or latest.\n241: Single.\n242: Okay.\n243: I've got to think how to word this.\n244: Over the years, Reckless Kelly was lucky enough to work with a true Texas icon, more than a legend.\n245: And this man was the late great Joe Ely.\n246: He was a hero.\n247: He was a friend and sharing the stage with him was unbelievable.\n248: Um,\n249: Today, what we've got for you is the last single Joe released before his passing.\n250: This is Early Morning Rain.\n251: OK. Oh, one more.\n252: OK, you know what?\n253: I'll pitch one here because, yeah, I could\n254: do more and I can do more if you ever need me to and I'll learn the process.\n255: Where did I put this?\n256: Okay, what is this called?\n257: Trying to find an album name.\n258: Unbeknownst to some of our fans, Willie and Cody Braun are not the only members of Reckless Kelly to come from a musical family.\n259: My esteemed colleague, drummer Jay Naz, also comes from a musical background.\n260: In fact, his father, Thomas Ellsworth Naziola, better known here as Tommy Ellsworth, is a member of the Rockabilly Hall of Fame.\n261: Here's some hot new wax from the 1950s that has finally come out on CD.\n262: You need to check this out.\n263: This song helped get my friend Tom into the Rockabilly Hall of Fame.\n264: This is I Was Too Blind by Tommy Ellsworth and his Rocking Jesters.",
+ "prompt_version": "v1",
+ "purpose": "partition:220",
+ "response": {
+  "model": "gpt-4o",
+  "text": "{\"paragraphs\": [{\"start\": 220, \"end\": 234, \"label\": \"Discovery of Gattis and musical influence\"}, {\"start\": 235, \"end\": 243, \"label\": \"Uncertainty and preparation\"}, {\"start\": 244, \"end\": 250, \"label\": \"Tribute to Joe Ely\"}, {\"start\": 251, \"end\": 257, \"label\": \"Offering more contributions\"}, {\"start\": 258, \"end\": 264, \"label\": \"Musical heritage of Reckless Kelly members\"}]}",
+  "usage": {
+   "completion_tokens": 117,
+   "completion_tokens_details": {
+    "accepted_prediction_tokens": 0,
+    "audio_tokens": 0,
+    "reasoning_tokens": 0,
+    "rejected_prediction_tokens": 0
+   },
+   "prompt_tokens": 821,
+   "prompt_tokens_details": {
+    "audio_tokens": 0,
+    "cached_tokens": 0
+   },
+   "total_tokens": 938
+  }
+ },
+ "window_params": {
+  "step": 110,
+  "window": 130
+ }
+}

@@ -1,0 +1,30 @@
+{
+ "model": "gpt-4o",
+ "product_spec_version": "v1",
+ "prompt": "Partition this slice of an interview transcript into CONTIGUOUS topical paragraphs that cover EVERY sentence (no gaps, no overlaps). A paragraph is a run of sentences on one subject. Return STRICT JSON: {\"paragraphs\": [{\"start\": <global idx>, \"end\": <global idx incl>, \"label\": \"<short topic>\"}]} spanning exactly 440..464.\n\n440: I've got this Radney Foster curse that not only every time he played someplace in Austin, not only did I have a gig, I had a gig that sucked.\n441: It's like, Hey, let's go play.\n442: We got four hours at Earl's knife and gun club playing for the meth heads.\n443: And I'm missing Randy Foster.\n444: Once again, you know, finally one time finally got to meet the guy, see him do a,\n445: It was just him and my buddy, Charlie Richards.\n446: You know, Charlie, good guitar player, great guy, good friend.\n447: It was just them up in Idaho playing that Braun Brothers reunion.\n448: I'm like, I finally get to see a Rodney Foster show and my buddies on it, which was cool.\n449: But, you know, he had a lot of hit bands with hit people.\n450: And I always wanted to see that, you know, whether it be my friends or not, I'm like, he's going to have a listers.\n451: He's going to have, he's got hit people on his records.\n452: He's going to have hip road people, you know, but just have managed to avoid it.\n453: Someday I'll get to see like a full band set of Radney's and, and maybe have a real conversation with him.\n454: You know, I just, I'm like, Hey man,\n455: Thanks for inspiring me since 1986.\n456: He's like, oh, okay.\n457: You're a long timer.\n458: Nice.\n459: Yeah.\n460: I played with him for a little bit.\n461: Very cool.\n462: We moved here after.\n463: Very hip.\n464: Yeah, when my kids were like, when my first one was.",
+ "prompt_version": "v1",
+ "purpose": "partition:440",
+ "response": {
+  "model": "gpt-4o",
+  "text": "{\"paragraphs\": [{\"start\": 440, \"end\": 443, \"label\": \"Missing Radney Foster shows\"}, {\"start\": 444, \"end\": 448, \"label\": \"Finally meeting Radney Foster\"}, {\"start\": 449, \"end\": 453, \"label\": \"Desire to see full band set\"}, {\"start\": 454, \"end\": 464, \"label\": \"Conversation with Radney Foster\"}]}",
+  "usage": {
+   "completion_tokens": 95,
+   "completion_tokens_details": {
+    "accepted_prediction_tokens": 0,
+    "audio_tokens": 0,
+    "reasoning_tokens": 0,
+    "rejected_prediction_tokens": 0
+   },
+   "prompt_tokens": 454,
+   "prompt_tokens_details": {
+    "audio_tokens": 0,
+    "cached_tokens": 0
+   },
+   "total_tokens": 549
+  }
+ },
+ "window_params": {
+  "step": 110,
+  "window": 130
+ }
+}

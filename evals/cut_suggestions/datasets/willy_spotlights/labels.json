@@ -1,0 +1,25 @@
+{
+  "artist": "Willy Braun",
+  "band": "Reckless Kelly",
+  "source": "willy_spotlights",
+  "transcript": "transcript.json",
+  "duration_minutes": 45,
+  "notes": "Ground-truth topics from the shipped-product filenames (mastered spotlights, 'Willy Braun - <topic> (N).m4a'). Raw audio is NOT committed. IMPORTANT: 'Willy 1.m4a' is only part 1 of a 6-part interview, so some shipped topics may not appear in this file; see coverage check. Excludes 'Spotlight 5 - Cody Braun - Working With Willy' (that spotlight's speaker is Cody Braun, not Willy Braun).",
+  "spotlights": [
+    "Family Holidays",
+    "Being An Introvert",
+    "On Our Own Terms",
+    "Becoming The Singer",
+    "Being Good at Entertaining",
+    "Friendship Dynamics",
+    "Scaling Back On Touring",
+    "A Day in the Life",
+    "Record Concepts",
+    "Bob Dylan and Writing Hits",
+    "New Music",
+    "Producing the Records",
+    "Thoughts on Streaming",
+    "Favorite Songwriters"
+  ],
+  "intros": []
+}
