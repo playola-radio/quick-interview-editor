@@ -183,8 +183,15 @@ def merge_adjacent_same_label(
                 "song": song,
             }
             merged = build_candidate(sentences, raw, specs, sample_rate)
-            merged.warnings.append(f"merged {j - i + 1} adjacent same-label fragments")
-            out.append(merged)
+            spec = specs.get(first.product_type)
+            if spec is not None and merged.duration_sec > spec.hard_max_sec:
+                # An over-long merge would be dropped by enforce_duration_window,
+                # taking the whole story with it; keep the fragments instead so
+                # each individually-valid piece can survive on its own.
+                out.extend(ordered[i : j + 1])
+            else:
+                merged.warnings.append(f"merged {j - i + 1} adjacent same-label fragments")
+                out.append(merged)
         i = j + 1
     return out
 

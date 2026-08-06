@@ -197,6 +197,29 @@ def test_merge_leaves_different_types_labels_and_distant_fragments_alone():
     assert len(out) == 3
 
 
+def test_merge_stops_at_interleaved_other_type():
+    # spotlight, intro, spotlight in adjacent order: the intro breaks the run so
+    # the two spotlight fragments stay separate (no cross-type grouping).
+    sents = _sents(["s"] * 20, sec_per=10.0)
+    a = build_candidate(sents, _labelled(0, 2, "X", "spotlight"), DEFAULT_SPECS, SR)
+    b = build_candidate(sents, _labelled(3, 5, "X", "intro"), DEFAULT_SPECS, SR)
+    c = build_candidate(sents, _labelled(6, 8, "X", "spotlight"), DEFAULT_SPECS, SR)
+    out = merge_adjacent_same_label([a, b, c], sents, DEFAULT_SPECS, SR)
+    assert len(out) == 3
+
+
+def test_merge_keeps_fragments_when_merged_span_exceeds_hard_max():
+    # Two same-label spotlight fragments that are each individually acceptable but
+    # whose merge exceeds hard_max (240s) must stay separate, so enforcement can
+    # keep the valid pieces instead of dropping the whole over-long merge.
+    sents = _sents(["s"] * 60, sec_per=10.0)
+    a = build_candidate(sents, _labelled(0, 11, "Long Story"), DEFAULT_SPECS, SR)  # 120s
+    b = build_candidate(sents, _labelled(12, 25, "Long Story"), DEFAULT_SPECS, SR)  # 140s -> merged 260s
+    out = merge_adjacent_same_label([a, b], sents, DEFAULT_SPECS, SR)
+    assert len(out) == 2  # not merged; both survive enforcement (<= hard_max)
+    assert not any("merged" in w for c in out for w in c.warnings)
+
+
 # --- ranking ---------------------------------------------------------------
 def test_rank_prefers_target_window_and_assigns_1_based_rank():
     sents = _sents(["s"] * 400)
