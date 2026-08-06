@@ -14,7 +14,12 @@ import json
 import os
 
 from evals.cut_suggestions.aligner import rule_align
-from evals.cut_suggestions.runner import DEFAULT_CACHE_DIR, DEFAULT_DATASET, run_eval
+from evals.cut_suggestions.runner import (
+    DEFAULT_CACHE_DIR,
+    DEFAULT_DATASET,
+    main,
+    run_eval,
+)
 
 _EVAL_DIR = os.path.dirname(DEFAULT_CACHE_DIR)
 _BASELINE = os.path.join(_EVAL_DIR, "baseline.json")
@@ -34,6 +39,21 @@ def test_cached_joe_miller_reproduces_baseline():
     assert spot["fragment_rate"] == 0.0  # acceptance: no fragments
     assert spot["recall"]["matched"] == 8  # ~8/11 shipped spotlights recalled
     assert spot["n_candidates"] >= 12
+
+
+def test_cached_mode_default_model_reproduces_without_cache_miss():
+    # The documented `--mode cached` command must work with NO --model flag: the
+    # eval defaults to the baseline model (gpt-4o), not config.DEFAULT_MODEL
+    # (claude-sonnet-5, which has no committed cache).
+    report = run_eval(DEFAULT_DATASET, mode="cached")  # no model kwarg
+    assert report.model == "gpt-4o"
+    assert report.per_product["spotlight"]["recall"]["matched"] == 8
+
+
+def test_cli_cached_no_model_flag_runs_offline(capsys):
+    main(["--mode", "cached"])  # must not raise CacheMiss
+    out = capsys.readouterr().out
+    assert "model=gpt-4o" in out
 
 
 def test_cached_joe_intros_scores_song_recall():

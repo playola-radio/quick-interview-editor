@@ -19,7 +19,6 @@ from dataclasses import dataclass, field
 
 from cut_suggester.cache import CachingLLMClient
 from cut_suggester.config import (
-    DEFAULT_MODEL,
     DEFAULT_SAMPLE_RATE,
     PRODUCT_SPEC_VERSION,
     PROMPT_VERSION,
@@ -44,6 +43,12 @@ from .metrics import (
 _HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_DATASET = os.path.join(_HERE, "datasets", "joe_miller")
 DEFAULT_CACHE_DIR = os.path.join(_HERE, "cache")
+
+# The eval defaults to the model the committed cache/baseline were produced with,
+# so `--mode cached` reproduces offline with no `--model` flag. This is distinct
+# from cut_suggester.config.DEFAULT_MODEL (claude-sonnet-5), the production
+# default; the eval baseline is pinned to whatever key was present (gpt-4o).
+EVAL_DEFAULT_MODEL = "gpt-4o"
 
 _LABEL_KEY = {ProductType.SPOTLIGHT: "spotlights", ProductType.INTRO: "intros"}
 
@@ -88,7 +93,7 @@ def run_eval(
     dataset_dir: str = DEFAULT_DATASET,
     *,
     mode: str = "cached",
-    model: str = DEFAULT_MODEL,
+    model: str = EVAL_DEFAULT_MODEL,
     llm=None,
     aligner=None,
     cache_dir: str = DEFAULT_CACHE_DIR,
@@ -168,7 +173,7 @@ def format_report(report: EvalReport) -> str:
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Cut-suggestion eval")
     ap.add_argument("--mode", choices=["cached", "live"], default="cached")
-    ap.add_argument("--model", default=DEFAULT_MODEL)
+    ap.add_argument("--model", default=EVAL_DEFAULT_MODEL)
     ap.add_argument("--dataset", default=DEFAULT_DATASET)
     ap.add_argument("--cache-dir", default=DEFAULT_CACHE_DIR)
     ap.add_argument("--json", action="store_true", help="print the full report as JSON")

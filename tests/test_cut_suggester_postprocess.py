@@ -127,6 +127,43 @@ def test_dedupe_keeps_distinct_same_type_stories_sharing_a_few_sentences():
     assert len(kept) == 2
 
 
+def test_dedupe_collapses_transitive_overlap_chain_to_longest():
+    # A~B and B~C each overlap >=50%, and the longest span (c) duplicates both.
+    # A replacement must be re-checked against ALL retained clips: the old early
+    # `break` could leave a residual duplicate. The cluster collapses to the
+    # single longest span with no residual overlaps.
+    sents = _sents(["s"] * 120)
+    a = build_candidate(sents, _clip(0, 60), DEFAULT_SPECS, SR)   # span 61
+    b = build_candidate(sents, _clip(30, 90), DEFAULT_SPECS, SR)  # span 61, dupes a
+    c = build_candidate(sents, _clip(0, 98), DEFAULT_SPECS, SR)   # span 99, dupes a and b
+    kept = dedupe_overlapping([a, b, c])
+    assert len(kept) == 1
+    assert (kept[0].start_index, kept[0].end_index) == (0, 98)  # the longest survives
+
+
+def test_dedupe_leaves_no_residual_overlap_when_longest_replaces_two():
+    # Three same-start-cluster candidates: the longest must absorb both others so
+    # no two retained same-type candidates overlap >=50%.
+    sents = _sents(["s"] * 120)
+    cands = [
+        build_candidate(sents, _clip(0, 40), DEFAULT_SPECS, SR),   # span 41
+        build_candidate(sents, _clip(0, 100), DEFAULT_SPECS, SR),  # span 101 (longest)
+        build_candidate(sents, _clip(20, 70), DEFAULT_SPECS, SR),  # span 51
+    ]
+    kept = dedupe_overlapping(cands)
+    for i in range(len(kept)):
+        for j in range(i + 1, len(kept)):
+            lo = max(kept[i].start_index, kept[j].start_index)
+            hi = min(kept[i].end_index, kept[j].end_index)
+            overlap = max(0, hi - lo + 1)
+            shorter = min(
+                kept[i].end_index - kept[i].start_index + 1,
+                kept[j].end_index - kept[j].start_index + 1,
+            )
+            assert overlap / shorter < 0.5  # no residual duplicate pair
+    assert (kept[0].start_index, kept[0].end_index) == (0, 100)
+
+
 def test_dedupe_keeps_disjoint_candidates():
     sents = _sents(["s"] * 100)
     a = build_candidate(sents, _clip(0, 40), DEFAULT_SPECS, SR)

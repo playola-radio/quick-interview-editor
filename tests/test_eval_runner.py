@@ -6,7 +6,7 @@ import pytest
 
 from cut_suggester.cache import CacheMiss
 from cut_suggester.llm import LLMResponse
-from evals.cut_suggestions.aligner import rule_align
+from evals.cut_suggestions.aligner import LLMAligner, rule_align
 from evals.cut_suggestions.runner import run_eval
 
 
@@ -56,3 +56,33 @@ def test_cached_mode_with_empty_cache_raises_no_network(tmp_path):
     empty_cache.mkdir()
     with pytest.raises(CacheMiss):
         run_eval(str(tmp_path), mode="cached", cache_dir=str(empty_cache), aligner=rule_align)
+
+
+class _AlignLLM:
+    def __init__(self, text):
+        self.text = text
+
+    def complete(self, prompt, *, purpose=""):
+        return LLMResponse(text=self.text)
+
+
+def test_llm_aligner_validates_one_to_one_and_derives_missed_extra():
+    # The LLM reuses a proposed label, invents one not in the input, and reports
+    # bogus missed/extra. The aligner must trust only a validated one-to-one map.
+    proposed = ["Song A", "Song B"]
+    shipped = ["Ship A", "Ship B", "Ship C"]
+    raw = json.dumps({
+        "matches": [
+            {"shipped": "Ship A", "proposed": "Song A"},   # valid
+            {"shipped": "Ship B", "proposed": "Song A"},   # reused -> rejected
+            {"shipped": "Ship C", "proposed": "Ghost"},    # not in proposed -> rejected
+        ],
+        "missed": [],            # LLM's own fields are not trusted
+        "extra": ["everything"],
+    })
+    res = LLMAligner(_AlignLLM(raw)).align(proposed, shipped)
+
+    matched = [m for m in res["matches"] if m["proposed"]]
+    assert matched == [{"shipped": "Ship A", "proposed": "Song A"}]
+    assert res["missed"] == ["Ship B", "Ship C"]
+    assert res["extra"] == ["Song B"]  # never validly claimed

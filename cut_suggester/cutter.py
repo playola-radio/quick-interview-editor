@@ -35,7 +35,10 @@ class CutSuggestResult:
 
 def parse_partition_response(text: str, a: int, b: int) -> list[TopicPartition]:
     """Parse a window's paragraph JSON, clamping spans into [a, b)."""
-    data = json.loads(text)
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        return []  # malformed provider/cache output -> no partitions
     paras = data.get("paragraphs") if isinstance(data, dict) else None
     if not isinstance(paras, list):
         return []
@@ -55,7 +58,10 @@ def parse_partition_response(text: str, a: int, b: int) -> list[TopicPartition]:
 
 
 def parse_clip_response(text: str) -> list[dict]:
-    data = json.loads(text)
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        return []  # malformed provider/cache output -> no clips
     clips = data.get("clips") if isinstance(data, dict) else None
     if not isinstance(clips, list):
         return []

@@ -49,6 +49,17 @@ def test_parse_clip_response_returns_raw_dicts():
     assert clips == [{"type": "spotlight", "start": 0, "end": 2, "label": "A"}]
 
 
+def test_parse_partition_response_returns_empty_on_malformed_json():
+    # Truncated/garbled provider or cache output must not raise.
+    assert parse_partition_response("not json {", a=0, b=5) == []
+    assert parse_partition_response('{"paragraphs": [ ', a=0, b=5) == []
+
+
+def test_parse_clip_response_returns_empty_on_malformed_json():
+    assert parse_clip_response("}{ broken") == []
+    assert parse_clip_response('{"clips": [') == []
+
+
 # --- end-to-end ------------------------------------------------------------
 def test_suggest_cuts_produces_ranked_candidates():
     sents = _sents(6, sec_per=20.0)  # 3-sentence clips = 60s (in the target window)

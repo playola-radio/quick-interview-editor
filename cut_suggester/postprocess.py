@@ -153,19 +153,26 @@ def dedupe_overlapping(
     ordered = sorted(candidates, key=lambda c: (c.start_index, c.end_index))
     kept: list[CutCandidate] = []
     for c in ordered:
-        merged = False
-        for i, k in enumerate(kept):
+        absorbed = False
+        i = 0
+        while i < len(kept):
+            k = kept[i]
             if k.product_type is not c.product_type:
+                i += 1
                 continue
             overlap = _overlap_sentences(c, k)
-            if overlap == 0:
-                continue
-            if overlap / min(_span_len(c), _span_len(k)) >= min_overlap_ratio:
+            if overlap and overlap / min(_span_len(c), _span_len(k)) >= min_overlap_ratio:
                 if _span_len(c) > _span_len(k):
-                    kept[i] = c
-                merged = True
+                    # c is the longer span: k is a duplicate of c. Drop k and keep
+                    # scanning — c may duplicate further retained clips too, so we
+                    # must not stop at the first match (that left duplicates).
+                    kept.pop(i)
+                    continue
+                # k is at least as long: c is absorbed by k and is discarded.
+                absorbed = True
                 break
-        if not merged:
+            i += 1
+        if not absorbed:
             kept.append(c)
     return kept
 

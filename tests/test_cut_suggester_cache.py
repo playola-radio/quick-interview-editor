@@ -1,5 +1,7 @@
 """Disk cache for LLM calls: deterministic keys, replay, no-network guarantee."""
 
+import threading
+
 import pytest
 
 from cut_suggester.cache import CacheMiss, CachingLLMClient
@@ -45,6 +47,41 @@ def test_live_mode_writes_through_and_replays_without_network(tmp_path):
     assert r2.text == "answer:1"
     assert r2.cached is True
     assert len(inner.calls) == 1  # inner was not called again
+
+
+def test_write_leaves_no_temp_file_behind(tmp_path):
+    live = _client(tmp_path, inner=_FakeLLM())
+    live.complete("prompt A", purpose="partition")
+    assert not any(f.name.endswith(".tmp") for f in tmp_path.iterdir())
+    assert _client(tmp_path, inner=None).complete("prompt A").text == "answer:1"
+
+
+def test_concurrent_writers_same_key_do_not_corrupt(tmp_path):
+    # Many writers racing on the same key must not FileNotFoundError or leave a
+    # torn/half-written cache file — the old shared "<path>.tmp" bug. Each writer
+    # now uses a unique temp file and atomically os.replace()s onto the key.
+    barrier = threading.Barrier(8)
+    errors: list[Exception] = []
+
+    def worker():
+        client = _client(tmp_path, inner=_FakeLLM())
+        try:
+            barrier.wait()
+            client.complete("hot key", purpose="partition")
+        except Exception as e:  # noqa: BLE001
+            errors.append(e)
+
+    threads = [threading.Thread(target=worker) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert errors == []
+    replay = _client(tmp_path, inner=None)
+    assert replay._has("hot key")  # a valid entry landed
+    assert replay.complete("hot key").text == "answer:1"  # readable, not torn
+    assert not any(f.name.endswith(".tmp") for f in tmp_path.iterdir())
 
 
 def test_key_includes_model_and_pins_and_prompt(tmp_path):

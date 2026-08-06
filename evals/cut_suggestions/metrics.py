@@ -7,7 +7,7 @@ pure given an aligner; the aligner may or may not hit the network.
 
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
 
 from cut_suggester.models import (
     CutCandidate,

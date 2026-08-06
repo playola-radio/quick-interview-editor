@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import tempfile
 
 from .llm import LLMClient, LLMResponse
 
@@ -80,8 +81,16 @@ class CachingLLMClient:
             "prompt": prompt,
             "response": {"text": resp.text, "usage": resp.usage, "model": resp.model},
         }
-        tmp = path + ".tmp"
-        with open(tmp, "w") as f:
-            json.dump(entry, f, indent=1, sort_keys=True)
-        os.replace(tmp, path)
+        # Unique temp file per writer: a shared "<path>.tmp" lets concurrent
+        # writers of the same key clobber each other's temp (FileNotFoundError on
+        # os.replace, or a torn read). mkstemp gives each writer its own file;
+        # os.replace onto the final path is atomic.
+        fd, tmp = tempfile.mkstemp(dir=self.cache_dir, suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w") as f:
+                json.dump(entry, f, indent=1, sort_keys=True)
+            os.replace(tmp, path)
+        finally:
+            if os.path.exists(tmp):
+                os.remove(tmp)
         return resp
