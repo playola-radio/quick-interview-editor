@@ -73,7 +73,13 @@ class LLMAligner:
 
     def align(self, proposed: list[str], shipped: list[str]) -> dict:
         resp = self.llm.complete(alignment_prompt(proposed, shipped), purpose="align")
-        return _validate_alignment(json.loads(resp.text), proposed, shipped)
+        try:
+            raw = json.loads(resp.text)
+        except (json.JSONDecodeError, TypeError):
+            # Malformed provider output or a damaged cached response must not abort
+            # the eval; fall back to the deterministic token-overlap aligner.
+            return rule_align(proposed, shipped)
+        return _validate_alignment(raw, proposed, shipped)
 
     def __call__(self, proposed: list[str], shipped: list[str]) -> dict:
         return self.align(proposed, shipped)

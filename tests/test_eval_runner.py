@@ -99,3 +99,12 @@ def test_llm_aligner_validates_one_to_one_and_derives_missed_extra():
     assert matched == [{"shipped": "Ship A", "proposed": "Song A"}]
     assert res["missed"] == ["Ship B", "Ship C"]
     assert res["extra"] == ["Song B"]  # never validly claimed
+
+
+def test_llm_aligner_falls_back_to_rules_on_malformed_json():
+    # A damaged cached response or garbled provider output must degrade to the
+    # deterministic token-overlap aligner, not raise and abort the eval.
+    res = LLMAligner(_AlignLLM("not json {")).align(["No Depression story"], ["No Depression"])
+    matched = [m for m in res["matches"] if m["proposed"]]
+    assert len(matched) == 1  # token overlap on "depression" still matches
+    assert res["missed"] == []
