@@ -9,6 +9,7 @@ from cut_suggester.postprocess import (
     build_candidate,
     dedupe_overlapping,
     enforce_duration_window,
+    merge_adjacent_same_label,
     rank_candidates,
     validate_clip,
     verify_song,
@@ -172,6 +173,30 @@ def test_dedupe_keeps_disjoint_candidates():
     assert len(kept) == 2
 
 
+# --- minimal merge of over-split same-label fragments ----------------------
+def test_merge_adjacent_same_label_fragments_into_one_clip():
+    sents = _sents(["s"] * 20, sec_per=10.0)
+    c1 = build_candidate(sents, _labelled(0, 2, "Radney Foster"), DEFAULT_SPECS, SR)
+    c2 = build_candidate(sents, _labelled(3, 5, "radney  foster"), DEFAULT_SPECS, SR)  # same normalized
+    c3 = build_candidate(sents, _labelled(6, 8, "Radney Foster"), DEFAULT_SPECS, SR)
+    other = build_candidate(sents, _labelled(10, 13, "Different Story"), DEFAULT_SPECS, SR)
+    merged = merge_adjacent_same_label([c1, c2, c3, other], sents, DEFAULT_SPECS, SR)
+    assert len(merged) == 2
+    combined = next(m for m in merged if m.label == "Radney Foster")
+    assert (combined.start_index, combined.end_index) == (0, 8)
+    assert combined.word_ids == list(c1.word_ids) + list(c2.word_ids) + list(c3.word_ids)
+    assert any("merged" in w for w in combined.warnings)
+
+
+def test_merge_leaves_different_types_labels_and_distant_fragments_alone():
+    sents = _sents(["s"] * 30, sec_per=10.0)
+    a = build_candidate(sents, _labelled(0, 2, "X", "spotlight"), DEFAULT_SPECS, SR)
+    b = build_candidate(sents, _labelled(3, 5, "X", "intro"), DEFAULT_SPECS, SR)  # different type
+    c = build_candidate(sents, _labelled(20, 22, "X", "spotlight"), DEFAULT_SPECS, SR)  # too far
+    out = merge_adjacent_same_label([a, b, c], sents, DEFAULT_SPECS, SR)
+    assert len(out) == 3
+
+
 # --- ranking ---------------------------------------------------------------
 def test_rank_prefers_target_window_and_assigns_1_based_rank():
     sents = _sents(["s"] * 400)
@@ -194,3 +219,7 @@ def test_verify_song_false_when_title_absent():
 
 def _clip(start, end, ptype="spotlight"):
     return {"type": ptype, "start": start, "end": end, "label": "x"}
+
+
+def _labelled(start, end, label, ptype="spotlight"):
+    return {"type": ptype, "start": start, "end": end, "label": label}

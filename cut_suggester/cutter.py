@@ -18,6 +18,7 @@ from .postprocess import (
     build_candidate,
     dedupe_overlapping,
     enforce_duration_window,
+    merge_adjacent_same_label,
     rank_candidates,
     validate_clip,
 )
@@ -125,6 +126,7 @@ def suggest_cuts(
             continue
         candidates.append(build_candidate(sentences, raw, specs, sample_rate))
 
+    candidates = merge_adjacent_same_label(candidates, sentences, specs, sample_rate)
     candidates, dropped = enforce_duration_window(candidates, specs)
     candidates = dedupe_overlapping(candidates)
     candidates = rank_candidates(candidates, specs)

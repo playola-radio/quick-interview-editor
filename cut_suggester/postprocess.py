@@ -138,6 +138,57 @@ def _span_len(c: CutCandidate) -> int:
     return c.end_index - c.start_index + 1
 
 
+def _norm_label(label: str) -> str:
+    return " ".join(t for t in _norm_tokens(label) if t)
+
+
+def merge_adjacent_same_label(
+    candidates: list[CutCandidate],
+    sentences: list[Sentence],
+    specs: dict[ProductType, ProductSpec],
+    sample_rate: int,
+    max_gap_sentences: int = 2,
+) -> list[CutCandidate]:
+    """Merge runs of adjacent same-type, same-label candidates into one clip.
+
+    Stage 2 sometimes over-splits one story into several fragments that carry the
+    same label (e.g. three "Radney Foster and Musical Aspirations" pieces).
+    `dedupe_overlapping` cannot fold them because they do not overlap, so they
+    inflate candidate count and editor burden. A run of candidates of the same
+    product type whose labels normalize equal and that sit within
+    `max_gap_sentences` of each other is rebuilt as a single spanning candidate.
+    """
+    ordered = sorted(candidates, key=lambda c: (c.start_index, c.end_index))
+    out: list[CutCandidate] = []
+    i = 0
+    while i < len(ordered):
+        j = i
+        while (
+            j + 1 < len(ordered)
+            and ordered[j + 1].product_type is ordered[i].product_type
+            and _norm_label(ordered[j + 1].label) == _norm_label(ordered[i].label)
+            and ordered[j + 1].start_index <= ordered[j].end_index + max_gap_sentences + 1
+        ):
+            j += 1
+        if j == i:
+            out.append(ordered[i])
+        else:
+            first, last = ordered[i], ordered[j]
+            song = next((c.song for c in ordered[i : j + 1] if c.song), None)
+            raw = {
+                "type": first.product_type.value,
+                "start": first.start_index,
+                "end": last.end_index,
+                "label": first.label,
+                "song": song,
+            }
+            merged = build_candidate(sentences, raw, specs, sample_rate)
+            merged.warnings.append(f"merged {j - i + 1} adjacent same-label fragments")
+            out.append(merged)
+        i = j + 1
+    return out
+
+
 def dedupe_overlapping(
     candidates: list[CutCandidate], min_overlap_ratio: float = 0.5
 ) -> list[CutCandidate]:

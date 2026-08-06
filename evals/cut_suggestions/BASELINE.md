@@ -35,10 +35,10 @@ shipped-product labels.
 | **recall@K** (semantic label match) | **8 / 11 = 0.73** |
 | missed | `No Depression`, `No Day Job`, `Buck Owens` |
 | **fragment rate** (<15s) | **0.00** |
-| candidates | 26 |
-| duration-window compliance (40–120s) | 0.46 |
+| candidates | 24 |
+| duration-window compliance (40–120s) | 0.54 |
 | overlap burden (pairs) | 0 |
-| candidates / interview-hour | 36.9 |
+| candidates / interview-hour | 34.1 |
 
 ## `willy_spotlights` — SPOTLIGHT (2nd artist, vs 14 shipped Willy Braun spotlights)
 
@@ -115,12 +115,19 @@ as a SPOTLIGHT-typed clip rather than an intro (see failure modes).
 ## Notes / deviations from the spike
 
 - **Joe Miller recall and fragments reproduce the spike** (8/11, 0 fragments).
-  The `two_stage.py` spike scored 8/11 with 14 clips; this run emits **26**
-  candidates (higher editor burden, `candidates/hour = 36.9`).
+  The `two_stage.py` spike scored 8/11 with 14 clips; this run emits **24**
+  candidates (higher editor burden, `candidates/hour = 34.1`).
+- **Minimal merge of over-split fragments.** Post-processing merges runs of
+  adjacent, same-type, same-label candidates into one clip (the brief's
+  "dedupe/merge across window seams"). On Joe Miller this folds three adjacent
+  "Radney Foster and Musical Aspirations" pieces (438–453) into one in-window 77s
+  clip, dropping the count 26 → 24 and lifting duration compliance 0.46 → 0.54.
+  Merge is conservative — same product type, labels that normalize equal, within
+  2 sentences — so it never combines distinct stories.
 - The candidate count is **not** locked to the spike's 14. Per the plan, 8/11 on
   one artist is enough to kill local embeddings but **not** to lock prompts —
-  prompt tuning to reduce editor burden is validated on the multi-artist paired
-  dataset in PR 5, not overfit to one artist here. The eval reports
+  further prompt tuning to reduce editor burden is validated on the multi-artist
+  paired dataset in PR 5, not overfit to one artist here. The eval reports
   `candidates/hour`, `duration-window compliance`, and `overlap burden` precisely
   so that tuning is measured rather than guessed.
 - **Spotlight generalizes to a 2nd artist** (Willy Braun): clean, in-duration,

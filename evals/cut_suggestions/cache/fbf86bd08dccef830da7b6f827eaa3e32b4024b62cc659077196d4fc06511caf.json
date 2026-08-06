@@ -1,0 +1,30 @@
+{
+ "model": "gpt-4o",
+ "product_spec_version": "v1",
+ "prompt": "Two lists describe topic clips from the same recording. GROUND TRUTH is what was actually shipped; PROPOSED is what a model suggested. Match them semantically (labels differ in wording). Return STRICT JSON: {\"matches\": [{\"shipped\": \"<gt>\", \"proposed\": \"<prop or null>\"}], \"missed\": [\"<gt not found>\"], \"extra\": [\"<proposed not in gt>\"]}.\n\nGROUND TRUTH:\n[\"Day Job\", \"Remembering to be a Bass Player\", \"No Depression\", \"No Day Job\", \"First Bass\", \"Radney Foster Curse\", \"Buck Owens\", \"Dumb Luck\", \"Meeting Reckless Kelly\", \"Starting Out As a Drummer\", \"Joining Reckless Kelly\"]\n\nPROPOSED:\n[\"Early Music Journey\", \"College and Radio\", \"Radio Experience\", \"Early music career and move to Austin\", \"Discovery of Reckless Kelly\", \"Friendship with Mickey and the Motorcars\", \"Challenges with Back Porch Mary\", \"Band merger and road life\", \"Dream Come True\", \"Career Transition\", \"Musical Background and Family Influence\", \"Musical Education and Experience\", \"Radney Foster and Musical Aspirations\", \"Transition to Bass\", \"Honky-tonk band decision\", \"High School Drumming\", \"Wife's Career and Financial Management\", \"Balancing Gigs and Reputation\", \"Conversation with Radney Foster\", \"Austin Music Scene\", \"Joining Reckless Kelly\", \"Music and Personal Life\", \"Music Preferences and Influences\", \"Learning Bass\"]",
+ "prompt_version": "v1",
+ "purpose": "align",
+ "response": {
+  "model": "gpt-4o",
+  "text": "{\n    \"matches\": [\n        {\"shipped\": \"Day Job\", \"proposed\": \"Career Transition\"},\n        {\"shipped\": \"Remembering to be a Bass Player\", \"proposed\": \"Transition to Bass\"},\n        {\"shipped\": \"No Depression\", \"proposed\": null},\n        {\"shipped\": \"No Day Job\", \"proposed\": null},\n        {\"shipped\": \"First Bass\", \"proposed\": \"Learning Bass\"},\n        {\"shipped\": \"Radney Foster Curse\", \"proposed\": \"Radney Foster and Musical Aspirations\"},\n        {\"shipped\": \"Buck Owens\", \"proposed\": null},\n        {\"shipped\": \"Dumb Luck\", \"proposed\": \"Dream Come True\"},\n        {\"shipped\": \"Meeting Reckless Kelly\", \"proposed\": \"Discovery of Reckless Kelly\"},\n        {\"shipped\": \"Starting Out As a Drummer\", \"proposed\": \"High School Drumming\"},\n        {\"shipped\": \"Joining Reckless Kelly\", \"proposed\": \"Joining Reckless Kelly\"}\n    ],\n    \"missed\": [\n        \"No Depression\",\n        \"No Day Job\",\n        \"Buck Owens\"\n    ],\n    \"extra\": [\n        \"Early Music Journey\",\n        \"College and Radio\",\n        \"Radio Experience\",\n        \"Early music career and move to Austin\",\n        \"Friendship with Mickey and the Motorcars\",\n        \"Challenges with Back Porch Mary\",\n        \"Band merger and road life\",\n        \"Musical Background and Family Influence\",\n        \"Musical Education and Experience\",\n        \"Honky-tonk band decision\",\n        \"Wife's Career and Financial Management\",\n        \"Balancing Gigs and Reputation\",\n        \"Conversation with Radney Foster\",\n        \"Austin Music Scene\",\n        \"Music and Personal Life\",\n        \"Music Preferences and Influences\"\n    ]\n}",
+  "usage": {
+   "completion_tokens": 380,
+   "completion_tokens_details": {
+    "accepted_prediction_tokens": 0,
+    "audio_tokens": 0,
+    "reasoning_tokens": 0,
+    "rejected_prediction_tokens": 0
+   },
+   "prompt_tokens": 323,
+   "prompt_tokens_details": {
+    "audio_tokens": 0,
+    "cached_tokens": 0
+   },
+   "total_tokens": 703
+  }
+ },
+ "window_params": {
+  "step": 110,
+  "window": 130
+ }
+}
