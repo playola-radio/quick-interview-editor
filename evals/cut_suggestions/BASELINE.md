@@ -89,10 +89,11 @@ as a SPOTLIGHT-typed clip rather than an intro (see failure modes).
 
 ## Known intro failure modes (documented follow-ups for PR 5)
 
-1. **Durations run long.** Intro clips average 50–75s against a 15–45s target
-   (duration-window compliance 0.25). The cutter emits the whole lead-up
-   paragraph instead of trimming to the final song handoff. Needs a trim-to-
-   handoff step for the intro product.
+1. **Durations run long.** Intro clips average ~52s (range 29.7–74.2s) against a
+   15–45s target, with only 3 of 12 already inside the window (duration-window
+   compliance 0.25). The cutter emits the whole lead-up paragraph instead of
+   trimming to the final song handoff. Needs a trim-to-handoff step for the intro
+   product.
 2. **Intro → spotlight type leakage.** When the subject tells a longer backstory
    before naming the song, the paragraph is sometimes classified as a spotlight
    (e.g. `Drown`), which drops intro recall and mislabels the product. Needs

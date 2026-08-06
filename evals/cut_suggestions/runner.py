@@ -152,9 +152,11 @@ def run_eval(
 def format_report(report: EvalReport) -> str:
     lines = [
         f"Dataset: {report.dataset}   mode={report.mode}   model={report.model}",
-        f"prompt={report.prompt_version}  product_spec={report.product_spec_version}  "
-        f"({report.meta.get('n_partitions')} paragraphs, {report.meta.get('n_raw_clips')} raw clips, "
-        f"{report.meta.get('n_dropped_duration')} dropped, {report.meta.get('n_invalid_clips')} invalid)",
+        (
+            f"prompt={report.prompt_version}  product_spec={report.product_spec_version}  "
+            f"({report.meta.get('n_partitions')} paragraphs, {report.meta.get('n_raw_clips')} raw clips, "
+            f"{report.meta.get('n_dropped_duration')} dropped, {report.meta.get('n_invalid_clips')} invalid)"
+        ),
     ]
     for ptype, m in report.per_product.items():
         lines.append(f"\n[{ptype}]  {m['n_candidates']} candidates")

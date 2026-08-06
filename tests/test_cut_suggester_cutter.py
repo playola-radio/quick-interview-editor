@@ -81,15 +81,17 @@ def test_suggest_cuts_produces_ranked_candidates():
 
 
 def test_suggest_cuts_skips_invalid_clips_and_drops_fragments():
-    sents = _sents(6, sec_per=20.0)
+    sents = _sents(6, sec_per=10.0)  # 1 sentence = 10s < spotlight hard_min (15s)
     partitions = '{"paragraphs": [{"start":0,"end":5,"label":"all"}]}'
     clips = (
         '{"clips": ['
         '{"type":"bumper","start":0,"end":2,"label":"bad type"},'      # invalid -> skipped
-        '{"type":"spotlight","start":0,"end":0,"label":"too short"},'   # 20s... kept
-        '{"type":"spotlight","start":0,"end":3,"label":"good"}]}'       # 80s -> kept
+        '{"type":"spotlight","start":0,"end":0,"label":"too short"},'   # 10s -> fragment, dropped
+        '{"type":"spotlight","start":0,"end":3,"label":"good"}]}'       # 40s -> kept
     )
-    result = suggest_cuts(_sents(6), llm=_FakeLLM(partitions, clips), sample_rate=SR, window=130, step=110)
+    result = suggest_cuts(sents, llm=_FakeLLM(partitions, clips), sample_rate=SR, window=130, step=110)
     labels = {c.label for c in result.candidates}
-    assert "bad type" not in labels
+    dropped = {c.label for c in result.dropped}
+    assert "bad type" not in labels          # invalid clip skipped before build
+    assert "too short" not in labels and "too short" in dropped  # below hard_min -> dropped
     assert "good" in labels

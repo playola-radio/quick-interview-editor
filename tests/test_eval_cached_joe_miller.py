@@ -77,8 +77,20 @@ def test_committed_baseline_matches_cached_runs_for_all_datasets():
     for name, dataset_dir in _DATASETS.items():
         entry = baseline["datasets"][name]
         report = run_eval(dataset_dir, mode="cached", model="gpt-4o")
+        # Compare every reported per-product metric (recall count, duration-window
+        # compliance, fragment rate, overlap burden, candidates/hr) so a cached run
+        # cannot drift any number while the test still passes. The recall
+        # matches/missed/extra breakdown is diagnostic detail, not a metric, so it
+        # is compared by count, not element-by-element.
         for ptype in ("spotlight", "intro"):
-            assert report.per_product[ptype]["n_candidates"] == (
-                entry["per_product"][ptype]["n_candidates"]
-            ), f"{name}/{ptype} n_candidates drifted"
-        assert report.meta["n_raw_clips"] == entry["meta"]["n_raw_clips"], name
+            got, want = report.per_product[ptype], entry["per_product"][ptype]
+            for field in ("n_candidates", "duration_window_compliance", "fragment_rate",
+                          "overlap_burden", "candidates_per_hour"):
+                assert got[field] == want[field], f"{name}/{ptype} {field} drifted"
+            if want["recall"] is None:
+                assert got["recall"] is None, f"{name}/{ptype} recall drifted"
+            else:
+                for field in ("recall", "matched", "shipped"):
+                    assert got["recall"][field] == want["recall"][field], f"{name}/{ptype} recall.{field} drifted"
+        for field in ("n_raw_clips", "n_partitions", "n_dropped_duration", "n_invalid_clips"):
+            assert report.meta[field] == entry["meta"][field], f"{name} meta.{field} drifted"

@@ -123,7 +123,9 @@ Run pyannote (`min=1, max=4`), then in pure Python:
    - 2nd speaker credible iff `total ≥ 10s AND % ≥ 8 AND turns ≥ 2 AND words ≥ 8 AND longest_turn ≥ 2s`.
    - 3rd speaker credible iff `total ≥ 8s AND % ≥ 5 AND turns ≥ 2 AND words ≥ 6`.
    - 4th+ computed but not surfaced as a default UI count (we support up to 3).
-4. `auto_speaker_count` = number of credible speakers. **Bias toward 1 when
+4. `auto_speaker_count` = `min(3, credible_speaker_count)` — the UI supports up
+   to 3, so a credible 4th speaker's stats are retained but the surfaced count is
+   clamped to 3 (emit a `decision_reason` noting the clamp). **Bias toward 1 when
    uncertain.** Rationale: the worst failure is a false `2` on a solo file, which
    destroys the paragraph model; a missed 2nd speaker is one override click to
    recover. Emit `decision_reasons[]` so tests assert on the *why*, not just the
@@ -155,7 +157,11 @@ struct TranscriptParagraph: Identifiable, Equatable {
   trailing punctuation, never cutting mid-sentence. Reuses the inter-word gap
   math already in `RunTogether.swift`.
 - **`SpeakerTurnBuilder`** (effective count 2–3): one paragraph per diarization
-  turn (already normalized), titled with the resolved speaker name.
+  turn, titled with the resolved speaker name. The wire `turns[]` are **raw**
+  (so an override can honestly re-group); the builder first applies the same
+  normalization the analysis used — drop turns `< 700 ms`, merge adjacent
+  same-speaker turns `< 500 ms` — to those raw turns before grouping, so the
+  rendered paragraphs never expose dropped or unmerged turns.
 
 `TranscriptPageModel` exposes `[TranscriptParagraph]` and the view renders it.
 

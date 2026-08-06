@@ -7,7 +7,7 @@ import pytest
 from cut_suggester.cache import CacheMiss
 from cut_suggester.llm import LLMResponse
 from evals.cut_suggestions.aligner import LLMAligner, rule_align
-from evals.cut_suggestions.runner import run_eval
+from evals.cut_suggestions.runner import format_report, run_eval
 
 
 def _write_dataset(tmp_path):
@@ -48,6 +48,19 @@ def test_run_eval_reports_per_product_metrics(tmp_path):
     assert spot["recall"]["recall"] == 1.0
     assert spot["fragment_rate"] == 0.0
     assert "intro" in report.per_product
+
+
+def test_format_report_handles_missing_recall(tmp_path):
+    # Intros produce recall: None in real runs; format_report must render the
+    # None-recall product without raising, and still emit recall@K for spotlight.
+    _write_dataset(tmp_path)
+    report = run_eval(
+        str(tmp_path), llm=_FakeLLM(), aligner=rule_align, sample_rate=1000, window=130, step=110,
+    )
+    assert report.per_product["intro"]["recall"] is None
+    text = format_report(report)
+    assert "[intro]" in text
+    assert "recall@K" in text  # emitted for spotlight only
 
 
 def test_cached_mode_with_empty_cache_raises_no_network(tmp_path):
