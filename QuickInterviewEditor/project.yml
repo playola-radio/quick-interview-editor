@@ -27,6 +27,8 @@ targets:
       - path: QuickInterviewEditor
       - path: Resources/Fixtures/edit-plan.json
         buildPhase: resources
+      - path: Resources/Fixtures/project-state.json
+        buildPhase: resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: fm.playola.QuickInterviewEditor
@@ -50,6 +52,8 @@ targets:
     sources:
       - path: QuickInterviewEditorTests
       - path: Resources/Fixtures/edit-plan.json
+        buildPhase: resources
+      - path: Resources/Fixtures/project-state.json
         buildPhase: resources
     settings:
       base:

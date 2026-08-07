@@ -13,6 +13,52 @@ enum Fixtures {
     return try! EditPlan.decoded(from: url)
   }
 
+  /// The committed project-sidecar fixture: two pending cut suggestions and empty
+  /// reserved speaker fields.
+  static func projectStateData() -> Data {
+    let url = Bundle(for: BundleToken.self)
+      .url(forResource: "project-state", withExtension: "json")!
+    // swiftlint:disable:next force_try
+    return try! Data(contentsOf: url)
+  }
+
+  static func projectState() -> ProjectState {
+    // swiftlint:disable:next force_try
+    try! JSONDecoder().decode(ProjectState.self, from: projectStateData())
+  }
+
+  /// A `CutSuggestion` with sensible defaults; override only what a test cares about.
+  static func cutSuggestion(
+    id: UUID,
+    productType: ProductType = .spotlight,
+    title: String = "A story",
+    song: String? = nil,
+    songVerified: Bool = false,
+    wordIDs: [Word.ID] = [1, 2, 3],
+    startSample: Int = 44100,
+    endSample: Int = 441000,
+    startSec: Double = 1,
+    endSec: Double = 10,
+    durationSec: Double = 9,
+    rank: Int = 0,
+    score: Double = 0.5,
+    status: CutSuggestion.Status = .pending
+  ) -> CutSuggestion {
+    CutSuggestion(
+      id: id, productType: productType, title: title, song: song,
+      songVerified: songVerified, wordIDs: wordIDs,
+      startSample: startSample, endSample: endSample,
+      startSec: startSec, endSec: endSec, durationSec: durationSec,
+      rank: rank, score: score, status: status,
+      provenance: CutSuggestion.Provenance(
+        model: "claude-sonnet-5", promptVersion: "v1", productSpecVersion: "v1",
+        transcriptHash: "t", sourceFingerprint: "fp", diarizationHash: nil))
+  }
+
+  static func uuid(_ index: Int) -> UUID {
+    UUID(uuidString: String(format: "00000000-0000-0000-0000-%012d", index))!
+  }
+
   /// A stand-in canonical audio URL for tests — no file is read (audio I/O is mocked).
   static let canonicalAudioURL = URL(fileURLWithPath: "/tmp/qie-canonical.aiff")
 
