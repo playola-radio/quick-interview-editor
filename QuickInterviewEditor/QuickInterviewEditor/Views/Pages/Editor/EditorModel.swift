@@ -617,7 +617,7 @@ final class EditorModel: ViewModel {
   }
 
   private func displaySnippet(_ text: String) -> String {
-    "“\(middleTruncatedSnippet(text, maxLength: 68))”"
+    displaySliceSnippet(text)
   }
 
   /// Re-derives a slice's word membership, snippet, and warnings for a new sample range once
@@ -638,14 +638,7 @@ final class EditorModel: ViewModel {
   /// Builds a brand-new slice from a fine-tuned sample range, deriving word membership by
   /// midpoint (not the raw transcript selection) so a dragged cut owns the right words.
   private func makeSlice(range: Range<Int>) -> Slice {
-    let ids = wordIDs(overlapping: range, words: editPlan.words)
-    return Slice(
-      id: UUID(), name: "Slice \(nextSliceNumber)", startSample: range.lowerBound,
-      endSample: range.upperBound, wordIDs: ids,
-      snippet: displaySnippet(sliceSnippet(for: ids, words: editPlan.words)),
-      warnings: sliceWarnings(
-        startSample: range.lowerBound, endSample: range.upperBound,
-        durationSamples: editPlan.source.durationSamples, silences: editPlan.silences))
+    buildSlice(id: UUID(), name: "Slice \(nextSliceNumber)", range: range, plan: editPlan)
   }
 
   /// Marks the export as running synchronously (so the buttons disable immediately
@@ -790,48 +783,6 @@ final class EditorModel: ViewModel {
   private func cancelMessage(copied: Int, total: Int) -> String {
     "Export cancelled — \(copied) of \(total) exported."
   }
-}
-
-/// Middle-truncate a transcript snippet to at most `maxLength` characters, always
-/// keeping the first and last words and filling in as many middle words as fit —
-/// e.g. "So a young … think is great" rather than "So a young Hayes Carl…". Short
-/// snippets, and those with fewer than three words, pass through unchanged.
-func middleTruncatedSnippet(_ text: String, maxLength: Int) -> String {
-  let trimmed = text.trimmingCharacters(in: .whitespaces)
-  guard trimmed.count > maxLength else { return trimmed }
-  let words = trimmed.split(separator: " ").map(String.init)
-  guard words.count >= 3 else { return trimmed }
-
-  func rendered(head: Int, tail: Int) -> String {
-    words.prefix(head).joined(separator: " ") + " … "
-      + words.suffix(tail).joined(separator: " ")
-  }
-  // Always show the first and last word, then greedily add words toward the
-  // middle from alternating ends while they still fit the budget.
-  var head = 1
-  var tail = 1
-  var growTail = true
-  // If even the minimal first-word … last-word window overflows (e.g. a single
-  // run-on word or a long URL), fall back to a hard character truncation so the
-  // maxLength guarantee always holds.
-  guard rendered(head: head, tail: tail).count <= maxLength else {
-    return String(trimmed.prefix(max(0, maxLength - 1))) + "…"
-  }
-  while head + tail < words.count {
-    let headFits = rendered(head: head + 1, tail: tail).count <= maxLength
-    let tailFits = rendered(head: head, tail: tail + 1).count <= maxLength
-    if !headFits, !tailFits { break }
-    if growTail, tailFits {
-      tail += 1
-    } else if headFits {
-      head += 1
-    } else {
-      tail += 1
-    }
-    growTail.toggle()
-  }
-  // If the head and tail met, nothing is actually elided — show the whole thing.
-  return head + tail >= words.count ? trimmed : rendered(head: head, tail: tail)
 }
 
 struct SliceRowState: Identifiable, Equatable {
