@@ -22,13 +22,26 @@ class Word:
     text: str
     start: float
     end: float | None = None
+    confidence: float | None = None  # WhisperX per-word alignment score (0..1)
 
     def to_dict(self) -> dict:
-        return {"id": self.id, "text": self.text, "start": self.start, "end": self.end}
+        return {
+            "id": self.id,
+            "text": self.text,
+            "start": self.start,
+            "end": self.end,
+            "confidence": self.confidence,
+        }
 
     @classmethod
     def from_dict(cls, d: dict) -> "Word":
-        return cls(id=d["id"], text=d["text"], start=d["start"], end=d.get("end"))
+        return cls(
+            id=d["id"],
+            text=d["text"],
+            start=d["start"],
+            end=d.get("end"),
+            confidence=d.get("confidence"),
+        )
 
 
 @dataclass(frozen=True)

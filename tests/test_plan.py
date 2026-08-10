@@ -58,9 +58,13 @@ def _run_plan(tmp_path: Path):
 def test_plan_emits_editplan_json_with_empty_segments(tmp_path):
     src, _work, proc = _run_plan(tmp_path)
     plan = json.loads(proc.stdout)
-    assert plan["schema_version"] == 1
+    assert plan["schema_version"] == 2
     assert plan["segments"] == []
     assert [w["text"] for w in plan["words"]] == ["hello", "world"]
+    # v2: the raw sentence grouping rides along as separate evidence
+    assert plan["transcript_segments"] == [
+        {"id": 1, "word_ids": [1, 2], "text": "hello world"}
+    ]
     assert all(w["start_sample"] is not None and w["end_sample"] is not None
                for w in plan["words"])
     assert plan["source"]["sample_rate"] > 0

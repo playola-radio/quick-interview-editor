@@ -13,6 +13,15 @@ enum Fixtures {
     return try! EditPlan.decoded(from: url)
   }
 
+  /// A schema-v2 solo transcript: per-word `confidence`, `transcript_segments`,
+  /// and long inter-word silences at sentence ends.
+  static func editPlanV2() -> EditPlan {
+    let url = Bundle(for: BundleToken.self)
+      .url(forResource: "edit-plan-v2", withExtension: "json")!
+    // swiftlint:disable:next force_try
+    return try! EditPlan.decoded(from: url)
+  }
+
   /// The committed project-sidecar fixture: two pending cut suggestions and empty
   /// reserved speaker fields.
   static func projectStateData() -> Data {
