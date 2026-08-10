@@ -8,7 +8,16 @@ than fuzzy guesswork.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
+
+
+def _finite(value: float | None) -> float | None:
+    # Confidence is serialized to JSON read by strict parsers (Swift's
+    # JSONDecoder) and cached to disk; a non-finite score would emit bare
+    # NaN/Infinity tokens, so normalize it to null.
+    return value if value is not None and math.isfinite(value) else None
+
 
 _HEADER = (
     "# Delete lines/chunks you don't want. Blank line = split into a new file.\n"
@@ -30,7 +39,7 @@ class Word:
             "text": self.text,
             "start": self.start,
             "end": self.end,
-            "confidence": self.confidence,
+            "confidence": _finite(self.confidence),
         }
 
     @classmethod

@@ -9,12 +9,11 @@ to honor intra-line word deletions.
 from __future__ import annotations
 
 import difflib
-import math
 import re
 from dataclasses import dataclass, field
 
 from .silence import Silence
-from .words import Transcript
+from .words import Transcript, _finite
 
 SCHEMA_VERSION = 2
 LAST_WORD_FALLBACK_SEC = 0.4  # assumed duration when the final word lacks an end
@@ -212,13 +211,6 @@ class ResolvedSegment:
 
 def _sample(seconds: float | None, sr: int) -> int | None:
     return None if seconds is None else round(seconds * sr)
-
-
-def _finite(value: float | None) -> float | None:
-    # edit-plan.json is decoded by a strict JSON reader (Swift's JSONDecoder). A
-    # non-finite WhisperX score would serialize as bare NaN/Infinity and poison
-    # the whole file, so drop it to null rather than emit invalid JSON.
-    return value if value is not None and math.isfinite(value) else None
 
 
 def build_edit_plan(
