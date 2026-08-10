@@ -53,6 +53,8 @@ targets:
       - path: QuickInterviewEditorTests
       - path: Resources/Fixtures/edit-plan.json
         buildPhase: resources
+      - path: Resources/Fixtures/edit-plan-v2.json
+        buildPhase: resources
       - path: Resources/Fixtures/project-state.json
         buildPhase: resources
     settings:

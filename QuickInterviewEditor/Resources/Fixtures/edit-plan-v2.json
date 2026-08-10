@@ -1,0 +1,36 @@
+{
+  "schema_version": 2,
+  "source": {
+    "path": "fixtures/solo-answer.m4a",
+    "sample_rate": 44100,
+    "channels": 1,
+    "duration_samples": 320000
+  },
+  "params": {},
+  "words": [
+    { "id": 1, "text": "So", "start": 1.0, "end": 1.2, "confidence": 0.99, "start_sample": 44100, "end_sample": 52920 },
+    { "id": 2, "text": "a", "start": 1.24, "end": 1.3, "confidence": null, "start_sample": 54684, "end_sample": 57330 },
+    { "id": 3, "text": "young", "start": 1.34, "end": 1.7, "confidence": 0.91, "start_sample": 59094, "end_sample": 74970 },
+    { "id": 4, "text": "Hayes.", "start": 1.74, "end": 2.1, "confidence": 0.88, "start_sample": 76734, "end_sample": 92610 },
+    { "id": 5, "text": "He", "start": 2.95, "end": 3.1, "confidence": 0.97, "start_sample": 130095, "end_sample": 136710 },
+    { "id": 6, "text": "waits", "start": 3.14, "end": 3.5, "confidence": 0.95, "start_sample": 138474, "end_sample": 154350 },
+    { "id": 7, "text": "around", "start": 4.4, "end": 4.7, "confidence": 0.9, "start_sample": 194040, "end_sample": 207270 },
+    { "id": 8, "text": "the", "start": 4.74, "end": 4.84, "confidence": null, "start_sample": 209034, "end_sample": 213444 },
+    { "id": 9, "text": "concert.", "start": 4.88, "end": 5.3, "confidence": 0.93, "start_sample": 215208, "end_sample": 233730 },
+    { "id": 10, "text": "Then", "start": 6.2, "end": 6.45, "confidence": 0.96, "start_sample": 273420, "end_sample": 284445 },
+    { "id": 11, "text": "he", "start": 6.49, "end": 6.6, "confidence": 0.98, "start_sample": 286209, "end_sample": 291060 },
+    { "id": 12, "text": "leaves.", "start": 6.64, "end": 7.0, "confidence": 0.94, "start_sample": 292824, "end_sample": 308700 }
+  ],
+  "silences": [
+    { "start": 0, "end": 44100 },
+    { "start": 92610, "end": 130095 },
+    { "start": 154350, "end": 194040 },
+    { "start": 233730, "end": 273420 }
+  ],
+  "segments": [],
+  "transcript_segments": [
+    { "id": 1, "word_ids": [1, 2, 3, 4], "text": "So a young Hayes." },
+    { "id": 2, "word_ids": [5, 6, 7, 8, 9], "text": "He waits around the concert." },
+    { "id": 3, "word_ids": [10, 11, 12], "text": "Then he leaves." }
+  ]
+}

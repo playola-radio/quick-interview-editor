@@ -8,7 +8,16 @@ than fuzzy guesswork.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
+
+
+def _finite(value: float | None) -> float | None:
+    # Confidence is serialized to JSON read by strict parsers (Swift's
+    # JSONDecoder) and cached to disk; a non-finite score would emit bare
+    # NaN/Infinity tokens, so normalize it to null.
+    return value if value is not None and math.isfinite(value) else None
+
 
 _HEADER = (
     "# Delete lines/chunks you don't want. Blank line = split into a new file.\n"
@@ -22,13 +31,26 @@ class Word:
     text: str
     start: float
     end: float | None = None
+    confidence: float | None = None  # WhisperX per-word alignment score (0..1)
 
     def to_dict(self) -> dict:
-        return {"id": self.id, "text": self.text, "start": self.start, "end": self.end}
+        return {
+            "id": self.id,
+            "text": self.text,
+            "start": self.start,
+            "end": self.end,
+            "confidence": _finite(self.confidence),
+        }
 
     @classmethod
     def from_dict(cls, d: dict) -> "Word":
-        return cls(id=d["id"], text=d["text"], start=d["start"], end=d.get("end"))
+        return cls(
+            id=d["id"],
+            text=d["text"],
+            start=d["start"],
+            end=d.get("end"),
+            confidence=d.get("confidence"),
+        )
 
 
 @dataclass(frozen=True)

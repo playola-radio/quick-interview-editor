@@ -13,9 +13,9 @@ import re
 from dataclasses import dataclass, field
 
 from .silence import Silence
-from .words import Transcript
+from .words import Transcript, _finite
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 LAST_WORD_FALLBACK_SEC = 0.4  # assumed duration when the final word lacks an end
 
 
@@ -240,10 +240,18 @@ def build_edit_plan(
                 "text": w.text,
                 "start": w.start,
                 "end": w.end,
+                "confidence": _finite(w.confidence),
                 "start_sample": _sample(w.start, sample_rate),
                 "end_sample": _sample(w.end, sample_rate),
             }
             for w in transcript.words
+        ],
+        # Raw WhisperX sentence grouping (v2). Kept separate from `segments`,
+        # which are output slices — this is transcription evidence the app uses
+        # to snap paragraph boundaries to sentence ends without a Python re-run.
+        "transcript_segments": [
+            {"id": s.id, "word_ids": list(s.word_ids), "text": s.text}
+            for s in transcript.segments
         ],
         "silences": [{"start": s.start, "end": s.end} for s in silences],
         "segments": [

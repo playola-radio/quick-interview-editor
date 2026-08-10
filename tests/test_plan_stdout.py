@@ -25,9 +25,9 @@ def _noisy_run_plan(source, work_dir, sample_rate, refresh=False):
     print("2026-01-01 12:00:00 - whisperx.asr - INFO - No language specified")
     os.write(1, b"2026-01-01 12:00:00 - pyannote - INFO - raw fd-1 noise\n")
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "source": {"path": "x", "sample_rate": 44100, "channels": 1, "duration_samples": 10},
-        "words": [], "silences": [], "segments": [],
+        "words": [], "silences": [], "segments": [], "transcript_segments": [],
     }
 
 cli.run_plan = _noisy_run_plan
@@ -53,7 +53,7 @@ def test_plan_stdout_is_pure_json_when_analysis_writes_to_stdout(tmp_path):
 
     # stdout is exactly the plan JSON — no library log lines leaked in.
     plan = json.loads(proc.stdout)
-    assert plan["schema_version"] == 1
+    assert plan["schema_version"] == 2
     assert plan["words"] == []
     # ...and the noise was redirected to stderr instead.
     assert "whisperx.asr" in proc.stderr

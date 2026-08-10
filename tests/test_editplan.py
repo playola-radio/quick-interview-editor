@@ -201,7 +201,7 @@ def test_build_edit_plan_has_versioned_shape_and_word_samples():
         total_samples=1_000_000, params={"roll_ms": 20},
         transcript=_transcript(), silences=[Silence(0, 4410)], segments=[seg],
     )
-    assert plan["schema_version"] == 1
+    assert plan["schema_version"] == 2
     assert plan["source"]["sample_rate"] == 44100
     assert plan["segments"][0]["output_name"] == "song.1.aiff"
     assert plan["segments"][0]["source_end_sample"] == 33000
@@ -209,3 +209,48 @@ def test_build_edit_plan_has_versioned_shape_and_word_samples():
     w0 = plan["words"][0]
     assert w0["start"] == 0.0 and w0["start_sample"] == 0
     assert plan["words"][1]["start_sample"] == round(0.2 * 44100)
+
+
+def _plan_from(transcript: Transcript) -> dict:
+    return build_edit_plan(
+        source_path="song.m4a", sample_rate=44100, channels=2,
+        total_samples=1_000_000, params={}, transcript=transcript,
+        silences=[], segments=[],
+    )
+
+
+def test_build_edit_plan_carries_per_word_confidence():
+    words = (
+        Word(1, "hi", 0.0, 0.1, confidence=0.98),
+        Word(2, "there", 0.2, 0.3),  # no score captured -> None
+    )
+    transcript = Transcript(words=words, segments=(Segment(1, (1, 2), "hi there"),))
+    plan = _plan_from(transcript)
+    assert plan["words"][0]["confidence"] == 0.98
+    assert plan["words"][1]["confidence"] is None
+
+
+def test_build_edit_plan_drops_non_finite_confidence():
+    import math
+
+    words = (
+        Word(1, "hi", 0.0, 0.1, confidence=math.nan),
+        Word(2, "there", 0.2, 0.3, confidence=math.inf),
+    )
+    transcript = Transcript(words=words, segments=(Segment(1, (1, 2), "hi there"),))
+    plan = _plan_from(transcript)
+    # NaN/Infinity would serialize as bare JSON tokens the Swift decoder rejects.
+    assert plan["words"][0]["confidence"] is None
+    assert plan["words"][1]["confidence"] is None
+
+
+def test_build_edit_plan_emits_transcript_segments_as_raw_evidence():
+    plan = _plan_from(_transcript())
+    # The raw WhisperX sentence grouping is preserved verbatim, distinct from
+    # the output `segments` (slices), which is empty here.
+    assert plan["transcript_segments"] == [
+        {"id": 1, "word_ids": [1, 2, 3, 4], "text": "the quick brown fox"},
+        {"id": 2, "word_ids": [5, 6], "text": "and then"},
+        {"id": 3, "word_ids": [7, 8, 9, 10], "text": "the quick brown fox"},
+    ]
+    assert plan["segments"] == []

@@ -7,10 +7,16 @@ struct EditPlan: Codable, Equatable {
   var words: [Word]
   var silences: [Silence]
   var segments: [Segment]
+  // Raw WhisperX sentence grouping (schema v2). Optional so a v1 plan still
+  // decodes; nil and [] both mean "no sentence evidence" to the builders. The
+  // `= nil` default keeps the memberwise init back-compatible for callers.
+  // swiftlint:disable:next redundant_optional_initialization
+  var transcriptSegments: [TranscriptSegment]? = nil
 
   enum CodingKeys: String, CodingKey {
     case schemaVersion = "schema_version"
     case source, words, silences, segments
+    case transcriptSegments = "transcript_segments"
   }
 
   struct Source: Codable, Equatable {
@@ -32,10 +38,26 @@ struct EditPlan: Codable, Equatable {
     var end: Double?
     var startSample: Int?
     var endSample: Int?
+    // WhisperX per-word alignment score (schema v2). Optional; nil in v1 plans.
+    // The `= nil` default keeps the memberwise init back-compatible for callers.
+    // swiftlint:disable:next redundant_optional_initialization
+    var confidence: Double? = nil
     enum CodingKeys: String, CodingKey {
-      case id, text, start, end
+      case id, text, start, end, confidence
       case startSample = "start_sample"
       case endSample = "end_sample"
+    }
+  }
+
+  /// Raw WhisperX sentence (roughly a sentence). Distinct from `Segment`, which
+  /// is an output slice. Used to snap pause-paragraph boundaries to sentence ends.
+  struct TranscriptSegment: Codable, Equatable, Identifiable {
+    var id: Int
+    var wordIDs: [Int]
+    var text: String
+    enum CodingKeys: String, CodingKey {
+      case id, text
+      case wordIDs = "word_ids"
     }
   }
 
