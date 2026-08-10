@@ -91,6 +91,19 @@ struct PauseParagraphBuilderTests {
     expectNoDifference(paragraphs.map(\.wordIDs), [[1, 2], [3]])
   }
 
+  @Test func degenerateSegmentsFallBackToPunctuation() {
+    // A non-empty transcript_segments that maps to no real sentence end (here an
+    // empty word_ids) must not suppress every break — fall back to punctuation.
+    let words = [
+      word(1, "All", 0.0, 0.2),
+      word(2, "done.", 0.24, 0.5),
+      word(3, "Next.", 1.4, 1.7),
+    ]
+    let paragraphs = PauseParagraphBuilder.paragraphs(
+      words: words, transcriptSegments: [segment(1, [], "")])
+    expectNoDifference(paragraphs.map(\.wordIDs), [[1, 2], [3]])
+  }
+
   @Test func emptyWordsYieldNoParagraphs() {
     expectNoDifference(
       PauseParagraphBuilder.paragraphs(words: [], transcriptSegments: nil), [])

@@ -66,14 +66,18 @@ enum PauseParagraphBuilder {
   }
 
   /// The word IDs that end a sentence. Prefer WhisperX's sentence grouping
-  /// (`transcript_segments`); fall back to trailing punctuation for v1 plans or
-  /// plans that carry no segments.
+  /// (`transcript_segments`); fall back to trailing punctuation for v1 plans, or
+  /// for v2 plans whose segments yield no sentence end that maps to a real word
+  /// (empty `word_ids`, or last IDs absent from `words`) — otherwise degenerate
+  /// segments would suppress every paragraph break.
   static func sentenceEndWordIDs(
     words: [Word],
     transcriptSegments: [EditPlan.TranscriptSegment]?
   ) -> Set<Word.ID> {
     if let segments = transcriptSegments, !segments.isEmpty {
-      return Set(segments.compactMap(\.wordIDs.last))
+      let wordIDs = Set(words.map(\.id))
+      let ends = Set(segments.compactMap(\.wordIDs.last)).intersection(wordIDs)
+      if !ends.isEmpty { return ends }
     }
     return Set(words.filter { endsSentence($0.text) }.map(\.id))
   }

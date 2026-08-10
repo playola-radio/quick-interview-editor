@@ -230,6 +230,20 @@ def test_build_edit_plan_carries_per_word_confidence():
     assert plan["words"][1]["confidence"] is None
 
 
+def test_build_edit_plan_drops_non_finite_confidence():
+    import math
+
+    words = (
+        Word(1, "hi", 0.0, 0.1, confidence=math.nan),
+        Word(2, "there", 0.2, 0.3, confidence=math.inf),
+    )
+    transcript = Transcript(words=words, segments=(Segment(1, (1, 2), "hi there"),))
+    plan = _plan_from(transcript)
+    # NaN/Infinity would serialize as bare JSON tokens the Swift decoder rejects.
+    assert plan["words"][0]["confidence"] is None
+    assert plan["words"][1]["confidence"] is None
+
+
 def test_build_edit_plan_emits_transcript_segments_as_raw_evidence():
     plan = _plan_from(_transcript())
     # The raw WhisperX sentence grouping is preserved verbatim, distinct from

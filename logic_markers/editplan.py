@@ -9,6 +9,7 @@ to honor intra-line word deletions.
 from __future__ import annotations
 
 import difflib
+import math
 import re
 from dataclasses import dataclass, field
 
@@ -213,6 +214,13 @@ def _sample(seconds: float | None, sr: int) -> int | None:
     return None if seconds is None else round(seconds * sr)
 
 
+def _finite(value: float | None) -> float | None:
+    # edit-plan.json is decoded by a strict JSON reader (Swift's JSONDecoder). A
+    # non-finite WhisperX score would serialize as bare NaN/Infinity and poison
+    # the whole file, so drop it to null rather than emit invalid JSON.
+    return value if value is not None and math.isfinite(value) else None
+
+
 def build_edit_plan(
     *,
     source_path,
@@ -240,7 +248,7 @@ def build_edit_plan(
                 "text": w.text,
                 "start": w.start,
                 "end": w.end,
-                "confidence": w.confidence,
+                "confidence": _finite(w.confidence),
                 "start_sample": _sample(w.start, sample_rate),
                 "end_sample": _sample(w.end, sample_rate),
             }
