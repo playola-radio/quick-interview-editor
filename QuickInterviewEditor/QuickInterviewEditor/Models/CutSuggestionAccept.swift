@@ -19,6 +19,9 @@ enum AcceptResult: Equatable {
 enum StaleReason: Equatable {
   /// The suggestion was generated against a different source file than the current one.
   case sourceFingerprintChanged
+  /// The transcript's word content changed under the suggestion (its provenance hash no
+  /// longer matches the current transcript hash), even though the source file is the same.
+  case transcriptChanged
   /// One or more of the suggestion's words no longer exist in the plan (IDs shifted).
   case missingWords([Word.ID])
 }
@@ -62,8 +65,12 @@ enum InvalidReason: Equatable {
 ///   - plan: The current edit plan (source of truth for words/samples/silences).
 ///   - sourceFingerprint: The current source file's fingerprint, to detect a stale
 ///     suggestion generated against a different file.
+///   - transcriptHash: The current transcript's canonical hash (`EditPlan.transcriptHash`),
+///     compared against the suggestion's provenance hash to detect transcript drift from an
+///     engine re-run of the same file.
 func acceptCutSuggestion(
-  _ id: CutSuggestion.ID, in state: ProjectState, plan: EditPlan, sourceFingerprint: String
+  _ id: CutSuggestion.ID, in state: ProjectState, plan: EditPlan, sourceFingerprint: String,
+  transcriptHash: String
 ) -> AcceptResult {
   guard let suggestion = state.cutSuggestions[id: id] else {
     return .invalid(.unknownSuggestion)
@@ -71,11 +78,13 @@ func acceptCutSuggestion(
   guard suggestion.provenance.sourceFingerprint == sourceFingerprint else {
     return .stale(.sourceFingerprintChanged)
   }
-  // NOTE: `provenance.transcriptHash` is intentionally not compared here. There is no
-  // canonical transcript-hash producer yet (that lands with `CutSuggestClient` in a later
-  // PR), so the transcript-drift check is deferred. The real re-run hazard — word IDs
-  // shifting — is already caught structurally by the missing-words / contiguity /
-  // membership checks below, and `sourceFingerprint` catches a changed source file.
+  // Transcript-drift gate (carry-forward from PR 3, now that a canonical hash producer
+  // exists): the source file is the same, but if its word content changed under the
+  // suggestion its hash won't match. The structural checks below catch word IDs that
+  // shifted or vanished; this catches a re-transcription that kept IDs but changed words.
+  guard suggestion.provenance.transcriptHash == transcriptHash else {
+    return .stale(.transcriptChanged)
+  }
   guard !suggestion.wordIDs.isEmpty else {
     return .invalid(.noWords)
   }

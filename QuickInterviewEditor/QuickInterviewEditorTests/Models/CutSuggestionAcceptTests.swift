@@ -72,7 +72,8 @@ struct CutSuggestionAcceptTests {
       wordIDs: wordIDs, sourceFingerprint: "fp")
     let state = ProjectState(cutSuggestions: [sug])
 
-    let result = acceptCutSuggestion(sug.id, in: state, plan: plan, sourceFingerprint: "fp")
+    let result = acceptCutSuggestion(
+      sug.id, in: state, plan: plan, sourceFingerprint: "fp", transcriptHash: "t")
 
     let words = wordIDs.map { id in plan.words.first { $0.id == id }! }
     let start = words.compactMap(\.startSample).min()!
@@ -95,7 +96,8 @@ struct CutSuggestionAcceptTests {
     let sug = suggestion(id: Fixtures.uuid(1), wordIDs: wordIDs)
     let state = ProjectState(cutSuggestions: [sug])
 
-    let result = acceptCutSuggestion(sug.id, in: state, plan: plan, sourceFingerprint: "fp")
+    let result = acceptCutSuggestion(
+      sug.id, in: state, plan: plan, sourceFingerprint: "fp", transcriptHash: "t")
 
     let words = wordIDs.map { id in plan.words.first { $0.id == id }! }
     guard case .accepted(let slice, _) = result else {
@@ -116,7 +118,7 @@ struct CutSuggestionAcceptTests {
 
     guard
       case .accepted(let slice, _) = acceptCutSuggestion(
-        sug.id, in: state, plan: plan, sourceFingerprint: "fp")
+        sug.id, in: state, plan: plan, sourceFingerprint: "fp", transcriptHash: "t")
     else {
       Issue.record("expected .accepted")
       return
@@ -131,7 +133,7 @@ struct CutSuggestionAcceptTests {
 
     guard
       case .accepted(let slice, _) = acceptCutSuggestion(
-        sug.id, in: state, plan: plan, sourceFingerprint: "fp")
+        sug.id, in: state, plan: plan, sourceFingerprint: "fp", transcriptHash: "t")
     else {
       Issue.record("expected .accepted")
       return
@@ -146,7 +148,7 @@ struct CutSuggestionAcceptTests {
 
     guard
       case .accepted(let slice, _) = acceptCutSuggestion(
-        sug.id, in: state, plan: plan, sourceFingerprint: "fp")
+        sug.id, in: state, plan: plan, sourceFingerprint: "fp", transcriptHash: "t")
     else {
       Issue.record("expected .accepted")
       return
@@ -164,7 +166,7 @@ struct CutSuggestionAcceptTests {
 
     guard
       case .accepted(_, let newState) = acceptCutSuggestion(
-        target.id, in: state, plan: plan, sourceFingerprint: "fp")
+        target.id, in: state, plan: plan, sourceFingerprint: "fp", transcriptHash: "t")
     else {
       Issue.record("expected .accepted")
       return
@@ -182,7 +184,7 @@ struct CutSuggestionAcceptTests {
 
     guard
       case .accepted(_, let newState) = acceptCutSuggestion(
-        sug.id, in: state, plan: plan, sourceFingerprint: "fp")
+        sug.id, in: state, plan: plan, sourceFingerprint: "fp", transcriptHash: "t")
     else {
       Issue.record("expected .accepted")
       return
@@ -195,7 +197,8 @@ struct CutSuggestionAcceptTests {
     let sug = suggestion(wordIDs: [1, 2, 3, 4], status: .accepted)
     let state = ProjectState(cutSuggestions: [sug])
 
-    let result = acceptCutSuggestion(sug.id, in: state, plan: plan, sourceFingerprint: "fp")
+    let result = acceptCutSuggestion(
+      sug.id, in: state, plan: plan, sourceFingerprint: "fp", transcriptHash: "t")
     guard case .accepted(let slice, let newState) = result else {
       Issue.record("expected .accepted")
       return
@@ -212,8 +215,35 @@ struct CutSuggestionAcceptTests {
     let state = ProjectState(cutSuggestions: [sug])
 
     let result = acceptCutSuggestion(
-      sug.id, in: state, plan: plan, sourceFingerprint: "new-fingerprint")
+      sug.id, in: state, plan: plan, sourceFingerprint: "new-fingerprint", transcriptHash: "t")
     expectNoDifference(result, .stale(.sourceFingerprintChanged))
+  }
+
+  @Test func staleWhenTranscriptHashChangedOnTheSameFile() {
+    // Same source file, but the transcript's word content changed under the suggestion
+    // (an engine re-run): its provenance hash no longer matches the current transcript.
+    let plan = Fixtures.editPlan()
+    let sug = suggestion(wordIDs: [1, 2, 3, 4], sourceFingerprint: "fp")
+    let state = ProjectState(cutSuggestions: [sug])
+
+    let result = acceptCutSuggestion(
+      sug.id, in: state, plan: plan, sourceFingerprint: "fp", transcriptHash: "different-hash")
+    expectNoDifference(result, .stale(.transcriptChanged))
+  }
+
+  @Test func acceptsWhenTranscriptHashMatches() {
+    // The gate passes through to conversion when the provenance hash matches the current
+    // transcript hash (the fixture suggestion's provenance hash is "t").
+    let plan = Fixtures.editPlan()
+    let sug = suggestion(wordIDs: [10, 11, 12, 13, 14, 15, 16], sourceFingerprint: "fp")
+    let state = ProjectState(cutSuggestions: [sug])
+
+    let result = acceptCutSuggestion(
+      sug.id, in: state, plan: plan, sourceFingerprint: "fp", transcriptHash: "t")
+    guard case .accepted = result else {
+      Issue.record("expected .accepted, got \(result)")
+      return
+    }
   }
 
   @Test func staleWhenWordsMissingAfterReRun() {
@@ -224,7 +254,8 @@ struct CutSuggestionAcceptTests {
     let sug = suggestion(wordIDs: [13, 14, 9999], sourceFingerprint: "fp")
     let state = ProjectState(cutSuggestions: [sug])
 
-    let result = acceptCutSuggestion(sug.id, in: state, plan: plan, sourceFingerprint: "fp")
+    let result = acceptCutSuggestion(
+      sug.id, in: state, plan: plan, sourceFingerprint: "fp", transcriptHash: "t")
     expectNoDifference(result, .stale(.missingWords([9999])))
   }
 
@@ -234,7 +265,7 @@ struct CutSuggestionAcceptTests {
     let plan = Fixtures.editPlan()
     let state = ProjectState(cutSuggestions: [suggestion(id: Fixtures.uuid(1), wordIDs: [1, 2])])
     let result = acceptCutSuggestion(
-      Fixtures.uuid(99), in: state, plan: plan, sourceFingerprint: "fp")
+      Fixtures.uuid(99), in: state, plan: plan, sourceFingerprint: "fp", transcriptHash: "t")
     expectNoDifference(result, .invalid(.unknownSuggestion))
   }
 
@@ -242,7 +273,8 @@ struct CutSuggestionAcceptTests {
     let plan = Fixtures.editPlan()
     let sug = suggestion(wordIDs: [])
     let state = ProjectState(cutSuggestions: [sug])
-    let result = acceptCutSuggestion(sug.id, in: state, plan: plan, sourceFingerprint: "fp")
+    let result = acceptCutSuggestion(
+      sug.id, in: state, plan: plan, sourceFingerprint: "fp", transcriptHash: "t")
     expectNoDifference(result, .invalid(.noWords))
   }
 
@@ -251,7 +283,8 @@ struct CutSuggestionAcceptTests {
     let plan = Fixtures.editPlan()
     let sug = suggestion(wordIDs: [1, 3])
     let state = ProjectState(cutSuggestions: [sug])
-    let result = acceptCutSuggestion(sug.id, in: state, plan: plan, sourceFingerprint: "fp")
+    let result = acceptCutSuggestion(
+      sug.id, in: state, plan: plan, sourceFingerprint: "fp", transcriptHash: "t")
     expectNoDifference(result, .invalid(.wordsNotContiguous))
   }
 
@@ -259,7 +292,8 @@ struct CutSuggestionAcceptTests {
     let plan = Fixtures.editPlan()
     let sug = suggestion(wordIDs: [1, 1, 2])
     let state = ProjectState(cutSuggestions: [sug])
-    let result = acceptCutSuggestion(sug.id, in: state, plan: plan, sourceFingerprint: "fp")
+    let result = acceptCutSuggestion(
+      sug.id, in: state, plan: plan, sourceFingerprint: "fp", transcriptHash: "t")
     expectNoDifference(result, .invalid(.duplicateWords([1])))
   }
 
@@ -275,7 +309,8 @@ struct CutSuggestionAcceptTests {
       durationSamples: 2000)
     let sug = suggestion(wordIDs: [1, 2])
     let state = ProjectState(cutSuggestions: [sug])
-    let result = acceptCutSuggestion(sug.id, in: state, plan: editPlan, sourceFingerprint: "fp")
+    let result = acceptCutSuggestion(
+      sug.id, in: state, plan: editPlan, sourceFingerprint: "fp", transcriptHash: "t")
     expectNoDifference(result, .invalid(.ambiguousPlanWords([1])))
   }
 
@@ -290,7 +325,8 @@ struct CutSuggestionAcceptTests {
       durationSamples: 300)
     let sug = suggestion(wordIDs: [1, 2, 3])
     let state = ProjectState(cutSuggestions: [sug])
-    let result = acceptCutSuggestion(sug.id, in: state, plan: editPlan, sourceFingerprint: "fp")
+    let result = acceptCutSuggestion(
+      sug.id, in: state, plan: editPlan, sourceFingerprint: "fp", transcriptHash: "t")
     expectNoDifference(result, .invalid(.wordsMissingSampleBounds([2])))
   }
 
@@ -303,7 +339,8 @@ struct CutSuggestionAcceptTests {
       durationSamples: 300)
     let sug = suggestion(wordIDs: [1, 2])
     let state = ProjectState(cutSuggestions: [sug])
-    let result = acceptCutSuggestion(sug.id, in: state, plan: editPlan, sourceFingerprint: "fp")
+    let result = acceptCutSuggestion(
+      sug.id, in: state, plan: editPlan, sourceFingerprint: "fp", transcriptHash: "t")
     expectNoDifference(result, .invalid(.wordsMissingSampleBounds([2])))
   }
 
@@ -318,7 +355,8 @@ struct CutSuggestionAcceptTests {
       durationSamples: 2000)
     let sug = suggestion(wordIDs: [1, 2])
     let state = ProjectState(cutSuggestions: [sug])
-    let result = acceptCutSuggestion(sug.id, in: state, plan: editPlan, sourceFingerprint: "fp")
+    let result = acceptCutSuggestion(
+      sug.id, in: state, plan: editPlan, sourceFingerprint: "fp", transcriptHash: "t")
     expectNoDifference(result, .invalid(.wordsOutOfOrder))
   }
 
@@ -332,7 +370,8 @@ struct CutSuggestionAcceptTests {
       durationSamples: 500)
     let sug = suggestion(wordIDs: [1, 2])
     let state = ProjectState(cutSuggestions: [sug])
-    let result = acceptCutSuggestion(sug.id, in: state, plan: editPlan, sourceFingerprint: "fp")
+    let result = acceptCutSuggestion(
+      sug.id, in: state, plan: editPlan, sourceFingerprint: "fp", transcriptHash: "t")
     expectNoDifference(result, .invalid(.samplesOutOfBounds))
   }
 
@@ -350,7 +389,8 @@ struct CutSuggestionAcceptTests {
       durationSamples: 500)
     let sug = suggestion(wordIDs: [1, 2])
     let state = ProjectState(cutSuggestions: [sug])
-    let result = acceptCutSuggestion(sug.id, in: state, plan: editPlan, sourceFingerprint: "fp")
+    let result = acceptCutSuggestion(
+      sug.id, in: state, plan: editPlan, sourceFingerprint: "fp", transcriptHash: "t")
     expectNoDifference(result, .invalid(.wordMembershipMismatch))
   }
 
@@ -364,7 +404,7 @@ struct CutSuggestionAcceptTests {
 
     guard
       case .accepted(let slice, _) = acceptCutSuggestion(
-        sug.id, in: state, plan: plan, sourceFingerprint: "fp")
+        sug.id, in: state, plan: plan, sourceFingerprint: "fp", transcriptHash: "t")
     else {
       Issue.record("expected .accepted")
       return
@@ -388,7 +428,7 @@ struct CutSuggestionAcceptTests {
 
     guard
       case .accepted(let slice, _) = acceptCutSuggestion(
-        sug.id, in: state, plan: editPlan, sourceFingerprint: "fp")
+        sug.id, in: state, plan: editPlan, sourceFingerprint: "fp", transcriptHash: "t")
     else {
       Issue.record("expected .accepted")
       return
@@ -411,7 +451,7 @@ struct CutSuggestionAcceptTests {
 
     guard
       case .accepted(let slice, _) = acceptCutSuggestion(
-        sug.id, in: state, plan: editPlan, sourceFingerprint: "fp")
+        sug.id, in: state, plan: editPlan, sourceFingerprint: "fp", transcriptHash: "t")
     else {
       Issue.record("expected .accepted")
       return
