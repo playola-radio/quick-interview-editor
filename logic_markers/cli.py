@@ -328,7 +328,8 @@ def run_plan(source: Path, work_dir: Path, sample_rate: int, refresh: bool = Fal
     filled = tuple(
         w if w.end is not None
         else RichWord(id=w.id, text=w.text, start=w.start,
-                      end=min(_word_end(w, by_id), duration_sec))
+                      end=min(_word_end(w, by_id), duration_sec),
+                      confidence=w.confidence)
         for w in transcript.words
     )
     transcript = Transcript(words=filled, segments=transcript.segments)

@@ -30,8 +30,9 @@ def _write_wav(path: Path, seconds=0.5, sr=16000):
 def _seed_transcript(cache: Path):
     t = Transcript(
         words=(
-            Word(id=1, text="hello", start=0.05, end=0.15),
-            Word(id=2, text="world", start=0.20, end=0.35),
+            Word(id=1, text="hello", start=0.05, end=0.15, confidence=0.9),
+            # end missing on purpose: run_plan fills it, and must keep confidence.
+            Word(id=2, text="world", start=0.20, end=None, confidence=0.8),
         ),
         segments=(Segment(id=1, word_ids=(1, 2), text="hello world"),),
     )
@@ -67,6 +68,8 @@ def test_plan_emits_editplan_json_with_empty_segments(tmp_path):
     ]
     assert all(w["start_sample"] is not None and w["end_sample"] is not None
                for w in plan["words"])
+    # confidence survives, even for the word whose missing end run_plan filled
+    assert [w["confidence"] for w in plan["words"]] == [0.9, 0.8]
     assert plan["source"]["sample_rate"] > 0
     assert plan["source"]["duration_samples"] > 0
 
