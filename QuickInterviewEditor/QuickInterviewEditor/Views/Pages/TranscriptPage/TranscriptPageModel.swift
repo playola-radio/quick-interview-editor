@@ -48,6 +48,9 @@ class TranscriptPageModel: ViewModel {
   /// which calls `rebuildForLoadedPlan()`. `private(set)` keeps `document`, `gaps`, and
   /// `runTogetherWordIDSet` from ever going stale behind an external plan assignment.
   private(set) var editPlan: EditPlan?
+  /// Pause-grouped paragraphs (solo interviews) the renderer can lay out. Derived
+  /// purely from the decoded plan's words + `transcript_segments`; no Python re-run.
+  var paragraphs: [TranscriptParagraph] = []
   /// Public run-together set for the renderer to diff.
   var runTogetherWordIDSet: Set<Word.ID> = []
   var runTogetherMaxGapMs: Double = 30
@@ -227,6 +230,8 @@ class TranscriptPageModel: ViewModel {
     guard let plan = editPlan else { return }
     document = TranscriptDocument(words: plan.words)
     gaps = wordGaps(plan.words)
+    paragraphs = PauseParagraphBuilder.paragraphs(
+      words: plan.words, transcriptSegments: plan.transcriptSegments)
     recomputeRunTogether()
   }
   /// Recomputes only the run-together set from the cached gaps. Cheap relative to

@@ -17,6 +17,12 @@ struct TranscriptPageTests {
     #expect(model.runTogetherWordIDSet.contains(runTogetherID(model, text: "want")))
   }
 
+  @Test func initWithV2PlanExposesPauseParagraphs() {
+    let model = TranscriptPageModel(editPlan: Fixtures.editPlanV2())
+    expectNoDifference(
+      model.paragraphs.map(\.wordIDs), [[1, 2, 3, 4], [5, 6, 7, 8, 9], [10, 11, 12]])
+  }
+
   @Test func viewAppearedLoadsWords() async {
     await withDependencies {
       $0.engine.loadPlan = { _ in Fixtures.editPlan() }

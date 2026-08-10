@@ -49,6 +49,22 @@ def test_word_end_may_be_missing():
     assert restored.end is None
 
 
+def test_word_dict_normalizes_non_finite_confidence_to_none():
+    import math
+
+    for bad in (math.nan, math.inf, -math.inf):
+        w = Word(1, "hi", 0.0, 0.1, confidence=bad)
+        # to_dict is what the transcript cache serializes; NaN/Infinity are not
+        # valid JSON, so they must round-trip as null rather than a bare token.
+        assert w.to_dict()["confidence"] is None
+        assert Word.from_dict(w.to_dict()).confidence is None
+
+
+def test_word_dict_preserves_finite_confidence():
+    w = Word(1, "hi", 0.0, 0.1, confidence=0.87)
+    assert Word.from_dict(w.to_dict()).confidence == 0.87
+
+
 def test_words_by_id_lookup():
     t = _sample_transcript()
     assert t.word(3).text == "Hayes"

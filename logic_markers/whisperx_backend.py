@@ -106,12 +106,14 @@ def transcribe_transcript(
                 continue  # alignment dropped this token; skip
             wid = len(words) + 1
             end = w.get("end")
+            score = w.get("score")
             words.append(
                 RichWord(
                     id=wid,
                     text=text,
                     start=float(start),
                     end=float(end) if end is not None else None,
+                    confidence=float(score) if score is not None else None,
                 )
             )
             word_ids.append(wid)
