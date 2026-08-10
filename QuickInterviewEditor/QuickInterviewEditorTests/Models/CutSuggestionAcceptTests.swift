@@ -263,6 +263,22 @@ struct CutSuggestionAcceptTests {
     expectNoDifference(result, .invalid(.duplicateWords([1])))
   }
 
+  @Test func invalidWhenPlanHasDuplicateWordID() {
+    // A corrupt/externally-decoded plan repeats word ID 1 at two positions with different
+    // audio — which occurrence the cut means is ambiguous, so refuse rather than guess.
+    let editPlan = plan(
+      words: [
+        WordSpec(1, "a", 0, 100),
+        WordSpec(2, "b", 100, 200),
+        WordSpec(1, "a-again", 900, 1000),
+      ],
+      durationSamples: 2000)
+    let sug = suggestion(wordIDs: [1, 2])
+    let state = ProjectState(cutSuggestions: [sug])
+    let result = acceptCutSuggestion(sug.id, in: state, plan: editPlan, sourceFingerprint: "fp")
+    expectNoDifference(result, .invalid(.ambiguousPlanWords([1])))
+  }
+
   @Test func invalidWhenWordMissingSampleBounds() {
     // Word 2 exists but has no sample bounds, so a real range can't be derived.
     let editPlan = plan(

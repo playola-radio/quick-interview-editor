@@ -29,6 +29,9 @@ enum InvalidReason: Equatable {
   case noWords
   case duplicateWords([Word.ID])
   case wordsNotContiguous
+  /// A referenced word ID appears more than once in the plan, so which occurrence's audio
+  /// the cut means is ambiguous (a corrupt/externally-decoded plan) — refuse to guess.
+  case ambiguousPlanWords([Word.ID])
   /// Listed words lack usable (present, positive-length) sample bounds.
   case wordsMissingSampleBounds([Word.ID])
   /// The words run backwards in audio (starts not non-decreasing), so a tight range
@@ -118,18 +121,11 @@ private func resolveWords(_ wordIDs: [Word.ID], in plan: EditPlan) -> WordResolu
     return .failed(.invalid(.duplicateWords(duplicates)))
   }
 
-  // Locate every word in the current plan. A missing ID means the transcript changed
-  // under the suggestion (engine re-run) — stale, not the user's fault.
-  let indexByID = Dictionary(
-    plan.words.enumerated().map { ($0.element.id, $0.offset) },
-    uniquingKeysWith: { first, _ in first })
-  var indices: [Int] = []
-  var missing: [Word.ID] = []
-  for wordID in wordIDs {
-    if let index = indexByID[wordID] { indices.append(index) } else { missing.append(wordID) }
-  }
-  guard missing.isEmpty else {
-    return .failed(.stale(.missingWords(missing)))
+  // Locate every referenced word in the current plan.
+  let indices: [Int]
+  switch locateWords(wordIDs, in: plan) {
+  case .located(let located): indices = located
+  case .failed(let result): return .failed(result)
   }
 
   // A slice is one sample range; its words must be a contiguous run in transcript order.
@@ -169,6 +165,41 @@ private func resolveWords(_ wordIDs: [Word.ID], in plan: EditPlan) -> WordResolu
   }
 
   return .resolved(words, start..<end)
+}
+
+/// The plan positions of a suggestion's words, or the `AcceptResult` explaining why they
+/// couldn't be located unambiguously.
+private enum WordLocation {
+  case located([Int])
+  case failed(AcceptResult)
+}
+
+/// Maps each referenced word ID to its single position in the plan. A missing ID means the
+/// transcript changed under the suggestion (an engine re-run) — stale. An ID present at more
+/// than one position means a corrupt/ambiguous plan — invalid; picking one silently could cut
+/// the wrong audio.
+private func locateWords(_ wordIDs: [Word.ID], in plan: EditPlan) -> WordLocation {
+  var offsetsByID: [Word.ID: [Int]] = [:]
+  for (offset, word) in plan.words.enumerated() {
+    offsetsByID[word.id, default: []].append(offset)
+  }
+  var indices: [Int] = []
+  var missing: [Word.ID] = []
+  var ambiguous: [Word.ID] = []
+  for wordID in wordIDs {
+    switch offsetsByID[wordID]?.count ?? 0 {
+    case 0: missing.append(wordID)
+    case 1: indices.append(offsetsByID[wordID]![0])
+    default: ambiguous.append(wordID)
+    }
+  }
+  guard ambiguous.isEmpty else {
+    return .failed(.invalid(.ambiguousPlanWords(ambiguous)))
+  }
+  guard missing.isEmpty else {
+    return .failed(.stale(.missingWords(missing)))
+  }
+  return .located(indices)
 }
 
 /// The IDs that appear more than once, in first-duplicate order.
