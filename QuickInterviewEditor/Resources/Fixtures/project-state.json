@@ -1,0 +1,54 @@
+{
+  "cutSuggestions": [
+    {
+      "id": "11111111-1111-1111-1111-111111111111",
+      "productType": "spotlight",
+      "title": "The night the tour bus broke down",
+      "song": null,
+      "songVerified": false,
+      "wordIDs": [10, 11, 12, 13, 14, 15, 16],
+      "startSample": 441000,
+      "endSample": 4410000,
+      "startSec": 10.0,
+      "endSec": 100.0,
+      "durationSec": 90.0,
+      "rank": 0,
+      "score": 0.91,
+      "status": "pending",
+      "provenance": {
+        "model": "claude-sonnet-5",
+        "promptVersion": "v1",
+        "productSpecVersion": "v1",
+        "transcriptHash": "sha256:transcript-abc",
+        "sourceFingerprint": "fingerprint-xyz",
+        "diarizationHash": null
+      }
+    },
+    {
+      "id": "22222222-2222-2222-2222-222222222222",
+      "productType": "intro",
+      "title": "Intro to \"Wildwood\"",
+      "song": "Wildwood",
+      "songVerified": true,
+      "wordIDs": [1, 2, 3, 4],
+      "startSample": 44100,
+      "endSample": 1323000,
+      "startSec": 1.0,
+      "endSec": 30.0,
+      "durationSec": 29.0,
+      "rank": 1,
+      "score": 0.75,
+      "status": "pending",
+      "provenance": {
+        "model": "claude-sonnet-5",
+        "promptVersion": "v1",
+        "productSpecVersion": "v1",
+        "transcriptHash": "sha256:transcript-abc",
+        "sourceFingerprint": "fingerprint-xyz",
+        "diarizationHash": "sha256:diar-1"
+      }
+    }
+  ],
+  "speakerCountOverride": null,
+  "speakerDisplayNames": {}
+}
