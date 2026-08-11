@@ -9,6 +9,7 @@ ranked, validated candidates. The LLM client is injected.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from .config import DEFAULT_SAMPLE_RATE, STAGE1_STEP, STAGE1_WINDOW
@@ -32,6 +33,16 @@ class CutSuggestResult:
     partitions: list[TopicPartition]
     dropped: list[CutCandidate]
     meta: dict = field(default_factory=dict)
+
+
+# A progress sink: `progress(phase="partitioning", message="…", index=1, total=5)`.
+# Keyword-only so callers can add fields without breaking older sinks. Optional
+# everywhere (default no-op), so the eval and unit tests stay unchanged.
+ProgressFn = Callable[..., None]
+
+
+def _noop_progress(**_kwargs: object) -> None:
+    pass
 
 
 def parse_partition_response(text: str, a: int, b: int) -> list[TopicPartition]:
@@ -75,11 +86,27 @@ def stage1_partition(
     *,
     window: int = STAGE1_WINDOW,
     step: int = STAGE1_STEP,
+    progress: ProgressFn = _noop_progress,
 ) -> list[TopicPartition]:
     n = len(sentences)
-    window_partitions: list[list[TopicPartition]] = []
+    # Only the window starts that will actually run: the loop below stops after the
+    # first window that reaches `n`, so build `starts` with the same terminal
+    # condition — otherwise `total` overcounts and the last message reads "9 of 10".
+    starts: list[int] = []
     for a in range(0, n, step):
+        starts.append(a)
+        if a + window >= n:
+            break
+    total = len(starts)
+    window_partitions: list[list[TopicPartition]] = []
+    for i, a in enumerate(starts):
         b = min(a + window, n)
+        progress(
+            phase="partitioning",
+            message=f"Reading section {i + 1} of {total}",
+            index=i + 1,
+            total=total,
+        )
         resp = llm.complete(partition_prompt(sentences, a, b), purpose=f"partition:{a}")
         window_partitions.append(parse_partition_response(resp.text, a, b))
         if b >= n:
@@ -105,6 +132,7 @@ def suggest_cuts(
     sample_rate: int = DEFAULT_SAMPLE_RATE,
     window: int = STAGE1_WINDOW,
     step: int = STAGE1_STEP,
+    progress: ProgressFn = _noop_progress,
 ) -> CutSuggestResult:
     specs = specs or DEFAULT_SPECS
 
@@ -114,9 +142,12 @@ def suggest_cuts(
             "n_invalid_clips": 0, "n_dropped_duration": 0,
         })
 
-    partitions = stage1_partition(sentences, llm, window=window, step=step)
+    progress(phase="started", message="Analyzing transcript")
+    partitions = stage1_partition(sentences, llm, window=window, step=step, progress=progress)
+    progress(phase="classifying", message="Selecting product clips")
     raw_clips = stage2_classify(sentences, partitions, llm, specs)
 
+    progress(phase="postprocessing", message="Building candidates")
     candidates: list[CutCandidate] = []
     invalid = 0
     for raw in raw_clips:
@@ -131,6 +162,11 @@ def suggest_cuts(
     candidates = dedupe_overlapping(candidates)
     candidates = rank_candidates(candidates, specs)
 
+    progress(
+        phase="completed",
+        message=f"{len(candidates)} candidate(s)",
+        n_candidates=len(candidates),
+    )
     meta = {
         "n_sentences": len(sentences),
         "n_partitions": len(partitions),

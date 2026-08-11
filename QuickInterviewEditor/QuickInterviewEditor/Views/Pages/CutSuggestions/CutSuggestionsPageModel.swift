@@ -119,7 +119,8 @@ final class CutSuggestionsPageModel: ViewModel {
       productSpecs: productSpecs,
       options: options,
       transcriptHash: editPlan.transcriptHash,
-      sourceFingerprint: sourceFingerprint)
+      sourceFingerprint: sourceFingerprint,
+      sampleRate: editPlan.source.sampleRate)
   }
 
   /// Provenance is bookkeeping the model owns authoritatively: it knows the current
