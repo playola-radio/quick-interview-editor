@@ -119,7 +119,31 @@ struct CutSuggestionsPageTests {
     }
   }
 
-  @Test func streamFinishingWithoutCompletionReturnsToIdle() async {
+  @Test func emptyCompletionSurfacesFailureAndLeavesExistingSuggestions() async {
+    let fingerprint = "fp-empty"
+    let existing = Fixtures.cutSuggestion(id: Fixtures.uuid(1), wordIDs: [10, 11, 12])
+
+    await withDependencies {
+      $0.defaultFileStorage = FileStorage.inMemory(fileSystem: LockIsolated([:]))
+      $0.keychain = .inMemory("sk-keychain")
+      $0.cutSuggest = fixtureClient(completed: [])
+    } operation: {
+      @Shared(.projectState(fingerprint: fingerprint)) var state = ProjectState(
+        cutSuggestions: [existing])
+      let model = CutSuggestionsPageModel(
+        editPlan: Fixtures.editPlan(), sourceFingerprint: fingerprint)
+      await model.suggestCutsTapped()
+
+      guard case .failed(let message) = model.phase else {
+        Issue.record("expected .failed, got \(model.phase)")
+        return
+      }
+      #expect(message.contains("produced no usable suggestions"))
+      expectNoDifference(state.cutSuggestions.elements, [existing])
+    }
+  }
+
+  @Test func streamFinishingWithoutCompletionSurfacesFailure() async {
     let fingerprint = "fp-nocomplete"
     await withDependencies {
       $0.defaultFileStorage = FileStorage.inMemory(fileSystem: LockIsolated([:]))
@@ -135,7 +159,7 @@ struct CutSuggestionsPageTests {
         editPlan: Fixtures.editPlan(), sourceFingerprint: fingerprint)
       await model.suggestCutsTapped()
 
-      expectNoDifference(model.phase, .idle)
+      expectNoDifference(model.phase, .failed("The cut-suggester stopped before returning results."))
       #expect(!model.isSuggesting)
     }
   }

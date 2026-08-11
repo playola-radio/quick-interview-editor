@@ -135,6 +135,12 @@ final class CutSuggestionsPageModel: ViewModel {
         case .progress(let message):
           phase = .suggesting(message)
         case .completed(let candidates):
+          guard !candidates.isEmpty else {
+            phase = .failed(
+              "The cut-suggester completed but produced no usable suggestions. "
+                + "Existing suggestions were left unchanged.")
+            return
+          }
           let stamped = candidates.map { stampProvenance(on: $0, from: request) }
           // De-dupe defensively: a malformed response repeating a suggestion ID would trap
           // `IdentifiedArray(uniqueElements:)`. Regenerating replaces the prior candidates
@@ -147,8 +153,10 @@ final class CutSuggestionsPageModel: ViewModel {
         }
       }
       // The stream finished without ever completing (a degenerate run): don't hang on the
-      // spinner — drop back to idle with whatever the sidecar already held.
-      if isSuggesting { phase = .idle }
+      // spinner, but fail visibly so the user sees the missing subprocess result.
+      if isSuggesting {
+        phase = .failed("The cut-suggester stopped before returning results.")
+      }
     } catch is CancellationError {
       phase = .idle
     } catch {

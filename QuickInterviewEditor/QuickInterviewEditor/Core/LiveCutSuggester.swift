@@ -165,9 +165,14 @@ enum LiveCutSuggester {
             throw mapFailure(stderr: proc.stderrTail())
           }
           let provenance = provenance(for: request)
-          let suggestions = try CutSuggestion.decodeSuggestions(
+          let payload = try CutSuggestion.decodeSuggestionPayload(
             from: out, provenance: provenance, makeID: { UUID() })
-          continuation.yield(.completed(suggestions))
+          guard !payload.suggestions.isEmpty else {
+            throw CutSuggestClientError.noSuggestions(
+              payload.meta?.diagnosticDescription
+                ?? "The helper returned an empty suggestions array without diagnostics.")
+          }
+          continuation.yield(.completed(payload.suggestions))
           continuation.finish()
         } catch is CancellationError {
           continuation.finish()

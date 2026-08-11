@@ -66,7 +66,19 @@ class CachingLLMClient:
             with open(path) as f:
                 entry = json.load(f)
             r = entry["response"]
-            return LLMResponse(text=r["text"], usage=r.get("usage", {}), model=r.get("model", ""), cached=True)
+            text = r["text"]
+            if text.strip():
+                return LLMResponse(
+                    text=text, usage=r.get("usage", {}), model=r.get("model", ""), cached=True)
+            if self.inner is None:
+                raise CacheMiss(
+                    f"cached response for {purpose or 'prompt'} was empty "
+                    f"(model={self.model}, prompt_version={self.prompt_version}); "
+                    "rerun live with --refresh to replace the cache entry"
+                )
+            # Old app versions could cache an empty provider response, which then
+            # replayed forever as "no suggestions." In live mode, treat that as a
+            # poisoned cache entry and recompute through the provider below.
 
         if self.inner is None:
             raise CacheMiss(
@@ -76,6 +88,10 @@ class CachingLLMClient:
             )
 
         resp = self.inner.complete(prompt, purpose=purpose)
+        if not resp.text.strip():
+            raise RuntimeError(
+                f"LLM returned an empty response for {purpose or 'prompt'}; not caching it"
+            )
         os.makedirs(self.cache_dir, exist_ok=True)
         entry = {
             "model": self.model,

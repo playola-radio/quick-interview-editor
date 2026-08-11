@@ -1,6 +1,9 @@
 """Two-stage cutter orchestration, driven by a fake LLM (no network)."""
 
+import pytest
+
 from cut_suggester.cutter import (
+    CutSuggesterOutputError,
     parse_clip_response,
     parse_partition_response,
     suggest_cuts,
@@ -49,15 +52,22 @@ def test_parse_clip_response_returns_raw_dicts():
     assert clips == [{"type": "spotlight", "start": 0, "end": 2, "label": "A"}]
 
 
-def test_parse_partition_response_returns_empty_on_malformed_json():
-    # Truncated/garbled provider or cache output must not raise.
-    assert parse_partition_response("not json {", a=0, b=5) == []
-    assert parse_partition_response('{"paragraphs": [ ', a=0, b=5) == []
+def test_parse_partition_response_raises_on_malformed_json():
+    # Truncated/garbled provider or cache output must fail loud; otherwise the app
+    # reports a successful empty run and hides the real provider/cache problem.
+    with pytest.raises(CutSuggesterOutputError, match="not valid JSON"):
+        parse_partition_response("not json {", a=0, b=5)
+    with pytest.raises(CutSuggesterOutputError, match="not valid JSON"):
+        parse_partition_response('{"paragraphs": [ ', a=0, b=5)
 
 
-def test_parse_clip_response_returns_empty_on_malformed_json():
-    assert parse_clip_response("}{ broken") == []
-    assert parse_clip_response('{"clips": [') == []
+def test_parse_clip_response_raises_on_malformed_json_or_empty_text():
+    with pytest.raises(CutSuggesterOutputError, match="not valid JSON"):
+        parse_clip_response("}{ broken")
+    with pytest.raises(CutSuggesterOutputError, match="not valid JSON"):
+        parse_clip_response('{"clips": [')
+    with pytest.raises(CutSuggesterOutputError, match="classification response was empty"):
+        parse_clip_response("")
 
 
 # --- end-to-end ------------------------------------------------------------

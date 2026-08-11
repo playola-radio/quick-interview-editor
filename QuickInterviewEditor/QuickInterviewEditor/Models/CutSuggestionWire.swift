@@ -45,6 +45,37 @@ extension CutSuggestion {
   /// (counts) the app currently ignores.
   struct WireResponse: Decodable, Sendable {
     var suggestions: [Wire]
+    var meta: WireMeta?
+  }
+
+  /// Diagnostic counts emitted by `cut_suggester.cli`. These stay optional so an older
+  /// helper can still decode; when present, empty runs become explainable in the UI.
+  struct WireMeta: Decodable, Equatable, Sendable {
+    var nSentences: Int?
+    var nPartitions: Int?
+    var nRawClips: Int?
+    var nInvalidClips: Int?
+    var nDroppedDuration: Int?
+
+    enum CodingKeys: String, CodingKey {
+      case nSentences = "n_sentences"
+      case nPartitions = "n_partitions"
+      case nRawClips = "n_raw_clips"
+      case nInvalidClips = "n_invalid_clips"
+      case nDroppedDuration = "n_dropped_duration"
+    }
+
+    var diagnosticDescription: String {
+      var parts: [String] = []
+      if let nSentences { parts.append("\(nSentences) transcript unit(s)") }
+      if let nPartitions { parts.append("\(nPartitions) topic partition(s)") }
+      if let nRawClips { parts.append("\(nRawClips) raw clip(s) from the model") }
+      if let nInvalidClips { parts.append("\(nInvalidClips) malformed clip(s)") }
+      if let nDroppedDuration { parts.append("\(nDroppedDuration) clip(s) outside duration limits") }
+      return parts.isEmpty
+        ? "The helper returned an empty suggestions array without diagnostics."
+        : parts.joined(separator: "; ") + "."
+    }
   }
 
   /// Build a `CutSuggestion` from a decoded wire candidate. `id` is injected (a fresh
@@ -82,6 +113,13 @@ extension CutSuggestion {
   static func decodeSuggestions(
     from data: Data, provenance: Provenance, makeID: () -> UUID
   ) throws -> [CutSuggestion] {
+    let payload = try decodeSuggestionPayload(from: data, provenance: provenance, makeID: makeID)
+    return payload.suggestions
+  }
+
+  static func decodeSuggestionPayload(
+    from data: Data, provenance: Provenance, makeID: () -> UUID
+  ) throws -> (suggestions: [CutSuggestion], meta: WireMeta?) {
     let response: WireResponse
     do {
       response = try JSONDecoder().decode(WireResponse.self, from: data)
@@ -91,8 +129,9 @@ extension CutSuggestion {
       throw CutSuggestClientError.decodeFailed(
         "\(error)\n\nOutput was not valid suggestion JSON. It began with:\n\(preview)")
     }
-    return try response.suggestions.map {
+    let suggestions = try response.suggestions.map {
       try CutSuggestion(wire: $0, id: makeID(), provenance: provenance)
     }
+    return (suggestions, response.meta)
   }
 }
