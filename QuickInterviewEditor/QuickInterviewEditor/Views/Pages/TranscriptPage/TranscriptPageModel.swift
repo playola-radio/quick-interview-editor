@@ -83,7 +83,7 @@ class TranscriptPageModel: ViewModel {
   let paragraphSpacing = 12.0
 
   // MARK: - View Helpers
-  var hasSelection: Bool { selectionAnchorID != nil }
+  var hasSelection: Bool { !selectedWords.isEmpty }
   var selectionSummary: String {
     let count = selectedWords.count
     guard count > 0 else { return "No selection" }
@@ -171,10 +171,23 @@ class TranscriptPageModel: ViewModel {
     }
   }
 
-  func transcriptClicked(atUTF16Offset offset: Int) {
+  func transcriptClicked(atUTF16Offset offset: Int, extending: Bool = false) {
     guard let id = document.wordID(atUTF16Offset: offset) else { return }
-    if selectionAnchorID == id, selectionFocusID == id {
-      clearSelectionTapped()
+    wordClicked(id, extending: extending)
+  }
+
+  /// The single selection entry point for both the transcript and the waveform.
+  /// `extending` = Shift held: keep the anchor and move the focus (contiguous run).
+  func wordClicked(_ id: Word.ID, extending: Bool) {
+    guard let plan = editPlan, plan.words.contains(where: { $0.id == id }) else { return }
+    let anchorIsValid =
+      selectionAnchorID.map { anchor in plan.words.contains { $0.id == anchor } } ?? false
+    if extending, anchorIsValid {
+      selectionFocusID = id  // keep anchor, move focus
+    } else if extending {
+      selectWord(id)  // no valid anchor -> plain select
+    } else if selectionAnchorID == id, selectionFocusID == id {
+      clearSelectionTapped()  // plain re-click of the sole selected word clears
     } else {
       selectWord(id)
     }
