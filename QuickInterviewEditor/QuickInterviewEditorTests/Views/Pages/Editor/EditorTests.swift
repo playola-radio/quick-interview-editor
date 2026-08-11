@@ -1014,4 +1014,90 @@ struct EditorTests {
     expectNoDifference(model.canExportSlice, false)
     expectNoDifference(model.showsCancelExport, true)
   }
+
+  // MARK: - Waveform scroll / click / key routing
+
+  /// The waveform's geometry (`totalSamples`) is only populated by the async audio load,
+  /// which tests never run — so set it explicitly, exactly like `WaveformTests` does, or the
+  /// `totalSamples > 0` guards make every zoom/pan a silent no-op.
+  private func geometryReadyEditor() -> EditorModel {
+    let model = editor()
+    model.waveform.totalSamples = 100_000_000
+    model.waveform.viewportWidth = 1000
+    model.waveform.samplesPerPixel = 100
+    model.waveform.visibleStartSample = 400_000
+    return model
+  }
+
+  @Test func optionCommandScrollZoomsWaveform() {
+    let model = geometryReadyEditor()
+    let before = model.waveform.samplesPerPixel
+    model.waveformScrolled(
+      deltaX: 0, deltaY: 30, hasPreciseDeltas: true,
+      optionDown: true, commandDown: true, atX: 500)
+    #expect(model.waveform.samplesPerPixel != before)  // zoom changed
+  }
+
+  @Test func plainScrollPansWaveformNotZoom() {
+    let model = geometryReadyEditor()
+    let sppBefore = model.waveform.samplesPerPixel
+    model.waveformScrolled(
+      deltaX: 0, deltaY: 20, hasPreciseDeltas: true,
+      optionDown: false, commandDown: false, atX: 500)
+    #expect(model.waveform.samplesPerPixel == sppBefore)  // zoom untouched
+    #expect(model.waveform.visibleStartSample != 400_000)  // panned
+  }
+
+  @Test func commandScrollPansWaveform() {
+    let model = geometryReadyEditor()
+    let sppBefore = model.waveform.samplesPerPixel
+    model.waveformScrolled(
+      deltaX: 20, deltaY: 0, hasPreciseDeltas: true,
+      optionDown: false, commandDown: true, atX: 500)
+    #expect(model.waveform.samplesPerPixel == sppBefore)
+    #expect(model.waveform.visibleStartSample != 400_000)
+  }
+
+  @Test func waveformClickExtendingExtendsSelection() {
+    let model = editor()  // default plan = Fixtures.editPlan()
+    model.waveform.totalSamples = 100_000_000
+    model.waveform.viewportWidth = 1000
+    model.waveform.samplesPerPixel = 1
+    model.waveform.visibleStartSample = 0
+    // With spp 1 / start 0, view-x == plan sample, so x = startSample+1 lands inside a word.
+    let words = Fixtures.editPlan().words
+    let first = words[0]
+    let later = words[4]
+    model.waveformClicked(atX: CGFloat(first.startSample! + 1), extending: false)
+    model.waveformClicked(atX: CGFloat(later.startSample! + 1), extending: true)
+    #expect(model.transcript.selectedWordIDSet.count >= 2)  // extended across the run
+  }
+
+  @Test func editorKeyDownZoomFitTogglesUsingSelection() {
+    let model = editor()
+    model.waveform.totalSamples = 100_000_000
+    model.waveform.viewportWidth = 1000
+    model.waveform.samplesPerPixel = 50
+    model.waveform.visibleStartSample = 0
+    selectWords(model.transcript, 0, 1)  // a real, resolvable selection
+    let consumed = model.editorKeyDown(.zoomFit)  // fit selection (stores 50/0)
+    #expect(consumed == true)
+    #expect(model.waveform.samplesPerPixel != 50)  // it fit to something
+    _ = model.editorKeyDown(.zoomFit)  // restore
+    #expect(model.waveform.samplesPerPixel == 50)
+    #expect(model.waveform.visibleStartSample == 0)
+  }
+
+  @Test func editorKeyDownZoomInOut() {
+    let model = editor()
+    model.waveform.totalSamples = 100_000_000  // fit spp = 100_000; 100 is well inside range
+    model.waveform.viewportWidth = 1000
+    model.waveform.samplesPerPixel = 100
+    model.waveform.visibleStartSample = 0
+    _ = model.editorKeyDown(.zoomIn)
+    #expect(model.waveform.samplesPerPixel < 100)
+    let zoomedIn = model.waveform.samplesPerPixel
+    _ = model.editorKeyDown(.zoomOut)
+    #expect(model.waveform.samplesPerPixel > zoomedIn)
+  }
 }
