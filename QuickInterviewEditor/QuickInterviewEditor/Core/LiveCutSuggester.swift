@@ -199,12 +199,23 @@ enum LiveCutSuggester {
   /// credential is called out distinctly so the UI can prompt for auth instead of
   /// showing a generic failure.
   private static func mapFailure(stderr: String) -> CutSuggestClientError {
-    let lowered = stderr.lowercased()
+    // The QIE_EVENT progress lines share this stream and carry free-form message
+    // text + counts (a partition index or candidate count could contain "401"), so
+    // they must not drive the classification — match only the non-progress lines.
+    let lowered =
+      stderr
+      .split(separator: "\n", omittingEmptySubsequences: true)
+      .filter { !$0.hasPrefix("QIE_EVENT ") }
+      .joined(separator: "\n")
+      .lowercased()
     let authSignals = [
       "openai_key", "anthropic_api_key", "api key", "api_key", "authentication",
-      "unauthorized", "401", "credential",
+      "unauthorized", "credential",
     ]
-    if authSignals.contains(where: lowered.contains) {
+    // Bounded match for the bare status code so an unrelated "401" substring
+    // (a sample index, a byte count) doesn't misclassify a genuine failure.
+    let statusUnauthorized = lowered.range(of: #"\b401\b"#, options: .regularExpression) != nil
+    if statusUnauthorized || authSignals.contains(where: lowered.contains) {
       return .authMissing(stderr)
     }
     return .suggestFailed(stderr)

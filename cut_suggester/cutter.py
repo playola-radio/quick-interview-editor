@@ -41,7 +41,7 @@ class CutSuggestResult:
 ProgressFn = Callable[..., None]
 
 
-def _noop_progress(**_kwargs) -> None:
+def _noop_progress(**_kwargs: object) -> None:
     pass
 
 
@@ -89,7 +89,14 @@ def stage1_partition(
     progress: ProgressFn = _noop_progress,
 ) -> list[TopicPartition]:
     n = len(sentences)
-    starts = list(range(0, n, step))
+    # Only the window starts that will actually run: the loop below stops after the
+    # first window that reaches `n`, so build `starts` with the same terminal
+    # condition — otherwise `total` overcounts and the last message reads "9 of 10".
+    starts: list[int] = []
+    for a in range(0, n, step):
+        starts.append(a)
+        if a + window >= n:
+            break
     total = len(starts)
     window_partitions: list[list[TopicPartition]] = []
     for i, a in enumerate(starts):

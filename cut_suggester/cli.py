@@ -161,7 +161,9 @@ def _cmd_suggest(args) -> int:
     if not os.path.exists(args.request):
         print(f"error: no such request file: {args.request}", file=sys.stderr)
         return 2
-    with open(args.request) as f:
+    # The app writes UTF-8 JSON with non-ASCII transcript text; read it as UTF-8
+    # explicitly so a non-UTF-8 child locale (e.g. LC_ALL=C) can't raise on decode.
+    with open(args.request, encoding="utf-8") as f:
         request = json.load(f)
     options = request.get("options") or {}
     llm = build_llm(
@@ -216,6 +218,13 @@ def main(argv=None) -> int:
     s.set_defaults(func=_cmd_suggest)
 
     args = parser.parse_args(argv)
+    # Reject flag combinations that would otherwise fail late with a misleading
+    # message: --refresh recomputes through the live client, so it needs one (not
+    # --cached) and a --cache-dir to overwrite.
+    if getattr(args, "cached", False) and getattr(args, "refresh", False):
+        parser.error("--refresh cannot be combined with --cached (no live client to recompute)")
+    if getattr(args, "refresh", False) and getattr(args, "cache_dir", None) is None:
+        parser.error("--refresh requires --cache-dir")
     try:
         return args.func(args)
     except CacheMiss as exc:
