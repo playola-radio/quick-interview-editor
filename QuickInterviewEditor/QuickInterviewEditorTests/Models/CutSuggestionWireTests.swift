@@ -103,4 +103,17 @@ struct CutSuggestionWireTests {
       from: empty, provenance: Self.provenance, makeID: UUID.init)
     expectNoDifference(suggestions, [])
   }
+
+  @Test func decodePayloadCarriesEmptyRunDiagnostics() throws {
+    let empty = Data(
+      """
+      {"suggestions": [], "meta": {"n_sentences": 245, "n_partitions": 18,
+       "n_raw_clips": 0, "n_invalid_clips": 0, "n_dropped_duration": 0}}
+      """.utf8)
+    let payload = try CutSuggestion.decodeSuggestionPayload(
+      from: empty, provenance: Self.provenance, makeID: UUID.init)
+    expectNoDifference(payload.suggestions, [])
+    #expect(payload.meta?.diagnosticDescription.contains("245 transcript unit(s)") == true)
+    #expect(payload.meta?.diagnosticDescription.contains("0 raw clip(s)") == true)
+  }
 }
