@@ -79,6 +79,10 @@ final class SongTabModel: ViewModel, Identifiable {
     // `start()` already set `.transcribing(nil)` synchronously (so the queue pump
     // counts this tab immediately); just clear any prior editor here.
     editor = nil
+    // Content-hash the source once (off-main) BEFORE the engine reads it, so the sidecar
+    // keys to the bytes we're actually transcribing — not a file swapped in at the same
+    // path mid-run — and survives engine re-runs. Falls back to the path if unreadable.
+    let fingerprint = await SourceFingerprint.make(for: sourceURL)
     do {
       for try await event in engine.transcribe(sourceURL) {
         switch event {
@@ -87,7 +91,7 @@ final class SongTabModel: ViewModel, Identifiable {
           editor = withDependencies(from: self) {
             EditorModel(
               sourceURL: sourceURL, canonicalAudioURL: result.canonicalAudioURL,
-              editPlan: result.editPlan)
+              editPlan: result.editPlan, sourceFingerprint: fingerprint)
           }
           phase = .loaded
         }

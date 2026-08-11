@@ -15,12 +15,31 @@ struct EditorView: View {
         }
       }
       Divider()
-      SlicesPanelView(model: model)
-        .frame(width: 302)
+      VStack(spacing: 0) {
+        Picker(model.rightPanelPickerLabel, selection: $model.rightPanelTab) {
+          Text(model.slicesTabLabel).tag(RightPanelTab.slices)
+          Text(model.suggestionsTabLabel).tag(RightPanelTab.suggestions)
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .padding(8)
+        Divider()
+        rightPanel
+      }
+      .frame(width: 302)
     }
     .background(Color.black)
     .task { await model.loadWaveform() }
     .task { await model.observePlayback() }
     .onChange(of: model.fineTuneSessionKey, initial: true) { _, _ in model.syncEditSession() }
+  }
+
+  @ViewBuilder private var rightPanel: some View {
+    switch model.rightPanelTab {
+    case .slices:
+      SlicesPanelView(model: model)
+    case .suggestions:
+      CutSuggestionsPageView(model: model.cutSuggestions)
+    }
   }
 }

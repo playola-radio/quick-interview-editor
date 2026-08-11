@@ -70,3 +70,28 @@ in their gap. Drag the AIFFs into Logic — markers travel with each file.
 ```bash
 python3 -m pytest -q
 ```
+
+## Cut Suggestions — API key setup
+
+The macOS app can suggest product-shaped cut points (Artist Spotlight / Intro)
+by sending the transcript to a hosted Claude model. This is **bring-your-own-key**:
+usage is billed to your own Anthropic account.
+
+1. Get an Anthropic API key at
+   <https://console.anthropic.com/settings/keys>.
+2. In the app, open **Settings** (⌘,) — or tap **Suggest Cuts** with no key set,
+   which opens the same key entry — and paste the key into **Anthropic API Key**.
+3. The key is stored in your **macOS Keychain** under a stable, machine-wide
+   service id (`fm.playola.QuickInterviewEditor.anthropicAPIKey`), so you set it
+   **once per machine** and it's shared across every build/workspace. It is never
+   written to `UserDefaults`, a plist, the on-disk request, or the process
+   arguments, and is never logged.
+
+**Env-var fallback (dev convenience):** if no Keychain key is set, the app falls
+back to the `ANTHROPIC_API_KEY` environment variable. Resolution order is
+Keychain first, then `ANTHROPIC_API_KEY`; if neither is present the feature shows
+an onboarding state and never calls the model. The resolved key is injected only
+into the cut-suggester subprocess's environment.
+
+The provider/model stays a config knob (defaults to `claude-sonnet-5`). A hosted
+Playola gateway is a possible future option; today it's your own key.

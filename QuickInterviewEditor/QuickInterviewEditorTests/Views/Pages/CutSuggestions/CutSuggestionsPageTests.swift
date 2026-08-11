@@ -14,15 +14,17 @@ struct CutSuggestionsPageTests {
 
   // MARK: - Helpers
 
-  /// A fixture cutter: optionally captures the request it was handed, emits progress ticks,
-  /// then completes with the given candidates — synchronously, no sleeps, no network.
+  /// A fixture cutter: optionally captures the request + key it was handed, emits progress
+  /// ticks, then completes with the given candidates — synchronously, no sleeps, no network.
   private func fixtureClient(
     progress: [String] = ["Analyzing transcript…"],
     completed: [CutSuggestion],
-    capture: LockIsolated<CutSuggestRequest?>? = nil
+    capture: LockIsolated<CutSuggestRequest?>? = nil,
+    captureKey: LockIsolated<String?>? = nil
   ) -> CutSuggestClient {
-    CutSuggestClient { request in
+    CutSuggestClient { request, apiKey in
       capture?.setValue(request)
+      captureKey?.setValue(apiKey)
       return AsyncThrowingStream { continuation in
         for message in progress { continuation.yield(.progress(message)) }
         continuation.yield(.completed(completed))
@@ -41,14 +43,16 @@ struct CutSuggestionsPageTests {
 
   // MARK: - Request building
 
-  @Test func buildsRequestFromTheTranscriptAndSendsItToTheClient() async {
+  @Test func buildsRequestAndThreadsTheResolvedKeyToTheClient() async {
     let fingerprint = "fp-request"
     let plan = Fixtures.editPlan()
     let capture = LockIsolated<CutSuggestRequest?>(nil)
+    let capturedKey = LockIsolated<String?>(nil)
 
     await withDependencies {
       $0.defaultFileStorage = FileStorage.inMemory(fileSystem: LockIsolated([:]))
-      $0.cutSuggest = fixtureClient(completed: [], capture: capture)
+      $0.keychain = .inMemory("sk-keychain")
+      $0.cutSuggest = fixtureClient(completed: [], capture: capture, captureKey: capturedKey)
     } operation: {
       let model = CutSuggestionsPageModel(editPlan: plan, sourceFingerprint: fingerprint)
       await model.suggestCutsTapped()
@@ -61,6 +65,8 @@ struct CutSuggestionsPageTests {
     expectNoDifference(request?.productSpecs, ProductSpec.defaults)
     expectNoDifference(request?.options, CutSuggestOptions())
     #expect(request?.diarization == nil)
+    // The Keychain key is threaded in memory to the client (never inside the request).
+    expectNoDifference(capturedKey.value, "sk-keychain")
   }
 
   // MARK: - Completion → sidecar
@@ -68,13 +74,13 @@ struct CutSuggestionsPageTests {
   @Test func completedRunStampsProvenanceAndWritesSuggestionsToTheSidecar() async {
     let fingerprint = "fp-complete"
     let plan = Fixtures.editPlan()
-    // Deliberately-wrong provenance proves the model re-stamps from the current run.
     var raw = Fixtures.cutSuggestion(id: Fixtures.uuid(1), wordIDs: [10, 11, 12])
     raw.provenance.transcriptHash = "stale-hash"
     raw.provenance.sourceFingerprint = "some-other-file"
 
     await withDependencies {
       $0.defaultFileStorage = FileStorage.inMemory(fileSystem: LockIsolated([:]))
+      $0.keychain = .inMemory("sk-keychain")
       $0.cutSuggest = fixtureClient(completed: [raw])
     } operation: {
       @Shared(.projectState(fingerprint: fingerprint)) var state = ProjectState()
@@ -91,34 +97,7 @@ struct CutSuggestionsPageTests {
     }
   }
 
-  @Test func aProducedSuggestionPassesTheAcceptTranscriptHashGate() async {
-    // End-to-end: a suggestion the model persisted is stamped with the current transcript
-    // hash, so accepting it against that same hash is not stale.
-    let fingerprint = "fp-accept"
-    let plan = Fixtures.editPlan()
-    let raw = Fixtures.cutSuggestion(
-      id: Fixtures.uuid(1), wordIDs: [10, 11, 12, 13, 14, 15, 16])
-
-    await withDependencies {
-      $0.defaultFileStorage = FileStorage.inMemory(fileSystem: LockIsolated([:]))
-      $0.cutSuggest = fixtureClient(completed: [raw])
-    } operation: {
-      @Shared(.projectState(fingerprint: fingerprint)) var state = ProjectState()
-      let model = CutSuggestionsPageModel(editPlan: plan, sourceFingerprint: fingerprint)
-      await model.suggestCutsTapped()
-
-      let result = acceptCutSuggestion(
-        raw.id, in: state, plan: plan, sourceFingerprint: fingerprint,
-        transcriptHash: plan.transcriptHash)
-      guard case .accepted = result else {
-        Issue.record("expected .accepted, got \(result)")
-        return
-      }
-    }
-  }
-
   @Test func completedWithDuplicateSuggestionIDsDoesNotCrashAndKeepsTheFirst() async {
-    // A malformed response repeating an ID must not trap `IdentifiedArray(uniqueElements:)`.
     let fingerprint = "fp-dup"
     let plan = Fixtures.editPlan()
     let first = Fixtures.cutSuggestion(id: Fixtures.uuid(1), title: "first", wordIDs: [10, 11, 12])
@@ -127,6 +106,7 @@ struct CutSuggestionsPageTests {
 
     await withDependencies {
       $0.defaultFileStorage = FileStorage.inMemory(fileSystem: LockIsolated([:]))
+      $0.keychain = .inMemory("sk-keychain")
       $0.cutSuggest = fixtureClient(completed: [first, second])
     } operation: {
       @Shared(.projectState(fingerprint: fingerprint)) var state = ProjectState()
@@ -140,11 +120,11 @@ struct CutSuggestionsPageTests {
   }
 
   @Test func streamFinishingWithoutCompletionReturnsToIdle() async {
-    // A degenerate run that never emits `.completed` must not leave the spinner stuck.
     let fingerprint = "fp-nocomplete"
     await withDependencies {
       $0.defaultFileStorage = FileStorage.inMemory(fileSystem: LockIsolated([:]))
-      $0.cutSuggest = CutSuggestClient { _ in
+      $0.keychain = .inMemory("sk-keychain")
+      $0.cutSuggest = CutSuggestClient { _, _ in
         AsyncThrowingStream { continuation in
           continuation.yield(.progress("Analyzing transcript…"))
           continuation.finish()
@@ -168,7 +148,8 @@ struct CutSuggestionsPageTests {
 
     await withDependencies {
       $0.defaultFileStorage = FileStorage.inMemory(fileSystem: LockIsolated([:]))
-      $0.cutSuggest = CutSuggestClient { _ in
+      $0.keychain = .inMemory("sk-keychain")
+      $0.cutSuggest = CutSuggestClient { _, _ in
         AsyncThrowingStream { $0.finish(throwing: error) }
       }
     } operation: {
@@ -183,14 +164,223 @@ struct CutSuggestionsPageTests {
     }
   }
 
+  // MARK: - Key resolution & onboarding
+
+  @Test func noKeyShowsOnboardingAndSuggestPresentsKeyEntryWithoutCallingTheClient() async {
+    await withDependencies {
+      $0.defaultFileStorage = FileStorage.inMemory(fileSystem: LockIsolated([:]))
+      $0.keychain = .inMemory(nil)
+      $0.environment = .constant([:])
+      // A cutter that would fail loudly if it were ever called with no key.
+      $0.cutSuggest = CutSuggestClient { _, _ in
+        AsyncThrowingStream { $0.finish(throwing: CutSuggestClientError.unimplemented("x")) }
+      }
+    } operation: {
+      let model = CutSuggestionsPageModel(
+        editPlan: Fixtures.editPlan(), sourceFingerprint: "fp-none")
+      model.viewAppeared()
+      expectNoDifference(model.showsOnboarding, true)
+      expectNoDifference(model.suggestButtonLabel, model.addKeyButtonLabel)
+
+      await model.suggestCutsTapped()
+      // No call happened (no error surfaced); the key-entry sheet is presented instead.
+      expectNoDifference(model.phase, .idle)
+      #expect(model.keyEntry != nil)
+    }
+  }
+
+  @Test func keychainKeyEnablesSuggest() {
+    withDependencies {
+      $0.defaultFileStorage = FileStorage.inMemory(fileSystem: LockIsolated([:]))
+      $0.keychain = .inMemory("sk-keychain")
+      $0.environment = .constant([:])
+    } operation: {
+      let model = CutSuggestionsPageModel(
+        editPlan: Fixtures.editPlan(), sourceFingerprint: "fp-kc")
+      model.viewAppeared()
+      expectNoDifference(model.showsOnboarding, false)
+      expectNoDifference(model.suggestButtonLabel, "Suggest Cuts")
+    }
+  }
+
+  @Test func envVarKeyResolvesWhenNoKeychainValue() {
+    withDependencies {
+      $0.defaultFileStorage = FileStorage.inMemory(fileSystem: LockIsolated([:]))
+      $0.keychain = .inMemory(nil)
+      $0.environment = .constant([anthropicAPIKeyEnvVar: "env-key"])
+    } operation: {
+      let model = CutSuggestionsPageModel(
+        editPlan: Fixtures.editPlan(), sourceFingerprint: "fp-env")
+      model.viewAppeared()
+      expectNoDifference(model.showsOnboarding, false)
+    }
+  }
+
+  @Test func savingAKeyInTheEntrySheetRefreshesStateAndDismisses() {
+    withDependencies {
+      $0.defaultFileStorage = FileStorage.inMemory(fileSystem: LockIsolated([:]))
+      $0.keychain = .inMemory(nil)
+      $0.environment = .constant([:])
+    } operation: {
+      let model = CutSuggestionsPageModel(
+        editPlan: Fixtures.editPlan(), sourceFingerprint: "fp-save")
+      model.viewAppeared()
+      expectNoDifference(model.showsOnboarding, true)
+
+      model.addAPIKeyTapped()
+      let entry = model.keyEntry
+      #expect(entry != nil)
+      entry?.apiKeyDraft = "sk-new"
+      entry?.saveTapped()
+
+      // The onSaved hook refreshed key state and dismissed the sheet.
+      #expect(model.keyEntry == nil)
+      expectNoDifference(model.showsOnboarding, false)
+    }
+  }
+
+  // MARK: - Accept / reject
+
+  @Test func acceptTappedAddsSliceFlipsStatusAndPersists() {
+    let fingerprint = "fp-accept"
+    let plan = Fixtures.editPlan()
+    var suggestion = Fixtures.cutSuggestion(
+      id: Fixtures.uuid(1), wordIDs: [10, 11, 12, 13, 14, 15, 16])
+    suggestion.provenance = stampedProvenance(
+      transcriptHash: plan.transcriptHash, fingerprint: fingerprint)
+    let acceptedSlice = LockIsolated<Slice?>(nil)
+
+    withDependencies {
+      $0.defaultFileStorage = FileStorage.inMemory(fileSystem: LockIsolated([:]))
+      $0.keychain = .inMemory("sk-keychain")
+    } operation: {
+      @Shared(.projectState(fingerprint: fingerprint)) var state = ProjectState(
+        cutSuggestions: [suggestion])
+      let model = CutSuggestionsPageModel(editPlan: plan, sourceFingerprint: fingerprint)
+      model.onAcceptSlice = { acceptedSlice.setValue($0) }
+
+      model.acceptTapped(suggestion.id)
+
+      expectNoDifference(acceptedSlice.value?.id, suggestion.id)
+      expectNoDifference(state.cutSuggestions[id: suggestion.id]?.status, .accepted)
+      expectNoDifference(model.actionMessage, nil)
+    }
+  }
+
+  @Test func acceptTappedOnAStaleSuggestionSurfacesAMessageAndDoesNotAccept() {
+    let fingerprint = "fp-stale"
+    let plan = Fixtures.editPlan()
+    var suggestion = Fixtures.cutSuggestion(id: Fixtures.uuid(1), wordIDs: [10, 11, 12])
+    // Same file, different transcript hash → transcript drifted under it.
+    suggestion.provenance = stampedProvenance(
+      transcriptHash: "different-hash", fingerprint: fingerprint)
+    let acceptedSlice = LockIsolated<Slice?>(nil)
+
+    withDependencies {
+      $0.defaultFileStorage = FileStorage.inMemory(fileSystem: LockIsolated([:]))
+    } operation: {
+      @Shared(.projectState(fingerprint: fingerprint)) var state = ProjectState(
+        cutSuggestions: [suggestion])
+      let model = CutSuggestionsPageModel(editPlan: plan, sourceFingerprint: fingerprint)
+      model.onAcceptSlice = { acceptedSlice.setValue($0) }
+
+      model.acceptTapped(suggestion.id)
+
+      #expect(acceptedSlice.value == nil)
+      expectNoDifference(state.cutSuggestions[id: suggestion.id]?.status, .pending)
+      expectNoDifference(model.actionMessage, cutSuggestionStaleMessage(.transcriptChanged))
+    }
+  }
+
+  @Test func acceptTappedOnAnInvalidSuggestionSurfacesAMessage() {
+    let fingerprint = "fp-invalid"
+    let plan = Fixtures.editPlan()
+    var suggestion = Fixtures.cutSuggestion(id: Fixtures.uuid(1), wordIDs: [])
+    suggestion.provenance = stampedProvenance(
+      transcriptHash: plan.transcriptHash, fingerprint: fingerprint)
+
+    withDependencies {
+      $0.defaultFileStorage = FileStorage.inMemory(fileSystem: LockIsolated([:]))
+    } operation: {
+      @Shared(.projectState(fingerprint: fingerprint)) var state = ProjectState(
+        cutSuggestions: [suggestion])
+      let model = CutSuggestionsPageModel(editPlan: plan, sourceFingerprint: fingerprint)
+
+      model.acceptTapped(suggestion.id)
+
+      expectNoDifference(state.cutSuggestions[id: suggestion.id]?.status, .pending)
+      expectNoDifference(model.actionMessage, cutSuggestionInvalidMessage(.noWords))
+    }
+  }
+
+  @Test func rejectTappedMarksTheSuggestionRejected() {
+    let fingerprint = "fp-reject"
+    let plan = Fixtures.editPlan()
+    let suggestion = Fixtures.cutSuggestion(id: Fixtures.uuid(1), wordIDs: [10, 11, 12])
+
+    withDependencies {
+      $0.defaultFileStorage = FileStorage.inMemory(fileSystem: LockIsolated([:]))
+    } operation: {
+      @Shared(.projectState(fingerprint: fingerprint)) var state = ProjectState(
+        cutSuggestions: [suggestion])
+      let model = CutSuggestionsPageModel(editPlan: plan, sourceFingerprint: fingerprint)
+
+      model.rejectTapped(suggestion.id)
+
+      expectNoDifference(state.cutSuggestions[id: suggestion.id]?.status, .rejected)
+    }
+  }
+
+  // MARK: - Ranked, grouped presentation + freshness
+
+  @Test func sectionsGroupByProductTypeInRankedOrderWithFreshnessFlags() {
+    let fingerprint = "fp-sections"
+    let plan = Fixtures.editPlan()
+    let hash = plan.transcriptHash
+    func provenance(transcriptHash: String) -> CutSuggestion.Provenance {
+      stampedProvenance(transcriptHash: transcriptHash, fingerprint: fingerprint)
+    }
+    var spotlight = Fixtures.cutSuggestion(
+      id: Fixtures.uuid(1), productType: .spotlight, title: "Story",
+      wordIDs: [10, 11, 12], rank: 1)
+    spotlight.provenance = provenance(transcriptHash: hash)
+    var intro = Fixtures.cutSuggestion(
+      id: Fixtures.uuid(2), productType: .intro, title: "Setup", song: "Hit",
+      wordIDs: [13, 14], rank: 2)
+    intro.provenance = provenance(transcriptHash: "stale")  // transcript drifted under the intro
+
+    withDependencies {
+      $0.defaultFileStorage = FileStorage.inMemory(fileSystem: LockIsolated([:]))
+    } operation: {
+      @Shared(.projectState(fingerprint: fingerprint)) var state = ProjectState(
+        cutSuggestions: [intro, spotlight])
+      let model = CutSuggestionsPageModel(editPlan: plan, sourceFingerprint: fingerprint)
+
+      let sections = model.sections
+      // Spotlight ranks first (rank 1), so its section leads.
+      expectNoDifference(sections.map(\.title), ["Artist Spotlight", "Intro"])
+      expectNoDifference(sections[0].rows.map(\.id), [spotlight.id])
+      expectNoDifference(sections[0].rows[0].isStale, false)
+      expectNoDifference(sections[0].rows[0].canAccept, true)
+
+      let introRow = sections[1].rows[0]
+      expectNoDifference(introRow.isStale, true)
+      expectNoDifference(introRow.canAccept, false)
+      expectNoDifference(introRow.showsFreshnessWarning, true)
+      expectNoDifference(introRow.songLine, "Song: Hit (unverified)")
+    }
+  }
+
   // MARK: - View-facing state
 
   @Test func viewFacingStateMapsFromPhase() {
     withDependencies {
       $0.defaultFileStorage = FileStorage.inMemory(fileSystem: LockIsolated([:]))
+      $0.keychain = .inMemory("sk-keychain")
     } operation: {
       let model = CutSuggestionsPageModel(
         editPlan: Fixtures.editPlan(), sourceFingerprint: "fp-phase")
+      model.viewAppeared()
 
       expectNoDifference(model.isSuggesting, false)
       expectNoDifference(model.progressMessage, "")

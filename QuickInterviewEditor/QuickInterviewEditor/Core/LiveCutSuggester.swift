@@ -13,13 +13,14 @@ import Synchronization
 /// regression eval both live in Python, so this shells to them rather than
 /// reimplementing the algorithm in Swift.
 ///
-/// Auth: the model/provider come from `request.options`; the provider reads its API
-/// key from the child's environment. No credential is ever hardcoded or passed on the
-/// command line.
-/// - TODO(auth): the packaged app's auth story (Playola gateway token vs a
-///   user-supplied key, and how it reaches the child's environment) is a deferred
-///   product decision. Today the child inherits the app's environment; when packaging
-///   lands, inject the resolved credential via `SpawnedProcess.extraEnvironment` here.
+/// Auth: the model/provider come from `request.options`; the resolved API key arrives as
+/// the `apiKey` argument (BYO Anthropic key from the Keychain, or the `ANTHROPIC_API_KEY`
+/// env fallback — resolved upstream by the model) and is injected only into the child's
+/// environment as `ANTHROPIC_API_KEY`. No credential is ever hardcoded, written to the
+/// request file, passed on the command line, or logged.
+/// - TODO(auth): the provider stays a knob (`request.options.model`); when a Playola
+///   gateway replaces BYO keys, swap the resolved value at the call site — the injection
+///   seam here (`extraEnvironment`) does not change.
 enum LiveCutSuggester {
 
   // MARK: Launch resolution
@@ -107,9 +108,9 @@ enum LiveCutSuggester {
   // MARK: suggestCuts
 
   // swiftlint:disable:next function_body_length
-  static func suggestCuts(_ request: CutSuggestRequest) -> AsyncThrowingStream<
-    CutSuggestEvent, Error
-  > {
+  static func suggestCuts(_ request: CutSuggestRequest, apiKey: String?)
+    -> AsyncThrowingStream<CutSuggestEvent, Error>
+  {
     AsyncThrowingStream { continuation in
       let procBox = Mutex<SpawnedProcess?>(nil)
 
@@ -135,7 +136,7 @@ enum LiveCutSuggester {
             executable: launch.executable,
             arguments: launch.arguments(subcommand: "suggest", args),
             currentDirectory: launch.workingDirectory,
-            extraEnvironment: launch.environment
+            extraEnvironment: childEnvironment(base: launch.environment, apiKey: apiKey)
           )
           procBox.withLock { $0 = proc }
           if Task.isCancelled { proc.terminate() }
@@ -180,6 +181,20 @@ enum LiveCutSuggester {
         procBox.withLock { $0 }?.terminate()
       }
     }
+  }
+
+  /// The child's environment: the launch base plus the resolved credential injected as
+  /// `ANTHROPIC_API_KEY` (only here — never argv, visible in `ps`, nor the on-disk request
+  /// file). A whitespace-only key is treated as absent so the provider returns a clean auth
+  /// error rather than a malformed header.
+  private static func childEnvironment(base: [String: String], apiKey: String?)
+    -> [String: String]
+  {
+    var environment = base
+    if let apiKey = apiKey?.trimmingCharacters(in: .whitespacesAndNewlines), !apiKey.isEmpty {
+      environment[anthropicAPIKeyEnvVar] = apiKey
+    }
+    return environment
   }
 
   /// The provenance stamped onto each produced suggestion. The `CutSuggestionsPageModel`

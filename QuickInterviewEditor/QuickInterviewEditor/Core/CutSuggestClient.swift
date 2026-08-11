@@ -3,12 +3,18 @@ import Foundation
 import IssueReporting
 
 /// The network side-effect boundary for LLM cut suggestions. Like `EngineClient`, it is a
-/// `Sendable` dependency-client struct: `suggestCuts` takes a fully-built request and
-/// streams progress then a completed set of ranked candidates. The live two-stage LLM
-/// implementation lands in PR 5; this PR ships the contract, a stub `liveValue`, and
-/// fixtures, so the model and its tests run with no network, no subprocess, and no sleeps.
+/// `Sendable` dependency-client struct: `suggestCuts` takes a fully-built request plus the
+/// resolved API key and streams progress then a completed set of ranked candidates.
+///
+/// The `apiKey` is passed as a separate, in-memory argument — never a field of the
+/// (Equatable, on-disk-serialized) `CutSuggestRequest` — so the credential can't leak into
+/// the request JSON, a snapshot, or a log. The live path injects it only into the child
+/// process environment. `nil` means "no key resolved"; callers gate on that before calling.
 struct CutSuggestClient: Sendable {
-  var suggestCuts: @Sendable (CutSuggestRequest) -> AsyncThrowingStream<CutSuggestEvent, Error>
+  var suggestCuts:
+    @Sendable (_ request: CutSuggestRequest, _ apiKey: String?) -> AsyncThrowingStream<
+      CutSuggestEvent, Error
+    >
 }
 
 /// Everything the cutter needs, addressed by stable IDs rather than raw offsets. The
@@ -73,7 +79,7 @@ extension CutSuggestClient: DependencyKey {
   /// `EngineClient.liveValue` → `LiveEngine`), so the validated windowing / classify /
   /// trim / dedupe / rank logic and the regression eval stay a single source of truth.
   static let liveValue = CutSuggestClient(
-    suggestCuts: { request in LiveCutSuggester.suggestCuts(request) }
+    suggestCuts: { request, apiKey in LiveCutSuggester.suggestCuts(request, apiKey: apiKey) }
   )
 }
 
@@ -82,7 +88,7 @@ extension CutSuggestClient: TestDependencyKey {
   /// `withDependencies { $0.cutSuggest = … }`), so a forgotten override never passes
   /// against a hidden fixture. Matches `EngineClient.testValue`.
   static let testValue = CutSuggestClient(
-    suggestCuts: { _ in
+    suggestCuts: { _, _ in
       AsyncThrowingStream { continuation in
         reportIssue("CutSuggestClient.suggestCuts called without a test override")
         continuation.finish(throwing: CutSuggestClientError.unimplemented("suggestCuts"))
@@ -93,7 +99,7 @@ extension CutSuggestClient: TestDependencyKey {
   /// Used automatically by SwiftUI previews: a progress tick then an empty completion, so a
   /// preview exercises the streaming path without a network call.
   static let previewValue = CutSuggestClient(
-    suggestCuts: { _ in
+    suggestCuts: { _, _ in
       AsyncThrowingStream { continuation in
         continuation.yield(.progress("Analyzing transcript…"))
         continuation.yield(.completed([]))
