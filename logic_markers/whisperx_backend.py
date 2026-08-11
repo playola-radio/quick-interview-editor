@@ -49,7 +49,8 @@ def _load_audio_16k_mono(source: Path):
 
 
 def _aligned_segments(
-    source: Path, model_name: str, device: str, compute_type: str
+    source: Path, model_name: str, device: str, compute_type: str,
+    *, progress_callback=None,
 ) -> list[dict]:
     # Resolve model locations + offline flags from QIE_* env. In dev (no env)
     # this is a no-op and models download to the default caches as before; in
@@ -68,7 +69,10 @@ def _aligned_segments(
     model = whisperx.load_model(
         whisper_arch, device, compute_type=compute_type, local_files_only=config.offline
     )
-    result = model.transcribe(audio, batch_size=16)
+    result = model.transcribe(
+        audio, batch_size=16,
+        combined_progress=True, progress_callback=progress_callback,
+    )
     # `model_cache_only=offline` forces the alignment model to load from disk only.
     # The packaged app ships just the English torchaudio align model; offline mode
     # therefore fails clearly for any other detected language instead of silently
@@ -82,6 +86,7 @@ def _aligned_segments(
     aligned = whisperx.align(
         result["segments"], align_model, metadata, audio, device,
         return_char_alignments=False,
+        combined_progress=True, progress_callback=progress_callback,
     )
     return aligned["segments"]
 
@@ -91,9 +96,12 @@ def transcribe_transcript(
     model_name: str = "large-v2",
     device: str = "cpu",
     compute_type: str = "int8",
+    *, progress_callback=None,
 ) -> Transcript:
     """Full transcription with per-word start/end grouped into segments."""
-    segments_raw = _aligned_segments(source, model_name, device, compute_type)
+    segments_raw = _aligned_segments(
+        source, model_name, device, compute_type, progress_callback=progress_callback
+    )
 
     words: list[RichWord] = []
     segments: list[Segment] = []
