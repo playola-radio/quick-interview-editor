@@ -20,20 +20,37 @@ final class EditorModel: ViewModel {
   /// is a sample of this one file, so the playhead sits exactly on the pyramid.
   let canonicalAudioURL: URL
   let editPlan: EditPlan
+  /// Stable identity for the source file, keying the per-file project sidecar the
+  /// cut-suggester writes to. Content-derived when supplied by the tab; a path-based
+  /// fallback keeps previews/tests working without hashing a file.
+  let sourceFingerprint: String
   var transcript: TranscriptPageModel
   var waveform: WaveformModel
   var fineTune: FineTuneModel
+  var cutSuggestions: CutSuggestionsPageModel
 
-  init(sourceURL: URL, canonicalAudioURL: URL, editPlan: EditPlan) {
+  init(sourceURL: URL, canonicalAudioURL: URL, editPlan: EditPlan, sourceFingerprint: String? = nil)
+  {
     self.sourceURL = sourceURL
     self.canonicalAudioURL = canonicalAudioURL
     self.editPlan = editPlan
+    let fingerprint = sourceFingerprint ?? ("path:" + sourceURL.standardizedFileURL.path)
+    self.sourceFingerprint = fingerprint
     self.transcript = TranscriptPageModel(editPlan: editPlan)
     self.waveform = WaveformModel()
     self.fineTune = FineTuneModel(
       sampleRate: editPlan.source.sampleRate, durationSamples: editPlan.source.durationSamples,
       silences: editPlan.silences)
+    // Constructed within the ambient dependency context of this init (the parent wraps
+    // `EditorModel(...)` in `withDependencies(from:)`), so the child inherits the same deps.
+    self.cutSuggestions = CutSuggestionsPageModel(
+      editPlan: editPlan, sourceFingerprint: fingerprint)
     super.init()
+    // Accepting a suggestion adds its slice here (idempotently), through the shared
+    // mutation funnel so it's exportable and undoable like any other slice.
+    cutSuggestions.onAcceptSlice = { [weak self] slice in
+      self?.acceptCutSuggestionSlice(slice)
+    }
   }
 
   // MARK: - Export Phase
@@ -61,6 +78,9 @@ final class EditorModel: ViewModel {
   @ObservationIgnored private var previewGeneration = 0
   var exportPhase: ExportPhase = .idle
   var destinationURL: URL?
+  /// Which pane the right column shows. The clips list and the cut-suggester share the
+  /// column so accepting a suggestion visibly lands a clip in the Slices tab.
+  var rightPanelTab: RightPanelTab = .slices
   private var nextSliceNumber = 1
   private var lastExportTightNames: [String] = []
   @ObservationIgnored private(set) var exportTask: Task<Void, Never>?
@@ -78,6 +98,9 @@ final class EditorModel: ViewModel {
   let redoLabel = "Redo"
   let tightBadgeLabel = "Tight join"
   let tightBadgeHelp = "A cut point isn't in a silence — add a fade in Logic."
+  let slicesTabLabel = "Clips"
+  let suggestionsTabLabel = "Suggestions"
+  let rightPanelPickerLabel = "Right panel"
 
   // MARK: - Fine-tune session
   /// The active slice's committed range, if a slice is open in the pane.
@@ -282,6 +305,15 @@ final class EditorModel: ViewModel {
     let old = slices
     body(&slices)
     sliceUndo.record(before: old, after: slices)
+  }
+
+  /// Adds an accepted suggestion's slice to the editor. Idempotent by `Slice.id` (a
+  /// re-accept is a no-op), routed through `mutateSlices` so it's exportable and undoable.
+  /// Known limitation: undoing/deleting the slice later does not un-accept the suggestion
+  /// in the sidecar — full accept/reject reconciliation is deferred.
+  func acceptCutSuggestionSlice(_ slice: Slice) {
+    guard slices[id: slice.id] == nil else { return }
+    mutateSlices { $0.append(slice) }
   }
 
   func addSliceTapped() {
@@ -783,6 +815,13 @@ final class EditorModel: ViewModel {
   private func cancelMessage(copied: Int, total: Int) -> String {
     "Export cancelled — \(copied) of \(total) exported."
   }
+}
+
+/// The two panes the editor's right column can show.
+enum RightPanelTab: String, CaseIterable, Identifiable, Equatable {
+  case slices
+  case suggestions
+  var id: String { rawValue }
 }
 
 struct SliceRowState: Identifiable, Equatable {

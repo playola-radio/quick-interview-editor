@@ -84,10 +84,13 @@ final class SongTabModel: ViewModel, Identifiable {
         switch event {
         case .progress(let progress): phase = .transcribing(progress)
         case .completed(let result):
+          // Content-hash the source once (off-main) so the cut-suggester sidecar keys to
+          // the file, not its path — surviving engine re-runs and file moves.
+          let fingerprint = await SourceFingerprint.make(for: sourceURL)
           editor = withDependencies(from: self) {
             EditorModel(
               sourceURL: sourceURL, canonicalAudioURL: result.canonicalAudioURL,
-              editPlan: result.editPlan)
+              editPlan: result.editPlan, sourceFingerprint: fingerprint)
           }
           phase = .loaded
         }
