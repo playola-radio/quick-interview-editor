@@ -46,6 +46,19 @@ rm -rf "$DEST_APP"
 /usr/bin/ditto "$BUILT" "$DEST_APP"
 ENGINE_DEST="$DEST_APP/Contents/Resources/engine"
 mkdir -p "$ENGINE_DEST"
+# Preflight: the two one-folder bundles must not share any top-level entry name, or
+# the second ditto would overwrite the first's files (e.g. a stray `_internal`
+# clobbering the engine's Python/libs before signing). Fail loud rather than merge
+# a corrupted engine dir.
+COLLIDE="$(comm -12 \
+  <(cd "$ENGINE_SRC" && ls -1A | sort) \
+  <(cd "$CUT_SRC" && ls -1A | sort))"
+if [ -n "$COLLIDE" ]; then
+  echo "error: engine + cut-suggester bundles share top-level entries, refusing to merge:" >&2
+  echo "$COLLIDE" | sed 's/^/       /' >&2
+  echo "       (cut-suggester.spec must set contents_directory=_cut_suggester_internal)" >&2
+  exit 1
+fi
 # Both frozen one-folder bundles ditto INTO the same engine/ dir. Their support
 # trees don't collide — logic-markers uses _internal/, cut-suggester uses
 # _cut_suggester_internal/ (set via contents_directory in cut-suggester.spec). The

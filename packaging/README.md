@@ -73,6 +73,22 @@ the client construction, then fails cleanly on the missing key. That proves the 
 actually froze into the bundle (a missing SDK would raise `No module named 'anthropic'`
 instead).
 
+`verify-cut-suggester.sh` then runs a REAL suggest from the frozen binary under a
+scrubbed `env -i` (no `.venv`/`QIE_ENGINE_REPO`/`PYTHONPATH`), forwarding only the LLM
+key. The two providers exercise **different** runtime stacks — OpenAI is stdlib
+`urllib`+OpenSSL, Anthropic is httpx+certifi — so a full release check runs it **twice**:
+
+```
+packaging/verify-cut-suggester.sh                        # OpenAI path (needs OPENAI_KEY)
+MODEL=claude-sonnet-5 packaging/verify-cut-suggester.sh  # Anthropic path (needs ANTHROPIC_API_KEY)
+```
+
+TLS is the frozen-only trap here: a frozen bundle's default OpenSSL CA path is the
+build machine's, which won't exist on a user's Mac. `cut_suggester_entry.py` wires
+`SSL_CERT_FILE` to the bundled certifi CA when frozen so both paths verify certificates
+on a clean Mac — but only the post-signing/stapling run against each provider actually
+proves it, which is why the release check covers both models.
+
 ### 2. Prove it runs offline — `verify-offline.sh`
 
 The spike's success criterion. Stages the model files into the layout the app

@@ -34,6 +34,14 @@ if ! "$PY" -c "import PyInstaller" 2>/dev/null; then
   echo "error: PyInstaller not installed in $VENV. Run: $PY -m pip install pyinstaller" >&2
   exit 1
 fi
+# contents_directory (the _internal-collision guard the two-bundle merge depends on)
+# is a PyInstaller 6+ feature. Fail loud on an older PyInstaller rather than silently
+# emitting an `_internal` tree that later clobbers the engine bundle at merge time.
+if ! "$PY" -c "import PyInstaller,sys; sys.exit(0 if int(PyInstaller.__version__.split('.')[0])>=6 else 1)" 2>/dev/null; then
+  echo "error: PyInstaller >= 6 required (contents_directory support). In $VENV run:" >&2
+  echo "       $PY -m pip install -U 'pyinstaller>=6'" >&2
+  exit 1
+fi
 if ! "$PY" -c "import anthropic" 2>/dev/null; then
   echo "error: anthropic not installed in $VENV. Run: $PY -m pip install anthropic" >&2
   exit 1
@@ -54,6 +62,21 @@ fi
 
 echo "==> Built: $HELPER"
 du -sh "$REPO_ROOT/packaging/dist/cut-suggester-engine" | awk '{print "    bundle size: " $1}'
+
+# The whole two-bundle merge (build-app.sh) depends on this bundle's ONLY top-level
+# entries being the executable + its distinct contents dir. If a PyInstaller change
+# ever emits `_internal` here it would clobber the engine bundle's `_internal` at
+# merge time (before signing) — catch that now, loudly, not in a corrupted .app.
+DIST_DIR="$REPO_ROOT/packaging/dist/cut-suggester-engine"
+TOP="$(cd "$DIST_DIR" && ls -1A | sort | tr '\n' ' ')"
+EXPECTED="_cut_suggester_internal cut-suggester-engine "
+if [[ "$TOP" != "$EXPECTED" ]]; then
+  echo "error: unexpected cut-suggester bundle layout. got: [$TOP]" >&2
+  echo "       expected exactly: [$EXPECTED]" >&2
+  echo "       (contents_directory must be _cut_suggester_internal; an _internal tree" >&2
+  echo "        would collide with logic-markers-engine when merged into engine/)" >&2
+  exit 1
+fi
 
 echo "==> Smoke test: helper responds to --help"
 "$HELPER" --help >/dev/null && echo "    OK (--help)"
