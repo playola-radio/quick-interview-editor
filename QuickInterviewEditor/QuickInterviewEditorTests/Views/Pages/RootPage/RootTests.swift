@@ -14,7 +14,6 @@ private func neverCompleting() -> AsyncThrowingStream<EngineEvent, Error> {
 struct RootTests {
   @Test func startsEmpty() {
     let model = withDependencies {
-      $0.continuousClock = TestClock()
       $0.engine.transcribe = { _ in AsyncThrowingStream { $0.finish() } }
     } operation: {
       RootModel()

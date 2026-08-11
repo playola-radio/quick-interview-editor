@@ -227,10 +227,12 @@ struct SongTabTests {
       $0.engine = client
     } operation: { SongTabModel(sourceURL: URL(fileURLWithPath: "/tmp/a.wav")) }
 
-    model.start()
-    await clock.advance(by: .seconds(120))
-    // fraction 0.25 -> p 0.5, elapsed 120 -> remaining 120s
-    expectNoDifference(model.etaMessage, "About 2 min remaining")
-    model.cancel()
+    await withMainSerialExecutor {
+      model.start()
+      await clock.advance(by: .seconds(120))
+      // fraction 0.25 -> p 0.5, elapsed 120 -> remaining 120s
+      expectNoDifference(model.etaMessage, "About 2 min remaining")
+      model.cancel()
+    }
   }
 }
