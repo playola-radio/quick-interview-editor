@@ -82,16 +82,16 @@ final class SongTabModel: ViewModel, Identifiable {
   var determinateValue: Double { maxFraction ?? 0 }
   static func etaText(elapsedSeconds: Double, fraction: Double) -> String? {
     if fraction >= 0.5 { return "Aligning words — almost done" }
-    let p = fraction / 0.5  // progress within the transcribe half
-    guard p >= 0.05 else { return nil }  // too early to estimate
-    let remaining = elapsedSeconds * (1 - p) / p
+    let progressRatio = fraction / 0.5  // progress within the transcribe half
+    guard progressRatio >= 0.05 else { return nil }  // too early to estimate
+    let remaining = elapsedSeconds * (1 - progressRatio) / progressRatio
     if remaining < 60 { return "Less than a minute remaining" }
     let minutes = Int((remaining / 60).rounded())
     return "About \(max(minutes, 1)) min remaining"
   }
   var etaMessage: String? {
-    guard let f = progressFraction else { return nil }
-    return Self.etaText(elapsedSeconds: elapsedSeconds, fraction: f)
+    guard let fraction = progressFraction else { return nil }
+    return Self.etaText(elapsedSeconds: elapsedSeconds, fraction: fraction)
   }
 
   // MARK: - User Actions

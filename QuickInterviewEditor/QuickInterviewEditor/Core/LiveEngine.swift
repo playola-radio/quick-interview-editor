@@ -218,10 +218,11 @@ enum LiveEngine {
               let phase = EngineProgress.Phase(rawValue: phaseRaw)
             else { continue }
             continuation.yield(
-              .progress(EngineProgress(
-                phase: phase,
-                message: wire.message ?? "",
-                fraction: sanitizedFraction(wire.fraction)))
+              .progress(
+                EngineProgress(
+                  phase: phase,
+                  message: wire.message ?? "",
+                  fraction: sanitizedFraction(wire.fraction)))
             )
           }
 

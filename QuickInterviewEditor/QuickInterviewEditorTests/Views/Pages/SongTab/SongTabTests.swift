@@ -219,13 +219,16 @@ struct SongTabTests {
       $0.continuousClock = clock
       var client = EngineClient.testValue
       client.transcribe = { _ in
-        AsyncThrowingStream { c in
-          c.yield(.progress(EngineProgress(phase: .transcribing, message: "x", fraction: 0.25)))
+        AsyncThrowingStream { continuation in
+          continuation.yield(
+            .progress(EngineProgress(phase: .transcribing, message: "x", fraction: 0.25)))
           // leave the stream open so the tick task keeps running
         }
       }
       $0.engine = client
-    } operation: { SongTabModel(sourceURL: URL(fileURLWithPath: "/tmp/a.wav")) }
+    } operation: {
+      SongTabModel(sourceURL: URL(fileURLWithPath: "/tmp/a.wav"))
+    }
 
     await withMainSerialExecutor {
       model.start()

@@ -23,7 +23,7 @@ struct EngineProgress: Equatable, Sendable {
   }
   var phase: Phase
   var message: String
-  var fraction: Double? = nil
+  var fraction: Double?
 }
 
 enum EngineClientError: Error, Equatable, LocalizedError {
