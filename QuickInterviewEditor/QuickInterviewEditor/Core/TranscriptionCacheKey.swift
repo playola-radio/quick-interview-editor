@@ -7,6 +7,7 @@ import Foundation
 /// bytes) — a `path:` key could serve a stale transcript for a different file that
 /// later occupies the same path, so those imports bypass the cache entirely.
 enum TranscriptionCacheKey {
+  // Cache-KEY schema; distinct from TranscriptCache.schemaVersion (on-disk manifest schema).
   static let schemaVersion = "1"
 
   static func make(sourceFingerprint: String, engineFingerprint: String) -> String? {

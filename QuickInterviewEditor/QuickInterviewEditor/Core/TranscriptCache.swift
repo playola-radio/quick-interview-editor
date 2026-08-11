@@ -16,6 +16,7 @@ struct CachedTranscription: Sendable, Equatable {
 /// The cache owns its own AIFF copy; `CanonicalAudioStore.remove` is guarded to its
 /// own base, so tab-close cleanup never deletes a cache-owned file.
 enum TranscriptCache {
+  // On-disk manifest schema; distinct from TranscriptionCacheKey.schemaVersion (cache-KEY schema).
   static let schemaVersion = 1
   static let planName = "plan.json"
   static let audioName = "canonical.aiff"
@@ -70,6 +71,17 @@ enum TranscriptCache {
     try fm.moveItem(at: tmp, to: dest)
     return CachedTranscription(
       editPlan: plan, canonicalAudioURL: dest.appendingPathComponent(audioName))
+  }
+
+  /// Removes orphaned `<key>.tmp.<uuid>` staging dirs left by a store that crashed
+  /// before its atomic rename. Safe to call at launch: a live store's temp dir only
+  /// exists for the moment between creation and rename, and nothing reads temp dirs.
+  static func sweepStaleTempDirs(base: URL) {
+    let fm = FileManager.default
+    guard let names = try? fm.contentsOfDirectory(atPath: base.path) else { return }
+    for name in names where name.contains(".tmp.") {
+      try? fm.removeItem(at: base.appendingPathComponent(name))
+    }
   }
 
   static func clear(base: URL) throws {

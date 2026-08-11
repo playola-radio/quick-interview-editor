@@ -78,4 +78,21 @@ import Testing
     #expect(cache.totalSize() == 0)
     #expect(cache.lookup("k") == nil)
   }
+
+  @Test func sweepStaleTempDirsRemovesOrphanedTempDirsButKeepsCommittedEntries() throws {
+    let base = makeBase()
+    defer { try? FileManager.default.removeItem(at: base) }
+    let cache = TranscriptCacheClient.onDisk(base: base)
+    _ = try cache.store("key1", Fixtures.editPlan(), makeAIFF(base))
+
+    let staleTempDir = base.appendingPathComponent("key1.tmp.\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: staleTempDir, withIntermediateDirectories: true)
+    try Data("orphan".utf8).write(to: staleTempDir.appendingPathComponent("plan.json"))
+
+    TranscriptCache.sweepStaleTempDirs(base: base)
+
+    #expect(!FileManager.default.fileExists(atPath: staleTempDir.path))
+    let hit = try #require(cache.lookup("key1"))
+    expectNoDifference(hit.editPlan, Fixtures.editPlan())
+  }
 }
