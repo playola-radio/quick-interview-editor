@@ -354,6 +354,24 @@ struct WaveformTests {
     #expect(model.visibleStartSample == 400_000)
   }
 
+  @Test func zoomFitToggledRefitsWhenSelectionChanged() {
+    let model = makeModel(
+      totalSamples: 1_000_000, viewportWidth: 1000, samplesPerPixel: 50, start: 300_000)
+    model.zoomFitToggled(selection: 100_000..<200_000)  // fit A
+    model.zoomFitToggled(selection: 700_000..<900_000)  // selection changed -> fit B, NOT restore
+    #expect(model.samplesPerPixel == 200)  // 200_000 / 1000
+    #expect(model.samplesPerPixel != 50)  // did not restore pre-fit zoom
+  }
+
+  @Test func zoomFitToggledRestoresWhenSelectionUnchanged() {
+    let model = makeModel(
+      totalSamples: 1_000_000, viewportWidth: 1000, samplesPerPixel: 50, start: 300_000)
+    model.zoomFitToggled(selection: 100_000..<200_000)  // fit
+    model.zoomFitToggled(selection: 100_000..<200_000)  // same selection -> restore
+    #expect(model.samplesPerPixel == 50)
+    #expect(model.visibleStartSample == 300_000)
+  }
+
   @Test func manualZoomBetweenTogglesInvalidatesRestore() {
     let model = makeModel(
       totalSamples: 1_000_000, viewportWidth: 1000, samplesPerPixel: 50, start: 300_000)

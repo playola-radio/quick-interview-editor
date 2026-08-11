@@ -53,9 +53,8 @@ struct WaveformInteractionLayer: NSViewRepresentable {
     }
 
     override func mouseUp(with event: NSEvent) {
-      if !didDrag {
-        model?.waveformClicked(
-          atX: localX(event), extending: event.modifierFlags.contains(.shift))
+      if !didDrag, let start = dragStartX {
+        model?.waveformClicked(atX: start, extending: event.modifierFlags.contains(.shift))
       }
       dragStartX = nil
       didDrag = false

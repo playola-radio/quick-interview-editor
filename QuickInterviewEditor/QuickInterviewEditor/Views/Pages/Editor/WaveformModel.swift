@@ -34,9 +34,10 @@ final class WaveformModel: ViewModel {
   var visibleStartSample = 0
   /// `visibleStartSample` captured at the start of a drag-pan gesture.
   @ObservationIgnored private var dragAnchorStartSample = 0
-  /// Zoom+scroll captured by `zoomFitToggled` so a second Z press can restore it.
+  /// Zoom+scroll captured by `zoomFitToggled` so a second Z press can restore it, along with
+  /// the selection that was fitted — restore only applies if the selection hasn't changed.
   /// Cleared by any manual zoom/pan so the next Z fits fresh instead of restoring stale state.
-  @ObservationIgnored private var fitRestore: (samplesPerPixel: Double, visibleStartSample: Int)?
+  @ObservationIgnored private var fitRestore: FitRestore?
 
   /// Current playback position, pushed in from the playback stream; nil when stopped.
   var playheadSample: Int?
@@ -188,7 +189,9 @@ final class WaveformModel: ViewModel {
   /// `dragScrolled` calls pan relative to it (dragging right reveals earlier audio).
   func dragScrollBegan() { dragAnchorStartSample = visibleStartSample }
   func dragScrolled(byPixels deltaX: CGFloat) {
-    scrolled(toStartSample: dragAnchorStartSample - Int(Double(deltaX) * samplesPerPixel))
+    guard deltaX.isFinite else { return }
+    scrolled(
+      toStartSample: dragAnchorStartSample - Int((Double(deltaX) * samplesPerPixel).rounded()))
   }
 
   /// Multiplies zoom by `factor` (clamped) while keeping the plan sample under view-x
@@ -226,13 +229,15 @@ final class WaveformModel: ViewModel {
   /// prior zoom+scroll on the next consecutive press.
   func zoomFitToggled(selection: Range<Int>?) {
     guard viewportWidth > 0, totalSamples > 0 else { return }
-    if let restore = fitRestore {
+    if let restore = fitRestore, restore.selection == selection {
       samplesPerPixel = clampedSamplesPerPixel(restore.samplesPerPixel)
       visibleStartSample = clampedStart(restore.visibleStartSample)
       fitRestore = nil
       return
     }
-    fitRestore = (samplesPerPixel, visibleStartSample)
+    fitRestore = FitRestore(
+      samplesPerPixel: samplesPerPixel, visibleStartSample: visibleStartSample,
+      selection: selection)
     if let selection { zoomToFit(selection) } else { zoomToFitAll() }
   }
 
@@ -261,6 +266,12 @@ final class WaveformModel: ViewModel {
   private func clampedStart(_ start: Int) -> Int {
     let maxStart = max(0, totalSamples - visibleSampleCount)
     return min(max(start, 0), maxStart)
+  }
+
+  private struct FitRestore {
+    var samplesPerPixel: Double
+    var visibleStartSample: Int
+    var selection: Range<Int>?
   }
 
   /// The coarsest level whose bucket size doesn't exceed `spp` (so each pixel aggregates

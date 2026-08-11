@@ -339,6 +339,7 @@ final class EditorModel: ViewModel {
     deltaX: CGFloat, deltaY: CGFloat, hasPreciseDeltas: Bool,
     optionDown: Bool, commandDown: Bool, atX positionX: CGFloat
   ) {
+    guard deltaX.isFinite, deltaY.isFinite else { return }
     if optionDown, commandDown {
       waveform.zoomByFactor(
         Self.scrollZoomFactor(deltaY: deltaY, hasPreciseDeltas: hasPreciseDeltas),
