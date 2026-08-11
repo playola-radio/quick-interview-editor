@@ -41,7 +41,8 @@ struct EditorKeyMonitor: NSViewRepresentable {
     /// Exactly ⌘← / ⌘→ ⇒ zoom out/in; Z with no modifiers ⇒ zoom-to-fit. Any extra
     /// modifier (Shift, Option, Control) falls through, as do ⌘Z (undo) and ⌥Z.
     static func editorKey(for event: NSEvent) -> EditorKey? {
-      let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+      let relevantModifiers: NSEvent.ModifierFlags = [.command, .shift, .option, .control]
+      let modifiers = event.modifierFlags.intersection(relevantModifiers)
       switch event.keyCode {
       case 123 where modifiers == .command: return .zoomOut  // ⌘←
       case 124 where modifiers == .command: return .zoomIn  // ⌘→
