@@ -32,13 +32,36 @@ enum EngineFingerprint {
   }
 
   /// Pure core with filesystem access injected, so it unit-tests without disk.
+  ///
+  /// Packaged (`launch.isBundled`): PyInstaller ONE-FOLDER ships the launcher
+  /// executable beside `_internal/`, which holds the actual Python code, native
+  /// libs, and package data. A rebuild can change `_internal/` without changing
+  /// the launcher, so hashing only the launcher under-invalidates (a stale cache
+  /// hit on a real engine change). This folds in: the launcher's content hash,
+  /// a stat-only (relativePath, size) digest of every file under the engine dir
+  /// (content hashing would mean reading a multi-gigabyte tree on every launch),
+  /// the app version, and the pinned model identity. Over-invalidation (an extra
+  /// re-transcribe) is safe; under-invalidation (a stale hit) is the hazard this
+  /// guards against — a real engine or model change cannot collapse to the same
+  /// fingerprint in practice.
   static func compute(
     launch: EngineLaunch,
     pythonFiles: (URL) -> [URL],
-    contentHash: (URL) -> String?
+    contentHash: (URL) -> String?,
+    engineTree: (URL) -> [(relativePath: String, size: Int64)] = { engineTreeSizes(under: $0) },
+    modelIdentity: String = ModelManifest.current.fingerprintIdentity,
+    appVersion: String = bundleVersionIdentity()
   ) -> String {
     if launch.isBundled {
-      return "engine:bin:\(contentHash(launch.executable) ?? "missing")"
+      let engineDir = launch.executable.deletingLastPathComponent()
+      var entries: [String] = ["exe:\(contentHash(launch.executable) ?? "missing")"]
+      for entry in engineTree(engineDir).sorted(by: { $0.relativePath < $1.relativePath }) {
+        entries.append("\(entry.relativePath):\(entry.size)")
+      }
+      entries.append("app:\(appVersion)")
+      entries.append("models:\(modelIdentity)")
+      let digest = SHA256.hash(data: Data(entries.joined(separator: "\n").utf8))
+      return "engine:bin:" + digest.map { String(format: "%02x", $0) }.joined()
     }
     let root = launch.workingDirectory
     let pkg = root.appendingPathComponent("logic_markers")
@@ -69,6 +92,38 @@ enum EngineFingerprint {
     guard let data = try? Data(contentsOf: url, options: .mappedIfSafe) else { return nil }
     return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
   }
+
+  /// Stat-only (never content-reading) enumeration of every file under the
+  /// packaged engine directory, relative to `dir`. The `_internal/` tree can be
+  /// gigabytes, so this uses `.fileSizeKey` rather than hashing bytes.
+  static func engineTreeSizes(under dir: URL) -> [(relativePath: String, size: Int64)] {
+    guard
+      let enumerator = FileManager.default.enumerator(
+        at: dir, includingPropertiesForKeys: [.fileSizeKey], options: [.skipsHiddenFiles])
+    else { return [] }
+    var results: [(relativePath: String, size: Int64)] = []
+    for case let url as URL in enumerator {
+      guard (try? url.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true
+      else { continue }
+      let size = Int64((try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0)
+      let relativePath =
+        url.path.hasPrefix(dir.path)
+        ? String(url.path.dropFirst(dir.path.count + 1))
+        : url.path
+      results.append((relativePath: relativePath, size: size))
+    }
+    return results
+  }
+}
+
+/// `"<CFBundleShortVersionString>-<CFBundleVersion>"` from the app's own Info
+/// dictionary, folded into the packaged fingerprint so an app rebuild that
+/// bumps the shipped engine also invalidates cached transcripts.
+func bundleVersionIdentity() -> String {
+  let info = Bundle.main.infoDictionary
+  let shortVersion = info?["CFBundleShortVersionString"] as? String ?? "?"
+  let buildVersion = info?["CFBundleVersion"] as? String ?? "?"
+  return "\(shortVersion)-\(buildVersion)"
 }
 
 // MARK: - EngineFingerprintClient

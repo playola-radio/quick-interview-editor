@@ -51,13 +51,117 @@ import Testing
     expectNoDifference(one, two)
   }
 
-  @Test func bundledFingerprintHashesTheBinary() {
-    let launch = EngineLaunch(
+  private func bundledLaunch() -> EngineLaunch {
+    EngineLaunch(
       executable: URL(fileURLWithPath: "/app/engine/logic-markers-engine"),
       argumentPrefix: [], workingDirectory: URL(fileURLWithPath: "/app/engine"), isBundled: true)
-    let value = EngineFingerprint.compute(
-      launch: launch, pythonFiles: { _ in [] }, contentHash: { _ in "binhash" })
-    expectNoDifference(value, "engine:bin:binhash")
+  }
+
+  @Test func bundledFingerprintReflectsEngineTreeNotJustLauncher() {
+    let launch = bundledLaunch()
+    let baseTree: [(relativePath: String, size: Int64)] = [
+      (relativePath: "_internal/logic_markers/cli.py", size: 1_024),
+      (relativePath: "_internal/libtorch.dylib", size: 50_000_000),
+    ]
+    let changedTree: [(relativePath: String, size: Int64)] = [
+      (relativePath: "_internal/logic_markers/cli.py", size: 2_048),
+      (relativePath: "_internal/libtorch.dylib", size: 50_000_000),
+    ]
+
+    let first = EngineFingerprint.compute(
+      launch: launch,
+      pythonFiles: { _ in [] },
+      contentHash: { _ in "launcherhash" },
+      engineTree: { _ in baseTree },
+      modelIdentity: "v1:abc",
+      appVersion: "1.0-100")
+    let second = EngineFingerprint.compute(
+      launch: launch,
+      pythonFiles: { _ in [] },
+      contentHash: { _ in "launcherhash" },
+      engineTree: { _ in changedTree },
+      modelIdentity: "v1:abc",
+      appVersion: "1.0-100")
+
+    #expect(first != second)
+  }
+
+  @Test func bundledFingerprintChangesWithModelManifest() {
+    let launch = bundledLaunch()
+    let tree: [(relativePath: String, size: Int64)] = [
+      (relativePath: "_internal/logic_markers/cli.py", size: 1_024)
+    ]
+
+    let first = EngineFingerprint.compute(
+      launch: launch,
+      pythonFiles: { _ in [] },
+      contentHash: { _ in "launcherhash" },
+      engineTree: { _ in tree },
+      modelIdentity: "v1:abc",
+      appVersion: "1.0-100")
+    let second = EngineFingerprint.compute(
+      launch: launch,
+      pythonFiles: { _ in [] },
+      contentHash: { _ in "launcherhash" },
+      engineTree: { _ in tree },
+      modelIdentity: "v2:xyz",
+      appVersion: "1.0-100")
+
+    #expect(first != second)
+  }
+
+  @Test func bundledFingerprintChangesWithAppVersion() {
+    let launch = bundledLaunch()
+    let tree: [(relativePath: String, size: Int64)] = [
+      (relativePath: "_internal/logic_markers/cli.py", size: 1_024)
+    ]
+
+    let first = EngineFingerprint.compute(
+      launch: launch,
+      pythonFiles: { _ in [] },
+      contentHash: { _ in "launcherhash" },
+      engineTree: { _ in tree },
+      modelIdentity: "v1:abc",
+      appVersion: "1.0-100")
+    let second = EngineFingerprint.compute(
+      launch: launch,
+      pythonFiles: { _ in [] },
+      contentHash: { _ in "launcherhash" },
+      engineTree: { _ in tree },
+      modelIdentity: "v1:abc",
+      appVersion: "1.1-101")
+
+    #expect(first != second)
+  }
+
+  @Test func bundledFingerprintStableForIdenticalInputs() {
+    let launch = bundledLaunch()
+    let treeInOrderA: [(relativePath: String, size: Int64)] = [
+      (relativePath: "_internal/logic_markers/cli.py", size: 1_024),
+      (relativePath: "_internal/libtorch.dylib", size: 50_000_000),
+    ]
+    let treeInOrderB: [(relativePath: String, size: Int64)] = [
+      (relativePath: "_internal/libtorch.dylib", size: 50_000_000),
+      (relativePath: "_internal/logic_markers/cli.py", size: 1_024),
+    ]
+
+    let first = EngineFingerprint.compute(
+      launch: launch,
+      pythonFiles: { _ in [] },
+      contentHash: { _ in "launcherhash" },
+      engineTree: { _ in treeInOrderA },
+      modelIdentity: "v1:abc",
+      appVersion: "1.0-100")
+    let second = EngineFingerprint.compute(
+      launch: launch,
+      pythonFiles: { _ in [] },
+      contentHash: { _ in "launcherhash" },
+      engineTree: { _ in treeInOrderB },
+      modelIdentity: "v1:abc",
+      appVersion: "1.0-100")
+
+    expectNoDifference(first, second)
+    #expect(first.hasPrefix("engine:bin:"))
   }
 
   @Test func currentIsMemoizedOncePerProcess() {
