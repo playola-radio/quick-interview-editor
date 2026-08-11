@@ -46,6 +46,7 @@ enum TranscriptCache {
       let manifestData = try? Data(contentsOf: manifestURL),
       let manifest = try? JSONDecoder().decode(Manifest.self, from: manifestData),
       manifest.schemaVersion == schemaVersion,
+      manifest.key == key,
       let plan = try? EditPlan.decoded(from: planURL)
     else { return nil }
     return CachedTranscription(editPlan: plan, canonicalAudioURL: audioURL)

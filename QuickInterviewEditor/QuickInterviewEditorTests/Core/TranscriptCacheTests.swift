@@ -95,4 +95,19 @@ import Testing
     let hit = try #require(cache.lookup("key1"))
     expectNoDifference(hit.editPlan, Fixtures.editPlan())
   }
+
+  @Test func lookupMissesWhenManifestKeyDoesNotMatchDirName() throws {
+    let base = makeBase()
+    defer { try? FileManager.default.removeItem(at: base) }
+    let dir = base.appendingPathComponent("wrongName")
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    try JSONEncoder().encode(Fixtures.editPlan()).write(to: dir.appendingPathComponent("plan.json"))
+    try Data("audio".utf8).write(to: dir.appendingPathComponent("canonical.aiff"))
+    let manifest = TranscriptCache.Manifest(
+      schemaVersion: TranscriptCache.schemaVersion, key: "someOtherKey")
+    try JSONEncoder().encode(manifest).write(to: dir.appendingPathComponent("manifest.json"))
+
+    let cache = TranscriptCacheClient.onDisk(base: base)
+    #expect(cache.lookup("wrongName") == nil)
+  }
 }
