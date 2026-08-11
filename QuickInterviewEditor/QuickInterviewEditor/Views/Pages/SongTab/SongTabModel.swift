@@ -8,6 +8,7 @@ final class SongTabModel: ViewModel, Identifiable {
 
   // MARK: - Dependencies
   @ObservationIgnored @Dependency(\.engine) var engine
+  @ObservationIgnored @Dependency(\.continuousClock) var clock
 
   // MARK: - Initialization
   let id = UUID()
@@ -28,7 +29,10 @@ final class SongTabModel: ViewModel, Identifiable {
   // MARK: - Properties
   var phase: Phase = .queued
   var editor: EditorModel?
+  private var maxFraction: Double?
+  private var elapsedSeconds: Double = 0
   @ObservationIgnored private var task: Task<Void, Never>?
+  @ObservationIgnored private var tickTask: Task<Void, Never>?
   /// Fired when this tab frees or wants a transcription slot (finished, failed, or
   /// re-queued for retry). RootModel wires this to its queue pump so the concurrency
   /// cap is honoured without the tab knowing about it.
@@ -39,6 +43,7 @@ final class SongTabModel: ViewModel, Identifiable {
   let retryButtonLabel = "Retry"
   let startingMessage = "Starting…"
   let queuedMessage = "Waiting to transcribe…"
+  let progressNote = "This can take several minutes — longer files take longer."
 
   // MARK: - View Helpers
   var title: String { sourceURL.deletingPathExtension().lastPathComponent }
@@ -67,11 +72,35 @@ final class SongTabModel: ViewModel, Identifiable {
     if case .failed(let message) = phase { return message }
     return nil
   }
+  var progressFraction: Double? {
+    guard case .transcribing(let progress) = phase,
+      let progress, progress.phase == .transcribing, progress.fraction != nil
+    else { return nil }
+    return maxFraction
+  }
+  var isProgressDeterminate: Bool { progressFraction != nil }
+  var determinateValue: Double { maxFraction ?? 0 }
+  static func etaText(elapsedSeconds: Double, fraction: Double) -> String? {
+    if fraction >= 0.5 { return "Aligning words — almost done" }
+    let progressRatio = fraction / 0.5  // progress within the transcribe half
+    guard progressRatio >= 0.05 else { return nil }  // too early to estimate
+    let remaining = elapsedSeconds * (1 - progressRatio) / progressRatio
+    if remaining < 60 { return "Less than a minute remaining" }
+    let minutes = Int((remaining / 60).rounded())
+    return "About \(max(minutes, 1)) min remaining"
+  }
+  var etaMessage: String? {
+    guard let fraction = progressFraction else { return nil }
+    return Self.etaText(elapsedSeconds: elapsedSeconds, fraction: fraction)
+  }
 
   // MARK: - User Actions
   func start() {
     task?.cancel()  // never leak/overtake a still-running task (e.g. rapid retry)
     phase = .transcribing(nil)  // mark running synchronously so the queue pump counts it
+    maxFraction = nil
+    elapsedSeconds = 0
+    startTicking()
     task = Task { await startTranscription() }
   }
 
@@ -86,7 +115,11 @@ final class SongTabModel: ViewModel, Identifiable {
     do {
       for try await event in engine.transcribe(sourceURL) {
         switch event {
-        case .progress(let progress): phase = .transcribing(progress)
+        case .progress(let progress):
+          if progress.phase == .transcribing, let fraction = progress.fraction {
+            maxFraction = max(maxFraction ?? 0, fraction)
+          }
+          phase = .transcribing(progress)
         case .completed(let result):
           editor = withDependencies(from: self) {
             EditorModel(
@@ -94,6 +127,7 @@ final class SongTabModel: ViewModel, Identifiable {
               editPlan: result.editPlan, sourceFingerprint: fingerprint)
           }
           phase = .loaded
+          stopTicking()
         }
       }
     } catch is CancellationError {
@@ -101,15 +135,39 @@ final class SongTabModel: ViewModel, Identifiable {
       return
     } catch {
       phase = .failed(error.localizedDescription)
+      stopTicking()
     }
+    stopTicking()  // idempotent; guards the stream ending without a terminal .completed/throw
     onReadyForNext?()  // slot freed (loaded or failed) — let RootModel start the next
   }
 
-  func cancel() { task?.cancel() }
+  func cancel() {
+    task?.cancel()
+    stopTicking()
+  }
 
   func retryTapped() {
     task?.cancel()
+    stopTicking()
     phase = .queued  // re-enter the queue so the cap is respected
     onReadyForNext?()
+  }
+
+  // MARK: - Private Helpers
+  private func startTicking() {
+    tickTask?.cancel()
+    tickTask = Task { [weak self] in
+      while !Task.isCancelled {
+        guard let self else { return }
+        try? await self.clock.sleep(for: .seconds(1))
+        guard !Task.isCancelled else { return }
+        self.elapsedSeconds += 1
+      }
+    }
+  }
+
+  private func stopTicking() {
+    tickTask?.cancel()
+    tickTask = nil
   }
 }

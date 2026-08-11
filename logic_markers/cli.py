@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import struct
 import sys
@@ -44,6 +45,54 @@ def _progress(phase: str, message: str) -> None:
     _emit_event({"type": "progress", "phase": phase, "message": message})
 
 
+class _ProgressEmitter:
+    """Turns a unified 0.0-1.0 progress fraction into throttled QIE_EVENT lines.
+
+    The two WhisperX stages (transcribe, align) are each mapped to their half
+    of the 0.0..1.0 range upstream in `whisperx_backend._aligned_segments`, so
+    this emitter receives one already-monotonic fraction. Emits the first
+    callback unconditionally, then only when the whole-number percent changes,
+    and clamps/drops junk. `finish()` guarantees a final 1.0 (unless nothing
+    fired, e.g. a cached transcript, or 100 already emitted).
+    """
+
+    def __init__(self, emit=_emit_event) -> None:
+        self._emit = emit
+        self._last_percent: int | None = None
+
+    def __call__(self, fraction: float) -> None:
+        try:
+            f = float(fraction)
+        except (TypeError, ValueError):
+            return
+        if not math.isfinite(f):
+            return
+        f = max(0.0, min(1.0, f))
+        whole = int(f * 100)
+        if self._last_percent is not None and whole == self._last_percent:
+            return
+        self._last_percent = whole
+        self._emit_fraction(f)
+
+    def finish(self) -> None:
+        if self._last_percent is None or self._last_percent == 100:
+            return
+        self._last_percent = 100
+        self._emit_fraction(1.0)
+
+    def _emit_fraction(self, fraction: float) -> None:
+        fraction = max(0.0, min(1.0, fraction))
+        label = "Aligning words…" if fraction >= 0.5 else "Transcribing audio…"
+        self._emit(
+            {
+                "type": "progress",
+                "phase": "transcribing",
+                "message": label,
+                "fraction": round(fraction, 4),
+            }
+        )
+
+
 def _load_or_transcribe_transcript(source: Path, refresh: bool) -> Transcript:
     """Full WhisperX transcript (words + segments), cached next to the source."""
     from .whisperx_backend import transcribe_transcript
@@ -58,14 +107,16 @@ def _load_or_transcribe_transcript(source: Path, refresh: bool) -> Transcript:
     return transcript
 
 
-def _load_or_transcribe_transcript_in(source: Path, work_dir: Path, refresh: bool) -> Transcript:
+def _load_or_transcribe_transcript_in(
+    source: Path, work_dir: Path, refresh: bool, *, on_progress=None
+) -> Transcript:
     """Same as `_load_or_transcribe_transcript`, but cached in `work_dir` (never beside source)."""
     from .whisperx_backend import transcribe_transcript
 
     cache = work_dir / (source.name + ".transcript.json")
     if cache.exists() and not refresh:
         return Transcript.from_dict(json.loads(cache.read_text()))
-    transcript = transcribe_transcript(source)
+    transcript = transcribe_transcript(source, progress_callback=on_progress)
     cache.write_text(json.dumps(transcript.to_dict(), indent=2))
     return transcript
 
@@ -295,8 +346,12 @@ def run_plan(source: Path, work_dir: Path, sample_rate: int, refresh: bool = Fal
     """Analyze (no cut): transcript + canonical AIFF + samples + silences → edit-plan dict."""
     work_dir.mkdir(parents=True, exist_ok=True)
 
-    _progress("transcribing", "Transcribing with WhisperX (first run downloads models)")
-    transcript = _load_or_transcribe_transcript_in(source, work_dir, refresh)
+    _progress("transcribing", "Preparing audio…")
+    _transcribe_progress = _ProgressEmitter()
+    transcript = _load_or_transcribe_transcript_in(
+        source, work_dir, refresh, on_progress=_transcribe_progress
+    )
+    _transcribe_progress.finish()
 
     _progress("converting", "Converting audio")
     # The canonical PCM AIFF that backs the app's waveform, playback, and render
