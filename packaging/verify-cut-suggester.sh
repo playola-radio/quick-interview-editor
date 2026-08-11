@@ -29,11 +29,16 @@ MODEL="${MODEL:-gpt-4o-mini}"
 # Forward only the credential the chosen provider needs.
 case "$MODEL" in
   gpt-*|o1*|o3*|o4*)
-    [ -n "${OPENAI_KEY:-}${OPENAI_API_KEY:-}" ] || {
+    # Forward exactly one credential (OPENAI_KEY is the cutter's primary; OPENAI_API_KEY
+    # is its fallback) so the scrubbed child gets no more than it needs.
+    if [ -n "${OPENAI_KEY:-}" ]; then
+      KEY_ENV=(OPENAI_KEY="$OPENAI_KEY")
+    elif [ -n "${OPENAI_API_KEY:-}" ]; then
+      KEY_ENV=(OPENAI_API_KEY="$OPENAI_API_KEY")
+    else
       echo "error: model '$MODEL' needs OPENAI_KEY (or OPENAI_API_KEY) in the env" >&2
       exit 1
-    }
-    KEY_ENV=(OPENAI_KEY="${OPENAI_KEY:-}" OPENAI_API_KEY="${OPENAI_API_KEY:-}") ;;
+    fi ;;
   *)
     [ -n "${ANTHROPIC_API_KEY:-}" ] || {
       echo "error: model '$MODEL' needs ANTHROPIC_API_KEY in the env" >&2

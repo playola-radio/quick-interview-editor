@@ -110,20 +110,31 @@ req = {
 }
 json.dump(req, open(sys.argv[1], "w"))
 PY
+# Run under a fully scrubbed env (no credential at all) so the helper MUST fail on
+# the missing key. Every outcome except "reached the Anthropic client and failed on
+# auth" fails the build — a clean exit, a missing module, a native-extension crash, or
+# any other error means the frozen bundle is broken and must NOT be embedded.
 set +e
-SMOKE_ERR="$(env -u ANTHROPIC_API_KEY "$HELPER" suggest --request "$SMOKE_DIR/request.json" 2>&1 >/dev/null)"
+SMOKE_ERR="$(env -i HOME="$SMOKE_DIR" PATH="/usr/bin:/bin" TMPDIR="$SMOKE_DIR" \
+  "$HELPER" suggest --request "$SMOKE_DIR/request.json" 2>&1 >/dev/null)"
+SMOKE_RC=$?
 set -e
+if [ "$SMOKE_RC" -eq 0 ]; then
+  echo "    FAILED: helper exited 0 with no LLM key (smoke is invalid — expected an auth failure):" >&2
+  echo "$SMOKE_ERR" | tail -5 >&2
+  exit 1
+fi
 if grep -qi "No module named" <<<"$SMOKE_ERR"; then
   echo "    FAILED: anthropic did not freeze into the bundle:" >&2
   echo "$SMOKE_ERR" | tail -5 >&2
   exit 1
 fi
-if grep -qiE "api_key|ANTHROPIC_API_KEY|authentic" <<<"$SMOKE_ERR"; then
-  echo "    OK (anthropic imported; failed on missing key as expected)"
-else
-  echo "    WARNING: unexpected smoke stderr (anthropic import unconfirmed):" >&2
+if ! grep -qiE "api_key|ANTHROPIC_API_KEY|authentic" <<<"$SMOKE_ERR"; then
+  echo "    FAILED: unexpected smoke failure (anthropic import unconfirmed):" >&2
   echo "$SMOKE_ERR" | tail -5 >&2
+  exit 1
 fi
+echo "    OK (anthropic imported; failed on missing key as expected)"
 
 echo
 echo "Next: build the app + embed both helpers with packaging/build-app.sh, then"
