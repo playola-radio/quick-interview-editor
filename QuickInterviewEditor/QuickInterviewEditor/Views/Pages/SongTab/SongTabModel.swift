@@ -28,6 +28,7 @@ final class SongTabModel: ViewModel, Identifiable {
   // MARK: - Properties
   var phase: Phase = .queued
   var editor: EditorModel?
+  @ObservationIgnored private var maxFraction: Double?
   @ObservationIgnored private var task: Task<Void, Never>?
   /// Fired when this tab frees or wants a transcription slot (finished, failed, or
   /// re-queued for retry). RootModel wires this to its queue pump so the concurrency
@@ -39,6 +40,7 @@ final class SongTabModel: ViewModel, Identifiable {
   let retryButtonLabel = "Retry"
   let startingMessage = "Starting…"
   let queuedMessage = "Waiting to transcribe…"
+  let progressNote = "This can take several minutes — longer files take longer."
 
   // MARK: - View Helpers
   var title: String { sourceURL.deletingPathExtension().lastPathComponent }
@@ -67,11 +69,20 @@ final class SongTabModel: ViewModel, Identifiable {
     if case .failed(let message) = phase { return message }
     return nil
   }
+  var progressFraction: Double? {
+    guard case .transcribing(let progress) = phase,
+      let progress, progress.phase == .transcribing, progress.fraction != nil
+    else { return nil }
+    return maxFraction
+  }
+  var isProgressDeterminate: Bool { progressFraction != nil }
+  var determinateValue: Double { maxFraction ?? 0 }
 
   // MARK: - User Actions
   func start() {
     task?.cancel()  // never leak/overtake a still-running task (e.g. rapid retry)
     phase = .transcribing(nil)  // mark running synchronously so the queue pump counts it
+    maxFraction = nil
     task = Task { await startTranscription() }
   }
 
@@ -86,7 +97,11 @@ final class SongTabModel: ViewModel, Identifiable {
     do {
       for try await event in engine.transcribe(sourceURL) {
         switch event {
-        case .progress(let progress): phase = .transcribing(progress)
+        case .progress(let progress):
+          if progress.phase == .transcribing, let fraction = progress.fraction {
+            maxFraction = max(maxFraction ?? 0, fraction)
+          }
+          phase = .transcribing(progress)
         case .completed(let result):
           editor = withDependencies(from: self) {
             EditorModel(

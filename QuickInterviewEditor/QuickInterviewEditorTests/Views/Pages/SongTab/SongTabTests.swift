@@ -96,4 +96,64 @@ struct SongTabTests {
     #expect(model.isQueued)  // re-enters the queue so the cap is respected
     #expect(readyCalled)
   }
+
+  @Test func preparingPhaseIsIndeterminate() async {
+    let model = SongTabModel(sourceURL: URL(fileURLWithPath: "/tmp/a.wav"))
+    await withDependencies {
+      $0.engine.transcribe = { _ in
+        stream([.progress(.init(phase: .transcribing, message: "Preparing audio…"))])
+      }
+    } operation: {
+      await model.startTranscription()
+    }
+    #expect(model.isProgressDeterminate == false)
+    expectNoDifference(model.progressFraction, nil)
+  }
+
+  @Test func transcribingFractionIsDeterminate() async {
+    let model = SongTabModel(sourceURL: URL(fileURLWithPath: "/tmp/a.wav"))
+    await withDependencies {
+      $0.engine.transcribe = { _ in
+        stream([
+          .progress(.init(phase: .transcribing, message: "Transcribing audio…", fraction: 0.25))
+        ])
+      }
+    } operation: {
+      await model.startTranscription()
+    }
+    #expect(model.isProgressDeterminate == true)
+    expectNoDifference(model.progressFraction, 0.25)
+    expectNoDifference(model.determinateValue, 0.25)
+  }
+
+  @Test func fractionNeverMovesBackward() async {
+    let model = SongTabModel(sourceURL: URL(fileURLWithPath: "/tmp/a.wav"))
+    await withDependencies {
+      $0.engine.transcribe = { _ in
+        stream([
+          .progress(.init(phase: .transcribing, message: "x", fraction: 0.6)),
+          .progress(.init(phase: .transcribing, message: "x", fraction: 0.4)),
+        ])
+      }
+    } operation: {
+      await model.startTranscription()
+    }
+    expectNoDifference(model.progressFraction, 0.6)
+  }
+
+  @Test func tailPhaseGoesIndeterminate() async {
+    let model = SongTabModel(sourceURL: URL(fileURLWithPath: "/tmp/a.wav"))
+    await withDependencies {
+      $0.engine.transcribe = { _ in
+        stream([
+          .progress(.init(phase: .transcribing, message: "x", fraction: 1.0)),
+          .progress(.init(phase: .converting, message: "Converting audio")),
+        ])
+      }
+    } operation: {
+      await model.startTranscription()
+    }
+    #expect(model.isProgressDeterminate == false)
+    expectNoDifference(model.progressMessage, "Converting audio")
+  }
 }
