@@ -28,6 +28,7 @@ final class RootModel: ViewModel {
   let emptyStateSubtitle = "Drag a file here, or choose one to open."
   let importButtonLabel = "Open Audio File…"
   let closeTabLabel = "Close tab"
+  let reimportMenuLabel = "Re-import (Ignore Cache)"
 
   // MARK: - View Helpers
   var showsEmptyState: Bool { tabs.isEmpty }

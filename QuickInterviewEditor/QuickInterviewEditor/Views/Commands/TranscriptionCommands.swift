@@ -7,7 +7,7 @@ struct TranscriptionCommands: Commands {
 
   var body: some Commands {
     CommandGroup(after: .newItem) {
-      Button("Re-import (Ignore Cache)") { root.reimportSelectedTabIgnoringCache() }
+      Button(root.reimportMenuLabel) { root.reimportSelectedTabIgnoringCache() }
         .keyboardShortcut("r", modifiers: [.command, .shift])
         .disabled(!root.canReimportSelectedTab)
     }
