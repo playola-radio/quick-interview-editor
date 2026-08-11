@@ -14,6 +14,7 @@ private func neverCompleting() -> AsyncThrowingStream<EngineEvent, Error> {
 struct RootTests {
   @Test func startsEmpty() {
     let model = withDependencies {
+      $0.continuousClock = TestClock()
       $0.engine.transcribe = { _ in AsyncThrowingStream { $0.finish() } }
     } operation: {
       RootModel()
@@ -24,6 +25,7 @@ struct RootTests {
 
   @Test func openingAFileAddsAndSelectsATab() {
     withDependencies {
+      $0.continuousClock = TestClock()
       $0.engine.transcribe = { _ in neverCompleting() }
     } operation: {
       let model = RootModel()
@@ -36,6 +38,7 @@ struct RootTests {
 
   @Test func droppingTwoFilesOpensTwoTabs() {
     withDependencies {
+      $0.continuousClock = TestClock()
       $0.engine.transcribe = { _ in neverCompleting() }
     } operation: {
       let model = RootModel()
@@ -46,6 +49,7 @@ struct RootTests {
 
   @Test func closingATabRemovesItAndFixesSelection() {
     withDependencies {
+      $0.continuousClock = TestClock()
       $0.engine.transcribe = { _ in neverCompleting() }
     } operation: {
       let model = RootModel()
@@ -75,6 +79,7 @@ struct RootTests {
 
   @Test func nonAudioDropsAreIgnored() {
     withDependencies {
+      $0.continuousClock = TestClock()
       $0.engine.transcribe = { _ in neverCompleting() }
     } operation: {
       let model = RootModel()
@@ -90,6 +95,7 @@ struct RootTests {
 
   @Test func dropsBeyondTheCapAreQueued() {
     withDependencies {
+      $0.continuousClock = TestClock()
       $0.engine.transcribe = { _ in neverCompleting() }
     } operation: {
       let model = RootModel()
@@ -117,6 +123,7 @@ struct RootTests {
     defer { try? FileManager.default.removeItem(at: destination) }
 
     try await withDependencies {
+      $0.continuousClock = TestClock()
       $0.engine.transcribe = { _ in
         AsyncThrowingStream {
           $0.yield(.completed(Fixtures.transcriptionResult(plan)))
@@ -153,6 +160,7 @@ struct RootTests {
 
   @Test func closingARunningTabPromotesAQueuedOne() {
     withDependencies {
+      $0.continuousClock = TestClock()
       $0.engine.transcribe = { _ in neverCompleting() }
     } operation: {
       let model = RootModel()
@@ -180,6 +188,7 @@ struct RootTests {
     let plan = Fixtures.editPlan()
 
     await withDependencies {
+      $0.continuousClock = TestClock()
       $0.engine.transcribe = { _ in
         AsyncThrowingStream {
           $0.yield(.completed(Fixtures.transcriptionResult(plan, canonicalAudioURL: canonical)))
