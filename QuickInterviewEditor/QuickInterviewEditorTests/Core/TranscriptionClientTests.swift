@@ -28,6 +28,14 @@ import Testing
     return url
   }
 
+  private nonisolated func throwingEngineStream(_ error: Error) -> AsyncThrowingStream<
+    EngineEvent, Error
+  > {
+    AsyncThrowingStream { continuation in
+      continuation.finish(throwing: error)
+    }
+  }
+
   private func drainCompleted(_ stream: AsyncThrowingStream<EngineEvent, Error>) async throws
     -> TranscriptionResult?
   {
@@ -36,6 +44,14 @@ import Testing
       if case .completed(let completedResult) = event { result = completedResult }
     }
     return result
+  }
+
+  private func drainAll(_ stream: AsyncThrowingStream<EngineEvent, Error>) async throws
+    -> [EngineEvent]
+  {
+    var events: [EngineEvent] = []
+    for try await event in stream { events.append(event) }
+    return events
   }
 
   @Test func missRunsEngineAndStoresResult() async throws {
@@ -150,5 +166,110 @@ import Testing
     #expect(engineCalls.value == 1)
     #expect(result?.canonicalAudioURL == engineAIFF)  // engine URL passed through, not stored
     #expect(cache.totalSize() == 0)
+  }
+
+  @Test func progressEventsForwardDuringMiss() async throws {
+    let base = tempBase()
+    defer { try? FileManager.default.removeItem(at: base) }
+    let cache = TranscriptCacheClient.onDisk(base: base.appendingPathComponent("cache"))
+    let plan = Fixtures.editPlan()
+    let engineAIFF = makeAIFF(base)
+    let progress = EngineProgress(phase: .transcribing, message: "Transcribing…")
+
+    let events = try await withDependencies {
+      $0.transcriptCache = cache
+      $0.engineFingerprint = EngineFingerprintClient(current: { "engine:test" })
+      $0.engine.transcribe = { _ in
+        self.engineStream([
+          .progress(progress),
+          .completed(TranscriptionResult(editPlan: plan, canonicalAudioURL: engineAIFF)),
+        ])
+      }
+    } operation: {
+      try await self.drainAll(
+        TranscriptionClient.liveValue.transcribe(
+          URL(fileURLWithPath: "/clip.wav"), "sha256:progress", .useCache))
+    }
+
+    let messages = events.compactMap { event -> String? in
+      if case .progress(let progress) = event { return progress.message }
+      return nil
+    }
+    expectNoDifference(messages, [progress.message])
+    #expect(
+      events.contains {
+        if case .completed = $0 { return true }
+        return false
+      })
+  }
+
+  @Test func storeFailureFallsBackToEngineURL() async throws {
+    struct StoreError: Error {}
+    let base = tempBase()
+    defer { try? FileManager.default.removeItem(at: base) }
+    let cache = TranscriptCacheClient(
+      lookup: { _ in nil },
+      store: { _, _, _ in throw StoreError() },
+      clear: {},
+      totalSize: { 0 })
+    let plan = Fixtures.editPlan()
+    let engineAIFF = makeAIFF(base)
+
+    let result = try await withDependencies {
+      $0.transcriptCache = cache
+      $0.engineFingerprint = EngineFingerprintClient(current: { "engine:test" })
+      $0.engine.transcribe = { _ in
+        self.engineStream([
+          .completed(TranscriptionResult(editPlan: plan, canonicalAudioURL: engineAIFF))
+        ])
+      }
+    } operation: {
+      try await self.drainCompleted(
+        TranscriptionClient.liveValue.transcribe(
+          URL(fileURLWithPath: "/clip.wav"), "sha256:storefail", .useCache))
+    }
+
+    #expect(result?.canonicalAudioURL == engineAIFF)  // fallback: engine's own URL, not a cache URL
+    expectNoDifference(result?.editPlan, plan)
+  }
+
+  @Test func engineErrorPropagates() async throws {
+    let base = tempBase()
+    defer { try? FileManager.default.removeItem(at: base) }
+    let cache = TranscriptCacheClient.onDisk(base: base.appendingPathComponent("cache"))
+
+    await withDependencies {
+      $0.transcriptCache = cache
+      $0.engineFingerprint = EngineFingerprintClient(current: { "engine:test" })
+      $0.engine.transcribe = { _ in
+        self.throwingEngineStream(EngineClientError.engineFailed("boom"))
+      }
+    } operation: {
+      await #expect(throws: EngineClientError.self) {
+        try await self.drainCompleted(
+          TranscriptionClient.liveValue.transcribe(
+            URL(fileURLWithPath: "/clip.wav"), "sha256:enginefail", .useCache))
+      }
+    }
+  }
+
+  @Test func engineCancellationFinishesQuietlyWithoutCompleted() async throws {
+    let base = tempBase()
+    defer { try? FileManager.default.removeItem(at: base) }
+    let cache = TranscriptCacheClient.onDisk(base: base.appendingPathComponent("cache"))
+
+    let events = try await withDependencies {
+      $0.transcriptCache = cache
+      $0.engineFingerprint = EngineFingerprintClient(current: { "engine:test" })
+      $0.engine.transcribe = { _ in
+        self.throwingEngineStream(CancellationError())
+      }
+    } operation: {
+      try await self.drainAll(
+        TranscriptionClient.liveValue.transcribe(
+          URL(fileURLWithPath: "/clip.wav"), "sha256:cancel", .useCache))
+    }
+
+    #expect(events.isEmpty)
   }
 }

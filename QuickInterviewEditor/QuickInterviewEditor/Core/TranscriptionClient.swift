@@ -53,12 +53,14 @@ enum LiveTranscription {
             case .progress:
               continuation.yield(event)
             case .completed(let result):
+              // Defaults to the engine's own result; if storing fails, this fallback
+              // keeps the session working with the engine's own URL.
               var out = result
-              if let key {
-                if let cached = try? cache.store(key, result.editPlan, result.canonicalAudioURL) {
-                  out = TranscriptionResult(
-                    editPlan: cached.editPlan, canonicalAudioURL: cached.canonicalAudioURL)
-                }  // store failed → keep the engine's own URL so the session still works
+              if let key,
+                let cached = try? cache.store(key, result.editPlan, result.canonicalAudioURL)
+              {
+                out = TranscriptionResult(
+                  editPlan: cached.editPlan, canonicalAudioURL: cached.canonicalAudioURL)
               }
               continuation.yield(.completed(out))
             }
