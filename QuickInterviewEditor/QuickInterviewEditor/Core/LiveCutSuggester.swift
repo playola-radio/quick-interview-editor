@@ -165,17 +165,9 @@ enum LiveCutSuggester {
           guard code == 0 else {
             throw mapFailure(stderr: proc.stderrTail())
           }
-          let provenance = provenance(for: request)
-          let payload = try CutSuggestion.decodeSuggestionPayload(
-            from: out, provenance: provenance, makeID: { UUID() })
-          guard !payload.suggestions.isEmpty else {
-            throw CutSuggestClientError.noSuggestions(
-              emptyRunDiagnostic(
-                meta: payload.meta,
-                launch: launch,
-                elapsed: Date().timeIntervalSince(startedAt)))
-          }
-          continuation.yield(.completed(payload.suggestions))
+          let completed = try completedEvent(
+            from: out, request: request, launch: launch, startedAt: startedAt)
+          continuation.yield(completed)
           continuation.finish()
         } catch is CancellationError {
           continuation.finish()
@@ -216,6 +208,24 @@ enum LiveCutSuggester {
       transcriptHash: request.transcriptHash,
       sourceFingerprint: request.sourceFingerprint,
       diarizationHash: request.diarization?.diarizationHash)
+  }
+
+  private static func completedEvent(
+    from out: Data,
+    request: CutSuggestRequest,
+    launch: EngineLaunch,
+    startedAt: Date
+  ) throws -> CutSuggestEvent {
+    let payload = try CutSuggestion.decodeSuggestionPayload(
+      from: out, provenance: provenance(for: request), makeID: { UUID() })
+    guard !payload.suggestions.isEmpty else {
+      throw CutSuggestClientError.noSuggestions(
+        emptyRunDiagnostic(
+          meta: payload.meta,
+          launch: launch,
+          elapsed: Date().timeIntervalSince(startedAt)))
+    }
+    return .completed(payload.suggestions)
   }
 
   private static func emptyRunDiagnostic(
