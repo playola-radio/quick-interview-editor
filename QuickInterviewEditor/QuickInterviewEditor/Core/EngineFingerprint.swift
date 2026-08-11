@@ -44,12 +44,12 @@ enum EngineFingerprint {
     let pkg = root.appendingPathComponent("logic_markers")
     var entries: [String] = []
     for file in pythonFiles(pkg).sorted(by: { $0.path < $1.path }) {
-      let rel = file.path.replacingOccurrences(of: root.path + "/", with: "")
+      let rel = String(file.path.dropFirst(root.path.count + 1))
       entries.append("\(rel):\(contentHash(file) ?? "missing")")
     }
     for pin in pinFiles {
       let url = root.appendingPathComponent(pin)
-      if let hash = contentHash(url) { entries.append("\(pin):\(hash)") }
+      entries.append("\(pin):\(contentHash(url) ?? "missing")")
     }
     let digest = SHA256.hash(data: Data(entries.joined(separator: "\n").utf8))
     return "engine:src:" + digest.map { String(format: "%02x", $0) }.joined()

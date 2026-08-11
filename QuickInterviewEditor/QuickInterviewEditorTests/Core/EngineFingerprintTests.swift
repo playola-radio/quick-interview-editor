@@ -1,3 +1,4 @@
+import CustomDump
 import Foundation
 import Testing
 
@@ -47,7 +48,7 @@ import Testing
     let two = EngineFingerprint.compute(
       launch: devLaunch(root: root), pythonFiles: { _ in [fileB, fileA] },
       contentHash: { contents[$0.path] })
-    #expect(one == two)
+    expectNoDifference(one, two)
   }
 
   @Test func bundledFingerprintHashesTheBinary() {
@@ -56,6 +57,36 @@ import Testing
       argumentPrefix: [], workingDirectory: URL(fileURLWithPath: "/app/engine"), isBundled: true)
     let value = EngineFingerprint.compute(
       launch: launch, pythonFiles: { _ in [] }, contentHash: { _ in "binhash" })
-    #expect(value == "engine:bin:binhash")
+    expectNoDifference(value, "engine:bin:binhash")
+  }
+
+  @Test func currentIsMemoizedOncePerProcess() {
+    let launch = EngineLaunch(
+      executable: URL(fileURLWithPath: "/app/engine/logic-markers-engine"),
+      argumentPrefix: [], workingDirectory: URL(fileURLWithPath: "/app/engine"), isBundled: true)
+    let first = EngineFingerprint.current(launch: launch)
+    let second = EngineFingerprint.current(launch: launch)
+    expectNoDifference(first, second)
+  }
+
+  @Test func devFingerprintChangesWhenAPinFileChanges() {
+    let root = URL(fileURLWithPath: "/repo")
+    let file = root.appendingPathComponent("logic_markers/cli.py")
+    let pin = root.appendingPathComponent("requirements.txt")
+    var contents = [file.path: "h1", pin.path: "r1"]
+
+    let first = EngineFingerprint.compute(
+      launch: devLaunch(root: root),
+      pythonFiles: { _ in [file] },
+      contentHash: { contents[$0.path] })
+
+    // Changing a pin file (not a .py source) changes the fingerprint.
+    contents[pin.path] = "r1-modified"
+    let second = EngineFingerprint.compute(
+      launch: devLaunch(root: root),
+      pythonFiles: { _ in [file] },
+      contentHash: { contents[$0.path] })
+
+    #expect(first != second)
   }
 }
