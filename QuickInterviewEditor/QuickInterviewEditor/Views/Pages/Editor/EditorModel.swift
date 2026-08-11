@@ -417,12 +417,14 @@ final class EditorModel: ViewModel {
         let range = slice.startSample..<slice.endSample
         if !fineTune.hasUnsavedChange, fineTune.committedRange != range {
           await stopPreviewIfPlaying()  // the preview was of the old range; the pane now differs
+          await stopAuditionIfPlaying()
           fineTune.begin(target: .slice(active), range: range)
         }
       } else {
         activeSliceID = nil
         fineTune.clear()
         await stopPreviewIfPlaying()
+        await stopAuditionIfPlaying()
       }
     }
   }
@@ -432,6 +434,16 @@ final class EditorModel: ViewModel {
     guard isPreviewingDraft else { return }
     previewGeneration &+= 1
     isPreviewingDraft = false
+    await audioPlayer.stop()
+  }
+
+  /// Stops an in-flight audition from an async context, ordered (awaited) rather than
+  /// fire-and-forget — used when the active slice an audition was anchored to is removed or
+  /// re-anchored, so the audition of a now-stale range doesn't keep playing to end-of-file.
+  private func stopAuditionIfPlaying() async {
+    guard audition != nil else { return }
+    auditionGeneration &+= 1
+    audition = nil
     await audioPlayer.stop()
   }
 

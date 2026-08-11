@@ -401,5 +401,31 @@ struct EditorAuditionTests {
       await task.value
     }
   }
+
+  @Test func deletingAuditionedActiveSliceStopsAudition() async {
+    let gate = AuditionGate()
+    let stopped = LockIsolated(false)
+    let model = editor()
+    selectWords(model.transcript, 0, 2)
+    model.addSliceTapped()
+    let slice = model.slices[0]
+    model.sliceSelected(slice.id)  // active slice drives activeEditingRange == its range
+    await withDependencies {
+      $0.audioPlayer.play = { _, _, _ in await gate.play() }
+      $0.audioPlayer.stop = {
+        stopped.setValue(true)
+        gate.release()
+      }
+    } operation: {
+      let task = Task { await model.auditionInTapped() }
+      await gate.awaitStarted()
+      expectNoDifference(model.audition, .cutIn)
+      await model.deleteSlice(slice.id)  // removes the active slice mid-audition
+      await task.value
+      expectNoDifference(model.audition, nil)
+      #expect(stopped.value)
+      #expect(model.slices[id: slice.id] == nil)
+    }
+  }
 }
 // swiftlint:enable large_tuple

@@ -54,6 +54,10 @@ struct AuditionKeyMonitor: NSViewRepresentable {
       if let responder = window.firstResponder as? NSText, responder.isEditable {
         return event
       }
+      // Bare keys only — never swallow Cmd/Ctrl/Opt combinations (menu/system shortcuts).
+      if !event.modifierFlags.isDisjoint(with: [.command, .control, .option]) {
+        return event
+      }
       let key: EditorModel.AuditionKey?
       switch event.keyCode {
       case 33: key = .cutIn  // [
