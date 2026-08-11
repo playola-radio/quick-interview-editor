@@ -255,4 +255,64 @@ struct WaveformTests {
     #expect(model.waveform == nil)
     #expect(model.isLoading == false)
   }
+
+  // MARK: - Cursor-anchored zoom + wheel pan
+
+  @Test func zoomByFactorKeepsSampleUnderCursorFixedZoomingIn() {
+    let model = makeModel(
+      totalSamples: 1_000_000, viewportWidth: 1000, samplesPerPixel: 100, start: 200_000)
+    let cursorX: CGFloat = 400
+    let sampleUnder = Double(model.xToSample(cursorX))
+    model.zoomByFactor(0.5, anchoredAtX: cursorX)  // zoom in
+    #expect(model.samplesPerPixel == 50)
+    // the same sample is still drawn within a pixel of the cursor
+    #expect(abs(Double(model.sampleToX(Int(sampleUnder)) - cursorX)) < 1.0)
+  }
+
+  @Test func zoomByFactorKeepsSampleUnderCursorFixedZoomingOut() {
+    let model = makeModel(
+      totalSamples: 10_000_000, viewportWidth: 1000, samplesPerPixel: 100, start: 500_000)
+    let cursorX: CGFloat = 250
+    let sampleUnder = Double(model.xToSample(cursorX))
+    model.zoomByFactor(2.0, anchoredAtX: cursorX)  // zoom out
+    #expect(model.samplesPerPixel == 200)
+    #expect(abs(Double(model.sampleToX(Int(sampleUnder)) - cursorX)) < 1.0)
+  }
+
+  @Test func zoomByFactorClampsAtMinSamplesPerPixel() {
+    let model = makeModel(
+      totalSamples: 1_000_000, viewportWidth: 1000, samplesPerPixel: 16, start: 0)
+    model.zoomByFactor(0.01, anchoredAtX: 500)  // far past the min (8)
+    #expect(model.samplesPerPixel == 8)
+  }
+
+  @Test func zoomByFactorClampsAtFit() {
+    let model = makeModel(
+      totalSamples: 100_000, viewportWidth: 1000, samplesPerPixel: 90, start: 0)
+    // fit spp = 100_000 / 1000 = 100
+    model.zoomByFactor(100, anchoredAtX: 500)
+    #expect(model.samplesPerPixel == 100)
+  }
+
+  @Test func panByPixelsClampsAtStart() {
+    let model = makeModel(
+      totalSamples: 1_000_000, viewportWidth: 1000, samplesPerPixel: 100, start: 5_000)
+    model.panByPixels(1_000_000)  // pan hard toward the start
+    #expect(model.visibleStartSample == 0)
+  }
+
+  @Test func panByPixelsClampsAtEnd() {
+    let model = makeModel(
+      totalSamples: 1_000_000, viewportWidth: 1000, samplesPerPixel: 100, start: 5_000)
+    // visibleSampleCount = 1000*100 = 100_000; maxStart = 900_000
+    model.panByPixels(-1_000_000)  // pan hard toward the end
+    #expect(model.visibleStartSample == 900_000)
+  }
+
+  @Test func panByPixelsMovesByPixelsTimesSamplesPerPixel() {
+    let model = makeModel(
+      totalSamples: 1_000_000, viewportWidth: 1000, samplesPerPixel: 100, start: 500_000)
+    model.panByPixels(-10)  // 10 px * 100 spp = 1000 samples, toward the end
+    #expect(model.visibleStartSample == 501_000)
+  }
 }

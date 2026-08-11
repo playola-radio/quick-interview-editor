@@ -187,6 +187,23 @@ final class WaveformModel: ViewModel {
     scrolled(toStartSample: dragAnchorStartSample - Int(Double(deltaX) * samplesPerPixel))
   }
 
+  /// Multiplies zoom by `factor` (clamped) while keeping the plan sample under view-x
+  /// `cursorX` pinned to `cursorX`. Recomputes from the current invariant each call, so
+  /// repeated small wheel deltas don't accumulate drift.
+  func zoomByFactor(_ factor: Double, anchoredAtX cursorX: CGFloat) {
+    guard viewportWidth > 0, totalSamples > 0, factor > 0 else { return }
+    let oldSamplesPerPixel = samplesPerPixel
+    let sampleUnderCursor = Double(visibleStartSample) + Double(cursorX) * oldSamplesPerPixel
+    samplesPerPixel = clampedSamplesPerPixel(oldSamplesPerPixel * factor)
+    visibleStartSample = clampedStart(
+      Int((sampleUnderCursor - Double(cursorX) * samplesPerPixel).rounded()))
+  }
+
+  /// Pans the viewport by `deltaX` pixels' worth of samples (clamped to the file).
+  func panByPixels(_ deltaX: CGFloat) {
+    scrolled(toStartSample: visibleStartSample - Int((Double(deltaX) * samplesPerPixel).rounded()))
+  }
+
   // MARK: - Private Helpers
   private func zoom(by factor: Double) {
     guard viewportWidth > 0, totalSamples > 0 else { return }
