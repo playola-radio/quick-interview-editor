@@ -218,7 +218,10 @@ enum LiveEngine {
               let phase = EngineProgress.Phase(rawValue: phaseRaw)
             else { continue }
             continuation.yield(
-              .progress(EngineProgress(phase: phase, message: wire.message ?? ""))
+              .progress(EngineProgress(
+                phase: phase,
+                message: wire.message ?? "",
+                fraction: sanitizedFraction(wire.fraction)))
             )
           }
 
@@ -276,6 +279,14 @@ enum LiveEngine {
     var type: String
     var phase: String?
     var message: String?
+    var fraction: Double?
+  }
+
+  /// Clamps a decoded progress fraction to `0...1`, dropping non-finite values
+  /// (`NaN`/`±infinity`) so a malformed engine event can't corrupt the UI.
+  static func sanitizedFraction(_ value: Double?) -> Double? {
+    guard let value, value.isFinite else { return nil }
+    return min(max(value, 0), 1)
   }
 
   // MARK: render
