@@ -8,8 +8,22 @@ struct SongTabView: View {
     switch model.phase {
     case .queued, .transcribing:
       VStack(spacing: 14) {
-        ProgressView()
+        if model.isProgressDeterminate {
+          ProgressView(value: model.determinateValue)
+            .progressViewStyle(.linear)
+            .frame(maxWidth: 320)
+        } else {
+          ProgressView()
+        }
         Text(model.progressMessage).foregroundStyle(Color(white: 0.7))
+        Text(model.progressNote)
+          .font(.caption)
+          .multilineTextAlignment(.center)
+          .foregroundStyle(Color(white: 0.5))
+          .frame(maxWidth: 320)
+        if let eta = model.etaMessage {
+          Text(eta).font(.caption).foregroundStyle(Color(white: 0.5))
+        }
         if model.showsCancel {
           Button(model.cancelButtonLabel) { onCancel() }
         }
