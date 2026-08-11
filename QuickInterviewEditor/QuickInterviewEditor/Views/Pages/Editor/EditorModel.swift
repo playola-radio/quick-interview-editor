@@ -61,6 +61,9 @@ final class EditorModel: ViewModel {
     case failed(String)
   }
 
+  enum AuditionMode: Equatable { case cutIn, cutOut }
+  enum AuditionKey: Equatable { case cutIn, cutOut, space }
+
   // MARK: - Properties
   var slices: IdentifiedArrayOf<Slice> = []
   /// Undo/redo history over `slices` only — never selection, zoom, playback, or export
@@ -76,6 +79,14 @@ final class EditorModel: ViewModel {
   /// Bumped each time preview playback starts or is superseded, so a stale completing preview
   /// task can't clear a newer one's state.
   @ObservationIgnored private var previewGeneration = 0
+  /// Which boundary audition is currently playing, or nil. The third playback owner
+  /// alongside `playingSliceID` and `isPreviewingDraft`.
+  var audition: AuditionMode?
+  /// The last audition the user triggered this session — replayed by Space when idle.
+  @ObservationIgnored private var lastAudition: AuditionMode?
+  /// Bumped each time an audition starts or is superseded, so a stale completing audition
+  /// task can't clear a newer owner's state (mirrors `previewGeneration`).
+  @ObservationIgnored private var auditionGeneration = 0
   var exportPhase: ExportPhase = .idle
   var destinationURL: URL?
   /// Which pane the right column shows. The clips list and the cut-suggester share the
@@ -275,7 +286,7 @@ final class EditorModel: ViewModel {
   /// clears its playhead, so another tab's playback never drives the wrong waveform.
   func observePlayback() async {
     for await position in audioPlayer.positions() {
-      guard playingSliceID != nil || isPreviewingDraft else {
+      guard playingSliceID != nil || isPreviewingDraft || audition != nil else {
         if waveform.playheadSample != nil { waveform.playheadSample = nil }
         continue
       }
@@ -290,13 +301,14 @@ final class EditorModel: ViewModel {
 
   /// Takes exclusive ownership of the single global player for a new playback: clears every
   /// other owner's flag and bumps their generation tokens so a stale completing task can't
-  /// clear the new owner's state. The caller sets its own owner *after* calling this. The
-  /// audition owner is added in the audition section.
+  /// clear the new owner's state. The caller sets its own owner *after* calling this.
   private func beginExclusivePlayback() {
     playingSliceID = nil
     endTranscriptFollow()
     previewGeneration &+= 1
     isPreviewingDraft = false
+    auditionGeneration &+= 1
+    audition = nil
   }
 
   /// Waveform → transcript: a click at view-x selects the word whose audio contains that
@@ -618,6 +630,65 @@ final class EditorModel: ViewModel {
     previewGeneration &+= 1
     isPreviewingDraft = false
     await audioPlayer.stop()
+  }
+
+  // MARK: - Audition
+  let auditionPreRollSeconds = 2.0
+  let auditionInButtonLabel = "▶ In  ["
+  let auditionOutButtonLabel = "]  Out ▶"
+
+  /// Samples of pre-roll for the out-cut audition, from the plan sample rate.
+  private var auditionPreRollSamples: Int {
+    Int(auditionPreRollSeconds * Double(editPlan.source.sampleRate))
+  }
+  /// The region drawn on the waveform, if it's a non-empty range worth auditioning.
+  private var auditionRegion: Range<Int>? {
+    guard let region = activeEditingRange, !region.isEmpty else { return nil }
+    return region
+  }
+  var canAudition: Bool { auditionRegion != nil }
+  var isAuditioningIn: Bool { audition == .cutIn }
+  var isAuditioningOut: Bool { audition == .cutOut }
+  var auditionStatusText: String? {
+    switch audition {
+    case .cutIn: return "Auditioning in-cut — Space to stop"
+    case .cutOut: return "Auditioning out-cut — Space to stop"
+    case .none: return nil
+    }
+  }
+
+  /// In-cut: drop in at the region's start and play forward to end-of-file.
+  func auditionInTapped() async {
+    guard let region = auditionRegion else { return }
+    let end = editPlan.source.durationSamples
+    guard region.lowerBound < end else { return }
+    await startAudition(.cutIn, range: region.lowerBound..<end)
+  }
+
+  /// Out-cut: play a pre-roll ending exactly at the region's out-point, stopping on the cut.
+  /// The pre-roll may begin before the region's own start (clamped at 0).
+  func auditionOutTapped() async {
+    guard let region = auditionRegion else { return }
+    let end = region.upperBound
+    let start = max(0, end - auditionPreRollSamples)
+    await startAudition(.cutOut, range: start..<end)
+  }
+
+  /// Shared audition start. `beginExclusivePlayback`'s generation bump is this call's token —
+  /// only the latest audition clears `audition` on completion, so mashing keys can't leave
+  /// stale UI (mirrors `playSliceTapped`'s id check and `previewEditTapped`'s generation check).
+  private func startAudition(_ mode: AuditionMode, range: Range<Int>) async {
+    guard !range.isEmpty else { return }
+    beginExclusivePlayback()
+    let generation = auditionGeneration
+    audition = mode
+    lastAudition = mode
+    do {
+      try await audioPlayer.play(canonicalAudioURL, range, editPlan.source.sampleRate)
+    } catch {
+      reportIssue(error)
+    }
+    if auditionGeneration == generation { audition = nil }
   }
 
   private func beginEditIfNeeded() {
