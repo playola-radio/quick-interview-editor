@@ -58,6 +58,8 @@ struct AuditionKeyMonitor: NSViewRepresentable {
       if !event.modifierFlags.isDisjoint(with: [.command, .control, .option]) {
         return event
       }
+      // One transport action per physical press — ignore auto-repeat.
+      if event.isARepeat { return event }
       let key: EditorModel.AuditionKey?
       switch event.keyCode {
       case 33: key = .cutIn  // [

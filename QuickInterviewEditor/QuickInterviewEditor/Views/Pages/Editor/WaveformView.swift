@@ -168,23 +168,26 @@ private struct AuditionEdgeButtons: View {
   private let gap: CGFloat = 4
 
   var body: some View {
-    // Left edge for In, right edge for Out; clamp both into a side-by-side pair when the span
-    // is too narrow to separate them.
-    let leftIdeal = span.positionX
-    let rightIdeal = span.positionX + span.width - buttonWidth
-    let clampedRight = max(rightIdeal, leftIdeal + buttonWidth + gap)
-    ZStack(alignment: .topLeading) {
-      button(model.auditionInButtonLabel, active: model.isAuditioningIn) {
-        Task { await model.auditionInTapped() }
+    GeometryReader { geo in
+      let width = geo.size.width
+      // In on the left edge, Out on the right edge; keep both within the band and never
+      // overlapping — a narrow or right-clipped span collapses them to a side-by-side pair.
+      let maxLeft = max(0, width - (buttonWidth * 2 + gap))
+      let left = min(max(0, span.positionX), maxLeft)
+      let rightIdeal = span.positionX + span.width - buttonWidth
+      let right = min(max(rightIdeal, left + buttonWidth + gap), max(0, width - buttonWidth))
+      ZStack(alignment: .topLeading) {
+        button(model.auditionInButtonLabel, active: model.isAuditioningIn) {
+          Task { await model.auditionInTapped() }
+        }
+        .offset(x: left, y: 8)
+        button(model.auditionOutButtonLabel, active: model.isAuditioningOut) {
+          Task { await model.auditionOutTapped() }
+        }
+        .offset(x: right, y: 8)
       }
-      .offset(x: leftIdeal, y: 8)
-      button(model.auditionOutButtonLabel, active: model.isAuditioningOut) {
-        Task { await model.auditionOutTapped() }
-      }
-      .offset(x: clampedRight, y: 8)
+      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
-    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-    .allowsHitTesting(true)
   }
 
   private func button(_ label: String, active: Bool, _ run: @escaping () -> Void)

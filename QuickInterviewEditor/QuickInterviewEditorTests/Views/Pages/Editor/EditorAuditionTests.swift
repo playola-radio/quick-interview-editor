@@ -427,5 +427,53 @@ struct EditorAuditionTests {
       #expect(model.slices[id: slice.id] == nil)
     }
   }
+
+  @Test func retargetingEditSessionStopsAudition() async {
+    let gate = AuditionGate()
+    let stopped = LockIsolated(false)
+    let model = editor()
+    selectWords(model.transcript, 0, 2)
+    await withDependencies {
+      $0.audioPlayer.play = { _, _, _ in await gate.play() }
+      $0.audioPlayer.stop = {
+        stopped.setValue(true)
+        gate.release()
+      }
+    } operation: {
+      let task = Task { await model.auditionInTapped() }
+      await gate.awaitStarted()
+      expectNoDifference(model.audition, .cutIn)
+      // Selecting different words retargets the fine-tune session, which must stop the stale audition.
+      selectWords(model.transcript, 4, 6)
+      model.syncEditSession()
+      await task.value  // completes only when the guarded stop task releases the gate
+      expectNoDifference(model.audition, nil)
+      #expect(stopped.value)
+    }
+  }
+
+  @Test func auditionOutClampsRangeToEndOfFile() async {
+    let gate = AuditionGate()
+    let recorded = LockIsolated<(URL, Range<Int>, Int)?>(nil)
+    let model = editor()
+    let dur = model.editPlan.source.durationSamples
+    // A slice whose out-point runs past EOF (corrupt/rounded data): audition must clamp to duration.
+    let overrun = Slice(
+      id: UUID(), name: "S", startSample: dur - 500, endSample: dur + 5000, wordIDs: [],
+      snippet: "x",
+      warnings: [])
+    model.slices.append(overrun)
+    model.activeSliceID = overrun.id
+    await withDependencies {
+      $0.audioPlayer.play = recordingPlay(recorded, gate)
+      $0.audioPlayer.stop = { gate.release() }
+    } operation: {
+      let task = Task { await model.auditionOutTapped() }
+      await gate.awaitStarted()
+      expectNoDifference(recorded.value?.1.upperBound, dur)  // clamped from dur+5000 to EOF
+      gate.release()
+      await task.value
+    }
+  }
 }
 // swiftlint:enable large_tuple

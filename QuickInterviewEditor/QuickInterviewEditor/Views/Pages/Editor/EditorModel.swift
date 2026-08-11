@@ -512,6 +512,7 @@ final class EditorModel: ViewModel {
       // the target went nil — the user must Save or Cancel first.
       if fineTune.target != nil, !fineTune.hasUnsavedChange {
         cancelPreviewIfNeeded()  // closing the pane removes the Stop-preview control
+        cancelAuditionIfNeeded()
         fineTune.clear()
       }
       return
@@ -533,6 +534,7 @@ final class EditorModel: ViewModel {
       // Retargeting to a different session must not leave an old preview playing — the new pane
       // would show "Stop preview" and the playhead would follow the stale range.
       cancelPreviewIfNeeded()
+      cancelAuditionIfNeeded()
       // A transcript selection taking over releases the previously active slice, so clearing the
       // selection later doesn't silently reopen the pane on a stale slice.
       if case .pendingSelection = target { activeSliceID = nil }
@@ -552,6 +554,23 @@ final class EditorModel: ViewModel {
     isPreviewingDraft = false
     Task {
       guard previewGeneration == generation, playingSliceID == nil else { return }
+      await audioPlayer.stop()
+    }
+  }
+
+  /// Stops an in-flight audition when the session retargets away from it, so the status line and
+  /// playhead don't keep claiming an audition of a range the editor no longer shows. Mirrors
+  /// `cancelPreviewIfNeeded`: clears the flag synchronously, stops audio on a guarded task that
+  /// fires only if no newer playback (slice/preview/newer audition) has taken over.
+  private func cancelAuditionIfNeeded() {
+    guard audition != nil else { return }
+    auditionGeneration &+= 1
+    let generation = auditionGeneration
+    audition = nil
+    Task {
+      guard auditionGeneration == generation, playingSliceID == nil, !isPreviewingDraft else {
+        return
+      }
       await audioPlayer.stop()
     }
   }
@@ -651,12 +670,17 @@ final class EditorModel: ViewModel {
 
   /// Samples of pre-roll for the out-cut audition, from the plan sample rate.
   private var auditionPreRollSamples: Int {
-    Int(auditionPreRollSeconds * Double(editPlan.source.sampleRate))
+    max(0, Int(auditionPreRollSeconds * Double(editPlan.source.sampleRate)))
   }
-  /// The region drawn on the waveform, if it's a non-empty range worth auditioning.
+  /// The region drawn on the waveform, if it's a non-empty range worth auditioning. Clamped to
+  /// the file's duration so a corrupt slice/selection range past EOF can't produce a range the
+  /// player silently clamps to empty, leaving stale audio playing with all owner flags nil.
   private var auditionRegion: Range<Int>? {
-    guard let region = activeEditingRange, !region.isEmpty else { return nil }
-    return region
+    guard let region = activeEditingRange else { return nil }
+    let upper = min(region.upperBound, editPlan.source.durationSamples)
+    let lower = min(region.lowerBound, upper)
+    guard lower < upper else { return nil }
+    return lower..<upper
   }
   var canAudition: Bool { auditionRegion != nil }
   var isAuditioningIn: Bool { audition == .cutIn }
