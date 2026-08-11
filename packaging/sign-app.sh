@@ -33,7 +33,10 @@ sign_runtime() { # <entitlements> <path>
 echo "==> Signing nested Mach-O under $ENGINE_DIR (inside-out)"
 # List every Mach-O, deepest-first (sort -r), and sign each individually. `file`
 # on each path is the reliable Mach-O test (extensions alone miss extensionless
-# binaries and Python framework stubs).
+# binaries and Python framework stubs). Both frozen helper executables
+# (logic-markers-engine, cut-suggester-engine) live in this tree; exclude them here
+# and sign each explicitly LAST so the inside-out order (nested libs before the
+# executable that dlopen's them) holds for both.
 count=0
 while IFS= read -r macho; do
   [ -z "$macho" ] && continue
@@ -43,12 +46,13 @@ done < <(find "$ENGINE_DIR" -type f -print0 \
            | xargs -0 file 2>/dev/null \
            | grep 'Mach-O' \
            | cut -d: -f1 \
-           | grep -v "/logic-markers-engine$" \
+           | grep -vE "/(logic-markers-engine|cut-suggester-engine)$" \
            | sort -r)
 echo "    signed $count nested Mach-O binaries"
 
-echo "==> Signing engine executable"
+echo "==> Signing engine + cut-suggester executables"
 sign_runtime "$ENGINE_ENTITLEMENTS" "$ENGINE_DIR/logic-markers-engine"
+sign_runtime "$ENGINE_ENTITLEMENTS" "$ENGINE_DIR/cut-suggester-engine"
 
 if [ -d "$APP/Contents/Frameworks" ]; then
   echo "==> Signing embedded frameworks/dylibs"
@@ -68,6 +72,9 @@ echo "==> App signature summary"
 codesign -dvvv "$APP" 2>&1 | grep -E "Authority=|TeamIdentifier=|Identifier=|Runtime" || true
 echo "==> Engine signature summary"
 codesign -dvvv "$ENGINE_DIR/logic-markers-engine" 2>&1 \
+  | grep -E "Authority=|TeamIdentifier=|Runtime|Entitlement" || true
+echo "==> Cut-suggester signature summary"
+codesign -dvvv "$ENGINE_DIR/cut-suggester-engine" 2>&1 \
   | grep -E "Authority=|TeamIdentifier=|Runtime|Entitlement" || true
 echo
 echo "Signed OK. Next: packaging/notarize-app.sh \"$APP\""
