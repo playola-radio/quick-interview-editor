@@ -89,6 +89,56 @@ struct TranscriptUnitTests {
     expectNoDifference(unit.endSample, 250)
   }
 
+  @Test func buildsUnitsFromTranscriptSegmentsWhenOutputSegmentsAreEmpty() {
+    // A freshly analyzed v2 plan: the WhisperX sentence grouping is in
+    // `transcript_segments`; the output `segments` are EMPTY (populated only on
+    // cut/render). Units must come from the grouping, or the cutter gets nothing.
+    let plan = EditPlan(
+      schemaVersion: 2,
+      source: EditPlan.Source(path: "t", sampleRate: 44100, channels: 1, durationSamples: 1000),
+      words: [
+        EditPlan.Word(id: 1, text: "hello", start: 0, end: 0.1, startSample: 10, endSample: 100),
+        EditPlan.Word(id: 2, text: "world", start: 0.2, end: 0.3, startSample: 120, endSample: 250),
+      ],
+      silences: [],
+      segments: [],  // no output slices yet — this is a plan, not a cut
+      transcriptSegments: [
+        EditPlan.TranscriptSegment(id: 7, wordIDs: [1, 2], text: "hello world")
+      ])
+
+    expectNoDifference(
+      plan.transcriptUnits,
+      [
+        TranscriptUnit(
+          id: 7, text: "hello world", wordIDs: [1, 2], startSample: 10, endSample: 250,
+          startSec: 0, endSec: 0.3, speakerID: nil)
+      ])
+  }
+
+  @Test func transcriptSegmentsTakePrecedenceOverOutputSegments() {
+    // When both are present, the sentence grouping wins (output segments are slices,
+    // not the LLM's sentence-level input).
+    let plan = EditPlan(
+      schemaVersion: 2,
+      source: EditPlan.Source(path: "t", sampleRate: 44100, channels: 1, durationSamples: 1000),
+      words: [
+        EditPlan.Word(id: 1, text: "a", start: 0, end: 0.1, startSample: 10, endSample: 100),
+        EditPlan.Word(id: 2, text: "b", start: 0.2, end: 0.3, startSample: 120, endSample: 250),
+      ],
+      silences: [],
+      segments: [
+        EditPlan.Segment(
+          index: 0, outputName: "x", wordIDs: [1, 2], startStatus: "clean", endStatus: "clean")
+      ],
+      transcriptSegments: [
+        EditPlan.TranscriptSegment(id: 5, wordIDs: [1], text: "a"),
+        EditPlan.TranscriptSegment(id: 6, wordIDs: [2], text: "b"),
+      ])
+
+    expectNoDifference(plan.transcriptUnits.map(\.id), [5, 6])
+    expectNoDifference(plan.transcriptUnits.map(\.wordIDs), [[1], [2]])
+  }
+
   @Test func skipsSegmentWithNoWords() {
     let plan = EditPlan(
       schemaVersion: 1,

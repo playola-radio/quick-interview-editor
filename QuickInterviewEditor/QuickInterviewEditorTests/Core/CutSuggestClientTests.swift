@@ -8,14 +8,8 @@ import Testing
 struct CutSuggestClientTests {
   private static let request = CutSuggestRequest(
     transcriptUnits: [], diarization: nil, productSpecs: ProductSpec.defaults,
-    options: CutSuggestOptions(), transcriptHash: "sha256:x", sourceFingerprint: "fp")
-
-  @Test func liveValueReportsMissingImplementationAndFinishesWithError() async {
-    // No live impl until PR 5: it reports an issue and the stream throws `unimplemented`.
-    await withKnownIssue {
-      for try await _ in CutSuggestClient.liveValue.suggestCuts(Self.request) {}
-    }
-  }
+    options: CutSuggestOptions(), transcriptHash: "sha256:x", sourceFingerprint: "fp",
+    sampleRate: 44100)
 
   @Test func testValueFailsCleanlyWithoutOverride() async {
     await withKnownIssue {

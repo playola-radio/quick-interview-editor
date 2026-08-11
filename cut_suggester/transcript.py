@@ -49,3 +49,48 @@ def sentences_from_dict(data: dict, sample_rate: int = DEFAULT_SAMPLE_RATE) -> l
 def load_transcript(path: str, sample_rate: int = DEFAULT_SAMPLE_RATE) -> list[Sentence]:
     with open(path) as f:
         return sentences_from_dict(json.load(f), sample_rate=sample_rate)
+
+
+def sentences_from_units(units: list[dict]) -> list[Sentence]:
+    """Build `Sentence`s from the app's pre-computed transcript units.
+
+    The Swift `CutSuggestClient` already derived one unit per non-empty segment
+    (text, word IDs, and canonical-rate samples) from `edit-plan.json`, so we take
+    those directly rather than re-deriving from words+segments. Samples come from
+    the unit (never recomputed from seconds), keeping Swift and the cutter on the
+    exact same coordinates. Malformed input fails loud — the app is expected to send
+    coherent units, and a silent skip would drift the stage indices.
+    """
+    out: list[Sentence] = []
+    for i, u in enumerate(units):
+        try:
+            segment_id = int(u["id"])
+            text = str(u["text"]).strip()
+            word_ids = tuple(int(w) for w in u["word_ids"])
+            start_sec = float(u["start_sec"])
+            end_sec = float(u["end_sec"])
+            start_sample = int(u["start_sample"])
+            end_sample = int(u["end_sample"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError(f"transcript unit {i} is malformed: {exc}") from exc
+        if not text:
+            raise ValueError(f"transcript unit {i} (segment {segment_id}) has empty text")
+        if not word_ids:
+            raise ValueError(f"transcript unit {i} (segment {segment_id}) has no word_ids")
+        if end_sample < start_sample:
+            raise ValueError(
+                f"transcript unit {i} (segment {segment_id}) has end_sample < start_sample"
+            )
+        out.append(
+            Sentence(
+                index=i,  # stage indices reference position in this list, not segment_id
+                segment_id=segment_id,
+                text=text,
+                word_ids=word_ids,
+                start_sec=start_sec,
+                end_sec=end_sec,
+                start_sample=start_sample,
+                end_sample=end_sample,
+            )
+        )
+    return out

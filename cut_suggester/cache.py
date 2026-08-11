@@ -30,6 +30,7 @@ class CachingLLMClient:
         prompt_version: str,
         product_spec_version: str,
         window_params: dict,
+        refresh: bool = False,
     ):
         self.cache_dir = cache_dir
         self.inner = inner
@@ -37,6 +38,10 @@ class CachingLLMClient:
         self.prompt_version = prompt_version
         self.product_spec_version = product_spec_version
         self.window_params = window_params
+        # When True, ignore any existing cache entry and recompute through `inner`,
+        # then overwrite. Lets a caller force fresh results after a prompt/model
+        # change without deleting the cache dir. Requires `inner` (a live client).
+        self.refresh = refresh
 
     def _key(self, prompt: str) -> str:
         payload = {
@@ -57,7 +62,7 @@ class CachingLLMClient:
 
     def complete(self, prompt: str, *, purpose: str = "") -> LLMResponse:
         path = self._path(prompt)
-        if os.path.exists(path):
+        if os.path.exists(path) and not self.refresh:
             with open(path) as f:
                 entry = json.load(f)
             r = entry["response"]
