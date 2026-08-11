@@ -1059,6 +1059,36 @@ struct EditorTests {
     #expect(model.waveform.visibleStartSample != 400_000)
   }
 
+  @Test func lineBasedScrollNormalizesToFortyPixelsPerLine() {
+    // Pan: 1 line == 40 precise px.
+    let lineModel = geometryReadyEditor()
+    lineModel.waveformScrolled(
+      deltaX: 0, deltaY: 1, hasPreciseDeltas: false,
+      optionDown: false, commandDown: false, atX: 500)
+
+    let preciseModel = geometryReadyEditor()
+    preciseModel.waveformScrolled(
+      deltaX: 0, deltaY: 40, hasPreciseDeltas: true,
+      optionDown: false, commandDown: false, atX: 500)
+
+    #expect(lineModel.waveform.visibleStartSample == preciseModel.waveform.visibleStartSample)
+
+    // Zoom: 1 line == 40 precise px under ⌥⌘.
+    let lineZoom = geometryReadyEditor()
+    lineZoom.waveform.visibleStartSample = 0
+    lineZoom.waveformScrolled(
+      deltaX: 0, deltaY: 1, hasPreciseDeltas: false,
+      optionDown: true, commandDown: true, atX: 500)
+
+    let preciseZoom = geometryReadyEditor()
+    preciseZoom.waveform.visibleStartSample = 0
+    preciseZoom.waveformScrolled(
+      deltaX: 0, deltaY: 40, hasPreciseDeltas: true,
+      optionDown: true, commandDown: true, atX: 500)
+
+    #expect(lineZoom.waveform.samplesPerPixel == preciseZoom.waveform.samplesPerPixel)
+  }
+
   @Test func waveformClickExtendingExtendsSelection() {
     let model = editor()  // default plan = Fixtures.editPlan()
     model.waveform.totalSamples = 100_000_000
