@@ -571,7 +571,7 @@ struct EditorTests {
     let model = editor()
     identityGeometry(model)
     let word = model.editPlan.words.first { $0.startSample != nil && $0.endSample != nil }!
-    model.waveformTapped(atX: CGFloat(word.startSample! + 1))
+    model.waveformClicked(atX: CGFloat(word.startSample! + 1), extending: false)
     expectNoDifference(model.transcript.orderedSelectedWordIDs, [word.id])
   }
 
@@ -584,12 +584,12 @@ struct EditorTests {
       $0.startSample != nil && $0.endSample != nil && $0.id != words.last?.id
     }!
     let word = words[index]
-    model.waveformTapped(atX: CGFloat(word.startSample!))  // start is inclusive
+    model.waveformClicked(atX: CGFloat(word.startSample!), extending: false)  // start is inclusive
     expectNoDifference(model.transcript.orderedSelectedWordIDs, [word.id])
     // Clear first: a tap at the exclusive end lands in the next word or a gap, never
     // back on this word — so the selection must not be this word afterward.
     model.transcript.clearSelectionTapped()
-    model.waveformTapped(atX: CGFloat(word.endSample!))  // end is exclusive
+    model.waveformClicked(atX: CGFloat(word.endSample!), extending: false)  // end is exclusive
     #expect(model.transcript.orderedSelectedWordIDs != [word.id])
   }
 
@@ -599,7 +599,8 @@ struct EditorTests {
     selectWords(model.transcript, 0, 0)
     let before = model.transcript.orderedSelectedWordIDs
     // a sample far beyond the audio belongs to no word
-    model.waveformTapped(atX: CGFloat(model.editPlan.source.durationSamples + 10_000))
+    model.waveformClicked(
+      atX: CGFloat(model.editPlan.source.durationSamples + 10_000), extending: false)
     expectNoDifference(model.transcript.orderedSelectedWordIDs, before)
   }
 

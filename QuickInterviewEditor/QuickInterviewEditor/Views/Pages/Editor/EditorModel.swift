@@ -331,8 +331,6 @@ final class EditorModel: ViewModel {
     }
   }
 
-  func waveformTapped(atX positionX: CGFloat) { waveformClicked(atX: positionX, extending: false) }
-
   // swiftlint:disable function_parameter_count
   /// Wheel/trackpad on the waveform. ⌥⌘ ⇒ cursor-anchored horizontal zoom; anything else
   /// ⇒ horizontal pan (Logic maps ⌘+scroll to horizontal scroll; our single lane has no
