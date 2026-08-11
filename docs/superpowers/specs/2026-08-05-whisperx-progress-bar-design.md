@@ -34,10 +34,13 @@ live ETA); progress for the render/export path (already determinate).
 
 - **`whisperx>=3.8.6`** — the `progress_callback` parameter this feature relies
   on was added in 3.8.6. Pin this floor in the engine's requirements so the
-  callback contract cannot silently disappear. The 0–50 / 50–100
-  transcribe/align split of `combined_progress` is WhisperX-internal; we do not
-  depend on the exact 50 boundary for correctness (only for the cosmetic
-  label swap — see below).
+  callback contract cannot silently disappear. WhisperX's own
+  `progress_callback` reports an **unscaled 0–100 within each stage**
+  independently (`combined_progress` only scales an internal `print` line,
+  never the callback — verified against the installed 3.8.6's `asr.py`/
+  `alignment.py`); **we** apply the 0–50 / 50–100 transcribe/align split
+  ourselves (see Architecture below). We do not depend on the exact 50
+  boundary for correctness (only for the cosmetic label swap — see below).
 - Model everything the model needs as display strings/derived values; the view
   holds zero logic (project MV convention).
 - No `Task.sleep` in tests; use `TestClock`/`ImmediateClock`.
@@ -47,13 +50,20 @@ live ETA); progress for the render/export path (already determinate).
 WhisperX 3.8.6 (installed at `.venv/…/whisperx`) exposes
 `progress_callback: Optional[Callable[[float], None]]` in **both** `transcribe()`
 (`asr.py:208`) and `align()` (`alignment.py:127`), plus `combined_progress: bool`.
-With `combined_progress=True`:
 
-- `transcribe` reports **0 → 50** (one callback per VAD segment as decoded).
-- `align` reports **50 → 100** (one callback per segment as aligned).
-
-So we get a genuine unified 0–100 signal with **no print-scraping and no
-monkeypatching** — we pass a callback. The callback receives a float in 0–100.
+Verified against the installed 3.8.6 source: **each stage's callback reports
+its own unscaled 0 → 100** (`asr.py:273`: `progress_callback(((idx+1)/
+total_segments)*100)`; `alignment.py:409`: `progress_callback(((sdx+1)/
+total_segments)*100)`). `combined_progress` only scales a separate internal
+`print` line — it never touches the callback, in either stage. So passing
+`combined_progress=True` does **not** give a unified 0–50/50–100 signal; both
+stages independently sweep 0→100. **We** own the stage mapping instead:
+`_aligned_segments` (`logic_markers/whisperx_backend.py`) wraps the caller's
+callback in two small adapters — `pct -> pct/100*0.5` for transcribe and
+`pct -> 0.5 + pct/100*0.5` for align — so the combined signal the emitter sees
+is a genuine monotonic 0.0→1.0 sweep across both stages. No print-scraping
+and no monkeypatching — we pass a callback, we just do not rely on WhisperX
+to combine the two stages for us.
 
 ## Two honest caveats baked into the design
 
@@ -102,9 +112,11 @@ run_plan (cli.py)                       # owns _emit_event; builds the callback
   → _load_or_transcribe_transcript_in(..., on_progress=cb)
     → transcribe_transcript(..., progress_callback=cb)
       → _aligned_segments(..., progress_callback=cb)
+        # _aligned_segments builds two stage-scaled adapters around `cb`
+        # (transcribe -> 0.0..0.5, align -> 0.5..1.0) — see Feasibility above.
         → model.transcribe(audio, batch_size=16,
-                           combined_progress=True, progress_callback=cb)
-        → whisperx.align(..., combined_progress=True, progress_callback=cb)
+                           progress_callback=_transcribe_progress)
+        → whisperx.align(..., progress_callback=_align_progress)
 ```
 
 Only the `plan` command constructs a real callback; be explicit in the code that
@@ -131,10 +143,10 @@ Before the first callback, `run_plan` emits the existing single
 `_progress("transcribing", "Preparing audio…")` (message reworded) with **no
 `fraction`** — this drives the indeterminate "Preparing audio…" state.
 
-`combined_progress=True` yields the single 0–100 scale (transcribe 0–50, align
-50–100). We accept WhisperX's split; align is much faster than transcribe, so the
-bar advances steadily through the first half then completes the back half
-quickly. That is measured, not estimated.
+We produce the single 0–100 scale ourselves (transcribe → 0–50, align →
+50–100); WhisperX does not do this for us (see Feasibility above). Align is
+much faster than transcribe, so the bar advances steadily through the first
+half then completes the back half quickly. That is measured, not estimated.
 
 ### Swift — wire + model
 

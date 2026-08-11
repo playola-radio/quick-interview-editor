@@ -4,13 +4,13 @@
 
 **Goal:** Replace the meaningless indeterminate spinner in the "Transcribing with WhisperX" state with a real, subprocess-driven progress bar plus an upfront note and a live "About X min remaining" estimate.
 
-**Architecture:** WhisperX 3.8.6's `transcribe()`/`align()` `progress_callback` (with `combined_progress=True`) feeds a Python emitter that writes throttled `QIE_EVENT {…,"fraction":0..1}` lines on stderr. The existing `LiveEngine` stderr reader decodes the new `fraction` into `EngineProgress`; `SongTabModel` derives a determinate progress value + ETA from it; `SongTabView` swaps to `ProgressView(value:)`. The bar represents the transcription phase only — it fills 0→100 during transcribe+align, then goes indeterminate for the fast tail phases (convert/silence/plan).
+**Architecture:** WhisperX 3.8.6's `transcribe()`/`align()` `progress_callback` reports an unscaled 0→100 independently in EACH stage (`combined_progress` only scales an internal `print` line, never the callback — verified against the installed 3.8.6's `asr.py`/`alignment.py`). `_aligned_segments` applies the stage mapping itself — transcribe → fraction 0.0–0.5, align → fraction 0.5–1.0 — before handing the result to a Python emitter that writes throttled `QIE_EVENT {…,"fraction":0..1}` lines on stderr. The existing `LiveEngine` stderr reader decodes the new `fraction` into `EngineProgress`; `SongTabModel` derives a determinate progress value + ETA from it; `SongTabView` swaps to `ProgressView(value:)`. The bar represents the transcription phase only — it fills 0→100 during transcribe+align, then goes indeterminate for the fast tail phases (convert/silence/plan).
 
 **Tech Stack:** Python 3.12 (pytest), whisperx 3.8.6; Swift/SwiftUI, swift-dependencies (`Clock`), Swift Testing + swift-custom-dump.
 
 ## Global Constraints
 
-- `whisperx==3.8.6` is already pinned in `requirements.txt` — no version change needed. The 0–50 (transcribe) / 50–100 (align) split of `combined_progress` is WhisperX-internal; correctness must not depend on the exact 50 boundary (it drives only the cosmetic label swap).
+- `whisperx==3.8.6` is already pinned in `requirements.txt` — no version change needed. WhisperX's `progress_callback` reports an unscaled 0–100 independently within each stage; `_aligned_segments` applies the 0–50 (transcribe) / 50–100 (align) split itself. Correctness must not depend on the exact 50 boundary (it drives only the cosmetic label swap).
 - Point-Free skills are mandatory before Swift code: `pfw-observable-models`, `pfw-dependencies`, `pfw-testing`, `pfw-custom-dump`, `pfw-modern-swiftui`. Value assertions use `expectNoDifference`, never raw `#expect(a == b)`.
 - Zero logic in the view: every label and the determinate/indeterminate choice is a model computed property.
 - No `Task.sleep` in tests; use `TestClock`.
