@@ -14,7 +14,7 @@ private func neverCompleting() -> AsyncThrowingStream<EngineEvent, Error> {
 struct RootTests {
   @Test func startsEmpty() {
     let model = withDependencies {
-      $0.engine.transcribe = { _ in AsyncThrowingStream { $0.finish() } }
+      $0.transcription.transcribe = { _, _, _ in AsyncThrowingStream { $0.finish() } }
     } operation: {
       RootModel()
     }
@@ -24,7 +24,7 @@ struct RootTests {
 
   @Test func openingAFileAddsAndSelectsATab() {
     withDependencies {
-      $0.engine.transcribe = { _ in neverCompleting() }
+      $0.transcription.transcribe = { _, _, _ in neverCompleting() }
     } operation: {
       let model = RootModel()
       model.filePicked(URL(fileURLWithPath: "/a/clip.m4a"))
@@ -36,7 +36,7 @@ struct RootTests {
 
   @Test func droppingTwoFilesOpensTwoTabs() {
     withDependencies {
-      $0.engine.transcribe = { _ in neverCompleting() }
+      $0.transcription.transcribe = { _, _, _ in neverCompleting() }
     } operation: {
       let model = RootModel()
       model.fileDropped([URL(fileURLWithPath: "/a.m4a"), URL(fileURLWithPath: "/b.m4a")])
@@ -46,7 +46,7 @@ struct RootTests {
 
   @Test func closingATabRemovesItAndFixesSelection() {
     withDependencies {
-      $0.engine.transcribe = { _ in neverCompleting() }
+      $0.transcription.transcribe = { _, _, _ in neverCompleting() }
     } operation: {
       let model = RootModel()
       model.fileDropped([URL(fileURLWithPath: "/a.m4a"), URL(fileURLWithPath: "/b.m4a")])
@@ -63,7 +63,7 @@ struct RootTests {
 
   @Test func filePickFailureIsSurfacedNotSwallowed() {
     let model = withDependencies {
-      $0.engine.transcribe = { _ in neverCompleting() }
+      $0.transcription.transcribe = { _, _, _ in neverCompleting() }
     } operation: {
       RootModel()
     }
@@ -75,7 +75,7 @@ struct RootTests {
 
   @Test func nonAudioDropsAreIgnored() {
     withDependencies {
-      $0.engine.transcribe = { _ in neverCompleting() }
+      $0.transcription.transcribe = { _, _, _ in neverCompleting() }
     } operation: {
       let model = RootModel()
       model.fileDropped([
@@ -90,7 +90,7 @@ struct RootTests {
 
   @Test func dropsBeyondTheCapAreQueued() {
     withDependencies {
-      $0.engine.transcribe = { _ in neverCompleting() }
+      $0.transcription.transcribe = { _, _, _ in neverCompleting() }
     } operation: {
       let model = RootModel()
       model.fileDropped([
@@ -117,7 +117,7 @@ struct RootTests {
     defer { try? FileManager.default.removeItem(at: destination) }
 
     try await withDependencies {
-      $0.engine.transcribe = { _ in
+      $0.transcription.transcribe = { _, _, _ in
         AsyncThrowingStream {
           $0.yield(.completed(Fixtures.transcriptionResult(plan)))
           $0.finish()
@@ -153,7 +153,7 @@ struct RootTests {
 
   @Test func closingARunningTabPromotesAQueuedOne() {
     withDependencies {
-      $0.engine.transcribe = { _ in neverCompleting() }
+      $0.transcription.transcribe = { _, _, _ in neverCompleting() }
     } operation: {
       let model = RootModel()
       model.fileDropped([
@@ -180,7 +180,7 @@ struct RootTests {
     let plan = Fixtures.editPlan()
 
     await withDependencies {
-      $0.engine.transcribe = { _ in
+      $0.transcription.transcribe = { _, _, _ in
         AsyncThrowingStream {
           $0.yield(.completed(Fixtures.transcriptionResult(plan, canonicalAudioURL: canonical)))
           $0.finish()

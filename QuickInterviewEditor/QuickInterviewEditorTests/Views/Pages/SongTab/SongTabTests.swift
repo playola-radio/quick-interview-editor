@@ -21,7 +21,7 @@ struct SongTabTests {
     let canonical = URL(fileURLWithPath: "/tmp/qie-songtab-canonical.aiff")
     let model = SongTabModel(sourceURL: URL(fileURLWithPath: "/clip.m4a"))
     await withDependencies {
-      $0.engine.transcribe = { _ in
+      $0.transcription.transcribe = { _, _, _ in
         stream([
           .progress(.init(phase: .transcribing, message: "Transcribing")),
           .completed(Fixtures.transcriptionResult(plan, canonicalAudioURL: canonical)),
@@ -39,7 +39,7 @@ struct SongTabTests {
   @Test func progressUpdatesMessageBeforeCompletion() async {
     let model = SongTabModel(sourceURL: URL(fileURLWithPath: "/clip.m4a"))
     await withDependencies {
-      $0.engine.transcribe = { _ in
+      $0.transcription.transcribe = { _, _, _ in
         stream(
           [.progress(.init(phase: .converting, message: "Converting audio"))],
           throwing: CancellationError())
@@ -54,7 +54,7 @@ struct SongTabTests {
   @Test func failureSetsFailedPhaseWithMessage() async {
     let model = SongTabModel(sourceURL: URL(fileURLWithPath: "/clip.m4a"))
     await withDependencies {
-      $0.engine.transcribe = { _ in
+      $0.transcription.transcribe = { _, _, _ in
         stream([], throwing: EngineClientError.engineFailed("no models"))
       }
     } operation: {
@@ -81,7 +81,9 @@ struct SongTabTests {
     var readyCalled = false
     model.onReadyForNext = { readyCalled = true }
     await withDependencies {
-      $0.engine.transcribe = { _ in stream([.completed(Fixtures.transcriptionResult(plan))]) }
+      $0.transcription.transcribe = { _, _, _ in
+        stream([.completed(Fixtures.transcriptionResult(plan))])
+      }
     } operation: {
       await model.startTranscription()
     }
@@ -95,5 +97,53 @@ struct SongTabTests {
     model.retryTapped()
     #expect(model.isQueued)  // re-enters the queue so the cap is respected
     #expect(readyCalled)
+  }
+
+  @Test func startPassesUseCachePolicyByDefault() async {
+    let captured = LockIsolated<CachePolicy?>(nil)
+    let model = SongTabModel(sourceURL: URL(fileURLWithPath: "/clip.m4a"))
+    await withDependencies {
+      $0.transcription.transcribe = { _, _, policy in
+        captured.setValue(policy)
+        return stream([.completed(Fixtures.transcriptionResult(Fixtures.editPlan()))])
+      }
+    } operation: {
+      await model.startTranscription()
+    }
+    expectNoDifference(captured.value, .useCache)
+  }
+
+  @Test func reimportIgnoringCacheRequeuesWithForceFresh() async {
+    let captured = LockIsolated<CachePolicy?>(nil)
+    let model = SongTabModel(sourceURL: URL(fileURLWithPath: "/clip.m4a"))
+    var readyCalled = false
+    model.onReadyForNext = { readyCalled = true }
+
+    model.reimportIgnoringCacheTapped()
+    #expect(model.isQueued)  // re-enters the queue so the cap is respected
+    #expect(readyCalled)
+
+    await withDependencies {
+      $0.transcription.transcribe = { _, _, policy in
+        captured.setValue(policy)
+        return stream([.completed(Fixtures.transcriptionResult(Fixtures.editPlan()))])
+      }
+    } operation: {
+      await model.startTranscription()
+    }
+    expectNoDifference(captured.value, .forceFresh)
+  }
+
+  @Test func canReimportOnlyWhenLoaded() async {
+    let model = SongTabModel(sourceURL: URL(fileURLWithPath: "/clip.m4a"))
+    #expect(!model.canReimport)  // queued
+    await withDependencies {
+      $0.transcription.transcribe = { _, _, _ in
+        stream([.completed(Fixtures.transcriptionResult(Fixtures.editPlan()))])
+      }
+    } operation: {
+      await model.startTranscription()
+    }
+    #expect(model.canReimport)  // loaded
   }
 }
