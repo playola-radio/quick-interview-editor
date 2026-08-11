@@ -137,6 +137,7 @@ final class SongTabModel: ViewModel, Identifiable {
       phase = .failed(error.localizedDescription)
       stopTicking()
     }
+    stopTicking()  // idempotent; guards the stream ending without a terminal .completed/throw
     onReadyForNext?()  // slot freed (loaded or failed) — let RootModel start the next
   }
 

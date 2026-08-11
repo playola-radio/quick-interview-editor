@@ -1,3 +1,4 @@
+import CustomDump
 import Testing
 
 @testable import QuickInterviewEditor
@@ -15,11 +16,11 @@ struct EngineEventTests {
   }
 
   @Test func sanitizedFractionClampsAndDropsJunk() {
-    #expect(LiveEngine.sanitizedFraction(0.4) == 0.4)
-    #expect(LiveEngine.sanitizedFraction(-1) == 0)
-    #expect(LiveEngine.sanitizedFraction(2) == 1)
-    #expect(LiveEngine.sanitizedFraction(.nan) == nil)
-    #expect(LiveEngine.sanitizedFraction(.infinity) == nil)
-    #expect(LiveEngine.sanitizedFraction(nil) == nil)
+    expectNoDifference(LiveEngine.sanitizedFraction(0.4), 0.4)
+    expectNoDifference(LiveEngine.sanitizedFraction(-1), 0)
+    expectNoDifference(LiveEngine.sanitizedFraction(2), 1)
+    expectNoDifference(LiveEngine.sanitizedFraction(.nan), nil)
+    expectNoDifference(LiveEngine.sanitizedFraction(.infinity), nil)
+    expectNoDifference(LiveEngine.sanitizedFraction(nil), nil)
   }
 }
