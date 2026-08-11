@@ -43,7 +43,7 @@ struct LiveCutSuggesterTests {
     let object = try encodedObject(Self.request(sampleRate: 48000))
     let options = try #require(object["options"] as? [String: Any])
     expectNoDifference(options["model"] as? String, "claude-sonnet-5")
-    expectNoDifference(options["prompt_version"] as? String, "v1")
+    expectNoDifference(options["prompt_version"] as? String, "v2")
     expectNoDifference(options["stage1_window"] as? Int, 130)
     expectNoDifference(options["stage1_step"] as? Int, 110)
     // The canonical rate the units' samples are expressed in — required so Python

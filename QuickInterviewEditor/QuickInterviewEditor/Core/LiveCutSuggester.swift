@@ -116,6 +116,7 @@ enum LiveCutSuggester {
 
       let task = Task {
         do {
+          let startedAt = Date()
           let launch = resolvedLaunch()
           guard FileManager.default.isExecutableFile(atPath: launch.executable.path) else {
             throw CutSuggestClientError.helperNotFound(launch.executable.path)
@@ -169,8 +170,10 @@ enum LiveCutSuggester {
             from: out, provenance: provenance, makeID: { UUID() })
           guard !payload.suggestions.isEmpty else {
             throw CutSuggestClientError.noSuggestions(
-              payload.meta?.diagnosticDescription
-                ?? "The helper returned an empty suggestions array without diagnostics.")
+              emptyRunDiagnostic(
+                meta: payload.meta,
+                launch: launch,
+                elapsed: Date().timeIntervalSince(startedAt)))
           }
           continuation.yield(.completed(payload.suggestions))
           continuation.finish()
@@ -213,6 +216,28 @@ enum LiveCutSuggester {
       transcriptHash: request.transcriptHash,
       sourceFingerprint: request.sourceFingerprint,
       diarizationHash: request.diarization?.diarizationHash)
+  }
+
+  private static func emptyRunDiagnostic(
+    meta: CutSuggestion.WireMeta?,
+    launch: EngineLaunch,
+    elapsed: TimeInterval
+  ) -> String {
+    let helperMode = launch.isBundled ? "bundled helper" : "dev Python fallback"
+    let base = meta?.diagnosticDescription
+      ?? "The helper returned an empty suggestions array without diagnostics."
+    let elapsedText = String(format: "%.1f", elapsed)
+    var lines = [
+      base,
+      "Helper: \(helperMode) at \(launch.executable.path).",
+      "Elapsed: \(elapsedText)s.",
+    ]
+    if elapsed < 2 {
+      lines.append(
+        "Because this finished almost instantly, it was probably served from cached LLM responses "
+          + "rather than a fresh provider call.")
+    }
+    return lines.joined(separator: "\n")
   }
 
   /// Classifies a nonzero-exit failure from the helper's stderr tail. A missing

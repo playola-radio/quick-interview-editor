@@ -37,7 +37,7 @@ struct CutSuggestionsPageTests {
     transcriptHash: String, fingerprint: String
   ) -> CutSuggestion.Provenance {
     CutSuggestion.Provenance(
-      model: "claude-sonnet-5", promptVersion: "v1", productSpecVersion: "v1",
+      model: "claude-sonnet-5", promptVersion: "v2", productSpecVersion: "v1",
       transcriptHash: transcriptHash, sourceFingerprint: fingerprint, diarizationHash: nil)
   }
 
