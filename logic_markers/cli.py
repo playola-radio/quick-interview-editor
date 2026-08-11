@@ -104,14 +104,16 @@ def _load_or_transcribe_transcript(source: Path, refresh: bool) -> Transcript:
     return transcript
 
 
-def _load_or_transcribe_transcript_in(source: Path, work_dir: Path, refresh: bool) -> Transcript:
+def _load_or_transcribe_transcript_in(
+    source: Path, work_dir: Path, refresh: bool, *, on_progress=None
+) -> Transcript:
     """Same as `_load_or_transcribe_transcript`, but cached in `work_dir` (never beside source)."""
     from .whisperx_backend import transcribe_transcript
 
     cache = work_dir / (source.name + ".transcript.json")
     if cache.exists() and not refresh:
         return Transcript.from_dict(json.loads(cache.read_text()))
-    transcript = transcribe_transcript(source)
+    transcript = transcribe_transcript(source, progress_callback=on_progress)
     cache.write_text(json.dumps(transcript.to_dict(), indent=2))
     return transcript
 
@@ -341,8 +343,12 @@ def run_plan(source: Path, work_dir: Path, sample_rate: int, refresh: bool = Fal
     """Analyze (no cut): transcript + canonical AIFF + samples + silences → edit-plan dict."""
     work_dir.mkdir(parents=True, exist_ok=True)
 
-    _progress("transcribing", "Transcribing with WhisperX (first run downloads models)")
-    transcript = _load_or_transcribe_transcript_in(source, work_dir, refresh)
+    _progress("transcribing", "Preparing audio…")
+    _transcribe_progress = _ProgressEmitter()
+    transcript = _load_or_transcribe_transcript_in(
+        source, work_dir, refresh, on_progress=_transcribe_progress
+    )
+    _transcribe_progress.finish()
 
     _progress("converting", "Converting audio")
     # The canonical PCM AIFF that backs the app's waveform, playback, and render
