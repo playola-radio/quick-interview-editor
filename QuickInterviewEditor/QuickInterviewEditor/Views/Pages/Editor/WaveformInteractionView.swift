@@ -26,10 +26,11 @@ struct WaveformInteractionLayer: NSViewRepresentable {
     override var acceptsFirstResponder: Bool { false }
 
     /// Claim points inside the band so clicks/drags/scroll come here, not the Canvas.
-    /// `point` is in the superview's coordinate system; points outside our own frame
-    /// return nil so sibling controls (e.g. the header zoom buttons) still receive theirs.
+    /// `point` arrives in the superview's coordinate system; convert into our own
+    /// bounds before testing so we claim exactly the waveform band (and nothing
+    /// outside it), regardless of our frame origin.
     override func hitTest(_ point: NSPoint) -> NSView? {
-      frame.contains(point) ? self : nil
+      bounds.contains(convert(point, from: superview)) ? self : nil
     }
 
     private func localX(_ event: NSEvent) -> CGFloat {
