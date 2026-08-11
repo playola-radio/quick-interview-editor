@@ -784,9 +784,10 @@ git commit -m "feat(editor): window-scoped key monitor for zoom shortcuts"
 **Files:**
 - Create: `QuickInterviewEditor/QuickInterviewEditor/Views/Pages/Editor/WaveformInteractionView.swift`
 - Modify: `QuickInterviewEditor/QuickInterviewEditor/Views/Pages/Editor/WaveformView.swift`
+- Modify: `QuickInterviewEditor/QuickInterviewEditor/Views/Pages/TranscriptPage/TranscriptTextView.swift` (wire Shift into the transcript click — the transcript half of the shift-extend feature)
 
 **Interfaces:**
-- Consumes: `EditorModel.waveformClicked(atX:extending:)`, `EditorModel.waveformScrolled(...)`, `waveform.dragScrollBegan()`, `waveform.dragScrolled(byPixels:)`.
+- Consumes: `EditorModel.waveformClicked(atX:extending:)`, `EditorModel.waveformScrolled(...)`, `waveform.dragScrollBegan()`, `waveform.dragScrolled(byPixels:)`, `TranscriptPageModel.transcriptClicked(atUTF16Offset:extending:)`.
 - Produces: `struct WaveformInteractionLayer: NSViewRepresentable` — a transparent view over the waveform band that owns `scrollWheel` + `mouseDown/Dragged/Up` and forwards primitive facts to the model (click vs 6px-drag classification; Shift on click; modifier flags + pointer-x on scroll).
 
 Thin AppKit plumbing (no unit test); verified in Task 7 manual QA.
@@ -893,6 +894,27 @@ Keep the `.onGeometryChange` that reports width. The header zoom buttons are unc
 
 3. In `EditorModel.swift`, delete the now-unused `waveformTapped(atX:)` wrapper added in Task 4 (nothing calls it anymore).
 
+- [ ] **Step 2b: Wire Shift into the transcript click**
+
+The waveform now passes Shift through, but the transcript's AppKit hit-tester still calls `transcriptClicked` without a modifier, so Shift-click in the transcript wouldn't extend. In `TranscriptTextView.swift`, in `HitTestingTextView.mouseUp(with:)`, change the click call to pass the Shift flag. Find:
+
+```swift
+      if !didDrag, let anchor = anchorOffset {
+        coordinator.model.transcriptClicked(atUTF16Offset: anchor)
+      }
+```
+
+and change it to:
+
+```swift
+      if !didDrag, let anchor = anchorOffset {
+        coordinator.model.transcriptClicked(
+          atUTF16Offset: anchor, extending: event.modifierFlags.contains(.shift))
+      }
+```
+
+Leave the drag handlers unchanged (drag stays non-shift per the design). `mouseUp`'s `event` already carries the modifier flags at button-release, which is correct for a Shift-click.
+
 - [ ] **Step 3: Regenerate the project and build**
 
 ```bash
@@ -910,8 +932,8 @@ Expected: `Test run with N tests … passed`.
 
 ```bash
 cd QuickInterviewEditor && make format && make lint
-git add QuickInterviewEditor/Views/Pages/Editor/WaveformInteractionView.swift QuickInterviewEditor/Views/Pages/Editor/WaveformView.swift QuickInterviewEditor/Views/Pages/Editor/EditorModel.swift QuickInterviewEditor.xcodeproj
-git commit -m "feat(waveform): AppKit interaction layer for scroll/click/drag"
+git add QuickInterviewEditor/Views/Pages/Editor/WaveformInteractionView.swift QuickInterviewEditor/Views/Pages/Editor/WaveformView.swift QuickInterviewEditor/Views/Pages/Editor/EditorModel.swift QuickInterviewEditor/Views/Pages/TranscriptPage/TranscriptTextView.swift QuickInterviewEditor.xcodeproj
+git commit -m "feat(waveform): AppKit interaction layer for scroll/click/drag + transcript shift-click"
 ```
 
 ---
