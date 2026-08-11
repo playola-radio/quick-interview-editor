@@ -21,6 +21,6 @@ def test_load_or_transcribe_forwards_on_progress(monkeypatch, tmp_path, capsys):
     cli._load_or_transcribe_transcript_in(
         tmp_path / "a.wav", tmp_path, refresh=False, on_progress=emitter
     )
-    lines = [l for l in capsys.readouterr().err.splitlines() if l.startswith("QIE_EVENT ")]
-    fractions = [json.loads(l[len("QIE_EVENT "):]).get("fraction") for l in lines]
+    lines = [line for line in capsys.readouterr().err.splitlines() if line.startswith("QIE_EVENT ")]
+    fractions = [json.loads(line[len("QIE_EVENT "):]).get("fraction") for line in lines]
     assert fractions == [0.25, 0.75]
