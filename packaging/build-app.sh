@@ -15,10 +15,15 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENGINE_SRC="$REPO_ROOT/packaging/dist/logic-markers-engine"
+CUT_SRC="$REPO_ROOT/packaging/dist/cut-suggester-engine"
 DIST="$REPO_ROOT/packaging/dist"
 
 [ -x "$ENGINE_SRC/logic-markers-engine" ] || {
   echo "error: frozen engine missing at $ENGINE_SRC (run package-engine.sh first)" >&2
+  exit 1
+}
+[ -x "$CUT_SRC/cut-suggester-engine" ] || {
+  echo "error: frozen cut-suggester missing at $CUT_SRC (run package-cut-suggester.sh first)" >&2
   exit 1
 }
 
@@ -35,12 +40,21 @@ xcodebuild \
 BUILT="$REPO_ROOT/packaging/build/app/Build/Products/Release/QuickInterviewEditor.app"
 [ -d "$BUILT" ] || { echo "error: build produced no .app at $BUILT" >&2; exit 1; }
 
-echo "==> Embedding frozen engine at Contents/Resources/engine/"
+echo "==> Embedding frozen engine + cut-suggester at Contents/Resources/engine/"
 DEST_APP="$DIST/QuickInterviewEditor.app"
 rm -rf "$DEST_APP"
 /usr/bin/ditto "$BUILT" "$DEST_APP"
-mkdir -p "$DEST_APP/Contents/Resources/engine"
-/usr/bin/ditto "$ENGINE_SRC" "$DEST_APP/Contents/Resources/engine"
+ENGINE_DEST="$DEST_APP/Contents/Resources/engine"
+mkdir -p "$ENGINE_DEST"
+# Both frozen one-folder bundles ditto INTO the same engine/ dir. Their support
+# trees don't collide — logic-markers uses _internal/, cut-suggester uses
+# _cut_suggester_internal/ (set via contents_directory in cut-suggester.spec). The
+# only top-level artifacts are the two executables, landing at
+# engine/logic-markers-engine and engine/cut-suggester-engine (the paths the Swift
+# EngineResolver / CutSuggesterResolver seams expect). ditto preserves the symlinks
+# PyInstaller 6 bundles rely on — do NOT swap it for cp.
+/usr/bin/ditto "$ENGINE_SRC" "$ENGINE_DEST"
+/usr/bin/ditto "$CUT_SRC" "$ENGINE_DEST"
 
 echo "==> Assembled: $DEST_APP"
 du -sh "$DEST_APP" | awk '{print "    app size: " $1}'

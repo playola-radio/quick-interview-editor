@@ -11,12 +11,19 @@ design and the Codex review that shaped it.
 ## The pipeline
 
 ```text
-packaging/package-engine.sh    # 1. PyInstaller one-folder freeze -> dist/logic-markers-engine/
-packaging/verify-offline.sh …  # 2. prove the frozen engine transcribes offline (no dev env)
-packaging/build-app.sh         # 3. build the .app + embed the engine at Resources/engine/
-packaging/sign-app.sh …        # 4. inside-out Developer ID + hardened-runtime signing
-packaging/notarize-app.sh …    # 5. notarize + staple  (needs notarytool credentials)
+packaging/package-engine.sh          # 1a. PyInstaller freeze -> dist/logic-markers-engine/
+packaging/package-cut-suggester.sh   # 1b. PyInstaller freeze -> dist/cut-suggester-engine/
+packaging/verify-offline.sh …        # 2a. prove the frozen engine transcribes offline (no dev env)
+packaging/verify-cut-suggester.sh    # 2b. prove the frozen cutter runs a real suggest (no dev env)
+packaging/build-app.sh               # 3. build the .app + embed BOTH helpers at Resources/engine/
+packaging/sign-app.sh …              # 4. inside-out Developer ID + hardened-runtime signing
+packaging/notarize-app.sh …          # 5. notarize + staple  (needs notarytool credentials)
 ```
+
+The app ships **two** frozen Python helpers, both under `Contents/Resources/engine/`:
+the heavy `logic-markers-engine` (whisperx transcription) and the light
+`cut-suggester-engine` (the LLM cut-suggester). Build each with its own
+`package-*.sh`; `build-app.sh` embeds both.
 
 ### 1. Freeze the engine — `package-engine.sh`
 
@@ -36,6 +43,35 @@ Key spec details (`engine.spec`):
   runtime if the tokenizer is missing. We stage it at build time and ship it as
   static data (`engine_entry.py` points `NLTK_DATA` at it) so the frozen engine
   never hits the network.
+
+### 1b. Freeze the cut-suggester — `package-cut-suggester.sh`
+
+The second helper is tiny next to the engine. `cut_suggester/cli.py suggest`'s whole
+runtime is CPython stdlib plus the `anthropic` SDK (lazy-imported on the Anthropic
+provider path); the OpenAI path is stdlib `urllib`. No torch/whisperx/numpy. So this
+freeze is fast and small.
+
+Key spec details (`cut-suggester.spec`):
+- `contents_directory="_cut_suggester_internal"` — the support tree is deliberately
+  **not** `_internal`, so this bundle can ditto INTO the same `Resources/engine/`
+  folder as `logic-markers-engine` (whose libs live in `_internal/`) without
+  colliding. The only top-level artifact is the `cut-suggester-engine` executable,
+  which lands at exactly `Resources/engine/cut-suggester-engine` — the path the Swift
+  `CutSuggesterResolver` seam already expects.
+- `collect_all` + `copy_metadata` for the `anthropic` stack (pydantic/pydantic_core,
+  httpx/httpcore, anyio, jiter, certifi, …). The metadata matters: the SDK does
+  `importlib.metadata.version(...)` checks at import; `certifi`'s CA bundle is
+  collected as data so live HTTPS works from inside the frozen bundle.
+- One-folder (not one-file): `pydantic_core` and `jiter` are native `.so` modules,
+  and one-file extracts unsigned native code to a temp dir at runtime — the same
+  hardened-runtime problem the engine avoided. One-folder lets `sign-app.sh` sign
+  every nested Mach-O inside-out.
+
+The build's `--help` smoke never touches `anthropic` (it's lazy), so the script also
+runs a keyless `suggest` against a `claude-*` model: it reaches `import anthropic` and
+the client construction, then fails cleanly on the missing key. That proves the SDK
+actually froze into the bundle (a missing SDK would raise `No module named 'anthropic'`
+instead).
 
 ### 2. Prove it runs offline — `verify-offline.sh`
 
@@ -81,6 +117,13 @@ keychain profile or an App Store Connect API key) — see the script header.
 users and against the dev engine for development. When bundled, `LiveEngine`
 passes the downloaded model dirs to the engine via `QIE_WHISPER_MODEL_DIR` /
 `QIE_ALIGN_MODEL_DIR` / `QIE_OFFLINE=1`.
+
+`CutSuggesterResolver` mirrors this for the cutter: it prefers
+`Resources/engine/cut-suggester-engine`, else falls back to
+`python -m cut_suggester.cli` from the dev repo root; if neither is runnable it
+throws `helperNotFound` cleanly (never a crash). The frozen helper reads the LLM
+key from its environment — the packaged app's auth story (how the user's key
+reaches the child env) is a separate follow-up, not part of this freeze.
 
 ## Models are data, not code
 
