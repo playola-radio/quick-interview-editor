@@ -71,7 +71,9 @@ extension CutSuggestion {
       if let nPartitions { parts.append("\(nPartitions) topic partition(s)") }
       if let nRawClips { parts.append("\(nRawClips) raw clip(s) from the model") }
       if let nInvalidClips { parts.append("\(nInvalidClips) malformed clip(s)") }
-      if let nDroppedDuration { parts.append("\(nDroppedDuration) clip(s) outside duration limits") }
+      if let nDroppedDuration {
+        parts.append("\(nDroppedDuration) clip(s) outside duration limits")
+      }
       return parts.isEmpty
         ? "The helper returned an empty suggestions array without diagnostics."
         : parts.joined(separator: "; ") + "."

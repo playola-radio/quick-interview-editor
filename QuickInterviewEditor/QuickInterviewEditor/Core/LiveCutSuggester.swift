@@ -224,7 +224,8 @@ enum LiveCutSuggester {
     elapsed: TimeInterval
   ) -> String {
     let helperMode = launch.isBundled ? "bundled helper" : "dev Python fallback"
-    let base = meta?.diagnosticDescription
+    let base =
+      meta?.diagnosticDescription
       ?? "The helper returned an empty suggestions array without diagnostics."
     let elapsedText = String(format: "%.1f", elapsed)
     var lines = [

@@ -159,7 +159,9 @@ struct CutSuggestionsPageTests {
         editPlan: Fixtures.editPlan(), sourceFingerprint: fingerprint)
       await model.suggestCutsTapped()
 
-      expectNoDifference(model.phase, .failed("The cut-suggester stopped before returning results."))
+      expectNoDifference(
+        model.phase,
+        .failed("The cut-suggester stopped before returning results."))
       #expect(!model.isSuggesting)
     }
   }
