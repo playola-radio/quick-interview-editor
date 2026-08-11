@@ -46,30 +46,33 @@ def _progress(phase: str, message: str) -> None:
 
 
 class _ProgressEmitter:
-    """Turns WhisperX's 0-100 progress_callback into throttled QIE_EVENT lines.
+    """Turns a unified 0.0-1.0 progress fraction into throttled QIE_EVENT lines.
 
-    Emits the first callback unconditionally, then only when the whole-number
-    percent changes, and clamps/drops junk. `finish()` guarantees a final 1.0
-    (unless nothing fired, e.g. a cached transcript, or 100 already emitted).
+    The two WhisperX stages (transcribe, align) are each mapped to their half
+    of the 0.0..1.0 range upstream in `whisperx_backend._aligned_segments`, so
+    this emitter receives one already-monotonic fraction. Emits the first
+    callback unconditionally, then only when the whole-number percent changes,
+    and clamps/drops junk. `finish()` guarantees a final 1.0 (unless nothing
+    fired, e.g. a cached transcript, or 100 already emitted).
     """
 
     def __init__(self, emit=_emit_event) -> None:
         self._emit = emit
         self._last_percent: int | None = None
 
-    def __call__(self, percent: float) -> None:
+    def __call__(self, fraction: float) -> None:
         try:
-            p = float(percent)
+            f = float(fraction)
         except (TypeError, ValueError):
             return
-        if not math.isfinite(p):
+        if not math.isfinite(f):
             return
-        p = max(0.0, min(100.0, p))
-        whole = int(p)
+        f = max(0.0, min(1.0, f))
+        whole = int(f * 100)
         if self._last_percent is not None and whole == self._last_percent:
             return
         self._last_percent = whole
-        self._emit_fraction(p / 100.0)
+        self._emit_fraction(f)
 
     def finish(self) -> None:
         if self._last_percent is None or self._last_percent == 100:

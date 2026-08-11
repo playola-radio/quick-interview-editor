@@ -10,8 +10,8 @@ def test_load_or_transcribe_forwards_on_progress(monkeypatch, tmp_path, capsys):
 
     def fake_transcribe_transcript(source, progress_callback=None):
         assert progress_callback is not None
-        progress_callback(25.0)
-        progress_callback(75.0)
+        progress_callback(0.25)
+        progress_callback(0.75)
         return Transcript(words=(RichWord(id=1, text="hi", start=0.0, end=1.0),),
                           segments=())
 

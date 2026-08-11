@@ -65,13 +65,28 @@ def _aligned_segments(
     # download); otherwise the caller's named model (e.g. "large-v2").
     whisper_arch = config.whisper_model_dir or model_name
 
+    # WhisperX passes each stage its OWN unscaled 0..100 progress (its
+    # `combined_progress` flag only scales the `print` line it emits, never
+    # the callback — verified against whisperx 3.8.6's asr.py/alignment.py).
+    # We own the stage mapping ourselves so the two stages combine into one
+    # monotonic 0.0..1.0 sweep: transcribe -> 0.0..0.5, align -> 0.5..1.0.
+    if progress_callback is not None:
+
+        def _transcribe_progress(pct):
+            progress_callback((pct / 100.0) * 0.5)
+
+        def _align_progress(pct):
+            progress_callback(0.5 + (pct / 100.0) * 0.5)
+    else:
+        _transcribe_progress = None
+        _align_progress = None
+
     audio = _load_audio_16k_mono(source)
     model = whisperx.load_model(
         whisper_arch, device, compute_type=compute_type, local_files_only=config.offline
     )
     result = model.transcribe(
-        audio, batch_size=16,
-        combined_progress=True, progress_callback=progress_callback,
+        audio, batch_size=16, progress_callback=_transcribe_progress,
     )
     # `model_cache_only=offline` forces the alignment model to load from disk only.
     # The packaged app ships just the English torchaudio align model; offline mode
@@ -85,8 +100,7 @@ def _aligned_segments(
     )
     aligned = whisperx.align(
         result["segments"], align_model, metadata, audio, device,
-        return_char_alignments=False,
-        combined_progress=True, progress_callback=progress_callback,
+        return_char_alignments=False, progress_callback=_align_progress,
     )
     return aligned["segments"]
 
