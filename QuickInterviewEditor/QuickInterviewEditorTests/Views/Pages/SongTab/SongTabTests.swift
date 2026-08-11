@@ -1,3 +1,4 @@
+import ConcurrencyExtras
 import CustomDump
 import Dependencies
 import Foundation
@@ -155,5 +156,35 @@ struct SongTabTests {
     }
     #expect(model.isProgressDeterminate == false)
     expectNoDifference(model.progressMessage, "Converting audio")
+  }
+
+  @Test func maxFractionResetsAcrossRuns() async {
+    let model = SongTabModel(sourceURL: URL(fileURLWithPath: "/tmp/a.wav"))
+    let callCount = LockIsolated(0)
+    await withDependencies {
+      $0.engine.transcribe = { _ in
+        let isFirstRun = callCount.withValue { count -> Bool in
+          count += 1
+          return count == 1
+        }
+        return isFirstRun
+          ? stream([.progress(.init(phase: .transcribing, message: "x", fraction: 0.8))])
+          : stream([.progress(.init(phase: .transcribing, message: "x", fraction: 0.1))])
+      }
+    } operation: {
+      await withCheckedContinuation { continuation in
+        model.onReadyForNext = { continuation.resume() }
+        model.start()
+      }
+      expectNoDifference(model.progressFraction, 0.8)
+
+      // A second real run (start(), not startTranscription()) must reset the monotonic
+      // ceiling — otherwise a shorter/faster retry would stay pinned at the prior run's max.
+      await withCheckedContinuation { continuation in
+        model.onReadyForNext = { continuation.resume() }
+        model.start()
+      }
+      expectNoDifference(model.progressFraction, 0.1)
+    }
   }
 }

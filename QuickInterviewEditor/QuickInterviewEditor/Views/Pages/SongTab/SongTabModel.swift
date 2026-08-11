@@ -28,7 +28,7 @@ final class SongTabModel: ViewModel, Identifiable {
   // MARK: - Properties
   var phase: Phase = .queued
   var editor: EditorModel?
-  @ObservationIgnored private var maxFraction: Double?
+  private var maxFraction: Double?
   @ObservationIgnored private var task: Task<Void, Never>?
   /// Fired when this tab frees or wants a transcription slot (finished, failed, or
   /// re-queued for retry). RootModel wires this to its queue pump so the concurrency
