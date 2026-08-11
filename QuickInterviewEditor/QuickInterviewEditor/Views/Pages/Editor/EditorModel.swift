@@ -288,6 +288,17 @@ final class EditorModel: ViewModel {
     waveform.playheadSample = nil
   }
 
+  /// Takes exclusive ownership of the single global player for a new playback: clears every
+  /// other owner's flag and bumps their generation tokens so a stale completing task can't
+  /// clear the new owner's state. The caller sets its own owner *after* calling this. The
+  /// audition owner is added in the audition section.
+  private func beginExclusivePlayback() {
+    playingSliceID = nil
+    endTranscriptFollow()
+    previewGeneration &+= 1
+    isPreviewingDraft = false
+  }
+
   /// Waveform → transcript: a click at view-x selects the word whose audio contains that
   /// point. A click landing in a gap (or exactly on a word's end, which is exclusive)
   /// selects nothing and leaves the current selection untouched.
@@ -414,9 +425,7 @@ final class EditorModel: ViewModel {
 
   func playSliceTapped(_ id: Slice.ID) async {
     guard let slice = slices[id: id] else { return }
-    // Superseding a different slice's playback: end its follow so the new slice's first tick
-    // is a clean rising edge (false→true) and the transcript resumes following it.
-    if let playing = playingSliceID, playing != id { endTranscriptFollow() }
+    beginExclusivePlayback()
     playingSliceID = id
     do {
       try await audioPlayer.play(
@@ -593,7 +602,7 @@ final class EditorModel: ViewModel {
   /// off a newer preview (mirrors `playSliceTapped`'s id check).
   func previewEditTapped() async {
     guard let range = fineTune.draftRange ?? fineTune.committedRange else { return }
-    playingSliceID = nil
+    beginExclusivePlayback()
     previewGeneration &+= 1
     let generation = previewGeneration
     isPreviewingDraft = true
