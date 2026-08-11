@@ -42,6 +42,15 @@ private final class AuditionGate: @unchecked Sendable {
     lock.unlock()
     for cont in conts { cont.resume() }
   }
+  /// Resumes only the oldest currently-suspended `play()`, leaving the rest suspended —
+  /// lets a test complete a stale (superseded) play in isolation, deterministically, before
+  /// the newer play is allowed to finish.
+  func releaseFirst() {
+    lock.lock()
+    let cont = continuations.isEmpty ? nil : continuations.removeFirst()
+    lock.unlock()
+    cont?.resume()
+  }
   func awaitStarted() async {
     var it = started.makeAsyncIterator()
     _ = await it.next()
@@ -240,15 +249,18 @@ struct EditorAuditionTests {
       $0.audioPlayer.play = { _, _, _ in await gate.play() }
       $0.audioPlayer.stop = { gate.release() }
     } operation: {
-      let first = Task { await model.auditionOutTapped() }
+      let first = Task { await model.auditionOutTapped() }  // stale owner .cutOut (older generation)
       await gate.awaitStarted()
-      let second = Task { await model.auditionInTapped() }  // supersedes; newer owner is .cutIn
+      let second = Task { await model.auditionInTapped() }  // newer owner .cutIn
       await gate.awaitStarted()
       expectNoDifference(model.audition, .cutIn)
-      gate.release()  // completes BOTH suspended plays (older then newer)
+      // Complete ONLY the stale .cutOut play; the newer .cutIn play stays suspended.
+      gate.releaseFirst()
       await first.value
-      await settle { model.audition == nil }
-      // The stale .cutOut completion must not have cleared, then the newer .cutIn clears itself.
+      // The stale completion's generation guard must have left the newer owner intact.
+      expectNoDifference(model.audition, .cutIn)
+      // Now finish the newer one; it clears itself.
+      gate.release()
       await second.value
       expectNoDifference(model.audition, nil)
     }
