@@ -249,7 +249,8 @@ struct EditorAuditionTests {
       $0.audioPlayer.play = { _, _, _ in await gate.play() }
       $0.audioPlayer.stop = { gate.release() }
     } operation: {
-      let first = Task { await model.auditionOutTapped() }  // stale owner .cutOut (older generation)
+      // stale owner .cutOut (older generation)
+      let first = Task { await model.auditionOutTapped() }
       await gate.awaitStarted()
       let second = Task { await model.auditionInTapped() }  // newer owner .cutIn
       await gate.awaitStarted()
@@ -302,7 +303,10 @@ struct EditorAuditionTests {
     selectWords(model.transcript, 3, 5)
     await withDependencies {
       $0.audioPlayer.play = { _, _, _ in await gate.play() }
-      $0.audioPlayer.stop = { stopped.setValue(true); gate.release() }
+      $0.audioPlayer.stop = {
+        stopped.setValue(true)
+        gate.release()
+      }
     } operation: {
       let task = Task { await model.auditionInTapped() }
       await gate.awaitStarted()
@@ -322,7 +326,10 @@ struct EditorAuditionTests {
     let slice = model.slices[0]
     await withDependencies {
       $0.audioPlayer.play = { _, _, _ in await gate.play() }
-      $0.audioPlayer.stop = { stopped.setValue(true); gate.release() }
+      $0.audioPlayer.stop = {
+        stopped.setValue(true)
+        gate.release()
+      }
     } operation: {
       let task = Task { await model.playSliceTapped(slice.id) }
       await gate.awaitStarted()
