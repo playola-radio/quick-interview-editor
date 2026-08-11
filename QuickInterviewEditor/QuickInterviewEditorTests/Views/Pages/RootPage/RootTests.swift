@@ -169,6 +169,41 @@ struct RootTests {
     }
   }
 
+  @Test func reimportSelectedTabRequeuesIt() async {
+    let model = withDependencies { _ in
+    } operation: {
+      RootModel()
+    }
+    let tab = withDependencies(from: model) {
+      SongTabModel(sourceURL: URL(fileURLWithPath: "/clip.wav"))
+    }
+    model.tabs.append(tab)
+    model.selectedTabID = tab.id
+    // Drive it to `.loaded` so re-import is allowed.
+    await withDependencies {
+      $0.transcription.transcribe = { _, _, _ in
+        AsyncThrowingStream { continuation in
+          continuation.yield(.completed(Fixtures.transcriptionResult(Fixtures.editPlan())))
+          continuation.finish()
+        }
+      }
+    } operation: {
+      await tab.startTranscription()
+    }
+
+    #expect(model.canReimportSelectedTab)
+    model.reimportSelectedTabIgnoringCache()
+    #expect(tab.isQueued)  // re-import re-enters the queue
+  }
+
+  @Test func cannotReimportWithNoSelection() {
+    let model = withDependencies { _ in
+    } operation: {
+      RootModel()
+    }
+    #expect(!model.canReimportSelectedTab)
+  }
+
   @Test func closingATabRemovesItsCanonicalAudio() async throws {
     // Seed a real cached canonical AIFF, then drive a tab whose completion carries
     // its URL; closing the tab must delete the cache dir.

@@ -66,4 +66,29 @@ struct SettingsModelTests {
       expectNoDifference(saved.value, true)
     }
   }
+
+  @Test func onAppearReadsCacheSizeAndClearWipesIt() {
+    let size = LockIsolated<Int64>(2_300_000_000)
+    let cleared = LockIsolated(false)
+    let model = withDependencies {
+      $0.transcriptCache = TranscriptCacheClient(
+        lookup: { _ in nil },
+        store: { _, plan, url in CachedTranscription(editPlan: plan, canonicalAudioURL: url) },
+        clear: {
+          cleared.setValue(true)
+          size.setValue(0)
+        },
+        totalSize: { size.value })
+    } operation: {
+      SettingsModel()
+    }
+
+    model.onAppear()
+    #expect(model.canClearCache)
+    #expect(model.cacheStatus.contains("2.3"))  // ByteCountFormatter, GB
+
+    model.clearCacheTapped()
+    #expect(cleared.value)
+    #expect(!model.canClearCache)
+  }
 }

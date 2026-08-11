@@ -32,6 +32,7 @@ final class RootModel: ViewModel {
   // MARK: - View Helpers
   var showsEmptyState: Bool { tabs.isEmpty }
   var selectedTab: SongTabModel? { selectedTabID.flatMap { tabs[id: $0] } }
+  var canReimportSelectedTab: Bool { selectedTab?.canReimport ?? false }
 
   // MARK: - User Actions
   func fileDropped(_ urls: [URL]) {
@@ -47,6 +48,7 @@ final class RootModel: ViewModel {
   }
   func importButtonTapped() { isImporterPresented = true }
   func tabSelected(_ id: SongTabModel.ID) { selectedTabID = id }
+  func reimportSelectedTabIgnoringCache() { selectedTab?.reimportIgnoringCacheTapped() }
 
   func closeTab(_ id: SongTabModel.ID) {
     let tab = tabs[id: id]
