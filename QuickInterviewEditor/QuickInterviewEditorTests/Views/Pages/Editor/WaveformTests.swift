@@ -315,4 +315,63 @@ struct WaveformTests {
     model.panByPixels(-10)  // 10 px * 100 spp = 1000 samples, toward the end
     #expect(model.visibleStartSample == 501_000)
   }
+
+  // MARK: - Z zoom-to-fit toggle
+
+  @Test func zoomToFitAllFitsWholeFileAtStart() {
+    let model = makeModel(
+      totalSamples: 100_000, viewportWidth: 1000, samplesPerPixel: 20, start: 40_000)
+    model.zoomToFitAll()
+    #expect(model.samplesPerPixel == 100)  // 100_000 / 1000
+    #expect(model.visibleStartSample == 0)
+  }
+
+  @Test func zoomToFitCentersTheRange() {
+    let model = makeModel(
+      totalSamples: 1_000_000, viewportWidth: 1000, samplesPerPixel: 100, start: 0)
+    model.zoomToFit(400_000..<600_000)  // 200_000 wide -> spp 200; center 500_000
+    #expect(model.samplesPerPixel == 200)
+    // visibleSampleCount = 1000*200 = 200_000; start = 500_000 - 100_000
+    #expect(model.visibleStartSample == 400_000)
+  }
+
+  @Test func zoomFitToggledFitsThenRestores() {
+    let model = makeModel(
+      totalSamples: 1_000_000, viewportWidth: 1000, samplesPerPixel: 50, start: 300_000)
+    model.zoomFitToggled(selection: nil)  // fit all
+    #expect(model.samplesPerPixel == 1000)  // 1_000_000 / 1000
+    #expect(model.visibleStartSample == 0)
+    model.zoomFitToggled(selection: nil)  // restore
+    #expect(model.samplesPerPixel == 50)
+    #expect(model.visibleStartSample == 300_000)
+  }
+
+  @Test func zoomFitToggledUsesSelectionWhenProvided() {
+    let model = makeModel(
+      totalSamples: 1_000_000, viewportWidth: 1000, samplesPerPixel: 50, start: 0)
+    model.zoomFitToggled(selection: 400_000..<600_000)
+    #expect(model.samplesPerPixel == 200)
+    #expect(model.visibleStartSample == 400_000)
+  }
+
+  @Test func manualZoomBetweenTogglesInvalidatesRestore() {
+    let model = makeModel(
+      totalSamples: 1_000_000, viewportWidth: 1000, samplesPerPixel: 50, start: 300_000)
+    model.zoomFitToggled(selection: nil)  // fit all (stores 50/300_000)
+    model.zoomByFactor(0.5, anchoredAtX: 500)  // manual zoom -> invalidates restore
+    let sppAfterManual = model.samplesPerPixel
+    model.zoomFitToggled(selection: nil)  // must FIT again, not restore
+    #expect(model.samplesPerPixel == 1000)
+    #expect(model.samplesPerPixel != sppAfterManual)
+  }
+
+  @Test func manualPanBetweenTogglesInvalidatesRestore() {
+    let model = makeModel(
+      totalSamples: 1_000_000, viewportWidth: 1000, samplesPerPixel: 50, start: 300_000)
+    model.zoomFitToggled(selection: nil)  // fit all (stores 50/300_000)
+    model.panByPixels(-10)  // manual pan -> invalidates restore
+    model.zoomFitToggled(selection: nil)  // must FIT again, not restore
+    #expect(model.visibleStartSample == 0)
+    #expect(model.samplesPerPixel == 1000)
+  }
 }

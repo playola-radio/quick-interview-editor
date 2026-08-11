@@ -34,6 +34,9 @@ final class WaveformModel: ViewModel {
   var visibleStartSample = 0
   /// `visibleStartSample` captured at the start of a drag-pan gesture.
   @ObservationIgnored private var dragAnchorStartSample = 0
+  /// Zoom+scroll captured by `zoomFitToggled` so a second Z press can restore it.
+  /// Cleared by any manual zoom/pan so the next Z fits fresh instead of restoring stale state.
+  @ObservationIgnored private var fitRestore: (samplesPerPixel: Double, visibleStartSample: Int)?
 
   /// Current playback position, pushed in from the playback stream; nil when stopped.
   var playheadSample: Int?
@@ -177,6 +180,7 @@ final class WaveformModel: ViewModel {
   func zoomOutTapped() { zoom(by: zoomStep) }
 
   func scrolled(toStartSample start: Int) {
+    fitRestore = nil
     visibleStartSample = clampedStart(start)
   }
 
@@ -192,6 +196,7 @@ final class WaveformModel: ViewModel {
   /// repeated small wheel deltas don't accumulate drift.
   func zoomByFactor(_ factor: Double, anchoredAtX cursorX: CGFloat) {
     guard viewportWidth > 0, totalSamples > 0, factor > 0 else { return }
+    fitRestore = nil
     let oldSamplesPerPixel = samplesPerPixel
     let sampleUnderCursor = Double(visibleStartSample) + Double(cursorX) * oldSamplesPerPixel
     samplesPerPixel = clampedSamplesPerPixel(oldSamplesPerPixel * factor)
@@ -204,9 +209,37 @@ final class WaveformModel: ViewModel {
     scrolled(toStartSample: visibleStartSample - Int((Double(deltaX) * samplesPerPixel).rounded()))
   }
 
+  func zoomToFitAll() {
+    guard viewportWidth > 0, totalSamples > 0 else { return }
+    samplesPerPixel = clampedSamplesPerPixel(fitSamplesPerPixel())
+    visibleStartSample = clampedStart(0)
+  }
+
+  func zoomToFit(_ range: Range<Int>) {
+    guard viewportWidth > 0, totalSamples > 0, range.lowerBound < range.upperBound else { return }
+    samplesPerPixel = clampedSamplesPerPixel(Double(range.count) / Double(viewportWidth))
+    let center = range.lowerBound + range.count / 2
+    visibleStartSample = clampedStart(center - visibleSampleCount / 2)
+  }
+
+  /// Logic's `Z`: fit on the first press (selection if any, else whole file), restore the
+  /// prior zoom+scroll on the next consecutive press.
+  func zoomFitToggled(selection: Range<Int>?) {
+    guard viewportWidth > 0, totalSamples > 0 else { return }
+    if let restore = fitRestore {
+      samplesPerPixel = clampedSamplesPerPixel(restore.samplesPerPixel)
+      visibleStartSample = clampedStart(restore.visibleStartSample)
+      fitRestore = nil
+      return
+    }
+    fitRestore = (samplesPerPixel, visibleStartSample)
+    if let selection { zoomToFit(selection) } else { zoomToFitAll() }
+  }
+
   // MARK: - Private Helpers
   private func zoom(by factor: Double) {
     guard viewportWidth > 0, totalSamples > 0 else { return }
+    fitRestore = nil
     let center = visibleStartSample + visibleSampleCount / 2
     samplesPerPixel = clampedSamplesPerPixel(samplesPerPixel * factor)
     visibleStartSample = clampedStart(center - visibleSampleCount / 2)
