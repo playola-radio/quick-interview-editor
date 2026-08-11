@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import struct
 import sys
@@ -42,6 +43,51 @@ def _emit_event(event: dict) -> None:
 
 def _progress(phase: str, message: str) -> None:
     _emit_event({"type": "progress", "phase": phase, "message": message})
+
+
+class _ProgressEmitter:
+    """Turns WhisperX's 0-100 progress_callback into throttled QIE_EVENT lines.
+
+    Emits the first callback unconditionally, then only when the whole-number
+    percent changes, and clamps/drops junk. `finish()` guarantees a final 1.0
+    (unless nothing fired, e.g. a cached transcript, or 100 already emitted).
+    """
+
+    def __init__(self, emit=_emit_event) -> None:
+        self._emit = emit
+        self._last_percent: int | None = None
+
+    def __call__(self, percent: float) -> None:
+        try:
+            p = float(percent)
+        except (TypeError, ValueError):
+            return
+        if not math.isfinite(p):
+            return
+        p = max(0.0, min(100.0, p))
+        whole = int(p)
+        if self._last_percent is not None and whole == self._last_percent:
+            return
+        self._last_percent = whole
+        self._emit_fraction(p / 100.0)
+
+    def finish(self) -> None:
+        if self._last_percent is None or self._last_percent == 100:
+            return
+        self._last_percent = 100
+        self._emit_fraction(1.0)
+
+    def _emit_fraction(self, fraction: float) -> None:
+        fraction = max(0.0, min(1.0, fraction))
+        label = "Aligning words…" if fraction >= 0.5 else "Transcribing audio…"
+        self._emit(
+            {
+                "type": "progress",
+                "phase": "transcribing",
+                "message": label,
+                "fraction": round(fraction, 4),
+            }
+        )
 
 
 def _load_or_transcribe_transcript(source: Path, refresh: bool) -> Transcript:
