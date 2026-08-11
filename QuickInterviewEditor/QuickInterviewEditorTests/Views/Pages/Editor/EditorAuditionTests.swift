@@ -294,5 +294,105 @@ struct EditorAuditionTests {
     #expect(!model.isAuditioningIn)
     expectNoDifference(model.auditionStatusText, "Auditioning out-cut — Space to stop")
   }
+
+  @Test func spaceStopsAnActiveAudition() async {
+    let gate = AuditionGate()
+    let stopped = LockIsolated(false)
+    let model = editor()
+    selectWords(model.transcript, 3, 5)
+    await withDependencies {
+      $0.audioPlayer.play = { _, _, _ in await gate.play() }
+      $0.audioPlayer.stop = { stopped.setValue(true); gate.release() }
+    } operation: {
+      let task = Task { await model.auditionInTapped() }
+      await gate.awaitStarted()
+      await model.auditionSpaceTapped()  // playing → stop
+      await task.value
+      expectNoDifference(model.audition, nil)
+      #expect(stopped.value)
+    }
+  }
+
+  @Test func spaceStopsSlicePlayback() async {
+    let gate = AuditionGate()
+    let stopped = LockIsolated(false)
+    let model = editor()
+    selectWords(model.transcript, 0, 2)
+    model.addSliceTapped()
+    let slice = model.slices[0]
+    await withDependencies {
+      $0.audioPlayer.play = { _, _, _ in await gate.play() }
+      $0.audioPlayer.stop = { stopped.setValue(true); gate.release() }
+    } operation: {
+      let task = Task { await model.playSliceTapped(slice.id) }
+      await gate.awaitStarted()
+      await model.auditionSpaceTapped()  // stops whatever the editor owns
+      await task.value
+      expectNoDifference(model.playingSliceID, nil)
+      #expect(stopped.value)
+    }
+  }
+
+  @Test func spaceWhenIdleReplaysLastAudition() async {
+    let gate = AuditionGate()
+    let recorded = LockIsolated<(URL, Range<Int>, Int)?>(nil)
+    let model = editor()
+    selectWords(model.transcript, 3, 6)
+    let region = model.activeEditingRange!
+    let preRoll = Int(model.auditionPreRollSeconds * Double(model.editPlan.source.sampleRate))
+    await withDependencies {
+      $0.audioPlayer.play = recordingPlay(recorded, gate)
+      $0.audioPlayer.stop = { gate.release() }
+    } operation: {
+      let out = Task { await model.auditionOutTapped() }  // last audition = .cutOut
+      await gate.awaitStarted()
+      gate.release()
+      await out.value
+      expectNoDifference(model.audition, nil)
+      // Idle now: Space replays the out-cut, not the in-cut.
+      let replay = Task { await model.auditionSpaceTapped() }
+      await gate.awaitStarted()
+      expectNoDifference(model.audition, .cutOut)
+      expectNoDifference(recorded.value?.1, max(0, region.upperBound - preRoll)..<region.upperBound)
+      gate.release()
+      await replay.value
+    }
+  }
+
+  @Test func spaceWhenIdleWithNoHistoryPlaysInCut() async {
+    let gate = AuditionGate()
+    let model = editor()
+    selectWords(model.transcript, 2, 4)
+    await withDependencies {
+      $0.audioPlayer.play = { _, _, _ in await gate.play() }
+      $0.audioPlayer.stop = { gate.release() }
+    } operation: {
+      let task = Task { await model.auditionSpaceTapped() }
+      await gate.awaitStarted()
+      expectNoDifference(model.audition, .cutIn)
+      gate.release()
+      await task.value
+    }
+  }
+
+  @Test func auditionKeyPressedRoutesToActions() async {
+    let gate = AuditionGate()
+    let recorded = LockIsolated<(URL, Range<Int>, Int)?>(nil)
+    let model = editor()
+    selectWords(model.transcript, 2, 4)
+    let region = model.activeEditingRange!
+    await withDependencies {
+      $0.audioPlayer.play = recordingPlay(recorded, gate)
+      $0.audioPlayer.stop = { gate.release() }
+    } operation: {
+      let task = Task { await model.auditionKeyPressed(.cutIn) }
+      await gate.awaitStarted()
+      expectNoDifference(model.audition, .cutIn)
+      expectNoDifference(
+        recorded.value?.1, region.lowerBound..<model.editPlan.source.durationSamples)
+      gate.release()
+      await task.value
+    }
+  }
 }
 // swiftlint:enable large_tuple

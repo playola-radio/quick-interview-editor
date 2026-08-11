@@ -691,6 +691,33 @@ final class EditorModel: ViewModel {
     if auditionGeneration == generation { audition = nil }
   }
 
+  /// Space: stop whatever the editor is playing; if idle, replay the last audition, else in-cut.
+  func auditionSpaceTapped() async {
+    if playingSliceID != nil || isPreviewingDraft || audition != nil {
+      await stopAllPlayback()
+      return
+    }
+    switch lastAudition ?? .cutIn {
+    case .cutIn: await auditionInTapped()
+    case .cutOut: await auditionOutTapped()
+    }
+  }
+
+  /// Routes a captured key to its action so the key-monitor view stays logic-free.
+  func auditionKeyPressed(_ key: AuditionKey) async {
+    switch key {
+    case .cutIn: await auditionInTapped()
+    case .cutOut: await auditionOutTapped()
+    case .space: await auditionSpaceTapped()
+    }
+  }
+
+  /// Stops any editor-owned playback (slice, preview, or audition) and clears all owners.
+  private func stopAllPlayback() async {
+    beginExclusivePlayback()
+    await audioPlayer.stop()
+  }
+
   private func beginEditIfNeeded() {
     if fineTune.committedRange == nil { syncEditSession() }
   }
