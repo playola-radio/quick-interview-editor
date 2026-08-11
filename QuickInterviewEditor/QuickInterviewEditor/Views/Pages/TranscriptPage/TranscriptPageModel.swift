@@ -78,6 +78,9 @@ class TranscriptPageModel: ViewModel {
   let sensitivityMinMs = 10.0
   let sensitivityMaxMs = 80.0
   let clearButtonLabel = "Clear"
+  /// Vertical gap (points) the renderer leaves after each pause-paragraph. A display
+  /// decision, so it lives on the model rather than being hardcoded in the view.
+  let paragraphSpacing = 12.0
 
   // MARK: - View Helpers
   var hasSelection: Bool { selectionAnchorID != nil }
@@ -228,10 +231,10 @@ class TranscriptPageModel: ViewModel {
   /// set (convenience init + `viewAppeared`), never on the selection/drag path.
   private func rebuildForLoadedPlan() {
     guard let plan = editPlan else { return }
-    document = TranscriptDocument(words: plan.words)
-    gaps = wordGaps(plan.words)
     paragraphs = PauseParagraphBuilder.paragraphs(
       words: plan.words, transcriptSegments: plan.transcriptSegments)
+    document = TranscriptDocument(words: plan.words, paragraphs: paragraphs)
+    gaps = wordGaps(plan.words)
     recomputeRunTogether()
   }
   /// Recomputes only the run-together set from the cached gaps. Cheap relative to

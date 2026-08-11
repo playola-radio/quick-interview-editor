@@ -23,6 +23,31 @@ struct TranscriptPageTests {
       model.paragraphs.map(\.wordIDs), [[1, 2, 3, 4], [5, 6, 7, 8, 9], [10, 11, 12]])
   }
 
+  @Test func v2PlanTranscriptBreaksParagraphsWithNewlines() {
+    let model = TranscriptPageModel(editPlan: Fixtures.editPlanV2())
+    expectNoDifference(
+      model.plainTranscriptText, "So a young Hayes.\nHe waits around the concert.\nThen he leaves.")
+  }
+
+  /// Clicking the first word after a paragraph break resolves to that word: the newline
+  /// separator did not shift the range map, so hit-testing still lands on the right word.
+  @Test func clickingWordAfterParagraphBreakSelectsIt() {
+    let model = TranscriptPageModel(editPlan: Fixtures.editPlanV2())
+    // Word index 4 ("He", id 5) is the first word of the second paragraph.
+    model.transcriptClicked(atUTF16Offset: offset(model, wordIndex: 4))
+    expectNoDifference(model.selectedWordIDSet, [5])
+  }
+
+  /// Dragging a selection that spans a paragraph break stays contiguous and correct —
+  /// the break changes offsets but every word still maps to its own range.
+  @Test func selectionSpanningParagraphBreakIsContiguous() {
+    let model = TranscriptPageModel(editPlan: Fixtures.editPlanV2())
+    // From "Hayes." (id 4, end of paragraph 1) through "waits" (id 6, in paragraph 2).
+    model.transcriptDragBegan(atUTF16Offset: offset(model, wordIndex: 3))
+    model.transcriptDragged(toUTF16Offset: offset(model, wordIndex: 5))
+    expectNoDifference(model.selectedWordIDSet, [4, 5, 6])
+  }
+
   @Test func viewAppearedLoadsWords() async {
     await withDependencies {
       $0.engine.loadPlan = { _ in Fixtures.editPlan() }

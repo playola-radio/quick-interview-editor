@@ -9,6 +9,7 @@ struct TranscriptTextView: NSViewRepresentable {
   let model: TranscriptPageModel
   let text: String
   let fontSize: Double
+  let paragraphSpacing: Double
   let selected: Set<Word.ID>
   let runTogether: Set<Word.ID>
   let scrollTarget: Word.ID?
@@ -48,6 +49,7 @@ struct TranscriptTextView: NSViewRepresentable {
     context.coordinator.model = model
     context.coordinator.textView = textView
     context.coordinator.scrollView = scroll
+    context.coordinator.paragraphSpacing = paragraphSpacing
     context.coordinator.observeScroll()
     context.coordinator.rebuildText(
       text: text, fontSize: fontSize, selected: selected, runTogether: runTogether)
@@ -56,6 +58,7 @@ struct TranscriptTextView: NSViewRepresentable {
 
   func updateNSView(_ nsView: NSScrollView, context: Context) {
     context.coordinator.model = model
+    context.coordinator.paragraphSpacing = paragraphSpacing
     context.coordinator.apply(
       text: text, fontSize: fontSize, selected: selected, runTogether: runTogether,
       scrollTarget: scrollTarget, followMode: followMode)
@@ -66,6 +69,7 @@ struct TranscriptTextView: NSViewRepresentable {
     var model: TranscriptPageModel
     weak var textView: NSTextView?
     weak var scrollView: NSScrollView?
+    var paragraphSpacing: Double = 0
     private var lastText = ""
     private var lastSelected: Set<Word.ID> = []
     private var lastRunTogether: Set<Word.ID> = []
@@ -92,6 +96,12 @@ struct TranscriptTextView: NSViewRepresentable {
       let full = NSRange(location: 0, length: attr.length)
       attr.addAttribute(.font, value: NSFont.systemFont(ofSize: fontSize), range: full)
       attr.addAttribute(.foregroundColor, value: Self.normalFG, range: full)
+      // The newline between paragraphs makes each pause-paragraph its own TextKit
+      // paragraph; this spacing renders the break as a visible vertical gap. Applied
+      // over the full range so it survives the incremental color/selection updates.
+      let paragraphStyle = NSMutableParagraphStyle()
+      paragraphStyle.paragraphSpacing = paragraphSpacing
+      attr.addAttribute(.paragraphStyle, value: paragraphStyle, range: full)
       storage.setAttributedString(attr)
       lastText = text
       lastFontSize = fontSize
