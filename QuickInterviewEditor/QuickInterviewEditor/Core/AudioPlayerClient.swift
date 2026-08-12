@@ -3,11 +3,24 @@ import Dependencies
 import Foundation
 import IssueReporting
 
+/// Identifies one continuous playback so a stale/superseded tick can never be mistaken for
+/// the current one. A fresh id is minted per `play`.
+struct PlaybackSessionID: Hashable, Sendable {
+  var rawValue: UUID
+  init(rawValue: UUID = UUID()) { self.rawValue = rawValue }
+}
+
 struct AudioPlayerClient: Sendable {
   /// Plays url from range.lowerBound to range.upperBound (samples) and returns when playback
-  /// finishes or stop() is called.
-  var play: @Sendable (URL, Range<Int>, Int) async throws -> Void
-  var stop: @Sendable () async -> Void
+  /// finishes or `stop`/a superseding `play` is called. `session` tags this playback's ticks.
+  var play: @Sendable (URL, Range<Int>, Int, PlaybackSessionID) async throws -> Void
+  /// Pauses `session` if it is the current playback, freezing the node in place; returns the
+  /// exact resting plan sample (nil if `session` is not current). Does not end the `play` call.
+  var pause: @Sendable (PlaybackSessionID) async -> Int?
+  /// Resumes `session` if it is the current paused playback; otherwise no-op.
+  var resume: @Sendable (PlaybackSessionID) async -> Void
+  /// Stops the current playback if `session` is nil or matches it; otherwise no-op.
+  var stop: @Sendable (PlaybackSessionID?) async -> Void
   /// A stream of playback positions in PLAN samples while a slice plays, terminated by an
   /// `isPlaying: false` tick on stop/finish. Additive to `play`/`stop` so the waveform
   /// playhead gets real positions without disturbing the tuned slice-playback path.
@@ -17,6 +30,7 @@ struct AudioPlayerClient: Sendable {
 /// A playback position sampled from the audio node, expressed in PLAN samples so it lands
 /// in the same coordinate system as the waveform (the native→plan conversion is internal).
 struct PlaybackPosition: Sendable, Equatable {
+  var sessionID: PlaybackSessionID
   var sample: Int
   var isPlaying: Bool
 }
@@ -27,16 +41,22 @@ extension AudioPlayerClient: DependencyKey {
 
 extension AudioPlayerClient: TestDependencyKey {
   static let testValue = AudioPlayerClient(
-    play: { _, _, _ in
+    play: { _, _, _, _ in
       reportIssue("AudioPlayerClient.play called without a test override")
       throw EngineClientError.unimplemented("AudioPlayerClient.play")
     },
-    stop: { reportIssue("AudioPlayerClient.stop called without a test override") },
+    pause: { _ in
+      reportIssue("AudioPlayerClient.pause called without a test override")
+      return nil
+    },
+    resume: { _ in reportIssue("AudioPlayerClient.resume called without a test override") },
+    stop: { _ in reportIssue("AudioPlayerClient.stop called without a test override") },
     positions: { AsyncStream { $0.finish() } }
   )
 
   static let previewValue = AudioPlayerClient(
-    play: { _, _, _ in }, stop: {}, positions: { AsyncStream { $0.finish() } })
+    play: { _, _, _, _ in }, pause: { _ in nil }, resume: { _ in },
+    stop: { _ in }, positions: { AsyncStream { $0.finish() } })
 }
 
 extension DependencyValues {
@@ -52,10 +72,12 @@ extension AudioPlayerClient {
   static func live() -> AudioPlayerClient {
     let box = LivePlayerBox()
     return AudioPlayerClient(
-      play: { url, range, sampleRate in
-        try await box.play(url: url, range: range, planSampleRate: sampleRate)
+      play: { url, range, sampleRate, session in
+        try await box.play(url: url, range: range, planSampleRate: sampleRate, session: session)
       },
-      stop: { await box.stop() },
+      pause: { session in await box.pause(session: session) },
+      resume: { session in await box.resume(session: session) },
+      stop: { session in await box.stop(session: session) },
       positions: {
         // Only the latest playhead position matters; drop stale ticks rather than let a
         // lagging consumer accumulate a backlog.
@@ -96,6 +118,9 @@ private actor LivePlayerBox {
   private var tickTask: Task<Void, Never>?
   private var startPlanSample = 0
   private var playRatio = 1.0
+  /// The session of the current play (nil when stopped). Tags every tick and gates
+  /// `pause`/`resume`/`stop` so a stale session's call is a no-op.
+  private var currentSession: PlaybackSessionID?
 
   func addPositionContinuation(
     id: UUID, _ continuation: AsyncStream<PlaybackPosition>.Continuation
@@ -116,7 +141,9 @@ private actor LivePlayerBox {
 
   /// Returns when the scheduled segment finishes playing, or when `stop()` or
   /// another `play()` supersedes it.
-  func play(url: URL, range: Range<Int>, planSampleRate: Int) async throws {
+  func play(
+    url: URL, range: Range<Int>, planSampleRate: Int, session: PlaybackSessionID
+  ) async throws {
     let file = try AVAudioFile(forReading: url)
     let nativeRate = file.processingFormat.sampleRate
     let ratio = nativeRate / Double(max(1, planSampleRate))
@@ -134,6 +161,7 @@ private actor LivePlayerBox {
     // tab's playhead to nil before B's first position arrives. The new ticking task emits
     // shortly.
     supersede(broadcastStop: false)
+    currentSession = session
     startPlanSample = max(0, range.lowerBound)
     playRatio = ratio
     if node.engine == nil { engine.attach(node) }
@@ -168,8 +196,47 @@ private actor LivePlayerBox {
     }
   }
 
-  func stop() {
+  func stop(session: PlaybackSessionID?) {
+    guard let session else {
+      supersede()  // nil = stop whatever is playing
+      return
+    }
+    guard currentSession == session else { return }
     supersede()
+  }
+
+  /// Freezes the node in place and returns the exact plan sample it stopped at. No
+  /// `isPlaying: false` broadcast — the playhead must stay where paused. Does not resume
+  /// the suspended `play` waiter, so the `play` call stays in flight until resume/stop.
+  func pause(session: PlaybackSessionID) -> Int? {
+    guard currentSession == session, node.isPlaying else { return nil }
+    // Pause the CURRENT session unconditionally; never leave audio running because the
+    // exact render time isn't available yet. `lastRenderTime`/`playerTime` are nil in the
+    // brief window after `play()` before the first render cycle — fall back to the range
+    // start there so an early Pause still stops and freezes at a valid sample.
+    let planSample: Int
+    if let nodeTime = node.lastRenderTime,
+      let playerTime = node.playerTime(forNodeTime: nodeTime)
+    {
+      let framesPlayed = max(0, playerTime.sampleTime)
+      planSample = startPlanSample + Int(Double(framesPlayed) / max(playRatio, .ulpOfOne))
+    } else {
+      planSample = startPlanSample
+    }
+    stopTicking(broadcastStop: false)  // stop polling; keep session + node position
+    node.pause()  // pauses without discarding the scheduled segment
+    return planSample
+  }
+
+  /// Resumes a paused session: restart the node and the tick loop. No-op if `session`
+  /// isn't current or the node is already playing.
+  func resume(session: PlaybackSessionID) {
+    guard currentSession == session, !node.isPlaying else { return }
+    // An interruption/device-change can stop the engine while the session stays current;
+    // restart it before `node.play()` so resume never silently produces no audio.
+    if !engine.isRunning { try? engine.start() }
+    node.play()
+    startTicking()
   }
 
   /// Invalidate the current segment: bump the generation, resume the waiter, and
@@ -182,6 +249,7 @@ private actor LivePlayerBox {
     continuation = nil
     stopTicking(broadcastStop: broadcastStop)
     stopNode()
+    currentSession = nil
     waiter?.resume()
   }
 
@@ -190,6 +258,7 @@ private actor LivePlayerBox {
     continuation = nil
     stopTicking()
     stopNode()
+    currentSession = nil
     waiter.resume()
   }
 
@@ -210,8 +279,8 @@ private actor LivePlayerBox {
   private func stopTicking(broadcastStop: Bool = true) {
     tickTask?.cancel()
     tickTask = nil
-    if broadcastStop {
-      broadcast(PlaybackPosition(sample: startPlanSample, isPlaying: false))
+    if broadcastStop, let session = currentSession {
+      broadcast(PlaybackPosition(sessionID: session, sample: startPlanSample, isPlaying: false))
     }
   }
 
@@ -222,12 +291,13 @@ private actor LivePlayerBox {
   /// resampler rounding — a cosmetic read-only-playhead limitation, closed once a single
   /// canonical AIFF backs both (roadmap decision 4).
   private func emitPosition() {
-    guard node.isPlaying, let nodeTime = node.lastRenderTime,
+    guard let session = currentSession,
+      node.isPlaying, let nodeTime = node.lastRenderTime,
       let playerTime = node.playerTime(forNodeTime: nodeTime)
     else { return }
     let framesPlayed = max(0, playerTime.sampleTime)
     let planSample = startPlanSample + Int(Double(framesPlayed) / max(playRatio, .ulpOfOne))
-    broadcast(PlaybackPosition(sample: planSample, isPlaying: true))
+    broadcast(PlaybackPosition(sessionID: session, sample: planSample, isPlaying: true))
   }
 
   private func stopNode() {

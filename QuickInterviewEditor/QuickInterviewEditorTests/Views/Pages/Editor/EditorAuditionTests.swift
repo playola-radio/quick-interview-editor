@@ -76,8 +76,8 @@ struct EditorAuditionTests {
 
   private func recordingPlay(
     _ recorded: LockIsolated<(URL, Range<Int>, Int)?>, _ gate: AuditionGate
-  ) -> @Sendable (URL, Range<Int>, Int) async throws -> Void {
-    { url, range, rate in
+  ) -> @Sendable (URL, Range<Int>, Int, PlaybackSessionID) async throws -> Void {
+    { url, range, rate, _ in
       recorded.setValue((url, range, rate))
       await gate.play()
     }
@@ -92,7 +92,7 @@ struct EditorAuditionTests {
     let preRoll = Int(model.auditionPreRollSeconds * Double(model.editPlan.source.sampleRate))
     await withDependencies {
       $0.audioPlayer.play = recordingPlay(recorded, gate)
-      $0.audioPlayer.stop = { gate.release() }
+      $0.audioPlayer.stop = { _ in gate.release() }
     } operation: {
       let task = Task { await model.auditionOutTapped() }
       await gate.awaitStarted()
@@ -124,7 +124,7 @@ struct EditorAuditionTests {
     #expect(1000 < preRoll)  // 2s @ any sane rate ≫ 1000 samples, so end - preRoll < 0
     await withDependencies {
       $0.audioPlayer.play = recordingPlay(recorded, gate)
-      $0.audioPlayer.stop = { gate.release() }
+      $0.audioPlayer.stop = { _ in gate.release() }
     } operation: {
       let task = Task { await model.auditionOutTapped() }
       await gate.awaitStarted()
@@ -142,7 +142,7 @@ struct EditorAuditionTests {
     let region = model.activeEditingRange!
     await withDependencies {
       $0.audioPlayer.play = recordingPlay(recorded, gate)
-      $0.audioPlayer.stop = { gate.release() }
+      $0.audioPlayer.stop = { _ in gate.release() }
     } operation: {
       let task = Task { await model.auditionInTapped() }
       await gate.awaitStarted()
@@ -160,7 +160,7 @@ struct EditorAuditionTests {
     #expect(model.activeEditingRange == nil)
     #expect(!model.canAudition)
     await withDependencies {
-      $0.audioPlayer.play = { _, _, _ in played.setValue(true) }
+      $0.audioPlayer.play = { _, _, _, _ in played.setValue(true) }
     } operation: {
       await model.auditionInTapped()
       await model.auditionOutTapped()
@@ -176,8 +176,8 @@ struct EditorAuditionTests {
     model.addSliceTapped()
     let slice = model.slices[0]
     await withDependencies {
-      $0.audioPlayer.play = { _, _, _ in await gate.play() }
-      $0.audioPlayer.stop = { gate.release() }
+      $0.audioPlayer.play = { _, _, _, _ in await gate.play() }
+      $0.audioPlayer.stop = { _ in gate.release() }
     } operation: {
       let slicePlay = Task { await model.playSliceTapped(slice.id) }
       await gate.awaitStarted()
@@ -200,8 +200,8 @@ struct EditorAuditionTests {
     model.addSliceTapped()
     let slice = model.slices[0]
     await withDependencies {
-      $0.audioPlayer.play = { _, _, _ in await gate.play() }
-      $0.audioPlayer.stop = { gate.release() }
+      $0.audioPlayer.play = { _, _, _, _ in await gate.play() }
+      $0.audioPlayer.stop = { _ in gate.release() }
     } operation: {
       selectWords(model.transcript, 3, 5)
       let audition = Task { await model.auditionOutTapped() }
@@ -223,11 +223,11 @@ struct EditorAuditionTests {
     let model = editor()
     selectWords(model.transcript, 3, 5)
     await withDependencies {
-      $0.audioPlayer.play = { _, _, _ in
+      $0.audioPlayer.play = { _, _, _, _ in
         starts.withValue { $0 += 1 }
         await gate.play()
       }
-      $0.audioPlayer.stop = { gate.release() }
+      $0.audioPlayer.stop = { _ in gate.release() }
     } operation: {
       let first = Task { await model.auditionOutTapped() }
       await gate.awaitStarted()
@@ -246,8 +246,8 @@ struct EditorAuditionTests {
     let model = editor()
     selectWords(model.transcript, 3, 5)
     await withDependencies {
-      $0.audioPlayer.play = { _, _, _ in await gate.play() }
-      $0.audioPlayer.stop = { gate.release() }
+      $0.audioPlayer.play = { _, _, _, _ in await gate.play() }
+      $0.audioPlayer.stop = { _ in gate.release() }
     } operation: {
       // stale owner .cutOut (older generation)
       let first = Task { await model.auditionOutTapped() }
@@ -275,7 +275,8 @@ struct EditorAuditionTests {
       $0.audioPlayer.positions = { stream }
     } operation: {
       let task = Task { await model.observePlayback() }
-      continuation.yield(PlaybackPosition(sample: 2000, isPlaying: true))
+      continuation.yield(
+        PlaybackPosition(sessionID: PlaybackSessionID(), sample: 2000, isPlaying: true))
       await settle { model.waveform.playheadSample == 2000 }
       #expect(model.waveform.playheadSample == 2000)
       continuation.finish()
@@ -302,8 +303,8 @@ struct EditorAuditionTests {
     let model = editor()
     selectWords(model.transcript, 3, 5)
     await withDependencies {
-      $0.audioPlayer.play = { _, _, _ in await gate.play() }
-      $0.audioPlayer.stop = {
+      $0.audioPlayer.play = { _, _, _, _ in await gate.play() }
+      $0.audioPlayer.stop = { _ in
         stopped.setValue(true)
         gate.release()
       }
@@ -325,8 +326,8 @@ struct EditorAuditionTests {
     model.addSliceTapped()
     let slice = model.slices[0]
     await withDependencies {
-      $0.audioPlayer.play = { _, _, _ in await gate.play() }
-      $0.audioPlayer.stop = {
+      $0.audioPlayer.play = { _, _, _, _ in await gate.play() }
+      $0.audioPlayer.stop = { _ in
         stopped.setValue(true)
         gate.release()
       }
@@ -349,7 +350,7 @@ struct EditorAuditionTests {
     let preRoll = Int(model.auditionPreRollSeconds * Double(model.editPlan.source.sampleRate))
     await withDependencies {
       $0.audioPlayer.play = recordingPlay(recorded, gate)
-      $0.audioPlayer.stop = { gate.release() }
+      $0.audioPlayer.stop = { _ in gate.release() }
     } operation: {
       let out = Task { await model.auditionOutTapped() }  // last audition = .cutOut
       await gate.awaitStarted()
@@ -371,8 +372,8 @@ struct EditorAuditionTests {
     let model = editor()
     selectWords(model.transcript, 2, 4)
     await withDependencies {
-      $0.audioPlayer.play = { _, _, _ in await gate.play() }
-      $0.audioPlayer.stop = { gate.release() }
+      $0.audioPlayer.play = { _, _, _, _ in await gate.play() }
+      $0.audioPlayer.stop = { _ in gate.release() }
     } operation: {
       let task = Task { await model.auditionSpaceTapped() }
       await gate.awaitStarted()
@@ -390,7 +391,7 @@ struct EditorAuditionTests {
     let region = model.activeEditingRange!
     await withDependencies {
       $0.audioPlayer.play = recordingPlay(recorded, gate)
-      $0.audioPlayer.stop = { gate.release() }
+      $0.audioPlayer.stop = { _ in gate.release() }
     } operation: {
       let task = Task { await model.auditionKeyPressed(.cutIn) }
       await gate.awaitStarted()
@@ -411,8 +412,8 @@ struct EditorAuditionTests {
     let slice = model.slices[0]
     model.sliceSelected(slice.id)  // active slice drives activeEditingRange == its range
     await withDependencies {
-      $0.audioPlayer.play = { _, _, _ in await gate.play() }
-      $0.audioPlayer.stop = {
+      $0.audioPlayer.play = { _, _, _, _ in await gate.play() }
+      $0.audioPlayer.stop = { _ in
         stopped.setValue(true)
         gate.release()
       }
@@ -434,8 +435,8 @@ struct EditorAuditionTests {
     let model = editor()
     selectWords(model.transcript, 0, 2)
     await withDependencies {
-      $0.audioPlayer.play = { _, _, _ in await gate.play() }
-      $0.audioPlayer.stop = {
+      $0.audioPlayer.play = { _, _, _, _ in await gate.play() }
+      $0.audioPlayer.stop = { _ in
         stopped.setValue(true)
         gate.release()
       }
@@ -466,7 +467,7 @@ struct EditorAuditionTests {
     model.activeSliceID = overrun.id
     await withDependencies {
       $0.audioPlayer.play = recordingPlay(recorded, gate)
-      $0.audioPlayer.stop = { gate.release() }
+      $0.audioPlayer.stop = { _ in gate.release() }
     } operation: {
       let task = Task { await model.auditionOutTapped() }
       await gate.awaitStarted()
@@ -484,8 +485,8 @@ struct EditorAuditionTests {
     model.syncEditSession()
     model.cutOutNudged(byMs: -10)  // a tuned draft so canCommitEdit is true
     await withDependencies {
-      $0.audioPlayer.play = { _, _, _ in await gate.play() }
-      $0.audioPlayer.stop = {
+      $0.audioPlayer.play = { _, _, _, _ in await gate.play() }
+      $0.audioPlayer.stop = { _ in
         stopped.setValue(true)
         gate.release()
       }
@@ -510,8 +511,8 @@ struct EditorAuditionTests {
     model.syncEditSession()
     model.cutOutNudged(byMs: -10)  // a tuned draft to cancel back to the committed range
     await withDependencies {
-      $0.audioPlayer.play = { _, _, _ in await gate.play() }
-      $0.audioPlayer.stop = {
+      $0.audioPlayer.play = { _, _, _, _ in await gate.play() }
+      $0.audioPlayer.stop = { _ in
         stopped.setValue(true)
         gate.release()
       }
