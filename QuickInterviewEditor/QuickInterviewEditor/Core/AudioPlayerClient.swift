@@ -233,8 +233,16 @@ private actor LivePlayerBox {
   func resume(session: PlaybackSessionID) {
     guard currentSession == session, !node.isPlaying else { return }
     // An interruption/device-change can stop the engine while the session stays current;
-    // restart it before `node.play()` so resume never silently produces no audio.
-    if !engine.isRunning { try? engine.start() }
+    // restart it before `node.play()`. If the restart fails, surface it and stay paused
+    // rather than fake a silent resume — the caller can retry or stop.
+    if !engine.isRunning {
+      do {
+        try engine.start()
+      } catch {
+        reportIssue(error)
+        return
+      }
+    }
     node.play()
     startTicking()
   }
