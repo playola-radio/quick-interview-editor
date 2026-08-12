@@ -28,6 +28,7 @@ struct AuditionKeyMonitor: NSViewRepresentable {
   /// A zero-size marker view; its only job is to give the coordinator a handle on the window.
   final class TrackingView: NSView {}
 
+  @MainActor
   final class Coordinator {
     var onKey: ((EditorModel.AuditionKey) -> Void)?
     private weak var host: NSView?
@@ -35,8 +36,18 @@ struct AuditionKeyMonitor: NSViewRepresentable {
 
     func install(host: NSView) {
       self.host = host
+      // The local key-down monitor always fires on the main thread, but on the current SDK its
+      // handler is a bare `@Sendable` closure and `NSEvent` is not `Sendable`. So read every
+      // value we need from the event here (all `Sendable`), and hop to the main actor carrying
+      // only those — the event itself never crosses the isolation boundary.
       monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-        self?.handle(event) ?? event
+        // Bare, non-repeated key we care about — everything here is a pure value read.
+        guard !event.isARepeat,
+          event.modifierFlags.isDisjoint(with: [.command, .control, .option]),
+          let key = Self.auditionKey(forKeyCode: event.keyCode)
+        else { return event }
+        let consumed = MainActor.assumeIsolated { self?.fire(key) ?? false }
+        return consumed ? nil : event
       }
     }
 
@@ -45,37 +56,35 @@ struct AuditionKeyMonitor: NSViewRepresentable {
       monitor = nil
     }
 
-    private func handle(_ event: NSEvent) -> NSEvent? {
-      // Only act for the window this view lives in, and only when it's key.
-      guard let window = host?.window, window.isKeyWindow, event.window === window else {
-        return event
+    /// Maps a physical key code to an audition action. `nil` for keys we don't handle.
+    /// Pure and `Sendable`, so it runs in the monitor's nonisolated handler.
+    private static func auditionKey(forKeyCode keyCode: UInt16) -> EditorModel.AuditionKey? {
+      switch keyCode {
+      case 33: return .cutIn  // [
+      case 30: return .cutOut  // ]
+      case 49: return .space  // space
+      default: return nil
       }
+    }
+
+    /// Fires the audition transport for `key` if focus allows it. Returns whether the key was
+    /// consumed (so the caller swallows it instead of letting it scroll / beep). Main-actor:
+    /// touches AppKit window/first-responder state.
+    private func fire(_ key: EditorModel.AuditionKey) -> Bool {
+      // Only act when this view's window is key (a local monitor sees every window's keys).
+      guard let window = host?.window, window.isKeyWindow else { return false }
       // Stand down while a text field is being edited.
       if let responder = window.firstResponder as? NSText, responder.isEditable {
-        return event
+        return false
       }
-      // Bare keys only — never swallow Cmd/Ctrl/Opt combinations (menu/system shortcuts).
-      if !event.modifierFlags.isDisjoint(with: [.command, .control, .option]) {
-        return event
-      }
-      // One transport action per physical press — ignore auto-repeat.
-      if event.isARepeat { return event }
-      let key: EditorModel.AuditionKey?
-      switch event.keyCode {
-      case 33: key = .cutIn  // [
-      case 30: key = .cutOut  // ]
-      case 49: key = .space  // space
-      default: key = nil
-      }
-      guard let key else { return event }
       // Space activates a focused control (button, checkbox, popup) via Full Keyboard Access;
       // don't hijack it there. Fire the audition transport only when focus is on the editor
       // content (the non-editable transcript NSTextView or the hosting view), not a control.
       if key == .space, window.firstResponder is NSControl {
-        return event
+        return false
       }
       onKey?(key)
-      return nil  // consume so the key doesn't also scroll / beep
+      return true
     }
   }
 }
