@@ -8,7 +8,7 @@ import Testing
 
 private final class PlayerGate: @unchecked Sendable {
   private let lock = NSLock()
-  private var releaseCont: CheckedContinuation<Void, Never>?
+  private var releaseConts: [CheckedContinuation<Void, Never>] = []
   private var released = false
   private let startedContinuation: AsyncStream<Void>.Continuation
   let started: AsyncStream<Void>
@@ -20,6 +20,8 @@ private final class PlayerGate: @unchecked Sendable {
   }
 
   /// Stand-in for `audioPlayer.play`: signals "started", then suspends until `release()`.
+  /// Queues its continuation rather than overwriting a prior one, so a test that starts a
+  /// second (superseding) playback before releasing the first can still resolve both.
   func play() async {
     startedContinuation.yield(())
     await withCheckedContinuation { cont in
@@ -29,19 +31,20 @@ private final class PlayerGate: @unchecked Sendable {
         cont.resume()
         return
       }
-      releaseCont = cont
+      releaseConts.append(cont)
       lock.unlock()
     }
   }
 
-  /// Stand-in for `audioPlayer.stop` (and for natural completion in a test): resumes `play()`.
+  /// Stand-in for `audioPlayer.stop` (and for natural completion in a test): resumes every
+  /// in-flight `play()` call.
   func release() {
     lock.lock()
-    let cont = releaseCont
-    releaseCont = nil
+    let conts = releaseConts
+    releaseConts = []
     released = true
     lock.unlock()
-    cont?.resume()
+    for cont in conts { cont.resume() }
   }
 
   func awaitStarted() async {
@@ -318,6 +321,31 @@ struct EditorTests {
       gate.release()  // natural completion
       await task.value
       expectNoDifference(model.playingSliceID, nil)
+    }
+  }
+
+  @Test func startingPreviewSupersedesPlayingSlice() async {
+    let gate = PlayerGate()
+    let model = editor()
+    addSlices(model, [(0, 2)])
+    let slice = model.slices[0]
+    await withDependencies {
+      $0.audioPlayer.play = { _, _, _ in await gate.play() }
+      $0.audioPlayer.stop = { gate.release() }
+    } operation: {
+      let slicePlay = Task { await model.playSliceTapped(slice.id) }
+      await gate.awaitStarted()
+      expectNoDifference(model.playingSliceID, slice.id)
+      // Open a fine-tune session on the slice, then preview its draft.
+      model.sliceSelected(slice.id)
+      let preview = Task { await model.previewEditTapped() }
+      await gate.awaitStarted()
+      // The slice is no longer the owner; the preview took over.
+      expectNoDifference(model.playingSliceID, nil)
+      #expect(model.isPreviewingDraft)
+      gate.release()
+      await slicePlay.value
+      await preview.value
     }
   }
 

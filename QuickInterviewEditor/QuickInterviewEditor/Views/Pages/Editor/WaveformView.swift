@@ -22,6 +22,11 @@ struct WaveformView: View {
       .contentShape(Rectangle())
       .onTapGesture(coordinateSpace: .local) { model.waveformTapped(atX: $0.x) }
       .gesture(panGesture)
+      .overlay(alignment: .topLeading) {
+        if model.canAudition, let span = model.waveformHighlightSpan {
+          AuditionEdgeButtons(model: model, span: span)
+        }
+      }
       .onGeometryChange(for: CGFloat.self) {
         $0.size.width
       } action: {
@@ -52,6 +57,11 @@ struct WaveformView: View {
       Text(model.waveform.caption)
         .font(.system(size: 11, weight: .semibold)).tracking(1.5)
         .foregroundStyle(Color(white: 0.44))
+      if let status = model.auditionStatusText {
+        Text(status)
+          .font(.system(size: 11, weight: .medium))
+          .foregroundStyle(Color(red: 0.96, green: 0.86, blue: 0.4))
+      }
       Spacer()
       Button {
         model.waveform.zoomOutTapped()
@@ -145,5 +155,58 @@ private struct WaveformPlayhead: View {
         .frame(maxHeight: .infinity)
         .offset(x: positionX)
     }
+  }
+}
+
+/// Two buttons pinned to the highlighted region's edges. Labels (and their keys) come from the
+/// model; this view only positions them and clamps so they don't overlap on a narrow span.
+private struct AuditionEdgeButtons: View {
+  let model: EditorModel
+  let span: WaveformSpan
+
+  private let buttonWidth: CGFloat = 74
+  private let gap: CGFloat = 4
+
+  var body: some View {
+    GeometryReader { geo in
+      let width = geo.size.width
+      // In on the left edge, Out on the right edge; keep both within the band and never
+      // overlapping — a narrow or right-clipped span collapses them to a side-by-side pair.
+      let maxLeft = max(0, width - (buttonWidth * 2 + gap))
+      let left = min(max(0, span.positionX), maxLeft)
+      let rightIdeal = span.positionX + span.width - buttonWidth
+      let right = min(max(rightIdeal, left + buttonWidth + gap), max(0, width - buttonWidth))
+      ZStack(alignment: .topLeading) {
+        button(model.auditionInButtonLabel, active: model.isAuditioningIn) {
+          Task { await model.auditionInTapped() }
+        }
+        .offset(x: left, y: 8)
+        button(model.auditionOutButtonLabel, active: model.isAuditioningOut) {
+          Task { await model.auditionOutTapped() }
+        }
+        .offset(x: right, y: 8)
+      }
+      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+  }
+
+  private func button(_ label: String, active: Bool, _ run: @escaping () -> Void)
+    -> some View
+  {
+    Button(action: run) {
+      Text(label)
+        .font(.system(size: 11, weight: .semibold))
+        .frame(width: buttonWidth)
+        .padding(.vertical, 3)
+    }
+    .buttonStyle(.borderless)
+    .background(
+      RoundedRectangle(cornerRadius: 4)
+        .fill(
+          active
+            ? Color(red: 0.96, green: 0.86, blue: 0.4).opacity(0.28)
+            : Color.white.opacity(0.12))
+    )
+    .foregroundStyle(active ? Color(red: 0.96, green: 0.86, blue: 0.4) : Color(white: 0.85))
   }
 }

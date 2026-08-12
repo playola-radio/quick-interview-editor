@@ -29,6 +29,11 @@ struct EditorView: View {
       .frame(width: 302)
     }
     .background(Color.black)
+    .background(
+      AuditionKeyMonitor { key in
+        Task { await model.auditionKeyPressed(key) }
+      }
+    )
     .task { await model.loadWaveform() }
     .task { await model.observePlayback() }
     .onChange(of: model.fineTuneSessionKey, initial: true) { _, _ in model.syncEditSession() }

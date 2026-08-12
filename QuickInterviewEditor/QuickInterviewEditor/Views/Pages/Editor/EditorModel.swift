@@ -61,6 +61,9 @@ final class EditorModel: ViewModel {
     case failed(String)
   }
 
+  enum AuditionMode: Equatable { case cutIn, cutOut }
+  enum AuditionKey: Equatable { case cutIn, cutOut, space }
+
   // MARK: - Properties
   var slices: IdentifiedArrayOf<Slice> = []
   /// Undo/redo history over `slices` only — never selection, zoom, playback, or export
@@ -76,6 +79,14 @@ final class EditorModel: ViewModel {
   /// Bumped each time preview playback starts or is superseded, so a stale completing preview
   /// task can't clear a newer one's state.
   @ObservationIgnored private var previewGeneration = 0
+  /// Which boundary audition is currently playing, or nil. The third playback owner
+  /// alongside `playingSliceID` and `isPreviewingDraft`.
+  var audition: AuditionMode?
+  /// The last audition the user triggered this session — replayed by Space when idle.
+  @ObservationIgnored private var lastAudition: AuditionMode?
+  /// Bumped each time an audition starts or is superseded, so a stale completing audition
+  /// task can't clear a newer owner's state (mirrors `previewGeneration`).
+  @ObservationIgnored private var auditionGeneration = 0
   var exportPhase: ExportPhase = .idle
   var destinationURL: URL?
   /// Which pane the right column shows. The clips list and the cut-suggester share the
@@ -275,7 +286,7 @@ final class EditorModel: ViewModel {
   /// clears its playhead, so another tab's playback never drives the wrong waveform.
   func observePlayback() async {
     for await position in audioPlayer.positions() {
-      guard playingSliceID != nil || isPreviewingDraft else {
+      guard playingSliceID != nil || isPreviewingDraft || audition != nil else {
         if waveform.playheadSample != nil { waveform.playheadSample = nil }
         continue
       }
@@ -286,6 +297,18 @@ final class EditorModel: ViewModel {
     // The loop also exits when the view's task is cancelled (tab switch / disappear);
     // clear the playhead so a stale marker doesn't linger when the tab reactivates.
     waveform.playheadSample = nil
+  }
+
+  /// Takes exclusive ownership of the single global player for a new playback: clears every
+  /// other owner's flag and bumps their generation tokens so a stale completing task can't
+  /// clear the new owner's state. The caller sets its own owner *after* calling this.
+  private func beginExclusivePlayback() {
+    playingSliceID = nil
+    endTranscriptFollow()
+    previewGeneration &+= 1
+    isPreviewingDraft = false
+    auditionGeneration &+= 1
+    audition = nil
   }
 
   /// Waveform → transcript: a click at view-x selects the word whose audio contains that
@@ -394,12 +417,14 @@ final class EditorModel: ViewModel {
         let range = slice.startSample..<slice.endSample
         if !fineTune.hasUnsavedChange, fineTune.committedRange != range {
           await stopPreviewIfPlaying()  // the preview was of the old range; the pane now differs
+          await stopAuditionIfPlaying()
           fineTune.begin(target: .slice(active), range: range)
         }
       } else {
         activeSliceID = nil
         fineTune.clear()
         await stopPreviewIfPlaying()
+        await stopAuditionIfPlaying()
       }
     }
   }
@@ -412,11 +437,19 @@ final class EditorModel: ViewModel {
     await audioPlayer.stop()
   }
 
+  /// Stops an in-flight audition from an async context, ordered (awaited) rather than
+  /// fire-and-forget — used when the active slice an audition was anchored to is removed or
+  /// re-anchored, so the audition of a now-stale range doesn't keep playing to end-of-file.
+  private func stopAuditionIfPlaying() async {
+    guard audition != nil else { return }
+    auditionGeneration &+= 1
+    audition = nil
+    await audioPlayer.stop()
+  }
+
   func playSliceTapped(_ id: Slice.ID) async {
     guard let slice = slices[id: id] else { return }
-    // Superseding a different slice's playback: end its follow so the new slice's first tick
-    // is a clean rising edge (false→true) and the transcript resumes following it.
-    if let playing = playingSliceID, playing != id { endTranscriptFollow() }
+    beginExclusivePlayback()
     playingSliceID = id
     do {
       try await audioPlayer.play(
@@ -479,6 +512,7 @@ final class EditorModel: ViewModel {
       // the target went nil — the user must Save or Cancel first.
       if fineTune.target != nil, !fineTune.hasUnsavedChange {
         cancelPreviewIfNeeded()  // closing the pane removes the Stop-preview control
+        cancelAuditionIfNeeded()
         fineTune.clear()
       }
       return
@@ -500,6 +534,7 @@ final class EditorModel: ViewModel {
       // Retargeting to a different session must not leave an old preview playing — the new pane
       // would show "Stop preview" and the playhead would follow the stale range.
       cancelPreviewIfNeeded()
+      cancelAuditionIfNeeded()
       // A transcript selection taking over releases the previously active slice, so clearing the
       // selection later doesn't silently reopen the pane on a stale slice.
       if case .pendingSelection = target { activeSliceID = nil }
@@ -519,6 +554,23 @@ final class EditorModel: ViewModel {
     isPreviewingDraft = false
     Task {
       guard previewGeneration == generation, playingSliceID == nil else { return }
+      await audioPlayer.stop()
+    }
+  }
+
+  /// Stops an in-flight audition when the session retargets away from it, so the status line and
+  /// playhead don't keep claiming an audition of a range the editor no longer shows. Mirrors
+  /// `cancelPreviewIfNeeded`: clears the flag synchronously, stops audio on a guarded task that
+  /// fires only if no newer playback (slice/preview/newer audition) has taken over.
+  private func cancelAuditionIfNeeded() {
+    guard audition != nil else { return }
+    auditionGeneration &+= 1
+    let generation = auditionGeneration
+    audition = nil
+    Task {
+      guard auditionGeneration == generation, playingSliceID == nil, !isPreviewingDraft else {
+        return
+      }
       await audioPlayer.stop()
     }
   }
@@ -557,8 +609,9 @@ final class EditorModel: ViewModel {
       let slice = makeSlice(range: draft)
       mutateSlices { $0.append(slice) }
       nextSliceNumber += 1
-      // Closing the pane removes the Stop-preview control, so stop any preview first.
+      // Closing the pane removes the region, so stop any preview or audition of the draft first.
       cancelPreviewIfNeeded()
+      cancelAuditionIfNeeded()
       fineTune.clear()
       transcript.clearSelectionTapped()
     }
@@ -570,6 +623,7 @@ final class EditorModel: ViewModel {
   /// held) during the edit can take over the pane.
   func cancelEditTapped() {
     cancelPreviewIfNeeded()
+    cancelAuditionIfNeeded()
     fineTune.resetDraft()
     syncEditSession()
   }
@@ -593,7 +647,7 @@ final class EditorModel: ViewModel {
   /// off a newer preview (mirrors `playSliceTapped`'s id check).
   func previewEditTapped() async {
     guard let range = fineTune.draftRange ?? fineTune.committedRange else { return }
-    playingSliceID = nil
+    beginExclusivePlayback()
     previewGeneration &+= 1
     let generation = previewGeneration
     isPreviewingDraft = true
@@ -608,6 +662,97 @@ final class EditorModel: ViewModel {
   func stopPreviewTapped() async {
     previewGeneration &+= 1
     isPreviewingDraft = false
+    await audioPlayer.stop()
+  }
+
+  // MARK: - Audition
+  let auditionPreRollSeconds = 2.0
+  let auditionInButtonLabel = "▶ In  ["
+  let auditionOutButtonLabel = "]  Out ▶"
+
+  /// Samples of pre-roll for the out-cut audition, from the plan sample rate.
+  private var auditionPreRollSamples: Int {
+    max(0, Int(auditionPreRollSeconds * Double(editPlan.source.sampleRate)))
+  }
+  /// The region drawn on the waveform, if it's a non-empty range worth auditioning. Clamped to
+  /// the file's duration so a corrupt slice/selection range past EOF can't produce a range the
+  /// player silently clamps to empty, leaving stale audio playing with all owner flags nil.
+  private var auditionRegion: Range<Int>? {
+    guard let region = activeEditingRange else { return nil }
+    let upper = min(region.upperBound, editPlan.source.durationSamples)
+    let lower = min(region.lowerBound, upper)
+    guard lower < upper else { return nil }
+    return lower..<upper
+  }
+  var canAudition: Bool { auditionRegion != nil }
+  var isAuditioningIn: Bool { audition == .cutIn }
+  var isAuditioningOut: Bool { audition == .cutOut }
+  var auditionStatusText: String? {
+    switch audition {
+    case .cutIn: return "Auditioning in-cut — Space to stop"
+    case .cutOut: return "Auditioning out-cut — Space to stop"
+    case .none: return nil
+    }
+  }
+
+  /// In-cut: drop in at the region's start and play forward to end-of-file.
+  func auditionInTapped() async {
+    guard let region = auditionRegion else { return }
+    let end = editPlan.source.durationSamples
+    guard region.lowerBound < end else { return }
+    await startAudition(.cutIn, range: region.lowerBound..<end)
+  }
+
+  /// Out-cut: play a pre-roll ending exactly at the region's out-point, stopping on the cut.
+  /// The pre-roll may begin before the region's own start (clamped at 0).
+  func auditionOutTapped() async {
+    guard let region = auditionRegion else { return }
+    let end = region.upperBound
+    let start = max(0, end - auditionPreRollSamples)
+    await startAudition(.cutOut, range: start..<end)
+  }
+
+  /// Shared audition start. `beginExclusivePlayback`'s generation bump is this call's token —
+  /// only the latest audition clears `audition` on completion, so mashing keys can't leave
+  /// stale UI (mirrors `playSliceTapped`'s id check and `previewEditTapped`'s generation check).
+  private func startAudition(_ mode: AuditionMode, range: Range<Int>) async {
+    guard !range.isEmpty else { return }
+    beginExclusivePlayback()
+    let generation = auditionGeneration
+    audition = mode
+    lastAudition = mode
+    do {
+      try await audioPlayer.play(canonicalAudioURL, range, editPlan.source.sampleRate)
+    } catch {
+      reportIssue(error)
+    }
+    if auditionGeneration == generation { audition = nil }
+  }
+
+  /// Space: stop whatever the editor is playing; if idle, replay the last audition, else in-cut.
+  func auditionSpaceTapped() async {
+    if playingSliceID != nil || isPreviewingDraft || audition != nil {
+      await stopAllPlayback()
+      return
+    }
+    switch lastAudition ?? .cutIn {
+    case .cutIn: await auditionInTapped()
+    case .cutOut: await auditionOutTapped()
+    }
+  }
+
+  /// Routes a captured key to its action so the key-monitor view stays logic-free.
+  func auditionKeyPressed(_ key: AuditionKey) async {
+    switch key {
+    case .cutIn: await auditionInTapped()
+    case .cutOut: await auditionOutTapped()
+    case .space: await auditionSpaceTapped()
+    }
+  }
+
+  /// Stops any editor-owned playback (slice, preview, or audition) and clears all owners.
+  private func stopAllPlayback() async {
+    beginExclusivePlayback()
     await audioPlayer.stop()
   }
 
