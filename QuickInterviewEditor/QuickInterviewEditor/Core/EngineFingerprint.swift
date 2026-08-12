@@ -37,18 +37,21 @@ enum EngineFingerprint {
   /// executable beside `_internal/`, which holds the actual Python code, native
   /// libs, and package data. A rebuild can change `_internal/` without changing
   /// the launcher, so hashing only the launcher under-invalidates (a stale cache
-  /// hit on a real engine change). This folds in: the launcher's content hash,
-  /// a stat-only (relativePath, size) digest of every file under the engine dir
-  /// (content hashing would mean reading a multi-gigabyte tree on every launch),
-  /// the app version, and the pinned model identity. Over-invalidation (an extra
-  /// re-transcribe) is safe; under-invalidation (a stale hit) is the hazard this
-  /// guards against — a real engine or model change cannot collapse to the same
-  /// fingerprint in practice.
+  /// hit on a real engine change). This folds in: the launcher's content hash, a
+  /// per-file identity for every file under the engine dir (content hash for
+  /// small, code-sized files so a same-size edit still changes the fingerprint;
+  /// size alone for large libs/weights, to avoid reading a multi-gigabyte tree on
+  /// every launch), the app version, and the pinned model identity.
+  /// Over-invalidation (an extra re-transcribe) is safe; under-invalidation (a
+  /// stale hit) is the hazard this guards against — a real engine or model change
+  /// cannot collapse to the same fingerprint in practice.
   static func compute(
     launch: EngineLaunch,
     pythonFiles: (URL) -> [URL],
     contentHash: (URL) -> String?,
-    engineTree: (URL) -> [(relativePath: String, size: Int64)] = { engineTreeSizes(under: $0) },
+    engineTree: (URL) -> [(relativePath: String, identity: String)] = {
+      engineTreeIdentities(under: $0)
+    },
     modelIdentity: String = ModelManifest.current.fingerprintIdentity,
     appVersion: String = bundleVersionIdentity()
   ) -> String {
@@ -56,7 +59,7 @@ enum EngineFingerprint {
       let engineDir = launch.executable.deletingLastPathComponent()
       var entries: [String] = ["exe:\(contentHash(launch.executable) ?? "missing")"]
       for entry in engineTree(engineDir).sorted(by: { $0.relativePath < $1.relativePath }) {
-        entries.append("\(entry.relativePath):\(entry.size)")
+        entries.append("\(entry.relativePath):\(entry.identity)")
       }
       entries.append("app:\(appVersion)")
       entries.append("models:\(modelIdentity)")
@@ -93,15 +96,22 @@ enum EngineFingerprint {
     return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
   }
 
-  /// Stat-only (never content-reading) enumeration of every file under the
-  /// packaged engine directory, relative to `dir`. The `_internal/` tree can be
-  /// gigabytes, so this uses `.fileSizeKey` rather than hashing bytes.
-  static func engineTreeSizes(under dir: URL) -> [(relativePath: String, size: Int64)] {
+  /// Files at or below this size are content-hashed; larger ones use size alone.
+  /// Engine *code* (`.py`/`.pyc`, small data) sits well under this, so a same-size
+  /// content edit still changes the fingerprint; multi-hundred-MB native libs and
+  /// model weights stay stat-only so a launch never reads a gigabyte tree.
+  static let maxContentHashByteCount: Int64 = 5_000_000
+
+  /// Per-file identity for every file under the packaged engine directory, relative
+  /// to `dir`: `"h:<sha256>"` for small (code-sized) files, `"s:<size>"` for large
+  /// ones. Only small files are read; the big `_internal/` payload is stat-only.
+  static func engineTreeIdentities(under dir: URL) -> [(relativePath: String, identity: String)] {
     guard
       let enumerator = FileManager.default.enumerator(
-        at: dir, includingPropertiesForKeys: [.fileSizeKey], options: [.skipsHiddenFiles])
+        at: dir, includingPropertiesForKeys: [.fileSizeKey, .isRegularFileKey],
+        options: [.skipsHiddenFiles])
     else { return [] }
-    var results: [(relativePath: String, size: Int64)] = []
+    var results: [(relativePath: String, identity: String)] = []
     for case let url as URL in enumerator {
       guard (try? url.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true
       else { continue }
@@ -110,7 +120,13 @@ enum EngineFingerprint {
         url.path.hasPrefix(dir.path)
         ? String(url.path.dropFirst(dir.path.count + 1))
         : url.path
-      results.append((relativePath: relativePath, size: size))
+      let identity: String
+      if size <= maxContentHashByteCount, let hash = sha256OfFile(url) {
+        identity = "h:\(hash)"
+      } else {
+        identity = "s:\(size)"
+      }
+      results.append((relativePath: relativePath, identity: identity))
     }
     return results
   }

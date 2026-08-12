@@ -78,8 +78,8 @@ import Testing
     }
 
     #expect(engineCalls.value == 1)
-    // Re-emitted with a cache-owned URL, and the entry is now on disk.
-    #expect(result?.canonicalAudioURL != engineAIFF)
+    // Editor keeps the engine's own session URL; the result is written through to the cache.
+    #expect(result?.canonicalAudioURL == engineAIFF)
     #expect(
       cache.lookup(
         TranscriptionCacheKey.make(

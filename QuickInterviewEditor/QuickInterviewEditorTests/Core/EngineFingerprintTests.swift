@@ -59,13 +59,15 @@ import Testing
 
   @Test func bundledFingerprintReflectsEngineTreeNotJustLauncher() {
     let launch = bundledLaunch()
-    let baseTree: [(relativePath: String, size: Int64)] = [
-      (relativePath: "_internal/logic_markers/cli.py", size: 1_024),
-      (relativePath: "_internal/libtorch.dylib", size: 50_000_000),
+    // A same-path content change (identity differs) must change the fingerprint —
+    // exactly the "same path & size" case that a size-only digest would miss.
+    let baseTree: [(relativePath: String, identity: String)] = [
+      (relativePath: "_internal/logic_markers/cli.py", identity: "h:aaa"),
+      (relativePath: "_internal/libtorch.dylib", identity: "s:50000000"),
     ]
-    let changedTree: [(relativePath: String, size: Int64)] = [
-      (relativePath: "_internal/logic_markers/cli.py", size: 2_048),
-      (relativePath: "_internal/libtorch.dylib", size: 50_000_000),
+    let changedTree: [(relativePath: String, identity: String)] = [
+      (relativePath: "_internal/logic_markers/cli.py", identity: "h:bbb"),
+      (relativePath: "_internal/libtorch.dylib", identity: "s:50000000"),
     ]
 
     let first = EngineFingerprint.compute(
@@ -88,8 +90,8 @@ import Testing
 
   @Test func bundledFingerprintChangesWithModelManifest() {
     let launch = bundledLaunch()
-    let tree: [(relativePath: String, size: Int64)] = [
-      (relativePath: "_internal/logic_markers/cli.py", size: 1_024)
+    let tree: [(relativePath: String, identity: String)] = [
+      (relativePath: "_internal/logic_markers/cli.py", identity: "h:aaa")
     ]
 
     let first = EngineFingerprint.compute(
@@ -112,8 +114,8 @@ import Testing
 
   @Test func bundledFingerprintChangesWithAppVersion() {
     let launch = bundledLaunch()
-    let tree: [(relativePath: String, size: Int64)] = [
-      (relativePath: "_internal/logic_markers/cli.py", size: 1_024)
+    let tree: [(relativePath: String, identity: String)] = [
+      (relativePath: "_internal/logic_markers/cli.py", identity: "h:aaa")
     ]
 
     let first = EngineFingerprint.compute(
@@ -136,13 +138,13 @@ import Testing
 
   @Test func bundledFingerprintStableForIdenticalInputs() {
     let launch = bundledLaunch()
-    let treeInOrderA: [(relativePath: String, size: Int64)] = [
-      (relativePath: "_internal/logic_markers/cli.py", size: 1_024),
-      (relativePath: "_internal/libtorch.dylib", size: 50_000_000),
+    let treeInOrderA: [(relativePath: String, identity: String)] = [
+      (relativePath: "_internal/logic_markers/cli.py", identity: "h:aaa"),
+      (relativePath: "_internal/libtorch.dylib", identity: "s:50000000"),
     ]
-    let treeInOrderB: [(relativePath: String, size: Int64)] = [
-      (relativePath: "_internal/libtorch.dylib", size: 50_000_000),
-      (relativePath: "_internal/logic_markers/cli.py", size: 1_024),
+    let treeInOrderB: [(relativePath: String, identity: String)] = [
+      (relativePath: "_internal/libtorch.dylib", identity: "s:50000000"),
+      (relativePath: "_internal/logic_markers/cli.py", identity: "h:aaa"),
     ]
 
     let first = EngineFingerprint.compute(
