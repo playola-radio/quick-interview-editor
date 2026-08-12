@@ -79,6 +79,7 @@ final class CutSuggestionsPageModel: ViewModel {
   let addKeyButtonLabel = "Add API Key…"
   let acceptLabel = "Accept"
   let rejectLabel = "Reject"
+  let revealSuggestionLabel = "Reveal suggestion in transcript and waveform"
 
   var suggestButtonLabel: String {
     hasAPIKey ? "Suggest Cuts" : addKeyButtonLabel

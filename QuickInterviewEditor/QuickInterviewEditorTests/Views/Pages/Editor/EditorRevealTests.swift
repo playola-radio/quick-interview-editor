@@ -62,6 +62,23 @@ struct EditorRevealTests {
     expectNoDifference(model.waveform.visibleStartSample, priorStart)
   }
 
+  @Test func clickingAPartiallyStaleSuggestionLeavesTheViewWhereItIs() {
+    let model = editor()
+    model.transcript.selectWords(anchorID: 1, focusID: 1)
+    model.zoomWaveformToSelection()
+    let priorReveal = model.transcript.reveal
+    let priorSpp = model.waveform.samplesPerPixel
+    let priorStart = model.waveform.visibleStartSample
+
+    // One surviving word (1) and one missing (900) — must NOT reveal the survivor's narrower span.
+    model.cutSuggestionSelected(Fixtures.cutSuggestion(id: Fixtures.uuid(9), wordIDs: [1, 900]))
+
+    expectNoDifference(model.transcript.selectedWordIDSet, [1])
+    expectNoDifference(model.transcript.reveal, priorReveal)
+    expectNoDifference(model.waveform.samplesPerPixel, priorSpp)
+    expectNoDifference(model.waveform.visibleStartSample, priorStart)
+  }
+
   @Test func clickingASuggestionResolvesEndpointsByPositionNotArrayOrder() {
     let model = editor()
     // wordIDs given out of transcript order — the span must still be word 1 … word 3.

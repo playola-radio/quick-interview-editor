@@ -223,6 +223,11 @@ final class WaveformModel: ViewModel {
   /// default of 0 fills edge-to-edge, so `zoomFitToggled`'s `Z` behavior is unchanged.
   func zoomToFit(_ range: Range<Int>, paddingFraction: Double = 0) {
     guard viewportWidth > 0, totalSamples > 0, range.lowerBound < range.upperBound else { return }
+    // A padded fit is a reveal (click a suggestion/clip), not the `Z` toggle — invalidate any
+    // armed restore like every other manual zoom/pan does, so the next `Z` fits fresh instead
+    // of jumping back to a pre-fit viewport. The `Z` path calls this with paddingFraction 0 and
+    // manages `fitRestore` itself, so it must not be cleared here.
+    if paddingFraction > 0 { fitRestore = nil }
     let padded = Double(range.count) * (1 + 2 * max(0, paddingFraction))
     samplesPerPixel = clampedSamplesPerPixel(padded / Double(viewportWidth))
     let center = range.lowerBound + range.count / 2

@@ -123,6 +123,7 @@ final class EditorModel: ViewModel {
   let slicesTabLabel = "Clips"
   let suggestionsTabLabel = "Suggestions"
   let rightPanelPickerLabel = "Right panel"
+  let revealClipLabel = "Reveal clip in transcript and waveform"
 
   // MARK: - Fine-tune session
   /// The active slice's committed range, if a slice is open in the pane.
@@ -413,7 +414,10 @@ final class EditorModel: ViewModel {
     let positions = wordIDs.compactMap { id in
       editPlan.words.firstIndex(where: { $0.id == id })
     }
-    guard let lower = positions.min(), let upper = positions.max(),
+    // Require every word to resolve — a partially-stale item (some words gone) would otherwise
+    // reveal the narrower span of the survivors, a subtly wrong jump. Leave the view put instead.
+    guard positions.count == wordIDs.count,
+      let lower = positions.min(), let upper = positions.max(),
       transcript.selectWords(anchorID: editPlan.words[lower].id, focusID: editPlan.words[upper].id)
     else { return }
     revealSelectionAcrossPanes()
