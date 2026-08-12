@@ -1049,14 +1049,13 @@ struct EditorTests {
     #expect(model.waveform.visibleStartSample != 400_000)  // panned
   }
 
-  @Test func commandScrollPansWaveform() {
+  @Test func commandScrollZoomsWaveform() {
     let model = geometryReadyEditor()
-    let sppBefore = model.waveform.samplesPerPixel
+    let before = model.waveform.samplesPerPixel
     model.waveformScrolled(
-      deltaX: 20, deltaY: 0, hasPreciseDeltas: true,
+      deltaX: 0, deltaY: 30, hasPreciseDeltas: true,
       optionDown: false, commandDown: true, atX: 500)
-    #expect(model.waveform.samplesPerPixel == sppBefore)
-    #expect(model.waveform.visibleStartSample != 400_000)
+    #expect(model.waveform.samplesPerPixel != before)  // ⌘+scroll zooms
   }
 
   @Test func lineBasedScrollNormalizesToFortyPixelsPerLine() {

@@ -332,15 +332,17 @@ final class EditorModel: ViewModel {
   }
 
   // swiftlint:disable function_parameter_count
-  /// Wheel/trackpad on the waveform. ⌥⌘ ⇒ cursor-anchored horizontal zoom; anything else
-  /// ⇒ horizontal pan (Logic maps ⌘+scroll to horizontal scroll; our single lane has no
-  /// vertical axis, so a plain scroll pans too). Delta interpretation lives here, not the view.
+  /// Wheel/trackpad on the waveform. Holding ⌘ while scrolling ⇒ cursor-anchored horizontal
+  /// zoom; a plain scroll (no ⌘) ⇒ horizontal pan. ⌘ is a single modifier that a Magic Mouse
+  /// swipe reliably carries, matching how Logic users reach for zoom. `optionDown` is accepted
+  /// for forward-compatibility but does not affect the decision. Interpretation lives here,
+  /// not the view.
   func waveformScrolled(
     deltaX: CGFloat, deltaY: CGFloat, hasPreciseDeltas: Bool,
     optionDown: Bool, commandDown: Bool, atX positionX: CGFloat
   ) {
     guard deltaX.isFinite, deltaY.isFinite else { return }
-    if optionDown, commandDown {
+    if commandDown {
       waveform.zoomByFactor(
         Self.scrollZoomFactor(deltaY: deltaY, hasPreciseDeltas: hasPreciseDeltas),
         anchoredAtX: positionX)

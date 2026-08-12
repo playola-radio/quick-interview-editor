@@ -20,8 +20,8 @@ out of scope here. PR 1 must not box PR 2 in.
 | Interaction | Logic convention | This app |
 |---|---|---|
 | Extend selection | Shift-click extends the contiguous selection | Shift-click a word (transcript or waveform): anchor stays, focus moves |
-| Horizontal zoom (wheel) | ⌥⌘ + scroll | ⌥⌘ + scroll on the waveform, anchored at the pointer |
-| Horizontal scroll/pan (wheel) | ⌘ + scroll | ⌘ + scroll pans; **plus** plain scroll pans (our lane has no vertical dimension — the one deliberate divergence) |
+| Horizontal zoom (wheel) | ⌥⌘ + scroll | **⌘ + scroll/swipe** on the waveform, anchored at the pointer (single-⌘ chosen for Magic-Mouse reliability — see note below) |
+| Horizontal scroll/pan (wheel) | ⌘ + scroll | **plain scroll/swipe** pans (our lane has no vertical dimension) |
 | Zoom out/in by step | ⌘← / ⌘→ | ⌘← / ⌘→ zoom the waveform out/in (recenters on viewport middle) |
 | Zoom to fit | `Z` toggles fit-selection / fit-all, and back | `Z` fits selection if any else whole file; pressing again restores prior zoom+scroll |
 

@@ -246,9 +246,11 @@ single waveform lane), and note the divergence when you do. Verify Logic's actua
 default rather than guessing.
 
 Known Logic conventions already relevant here:
-- **Horizontal zoom (waveform):** ⌥⌘ + scroll wheel, anchored at the pointer;
-  ⌘←/⌘→ to zoom out/in by steps.
-- **Horizontal scroll (pan):** ⌘ + scroll wheel.
+- **Horizontal zoom (waveform):** ⌘ + scroll/swipe, anchored at the pointer;
+  ⌘←/⌘→ to zoom out/in by steps. (Logic's documented mouse-wheel default is
+  ⌥⌘; we use single-⌘ because a Magic Mouse swipe reliably carries one modifier
+  and it matches how our Logic users reach for zoom — a deliberate divergence.)
+- **Horizontal scroll (pan):** plain scroll/swipe (no modifier).
 - **Zoom to fit:** `Z` toggles between fitting the current selection and fitting
   all content.
 - **Extend selection:** Shift-click extends a contiguous selection to the clicked
