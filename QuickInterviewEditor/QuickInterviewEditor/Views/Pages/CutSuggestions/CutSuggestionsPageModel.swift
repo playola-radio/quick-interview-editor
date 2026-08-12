@@ -28,19 +28,24 @@ final class CutSuggestionsPageModel: ViewModel {
   /// Hands an accepted suggestion's `Slice` to the editor (wired by `EditorModel`), which
   /// appends it to its slices/render list. Kept a closure so this model stays editor-agnostic.
   @ObservationIgnored var onAcceptSlice: ((Slice) -> Void)?
+  /// Asks the editor to reveal a suggestion across both panes (select its words, scroll the
+  /// transcript, zoom the waveform) when the user clicks a row. Wired by `EditorModel`.
+  @ObservationIgnored var onSelectSuggestion: ((CutSuggestion) -> Void)?
 
   init(
     editPlan: EditPlan,
     sourceFingerprint: String,
     options: CutSuggestOptions = CutSuggestOptions(),
     productSpecs: [ProductSpec] = ProductSpec.defaults,
-    onAcceptSlice: ((Slice) -> Void)? = nil
+    onAcceptSlice: ((Slice) -> Void)? = nil,
+    onSelectSuggestion: ((CutSuggestion) -> Void)? = nil
   ) {
     self.editPlan = editPlan
     self.sourceFingerprint = sourceFingerprint
     self.options = options
     self.productSpecs = productSpecs
     self.onAcceptSlice = onAcceptSlice
+    self.onSelectSuggestion = onSelectSuggestion
     _projectState = Shared(.projectState(fingerprint: sourceFingerprint))
     super.init()
   }
@@ -118,6 +123,14 @@ final class CutSuggestionsPageModel: ViewModel {
 
   // MARK: - User Actions
   func viewAppeared() { refreshKeyState() }
+
+  /// Clicking a row asks the editor to reveal it (select its words, scroll the transcript, zoom
+  /// the waveform) so the user can review — and, with the fine-tune pane open, audition — the
+  /// candidate before accepting or rejecting it. A no-op for an unknown ID.
+  func rowTapped(_ id: CutSuggestion.ID) {
+    guard let suggestion = suggestions.first(where: { $0.id == id }) else { return }
+    onSelectSuggestion?(suggestion)
+  }
 
   func suggestCutsTapped() async {
     guard !isSuggesting else { return }

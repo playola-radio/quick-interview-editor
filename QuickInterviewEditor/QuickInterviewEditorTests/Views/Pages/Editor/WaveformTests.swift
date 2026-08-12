@@ -335,6 +335,16 @@ struct WaveformTests {
     expectNoDifference(model.visibleStartSample, 400_000)
   }
 
+  @Test func zoomToFitPaddingLeavesBreathingRoomAroundTheRange() {
+    let model = makeModel(
+      totalSamples: 1_000_000, viewportWidth: 1000, samplesPerPixel: 100, start: 0)
+    // 200_000 wide, padded ×1.2 -> 240_000 over 1000 px -> spp 240; center stays 500_000.
+    model.zoomToFit(400_000..<600_000, paddingFraction: 0.1)
+    expectNoDifference(model.samplesPerPixel, 240)
+    // visibleSampleCount = 1000*240 = 240_000; start = 500_000 - 120_000
+    expectNoDifference(model.visibleStartSample, 380_000)
+  }
+
   @Test func zoomFitToggledFitsThenRestores() {
     let model = makeModel(
       totalSamples: 1_000_000, viewportWidth: 1000, samplesPerPixel: 50, start: 300_000)

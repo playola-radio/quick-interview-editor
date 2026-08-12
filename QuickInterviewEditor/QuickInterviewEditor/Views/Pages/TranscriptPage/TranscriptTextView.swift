@@ -14,6 +14,7 @@ struct TranscriptTextView: NSViewRepresentable {
   let runTogether: Set<Word.ID>
   let scrollTarget: Word.ID?
   let followMode: TranscriptFollowMode
+  let reveal: TranscriptReveal?
 
   func makeCoordinator() -> Coordinator { Coordinator(model: model) }
 
@@ -61,7 +62,7 @@ struct TranscriptTextView: NSViewRepresentable {
     context.coordinator.paragraphSpacing = paragraphSpacing
     context.coordinator.apply(
       text: text, fontSize: fontSize, selected: selected, runTogether: runTogether,
-      scrollTarget: scrollTarget, followMode: followMode)
+      scrollTarget: scrollTarget, followMode: followMode, reveal: reveal)
   }
 
   @MainActor
@@ -76,6 +77,7 @@ struct TranscriptTextView: NSViewRepresentable {
     private var lastFontSize: Double = 0
     private var lastScrollTarget: Word.ID?
     private var lastFollowMode: TranscriptFollowMode = .following
+    private var lastReveal: TranscriptReveal?
 
     init(model: TranscriptPageModel) { self.model = model }
 
@@ -116,7 +118,7 @@ struct TranscriptTextView: NSViewRepresentable {
     // swiftlint:disable:next function_parameter_count
     func apply(
       text: String, fontSize: Double, selected: Set<Word.ID>, runTogether: Set<Word.ID>,
-      scrollTarget: Word.ID?, followMode: TranscriptFollowMode
+      scrollTarget: Word.ID?, followMode: TranscriptFollowMode, reveal: TranscriptReveal?
     ) {
       guard let storage = textView?.textStorage, let textView else { return }
 
@@ -160,6 +162,16 @@ struct TranscriptTextView: NSViewRepresentable {
         // so it can never be mistaken for a user scroll — no guard flag needed.
         textView.scrollRangeToVisible(range)
         lastScrollTarget = target
+      }
+
+      // An explicit reveal (clicking a suggestion or clip) scrolls regardless of `followMode` —
+      // the user asked to jump here, so a prior manual scroll must not suppress it. The token in
+      // `TranscriptReveal` changes on every request, so re-revealing the same word re-scrolls.
+      if let reveal, reveal != lastReveal {
+        if let range = range(for: reveal.wordID) {
+          textView.scrollRangeToVisible(range)
+        }
+        lastReveal = reveal
       }
     }
 

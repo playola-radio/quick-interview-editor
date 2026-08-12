@@ -424,4 +424,44 @@ struct CutSuggestionsPageTests {
       expectNoDifference(model.isSuggesting, false)
     }
   }
+
+  // MARK: - Row tap → reveal
+
+  @Test func rowTappedHandsTheSuggestionToTheEditor() {
+    let fingerprint = "fp-tap"
+    let suggestion = Fixtures.cutSuggestion(id: Fixtures.uuid(1), wordIDs: [10, 11, 12])
+    let selected = LockIsolated<CutSuggestion?>(nil)
+
+    withDependencies {
+      $0.defaultFileStorage = FileStorage.inMemory(fileSystem: LockIsolated([:]))
+    } operation: {
+      @Shared(.projectState(fingerprint: fingerprint)) var state = ProjectState(
+        cutSuggestions: [suggestion])
+      let model = CutSuggestionsPageModel(
+        editPlan: Fixtures.editPlan(), sourceFingerprint: fingerprint)
+      model.onSelectSuggestion = { selected.setValue($0) }
+
+      model.rowTapped(suggestion.id)
+
+      expectNoDifference(selected.value?.id, suggestion.id)
+    }
+  }
+
+  @Test func rowTappedWithAnUnknownIDIsANoOp() {
+    let fingerprint = "fp-tap-unknown"
+    let selected = LockIsolated<CutSuggestion?>(nil)
+
+    withDependencies {
+      $0.defaultFileStorage = FileStorage.inMemory(fileSystem: LockIsolated([:]))
+    } operation: {
+      @Shared(.projectState(fingerprint: fingerprint)) var state = ProjectState()
+      let model = CutSuggestionsPageModel(
+        editPlan: Fixtures.editPlan(), sourceFingerprint: fingerprint)
+      model.onSelectSuggestion = { selected.setValue($0) }
+
+      model.rowTapped(Fixtures.uuid(42))
+
+      #expect(selected.value == nil)
+    }
+  }
 }

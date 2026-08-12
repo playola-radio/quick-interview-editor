@@ -76,29 +76,36 @@ struct CutSuggestionsPageView: View {
 
   private func rowView(_ row: SuggestionRow) -> some View {
     VStack(alignment: .leading, spacing: 4) {
-      HStack(alignment: .firstTextBaseline) {
-        Text(row.rankLabel)
+      // Only the descriptive lines are the reveal target; the Accept/Reject buttons stay outside
+      // this gesture so a tap on them never doubles as a reveal.
+      VStack(alignment: .leading, spacing: 4) {
+        HStack(alignment: .firstTextBaseline) {
+          Text(row.rankLabel)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+          Text(row.title)
+          Spacer()
+          Text(row.statusLabel)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+        if let songLine = row.songLine {
+          Text(songLine)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+        Text("\(row.timeRange) · \(row.duration)")
           .font(.caption)
           .foregroundStyle(.secondary)
-        Text(row.title)
-        Spacer()
-        Text(row.statusLabel)
-          .font(.caption)
-          .foregroundStyle(.secondary)
+        if row.showsFreshnessWarning {
+          Text(row.freshnessLabel)
+            .font(.caption)
+            .foregroundStyle(.orange)
+        }
       }
-      if let songLine = row.songLine {
-        Text(songLine)
-          .font(.caption)
-          .foregroundStyle(.secondary)
-      }
-      Text("\(row.timeRange) · \(row.duration)")
-        .font(.caption)
-        .foregroundStyle(.secondary)
-      if row.showsFreshnessWarning {
-        Text(row.freshnessLabel)
-          .font(.caption)
-          .foregroundStyle(.orange)
-      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .contentShape(Rectangle())
+      .onTapGesture { model.rowTapped(row.id) }
       HStack {
         if row.showsAcceptButton {
           Button(model.acceptLabel) { model.acceptTapped(row.id) }

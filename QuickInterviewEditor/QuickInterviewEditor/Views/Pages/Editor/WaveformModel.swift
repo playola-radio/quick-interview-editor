@@ -218,9 +218,13 @@ final class WaveformModel: ViewModel {
     visibleStartSample = clampedStart(0)
   }
 
-  func zoomToFit(_ range: Range<Int>) {
+  /// Frames `range` in the viewport. `paddingFraction` leaves that fraction of the range as
+  /// breathing room on each side (0.1 ⇒ the range fills the middle ~83% of the width); the
+  /// default of 0 fills edge-to-edge, so `zoomFitToggled`'s `Z` behavior is unchanged.
+  func zoomToFit(_ range: Range<Int>, paddingFraction: Double = 0) {
     guard viewportWidth > 0, totalSamples > 0, range.lowerBound < range.upperBound else { return }
-    samplesPerPixel = clampedSamplesPerPixel(Double(range.count) / Double(viewportWidth))
+    let padded = Double(range.count) * (1 + 2 * max(0, paddingFraction))
+    samplesPerPixel = clampedSamplesPerPixel(padded / Double(viewportWidth))
     let center = range.lowerBound + range.count / 2
     visibleStartSample = clampedStart(center - visibleSampleCount / 2)
   }

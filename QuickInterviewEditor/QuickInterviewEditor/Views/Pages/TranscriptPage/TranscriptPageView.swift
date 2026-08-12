@@ -14,7 +14,8 @@ struct TranscriptPageView: View {
         selected: model.selectedWordIDSet,
         runTogether: model.runTogetherWordIDSet,
         scrollTarget: model.scrollTargetWordID,
-        followMode: model.followMode
+        followMode: model.followMode,
+        reveal: model.reveal
       )
       .frame(maxWidth: .infinity, maxHeight: .infinity)
       controls

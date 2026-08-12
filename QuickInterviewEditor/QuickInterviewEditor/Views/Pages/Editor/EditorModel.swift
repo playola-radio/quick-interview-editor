@@ -58,6 +58,10 @@ final class EditorModel: ViewModel {
     cutSuggestions.onAcceptSlice = { [weak self] slice in
       self?.acceptCutSuggestionSlice(slice)
     }
+    // Clicking a suggestion reveals it across both panes so the user can review/audition it.
+    cutSuggestions.onSelectSuggestion = { [weak self] suggestion in
+      self?.cutSuggestionSelected(suggestion)
+    }
   }
 
   // MARK: - Export Phase
@@ -379,6 +383,53 @@ final class EditorModel: ViewModel {
   func acceptCutSuggestionSlice(_ slice: Slice) {
     guard slices[id: slice.id] == nil else { return }
     mutateSlices { $0.append(slice) }
+  }
+
+  // MARK: - Reveal across panes
+  /// Padding left on each side when framing a revealed range on the waveform, so the clip
+  /// reads as an object with a little context rather than filling the viewport edge-to-edge.
+  let waveformFramePadding = 0.1
+
+  /// Clicking a suggestion selects its words (lighting up the transcript + waveform highlights
+  /// and opening the fine-tune pane so Preview/Audition are available) and reveals it in both
+  /// panes. A no-op for a suggestion with no words.
+  func cutSuggestionSelected(_ suggestion: CutSuggestion) {
+    revealWords(suggestion.wordIDs)
+  }
+
+  /// Clicking a saved clip reveals it the same way a suggestion does — its words are selected,
+  /// the transcript scrolls to them, and the waveform zooms to frame the clip.
+  func sliceRevealTapped(_ id: Slice.ID) {
+    guard let slice = slices[id: id] else { return }
+    revealWords(slice.wordIDs)
+  }
+
+  /// Selects the span covered by `wordIDs` then reveals it across both panes. Endpoints are the
+  /// earliest and latest words by transcript position (not the array's first/last), so an
+  /// unsorted or sparse `wordIDs` still frames the right range. Reveals only when the selection
+  /// actually resolved — a stale item whose words are gone leaves the current view untouched
+  /// instead of jumping to the previous selection.
+  private func revealWords(_ wordIDs: [Word.ID]) {
+    let positions = wordIDs.compactMap { id in
+      editPlan.words.firstIndex(where: { $0.id == id })
+    }
+    guard let lower = positions.min(), let upper = positions.max(),
+      transcript.selectWords(anchorID: editPlan.words[lower].id, focusID: editPlan.words[upper].id)
+    else { return }
+    revealSelectionAcrossPanes()
+  }
+
+  /// Scrolls the transcript to the current selection and zooms/scrolls the waveform to frame it.
+  func revealSelectionAcrossPanes() {
+    transcript.revealSelection()
+    zoomWaveformToSelection()
+  }
+
+  /// Zooms and scrolls the waveform to frame the current transcript selection (padded). A no-op
+  /// when nothing is selected.
+  func zoomWaveformToSelection() {
+    guard let range = transcript.selectedSampleRange else { return }
+    waveform.zoomToFit(range, paddingFraction: waveformFramePadding)
   }
 
   func addSliceTapped() {
