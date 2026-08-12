@@ -609,8 +609,9 @@ final class EditorModel: ViewModel {
       let slice = makeSlice(range: draft)
       mutateSlices { $0.append(slice) }
       nextSliceNumber += 1
-      // Closing the pane removes the Stop-preview control, so stop any preview first.
+      // Closing the pane removes the region, so stop any preview or audition of the draft first.
       cancelPreviewIfNeeded()
+      cancelAuditionIfNeeded()
       fineTune.clear()
       transcript.clearSelectionTapped()
     }
@@ -622,6 +623,7 @@ final class EditorModel: ViewModel {
   /// held) during the edit can take over the pane.
   func cancelEditTapped() {
     cancelPreviewIfNeeded()
+    cancelAuditionIfNeeded()
     fineTune.resetDraft()
     syncEditSession()
   }

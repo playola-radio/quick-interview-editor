@@ -475,5 +475,57 @@ struct EditorAuditionTests {
       await task.value
     }
   }
+
+  @Test func committingPendingSelectionStopsAudition() async {
+    let gate = AuditionGate()
+    let stopped = LockIsolated(false)
+    let model = editor()
+    selectWords(model.transcript, 0, 2)
+    model.syncEditSession()
+    model.cutOutNudged(byMs: -10)  // a tuned draft so canCommitEdit is true
+    await withDependencies {
+      $0.audioPlayer.play = { _, _, _ in await gate.play() }
+      $0.audioPlayer.stop = {
+        stopped.setValue(true)
+        gate.release()
+      }
+    } operation: {
+      let task = Task { await model.auditionInTapped() }
+      await gate.awaitStarted()
+      expectNoDifference(model.audition, .cutIn)
+      // Committing the pending selection closes the pane and clears the region — the audition of
+      // the now-saved draft must stop instead of playing on with nothing shown.
+      model.commitEditTapped()
+      await task.value  // completes only when the guarded stop task releases the gate
+      expectNoDifference(model.audition, nil)
+      #expect(stopped.value)
+    }
+  }
+
+  @Test func cancellingEditStopsAudition() async {
+    let gate = AuditionGate()
+    let stopped = LockIsolated(false)
+    let model = editor()
+    selectWords(model.transcript, 0, 2)
+    model.syncEditSession()
+    model.cutOutNudged(byMs: -10)  // a tuned draft to cancel back to the committed range
+    await withDependencies {
+      $0.audioPlayer.play = { _, _, _ in await gate.play() }
+      $0.audioPlayer.stop = {
+        stopped.setValue(true)
+        gate.release()
+      }
+    } operation: {
+      let task = Task { await model.auditionInTapped() }
+      await gate.awaitStarted()
+      expectNoDifference(model.audition, .cutIn)
+      // Cancelling reverts the draft to the committed range — the audition of the discarded draft
+      // must stop rather than keep playing a range the waveform no longer shows.
+      model.cancelEditTapped()
+      await task.value
+      expectNoDifference(model.audition, nil)
+      #expect(stopped.value)
+    }
+  }
 }
 // swiftlint:enable large_tuple
