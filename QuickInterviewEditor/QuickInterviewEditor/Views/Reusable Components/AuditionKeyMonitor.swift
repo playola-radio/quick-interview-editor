@@ -68,6 +68,12 @@ struct AuditionKeyMonitor: NSViewRepresentable {
       default: key = nil
       }
       guard let key else { return event }
+      // Space activates a focused control (button, checkbox, popup) via Full Keyboard Access;
+      // don't hijack it there. Fire the audition transport only when focus is on the editor
+      // content (the non-editable transcript NSTextView or the hosting view), not a control.
+      if key == .space, window.firstResponder is NSControl {
+        return event
+      }
       onKey?(key)
       return nil  // consume so the key doesn't also scroll / beep
     }
