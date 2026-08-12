@@ -4,6 +4,13 @@ import IdentifiedCollections
 import IssueReporting
 import Observation
 
+/// The editor-global shortcuts the key monitor can deliver. PR 2 adds transport cases here.
+enum EditorKey {
+  case zoomIn
+  case zoomOut
+  case zoomFit
+}
+
 @MainActor
 @Observable
 final class EditorModel: ViewModel {
@@ -312,12 +319,47 @@ final class EditorModel: ViewModel {
   }
 
   /// Waveform → transcript: a click at view-x selects the word whose audio contains that
-  /// point. A click landing in a gap (or exactly on a word's end, which is exclusive)
-  /// selects nothing and leaves the current selection untouched.
-  func waveformTapped(atX positionX: CGFloat) {
+  /// point; Shift extends the current selection to it. A click landing in a gap selects
+  /// nothing and leaves the selection untouched.
+  func waveformClicked(atX positionX: CGFloat, extending: Bool) {
     let sample = waveform.xToSample(positionX)
     guard let wordID = wordID(atSample: sample) else { return }
-    transcript.selectWord(wordID)
+    if extending {
+      transcript.wordClicked(wordID, extending: true)
+    } else {
+      transcript.selectWord(wordID)
+    }
+  }
+
+  // swiftlint:disable function_parameter_count
+  /// Wheel/trackpad on the waveform. Holding ⌘ while scrolling ⇒ cursor-anchored horizontal
+  /// zoom; a plain scroll (no ⌘) ⇒ horizontal pan. ⌘ is a single modifier that a Magic Mouse
+  /// swipe reliably carries, matching how Logic users reach for zoom. `optionDown` is accepted
+  /// for forward-compatibility but does not affect the decision. Interpretation lives here,
+  /// not the view.
+  func waveformScrolled(
+    deltaX: CGFloat, deltaY: CGFloat, hasPreciseDeltas: Bool,
+    optionDown: Bool, commandDown: Bool, atX positionX: CGFloat
+  ) {
+    guard deltaX.isFinite, deltaY.isFinite else { return }
+    if commandDown {
+      waveform.zoomByFactor(
+        Self.scrollZoomFactor(deltaY: deltaY, hasPreciseDeltas: hasPreciseDeltas),
+        anchoredAtX: positionX)
+    } else {
+      waveform.panByPixels(
+        Self.scrollPanPixels(deltaX: deltaX, deltaY: deltaY, hasPreciseDeltas: hasPreciseDeltas))
+    }
+  }
+  // swiftlint:enable function_parameter_count
+
+  func editorKeyDown(_ key: EditorKey) -> Bool {
+    switch key {
+    case .zoomIn: waveform.zoomInTapped()
+    case .zoomOut: waveform.zoomOutTapped()
+    case .zoomFit: waveform.zoomFitToggled(selection: transcript.selectedSampleRange)
+    }
+    return true
   }
 
   /// The single funnel for every `slices` mutation: snapshots before/after and records
@@ -959,6 +1001,24 @@ final class EditorModel: ViewModel {
 
   private func cancelMessage(copied: Int, total: Int) -> String {
     "Export cancelled — \(copied) of \(total) exported."
+  }
+
+  /// Points a line-based mouse wheel "click" is worth (trackpads report pixel-precise deltas
+  /// already). Pan/zoom sensitivity constants; on-screen direction verified in QA.
+  private static let pointsPerScrollLine: CGFloat = 40
+  private static let pixelsPerZoomDouble = 300.0
+
+  private static func scrollPanPixels(
+    deltaX: CGFloat, deltaY: CGFloat, hasPreciseDeltas: Bool
+  ) -> CGFloat {
+    let primary = abs(deltaX) >= abs(deltaY) ? deltaX : deltaY
+    return hasPreciseDeltas ? primary : primary * pointsPerScrollLine
+  }
+
+  private static func scrollZoomFactor(deltaY: CGFloat, hasPreciseDeltas: Bool) -> Double {
+    let dy = Double(hasPreciseDeltas ? deltaY : deltaY * pointsPerScrollLine)
+    // spp *= factor; scrolling "away" should zoom in (spp < 1). Flip the sign in QA if inverted.
+    return pow(2.0, -dy / pixelsPerZoomDouble)
   }
 }
 

@@ -64,4 +64,65 @@ struct TranscriptSelectionTests {
     expectNoDifference(model.plainTranscriptText, plainTextBefore)
     expectNoDifference(model.runTogetherWordIDSet, runTogetherBefore)
   }
+
+  @Test func shiftClickExtendsFromAnchorForward() {
+    let model = TranscriptPageModel(editPlan: plan)
+    model.wordClicked(1, extending: false)  // anchor on "one"
+    model.wordClicked(3, extending: true)  // extend to "three"
+    expectNoDifference(model.selectedWordIDSet, [1, 2, 3])
+    expectNoDifference(model.selectionAnchorID, 1)
+    expectNoDifference(model.selectionFocusID, 3)
+  }
+
+  @Test func shiftClickExtendsBackwardKeepingAnchor() {
+    let model = TranscriptPageModel(editPlan: plan)
+    model.wordClicked(3, extending: false)  // anchor on "three"
+    model.wordClicked(1, extending: true)  // extend back to "one"
+    expectNoDifference(model.selectedWordIDSet, [1, 2, 3])
+    expectNoDifference(model.selectionAnchorID, 3)
+  }
+
+  @Test func shiftClickWithNoPriorSelectionPlainSelects() {
+    let model = TranscriptPageModel(editPlan: plan)
+    model.wordClicked(2, extending: true)  // nothing selected yet
+    expectNoDifference(model.selectedWordIDSet, [2])
+    expectNoDifference(model.selectionAnchorID, 2)
+  }
+
+  @Test func shiftClickSameWordStaysSingleWordNotCleared() {
+    let model = TranscriptPageModel(editPlan: plan)
+    model.wordClicked(2, extending: false)
+    model.wordClicked(2, extending: true)  // shift-click the same word
+    expectNoDifference(model.selectedWordIDSet, [2])  // does NOT toggle-clear
+  }
+
+  @Test func plainClickSameWordTogglesClear() {
+    let model = TranscriptPageModel(editPlan: plan)
+    model.wordClicked(2, extending: false)
+    model.wordClicked(2, extending: false)  // plain re-click clears
+    expectNoDifference(model.selectedWordIDSet, [])
+  }
+
+  @Test func shiftClickWithStaleAnchorPlainSelects() {
+    let model = TranscriptPageModel(editPlan: plan)
+    model.selectionAnchorID = 999  // id not in the plan
+    model.selectionFocusID = 999
+    model.wordClicked(2, extending: true)
+    expectNoDifference(model.selectedWordIDSet, [2])
+    expectNoDifference(model.selectionAnchorID, 2)
+  }
+
+  @Test func hasSelectionFalseWhenAnchorStale() {
+    let model = TranscriptPageModel(editPlan: plan)
+    model.selectionAnchorID = 999  // set but unresolvable
+    model.selectionFocusID = 999
+    expectNoDifference(model.hasSelection, false)
+  }
+
+  @Test func transcriptClickExtendingRoutesThroughWordClicked() {
+    let model = TranscriptPageModel(editPlan: plan)
+    model.transcriptClicked(atUTF16Offset: 0, extending: false)  // "one"
+    model.transcriptClicked(atUTF16Offset: 10, extending: true)  // extend into "three"
+    expectNoDifference(model.selectedWordIDSet, [1, 2, 3])
+  }
 }

@@ -264,7 +264,8 @@ final class HitTestingTextView: NSTextView {
   override func mouseUp(with event: NSEvent) {
     guard let coordinator else { return }
     if !didDrag, let anchor = anchorOffset {
-      coordinator.model.transcriptClicked(atUTF16Offset: anchor)
+      coordinator.model.transcriptClicked(
+        atUTF16Offset: anchor, extending: event.modifierFlags.contains(.shift))
     }
     coordinator.model.transcriptDragEnded()
     anchorOffset = nil

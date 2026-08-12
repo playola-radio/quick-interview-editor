@@ -234,6 +234,28 @@ pangyo/
         └── Reusable Components/   # incl. ViewModel base class
 ```
 
+## Interface parity with Logic Pro
+
+**Whenever an interface choice has a counterpart in Logic Pro, match Logic's
+convention** — gestures, modifier keys, keyboard shortcuts, zoom/scroll behavior,
+selection semantics, and naming. This app targets Logic users, so their existing
+muscle memory should transfer directly. When adding an interaction, first ask
+"how does Logic do this?" and mirror it; only diverge when the app has no
+equivalent concept (e.g. Logic's vertical track scrolling has no meaning in our
+single waveform lane), and note the divergence when you do. Verify Logic's actual
+default rather than guessing.
+
+Known Logic conventions already relevant here:
+- **Horizontal zoom (waveform):** ⌘ + scroll/swipe, anchored at the pointer;
+  ⌘←/⌘→ to zoom out/in by steps. (Logic's documented mouse-wheel default is
+  ⌥⌘; we use single-⌘ because a Magic Mouse swipe reliably carries one modifier
+  and it matches how our Logic users reach for zoom — a deliberate divergence.)
+- **Horizontal scroll (pan):** plain scroll/swipe (no modifier).
+- **Zoom to fit:** `Z` toggles between fitting the current selection and fitting
+  all content.
+- **Extend selection:** Shift-click extends a contiguous selection to the clicked
+  item (anchor stays put, focus moves).
+
 ## macOS specifics
 
 - SwiftUI-first; drop to `NSViewRepresentable`/`AppKit` only where needed (the
