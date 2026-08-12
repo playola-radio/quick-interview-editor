@@ -33,6 +33,16 @@ struct SettingsView: View {
       } header: {
         Text(model.title)
       }
+
+      Section {
+        Text(model.cacheStatus)
+          .font(.caption)
+          .foregroundStyle(.secondary)
+        Button(model.clearCacheLabel, role: .destructive) { model.clearCacheTapped() }
+          .disabled(!model.canClearCache)
+      } header: {
+        Text(model.cacheSectionTitle)
+      }
     }
     .padding()
     .frame(width: 460)

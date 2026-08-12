@@ -32,6 +32,13 @@ struct ModelManifest: Equatable, Sendable {
 
   var totalByteCount: Int64 { files.reduce(0) { $0 + $1.byteCount } }
 
+  /// A compact identity of the pinned model set, folded into the packaged engine
+  /// fingerprint so a model bump invalidates cached transcripts. Uses the version
+  /// plus each file's content hash — no disk I/O.
+  var fingerprintIdentity: String {
+    "v\(version):" + files.map(\.sha256).sorted().joined(separator: ",")
+  }
+
   /// faster-whisper `large-v2` (CTranslate2, MIT) pinned to a HuggingFace commit,
   /// plus the torchaudio `WAV2VEC2_ASR_BASE_960H` English alignment model (MIT).
   static let current = ModelManifest(

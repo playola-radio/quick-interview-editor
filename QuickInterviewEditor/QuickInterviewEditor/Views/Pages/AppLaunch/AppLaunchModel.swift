@@ -29,6 +29,12 @@ final class AppLaunchModel: ViewModel {
     // Canonical audio caches are per-session derived data. On launch no editor
     // references any prior-run dir, so prune them all before any new one is created.
     CanonicalAudioStore.pruneAll()
+    // Warm the engine-fingerprint memo off the main actor so the first import
+    // doesn't stall on hashing the engine (notably the frozen binary in packaged builds).
+    Task.detached(priority: .utility) { _ = EngineFingerprint.current() }
+    if let base = try? TranscriptCache.baseDirectory() {
+      TranscriptCache.sweepStaleTempDirs(base: base)
+    }
     self.root = RootModel()
     self.phase = requiresManagedModels ? .modelSetup : .ready
     if requiresManagedModels {

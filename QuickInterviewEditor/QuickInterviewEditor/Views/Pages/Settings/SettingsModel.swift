@@ -15,6 +15,7 @@ final class SettingsModel: ViewModel, Identifiable {
 
   // MARK: - Dependencies
   @ObservationIgnored @Dependency(\.keychain) var keychain
+  @ObservationIgnored @Dependency(\.transcriptCache) var transcriptCache
 
   // MARK: - Initialization
   /// Fired after a successful save or clear, so a presenting model can refresh its
@@ -31,6 +32,7 @@ final class SettingsModel: ViewModel, Identifiable {
   var apiKeyDraft = ""
   private(set) var hasStoredKey = false
   private(set) var statusMessage: String?
+  private(set) var cacheSizeBytes: Int64 = 0
 
   // MARK: - Display Text
   let title = "Cut Suggestions"
@@ -43,6 +45,8 @@ final class SettingsModel: ViewModel, Identifiable {
   let getKeyURL = URL(string: "https://console.anthropic.com/settings/keys")!
   let saveLabel = "Save Key"
   let clearLabel = "Remove Key"
+  let cacheSectionTitle = "Transcription Cache"
+  let clearCacheLabel = "Clear Cache"
 
   // MARK: - View Helpers
   var canSave: Bool {
@@ -52,9 +56,18 @@ final class SettingsModel: ViewModel, Identifiable {
   var storedKeyStatus: String {
     hasStoredKey ? "A key is saved for this machine." : "No key saved yet."
   }
+  var canClearCache: Bool { cacheSizeBytes > 0 }
+  var cacheStatus: String {
+    guard cacheSizeBytes > 0 else { return "No cached transcripts." }
+    let formatted = ByteCountFormatter.string(fromByteCount: cacheSizeBytes, countStyle: .file)
+    return "Cached transcripts use \(formatted). Re-importing an unchanged file is instant."
+  }
 
   // MARK: - User Actions
-  func onAppear() { refreshStoredKeyState() }
+  func onAppear() {
+    refreshStoredKeyState()
+    cacheSizeBytes = transcriptCache.totalSize()
+  }
 
   func saveTapped() {
     let trimmed = apiKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -80,6 +93,17 @@ final class SettingsModel: ViewModel, Identifiable {
       onSaved?()
     } catch {
       statusMessage = "Could not remove the key. Please try again."
+      reportIssue(error)
+    }
+  }
+
+  func clearCacheTapped() {
+    do {
+      try transcriptCache.clear()
+      cacheSizeBytes = 0
+      statusMessage = "Transcription cache cleared."
+    } catch {
+      statusMessage = "Could not clear the cache. Please try again."
       reportIssue(error)
     }
   }

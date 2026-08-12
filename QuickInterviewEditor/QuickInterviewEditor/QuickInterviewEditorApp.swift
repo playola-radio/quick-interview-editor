@@ -11,6 +11,9 @@ struct QuickInterviewEditorApp: App {
         .preferredColorScheme(.dark)
     }
     .defaultSize(width: 1200, height: 800)
+    .commands {
+      TranscriptionCommands(root: model.root)
+    }
 
     Settings {
       SettingsView(model: settings)

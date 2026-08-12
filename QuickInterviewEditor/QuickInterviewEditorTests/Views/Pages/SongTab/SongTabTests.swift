@@ -22,7 +22,7 @@ struct SongTabTests {
     let canonical = URL(fileURLWithPath: "/tmp/qie-songtab-canonical.aiff")
     let model = SongTabModel(sourceURL: URL(fileURLWithPath: "/clip.m4a"))
     await withDependencies {
-      $0.engine.transcribe = { _ in
+      $0.transcription.transcribe = { _, _, _ in
         stream([
           .progress(.init(phase: .transcribing, message: "Transcribing")),
           .completed(Fixtures.transcriptionResult(plan, canonicalAudioURL: canonical)),
@@ -40,7 +40,7 @@ struct SongTabTests {
   @Test func progressUpdatesMessageBeforeCompletion() async {
     let model = SongTabModel(sourceURL: URL(fileURLWithPath: "/clip.m4a"))
     await withDependencies {
-      $0.engine.transcribe = { _ in
+      $0.transcription.transcribe = { _, _, _ in
         stream(
           [.progress(.init(phase: .converting, message: "Converting audio"))],
           throwing: CancellationError())
@@ -55,7 +55,7 @@ struct SongTabTests {
   @Test func failureSetsFailedPhaseWithMessage() async {
     let model = SongTabModel(sourceURL: URL(fileURLWithPath: "/clip.m4a"))
     await withDependencies {
-      $0.engine.transcribe = { _ in
+      $0.transcription.transcribe = { _, _, _ in
         stream([], throwing: EngineClientError.engineFailed("no models"))
       }
     } operation: {
@@ -82,7 +82,9 @@ struct SongTabTests {
     var readyCalled = false
     model.onReadyForNext = { readyCalled = true }
     await withDependencies {
-      $0.engine.transcribe = { _ in stream([.completed(Fixtures.transcriptionResult(plan))]) }
+      $0.transcription.transcribe = { _, _, _ in
+        stream([.completed(Fixtures.transcriptionResult(plan))])
+      }
     } operation: {
       await model.startTranscription()
     }
@@ -98,10 +100,58 @@ struct SongTabTests {
     #expect(readyCalled)
   }
 
+  @Test func startPassesUseCachePolicyByDefault() async {
+    let captured = LockIsolated<CachePolicy?>(nil)
+    let model = SongTabModel(sourceURL: URL(fileURLWithPath: "/clip.m4a"))
+    await withDependencies {
+      $0.transcription.transcribe = { _, _, policy in
+        captured.setValue(policy)
+        return stream([.completed(Fixtures.transcriptionResult(Fixtures.editPlan()))])
+      }
+    } operation: {
+      await model.startTranscription()
+    }
+    expectNoDifference(captured.value, .useCache)
+  }
+
+  @Test func reimportIgnoringCacheRequeuesWithForceFresh() async {
+    let captured = LockIsolated<CachePolicy?>(nil)
+    let model = SongTabModel(sourceURL: URL(fileURLWithPath: "/clip.m4a"))
+    var readyCalled = false
+    model.onReadyForNext = { readyCalled = true }
+
+    model.reimportIgnoringCacheTapped()
+    #expect(model.isQueued)  // re-enters the queue so the cap is respected
+    #expect(readyCalled)
+
+    await withDependencies {
+      $0.transcription.transcribe = { _, _, policy in
+        captured.setValue(policy)
+        return stream([.completed(Fixtures.transcriptionResult(Fixtures.editPlan()))])
+      }
+    } operation: {
+      await model.startTranscription()
+    }
+    expectNoDifference(captured.value, .forceFresh)
+  }
+
+  @Test func canReimportOnlyWhenLoaded() async {
+    let model = SongTabModel(sourceURL: URL(fileURLWithPath: "/clip.m4a"))
+    #expect(!model.canReimport)  // queued
+    await withDependencies {
+      $0.transcription.transcribe = { _, _, _ in
+        stream([.completed(Fixtures.transcriptionResult(Fixtures.editPlan()))])
+      }
+    } operation: {
+      await model.startTranscription()
+    }
+    #expect(model.canReimport)  // loaded
+  }
+
   @Test func preparingPhaseIsIndeterminate() async {
     let model = SongTabModel(sourceURL: URL(fileURLWithPath: "/tmp/a.wav"))
     await withDependencies {
-      $0.engine.transcribe = { _ in
+      $0.transcription.transcribe = { _, _, _ in
         stream([.progress(.init(phase: .transcribing, message: "Preparing audio…"))])
       }
     } operation: {
@@ -114,7 +164,7 @@ struct SongTabTests {
   @Test func transcribingFractionIsDeterminate() async {
     let model = SongTabModel(sourceURL: URL(fileURLWithPath: "/tmp/a.wav"))
     await withDependencies {
-      $0.engine.transcribe = { _ in
+      $0.transcription.transcribe = { _, _, _ in
         stream([
           .progress(.init(phase: .transcribing, message: "Transcribing audio…", fraction: 0.25))
         ])
@@ -130,7 +180,7 @@ struct SongTabTests {
   @Test func fractionNeverMovesBackward() async {
     let model = SongTabModel(sourceURL: URL(fileURLWithPath: "/tmp/a.wav"))
     await withDependencies {
-      $0.engine.transcribe = { _ in
+      $0.transcription.transcribe = { _, _, _ in
         stream([
           .progress(.init(phase: .transcribing, message: "x", fraction: 0.6)),
           .progress(.init(phase: .transcribing, message: "x", fraction: 0.4)),
@@ -145,7 +195,7 @@ struct SongTabTests {
   @Test func tailPhaseGoesIndeterminate() async {
     let model = SongTabModel(sourceURL: URL(fileURLWithPath: "/tmp/a.wav"))
     await withDependencies {
-      $0.engine.transcribe = { _ in
+      $0.transcription.transcribe = { _, _, _ in
         stream([
           .progress(.init(phase: .transcribing, message: "x", fraction: 1.0)),
           .progress(.init(phase: .converting, message: "Converting audio")),
@@ -163,7 +213,7 @@ struct SongTabTests {
     let callCount = LockIsolated(0)
     await withDependencies {
       $0.continuousClock = ImmediateClock()
-      $0.engine.transcribe = { _ in
+      $0.transcription.transcribe = { _, _, _ in
         let isFirstRun = callCount.withValue { count -> Bool in
           count += 1
           return count == 1
@@ -217,15 +267,13 @@ struct SongTabTests {
     let clock = TestClock()
     let model = withDependencies {
       $0.continuousClock = clock
-      var client = EngineClient.testValue
-      client.transcribe = { _ in
+      $0.transcription.transcribe = { _, _, _ in
         AsyncThrowingStream { continuation in
           continuation.yield(
             .progress(EngineProgress(phase: .transcribing, message: "x", fraction: 0.25)))
           // leave the stream open so the tick task keeps running
         }
       }
-      $0.engine = client
     } operation: {
       SongTabModel(sourceURL: URL(fileURLWithPath: "/tmp/a.wav"))
     }

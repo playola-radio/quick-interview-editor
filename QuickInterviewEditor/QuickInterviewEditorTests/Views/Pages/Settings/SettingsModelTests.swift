@@ -1,6 +1,7 @@
 import ConcurrencyExtras
 import CustomDump
 import Dependencies
+import Foundation
 import Testing
 
 @testable import QuickInterviewEditor
@@ -65,5 +66,33 @@ struct SettingsModelTests {
       expectNoDifference(model.hasStoredKey, false)
       expectNoDifference(saved.value, true)
     }
+  }
+
+  @Test func onAppearReadsCacheSizeAndClearWipesIt() {
+    let size = LockIsolated<Int64>(2_300_000_000)
+    let cleared = LockIsolated(false)
+    let model = withDependencies {
+      $0.transcriptCache = TranscriptCacheClient(
+        lookup: { _ in nil },
+        store: { _, plan, url in CachedTranscription(editPlan: plan, canonicalAudioURL: url) },
+        clear: {
+          cleared.setValue(true)
+          size.setValue(0)
+        },
+        totalSize: { size.value })
+    } operation: {
+      SettingsModel()
+    }
+
+    model.onAppear()
+    #expect(model.canClearCache)
+    // Build the expected size string via the same formatter the model uses, so the
+    // assertion doesn't depend on the runtime locale's decimal separator.
+    let expectedSize = ByteCountFormatter.string(fromByteCount: 2_300_000_000, countStyle: .file)
+    #expect(model.cacheStatus.contains(expectedSize))
+
+    model.clearCacheTapped()
+    #expect(cleared.value)
+    #expect(!model.canClearCache)
   }
 }
