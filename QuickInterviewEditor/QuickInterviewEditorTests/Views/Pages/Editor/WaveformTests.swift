@@ -264,7 +264,7 @@ struct WaveformTests {
     let cursorX: CGFloat = 400
     let sampleUnder = Double(model.xToSample(cursorX))
     model.zoomByFactor(0.5, anchoredAtX: cursorX)  // zoom in
-    #expect(model.samplesPerPixel == 50)
+    expectNoDifference(model.samplesPerPixel, 50)
     // the same sample is still drawn within a pixel of the cursor
     #expect(abs(Double(model.sampleToX(Int(sampleUnder)) - cursorX)) < 1.0)
   }
@@ -275,7 +275,7 @@ struct WaveformTests {
     let cursorX: CGFloat = 250
     let sampleUnder = Double(model.xToSample(cursorX))
     model.zoomByFactor(2.0, anchoredAtX: cursorX)  // zoom out
-    #expect(model.samplesPerPixel == 200)
+    expectNoDifference(model.samplesPerPixel, 200)
     #expect(abs(Double(model.sampleToX(Int(sampleUnder)) - cursorX)) < 1.0)
   }
 
@@ -283,7 +283,7 @@ struct WaveformTests {
     let model = makeModel(
       totalSamples: 1_000_000, viewportWidth: 1000, samplesPerPixel: 16, start: 0)
     model.zoomByFactor(0.01, anchoredAtX: 500)  // far past the min (8)
-    #expect(model.samplesPerPixel == 8)
+    expectNoDifference(model.samplesPerPixel, 8)
   }
 
   @Test func zoomByFactorClampsAtFit() {
@@ -291,14 +291,14 @@ struct WaveformTests {
       totalSamples: 100_000, viewportWidth: 1000, samplesPerPixel: 90, start: 0)
     // fit spp = 100_000 / 1000 = 100
     model.zoomByFactor(100, anchoredAtX: 500)
-    #expect(model.samplesPerPixel == 100)
+    expectNoDifference(model.samplesPerPixel, 100)
   }
 
   @Test func panByPixelsClampsAtStart() {
     let model = makeModel(
       totalSamples: 1_000_000, viewportWidth: 1000, samplesPerPixel: 100, start: 5_000)
     model.panByPixels(1_000_000)  // pan hard toward the start
-    #expect(model.visibleStartSample == 0)
+    expectNoDifference(model.visibleStartSample, 0)
   }
 
   @Test func panByPixelsClampsAtEnd() {
@@ -306,14 +306,14 @@ struct WaveformTests {
       totalSamples: 1_000_000, viewportWidth: 1000, samplesPerPixel: 100, start: 5_000)
     // visibleSampleCount = 1000*100 = 100_000; maxStart = 900_000
     model.panByPixels(-1_000_000)  // pan hard toward the end
-    #expect(model.visibleStartSample == 900_000)
+    expectNoDifference(model.visibleStartSample, 900_000)
   }
 
   @Test func panByPixelsMovesByPixelsTimesSamplesPerPixel() {
     let model = makeModel(
       totalSamples: 1_000_000, viewportWidth: 1000, samplesPerPixel: 100, start: 500_000)
     model.panByPixels(-10)  // 10 px * 100 spp = 1000 samples, toward the end
-    #expect(model.visibleStartSample == 501_000)
+    expectNoDifference(model.visibleStartSample, 501_000)
   }
 
   // MARK: - Z zoom-to-fit toggle
@@ -322,36 +322,36 @@ struct WaveformTests {
     let model = makeModel(
       totalSamples: 100_000, viewportWidth: 1000, samplesPerPixel: 20, start: 40_000)
     model.zoomToFitAll()
-    #expect(model.samplesPerPixel == 100)  // 100_000 / 1000
-    #expect(model.visibleStartSample == 0)
+    expectNoDifference(model.samplesPerPixel, 100)  // 100_000 / 1000
+    expectNoDifference(model.visibleStartSample, 0)
   }
 
   @Test func zoomToFitCentersTheRange() {
     let model = makeModel(
       totalSamples: 1_000_000, viewportWidth: 1000, samplesPerPixel: 100, start: 0)
     model.zoomToFit(400_000..<600_000)  // 200_000 wide -> spp 200; center 500_000
-    #expect(model.samplesPerPixel == 200)
+    expectNoDifference(model.samplesPerPixel, 200)
     // visibleSampleCount = 1000*200 = 200_000; start = 500_000 - 100_000
-    #expect(model.visibleStartSample == 400_000)
+    expectNoDifference(model.visibleStartSample, 400_000)
   }
 
   @Test func zoomFitToggledFitsThenRestores() {
     let model = makeModel(
       totalSamples: 1_000_000, viewportWidth: 1000, samplesPerPixel: 50, start: 300_000)
     model.zoomFitToggled(selection: nil)  // fit all
-    #expect(model.samplesPerPixel == 1000)  // 1_000_000 / 1000
-    #expect(model.visibleStartSample == 0)
+    expectNoDifference(model.samplesPerPixel, 1000)  // 1_000_000 / 1000
+    expectNoDifference(model.visibleStartSample, 0)
     model.zoomFitToggled(selection: nil)  // restore
-    #expect(model.samplesPerPixel == 50)
-    #expect(model.visibleStartSample == 300_000)
+    expectNoDifference(model.samplesPerPixel, 50)
+    expectNoDifference(model.visibleStartSample, 300_000)
   }
 
   @Test func zoomFitToggledUsesSelectionWhenProvided() {
     let model = makeModel(
       totalSamples: 1_000_000, viewportWidth: 1000, samplesPerPixel: 50, start: 0)
     model.zoomFitToggled(selection: 400_000..<600_000)
-    #expect(model.samplesPerPixel == 200)
-    #expect(model.visibleStartSample == 400_000)
+    expectNoDifference(model.samplesPerPixel, 200)
+    expectNoDifference(model.visibleStartSample, 400_000)
   }
 
   @Test func zoomFitToggledRefitsWhenSelectionChanged() {
@@ -359,7 +359,7 @@ struct WaveformTests {
       totalSamples: 1_000_000, viewportWidth: 1000, samplesPerPixel: 50, start: 300_000)
     model.zoomFitToggled(selection: 100_000..<200_000)  // fit A
     model.zoomFitToggled(selection: 700_000..<900_000)  // selection changed -> fit B, NOT restore
-    #expect(model.samplesPerPixel == 200)  // 200_000 / 1000
+    expectNoDifference(model.samplesPerPixel, 200)  // 200_000 / 1000
     #expect(model.samplesPerPixel != 50)  // did not restore pre-fit zoom
   }
 
@@ -368,8 +368,8 @@ struct WaveformTests {
       totalSamples: 1_000_000, viewportWidth: 1000, samplesPerPixel: 50, start: 300_000)
     model.zoomFitToggled(selection: 100_000..<200_000)  // fit
     model.zoomFitToggled(selection: 100_000..<200_000)  // same selection -> restore
-    #expect(model.samplesPerPixel == 50)
-    #expect(model.visibleStartSample == 300_000)
+    expectNoDifference(model.samplesPerPixel, 50)
+    expectNoDifference(model.visibleStartSample, 300_000)
   }
 
   @Test func manualZoomBetweenTogglesInvalidatesRestore() {
@@ -379,7 +379,7 @@ struct WaveformTests {
     model.zoomByFactor(0.5, anchoredAtX: 500)  // manual zoom -> invalidates restore
     let sppAfterManual = model.samplesPerPixel
     model.zoomFitToggled(selection: nil)  // must FIT again, not restore
-    #expect(model.samplesPerPixel == 1000)
+    expectNoDifference(model.samplesPerPixel, 1000)
     #expect(model.samplesPerPixel != sppAfterManual)
   }
 
@@ -389,7 +389,7 @@ struct WaveformTests {
     model.zoomFitToggled(selection: nil)  // fit all (stores 50/300_000)
     model.panByPixels(-10)  // manual pan -> invalidates restore
     model.zoomFitToggled(selection: nil)  // must FIT again, not restore
-    #expect(model.visibleStartSample == 0)
-    #expect(model.samplesPerPixel == 1000)
+    expectNoDifference(model.visibleStartSample, 0)
+    expectNoDifference(model.samplesPerPixel, 1000)
   }
 }

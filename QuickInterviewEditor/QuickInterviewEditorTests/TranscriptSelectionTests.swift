@@ -116,7 +116,7 @@ struct TranscriptSelectionTests {
     let model = TranscriptPageModel(editPlan: plan)
     model.selectionAnchorID = 999  // set but unresolvable
     model.selectionFocusID = 999
-    #expect(model.hasSelection == false)
+    expectNoDifference(model.hasSelection, false)
   }
 
   @Test func transcriptClickExtendingRoutesThroughWordClicked() {

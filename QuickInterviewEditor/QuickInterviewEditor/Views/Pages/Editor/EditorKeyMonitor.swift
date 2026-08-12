@@ -35,6 +35,9 @@ struct EditorKeyMonitor: NSViewRepresentable {
       guard let window, event.window === window else { return event }
       guard !Self.isTextEntryActive(in: window) else { return event }
       guard let key = Self.editorKey(for: event), let model else { return event }
+      // Z is a toggle; swallow key auto-repeat so holding it doesn't flicker fit↔restore.
+      // The arrow zoom keys intentionally keep repeating (hold to keep zooming).
+      if key == .zoomFit, event.isARepeat { return nil }
       return model.editorKeyDown(key) ? nil : event
     }
 

@@ -1045,7 +1045,7 @@ struct EditorTests {
     model.waveformScrolled(
       deltaX: 0, deltaY: 20, hasPreciseDeltas: true,
       optionDown: false, commandDown: false, atX: 500)
-    #expect(model.waveform.samplesPerPixel == sppBefore)  // zoom untouched
+    expectNoDifference(model.waveform.samplesPerPixel, sppBefore)  // zoom untouched
     #expect(model.waveform.visibleStartSample != 400_000)  // panned
   }
 
@@ -1070,7 +1070,8 @@ struct EditorTests {
       deltaX: 0, deltaY: 40, hasPreciseDeltas: true,
       optionDown: false, commandDown: false, atX: 500)
 
-    #expect(lineModel.waveform.visibleStartSample == preciseModel.waveform.visibleStartSample)
+    expectNoDifference(
+      lineModel.waveform.visibleStartSample, preciseModel.waveform.visibleStartSample)
 
     // Zoom: 1 line == 40 precise px under ⌥⌘.
     let lineZoom = geometryReadyEditor()
@@ -1085,7 +1086,7 @@ struct EditorTests {
       deltaX: 0, deltaY: 40, hasPreciseDeltas: true,
       optionDown: true, commandDown: true, atX: 500)
 
-    #expect(lineZoom.waveform.samplesPerPixel == preciseZoom.waveform.samplesPerPixel)
+    expectNoDifference(lineZoom.waveform.samplesPerPixel, preciseZoom.waveform.samplesPerPixel)
   }
 
   @Test func waveformClickExtendingExtendsSelection() {
@@ -1111,11 +1112,11 @@ struct EditorTests {
     model.waveform.visibleStartSample = 0
     selectWords(model.transcript, 0, 1)  // a real, resolvable selection
     let consumed = model.editorKeyDown(.zoomFit)  // fit selection (stores 50/0)
-    #expect(consumed == true)
+    expectNoDifference(consumed, true)
     #expect(model.waveform.samplesPerPixel != 50)  // it fit to something
     _ = model.editorKeyDown(.zoomFit)  // restore
-    #expect(model.waveform.samplesPerPixel == 50)
-    #expect(model.waveform.visibleStartSample == 0)
+    expectNoDifference(model.waveform.samplesPerPixel, 50)
+    expectNoDifference(model.waveform.visibleStartSample, 0)
   }
 
   @Test func editorKeyDownZoomInOut() {
