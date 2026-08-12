@@ -335,6 +335,37 @@ struct WaveformTests {
     expectNoDifference(model.visibleStartSample, 400_000)
   }
 
+  @Test func zoomToFitPaddingLeavesBreathingRoomAroundTheRange() {
+    let model = makeModel(
+      totalSamples: 1_000_000, viewportWidth: 1000, samplesPerPixel: 100, start: 0)
+    // 200_000 wide, padded ×1.2 -> 240_000 over 1000 px -> spp 240; center stays 500_000.
+    model.zoomToFit(400_000..<600_000, paddingFraction: 0.1)
+    expectNoDifference(model.samplesPerPixel, 240)
+    // visibleSampleCount = 1000*240 = 240_000; start = 500_000 - 120_000
+    expectNoDifference(model.visibleStartSample, 380_000)
+  }
+
+  @Test func paddedZoomInvalidatesTheArmedFitRestore() {
+    let model = makeModel(
+      totalSamples: 1_000_000, viewportWidth: 1000, samplesPerPixel: 50, start: 0)
+    let selection = 400_000..<600_000
+    model.zoomFitToggled(selection: selection)  // fits X (spp 200), arms restore of spp 50
+    model.zoomToFit(selection, paddingFraction: 0.1)  // reveal: must clear the armed restore
+    // With the restore cleared, a second Z fits fresh (spp 200) instead of restoring spp 50.
+    model.zoomFitToggled(selection: selection)
+    expectNoDifference(model.samplesPerPixel, 200)
+  }
+
+  @Test func plainZoomToFitStillTogglesRestoreForTheZKey() {
+    let model = makeModel(
+      totalSamples: 1_000_000, viewportWidth: 1000, samplesPerPixel: 50, start: 300_000)
+    let selection = 400_000..<600_000
+    model.zoomFitToggled(selection: selection)  // fit (spp 200), arms restore of spp 50/start 300k
+    model.zoomFitToggled(selection: selection)  // same selection -> restore, NOT re-fit
+    expectNoDifference(model.samplesPerPixel, 50)
+    expectNoDifference(model.visibleStartSample, 300_000)
+  }
+
   @Test func zoomFitToggledFitsThenRestores() {
     let model = makeModel(
       totalSamples: 1_000_000, viewportWidth: 1000, samplesPerPixel: 50, start: 300_000)

@@ -93,20 +93,33 @@ private struct SliceCard: View {
         Text(row.durationLabel).font(.system(size: 11))
           .foregroundStyle(Color(white: 0.54))
       }
-      Text(row.rangeLabel).font(.system(size: 11).monospacedDigit())
-        .foregroundStyle(Color(white: 0.44))
-      Text(row.snippet).font(.system(size: 12.5))
-        .foregroundStyle(Color(white: 0.6)).lineLimit(2)
-      if row.isTight {
-        Text(row.warningLabel)
-          .font(.system(size: 10, weight: .semibold)).tracking(0.3)
-          .foregroundStyle(Color(red: 0.89, green: 0.58, blue: 0.58))
-          .padding(.horizontal, 7).padding(.vertical, 2)
-          .background(
-            Capsule().fill(Color(red: 0.89, green: 0.58, blue: 0.58).opacity(0.16))
-          )
-          .help(row.warningHelp).accessibilityLabel(row.warningHelp)
+      // The range + snippet block is a plain-style button — activating it jumps the transcript
+      // and waveform to the clip and is keyboard/VoiceOver-accessible. Kept off the rename field
+      // and the action buttons so it never steals their taps.
+      Button {
+        model.sliceRevealTapped(row.id)
+      } label: {
+        VStack(alignment: .leading, spacing: 6) {
+          Text(row.rangeLabel).font(.system(size: 11).monospacedDigit())
+            .foregroundStyle(Color(white: 0.44))
+          Text(row.snippet).font(.system(size: 12.5))
+            .foregroundStyle(Color(white: 0.6)).lineLimit(2)
+          if row.isTight {
+            Text(row.warningLabel)
+              .font(.system(size: 10, weight: .semibold)).tracking(0.3)
+              .foregroundStyle(Color(red: 0.89, green: 0.58, blue: 0.58))
+              .padding(.horizontal, 7).padding(.vertical, 2)
+              .background(
+                Capsule().fill(Color(red: 0.89, green: 0.58, blue: 0.58).opacity(0.16))
+              )
+              .help(row.warningHelp).accessibilityLabel(row.warningHelp)
+          }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
       }
+      .buttonStyle(.plain)
+      .accessibilityLabel(model.revealClipLabel)
       HStack(spacing: 8) {
         Button(row.playButtonLabel) {
           Task { await model.playStopTapped(row.id) }

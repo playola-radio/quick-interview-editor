@@ -19,6 +19,14 @@ enum TranscriptFollowMode: Equatable {
   case userPaused
 }
 
+/// An explicit "scroll this word into view" request, distinct from the playhead-follow
+/// `scrollTargetWordID` (which the view suppresses once the user scrolls by hand). The
+/// `token` bumps on every request so re-revealing the same word still re-scrolls.
+struct TranscriptReveal: Equatable {
+  var wordID: Word.ID
+  var token: Int
+}
+
 @MainActor
 @Observable
 class TranscriptPageModel: ViewModel {
@@ -68,6 +76,10 @@ class TranscriptPageModel: ViewModel {
   let defaultFontSize = defaultTranscriptFontSize
   var followMode: TranscriptFollowMode = .following
   var scrollTargetWordID: Word.ID?
+  /// The latest explicit reveal request (from clicking a suggestion or clip). The view scrolls
+  /// to it regardless of `followMode`; nil until the first reveal.
+  var reveal: TranscriptReveal?
+  @ObservationIgnored private var revealToken = 0
   @ObservationIgnored private var wasPlaying = false
 
   // MARK: - Display Text
@@ -151,6 +163,28 @@ class TranscriptPageModel: ViewModel {
   func selectWord(_ id: Word.ID) {
     selectionAnchorID = id
     selectionFocusID = id
+  }
+
+  /// Selects the contiguous run between two words (a suggestion's or clip's endpoints).
+  /// Both IDs must resolve in the loaded plan; otherwise the selection is left untouched and
+  /// `false` is returned so callers don't act on a selection that didn't change.
+  @discardableResult
+  func selectWords(anchorID: Word.ID, focusID: Word.ID) -> Bool {
+    guard let plan = editPlan,
+      plan.words.contains(where: { $0.id == anchorID }),
+      plan.words.contains(where: { $0.id == focusID })
+    else { return false }
+    selectionAnchorID = anchorID
+    selectionFocusID = focusID
+    return true
+  }
+
+  /// Requests a scroll to the first selected word — an explicit reveal that isn't gated by
+  /// `followMode`, so it works even after the user has scrolled away. No-op with no selection.
+  func revealSelection() {
+    guard let first = selectedWords.first else { return }
+    revealToken += 1
+    reveal = TranscriptReveal(wordID: first.id, token: revealToken)
   }
 
   func sensitivityChanged(_ ms: Double) {
