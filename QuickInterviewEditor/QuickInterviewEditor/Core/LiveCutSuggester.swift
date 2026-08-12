@@ -116,6 +116,7 @@ enum LiveCutSuggester {
 
       let task = Task {
         do {
+          let startedAt = Date()
           let launch = resolvedLaunch()
           guard FileManager.default.isExecutableFile(atPath: launch.executable.path) else {
             throw CutSuggestClientError.helperNotFound(launch.executable.path)
@@ -164,10 +165,9 @@ enum LiveCutSuggester {
           guard code == 0 else {
             throw mapFailure(stderr: proc.stderrTail())
           }
-          let provenance = provenance(for: request)
-          let suggestions = try CutSuggestion.decodeSuggestions(
-            from: out, provenance: provenance, makeID: { UUID() })
-          continuation.yield(.completed(suggestions))
+          let completed = try completedEvent(
+            from: out, request: request, launch: launch, startedAt: startedAt)
+          continuation.yield(completed)
           continuation.finish()
         } catch is CancellationError {
           continuation.finish()
@@ -208,6 +208,47 @@ enum LiveCutSuggester {
       transcriptHash: request.transcriptHash,
       sourceFingerprint: request.sourceFingerprint,
       diarizationHash: request.diarization?.diarizationHash)
+  }
+
+  private static func completedEvent(
+    from out: Data,
+    request: CutSuggestRequest,
+    launch: EngineLaunch,
+    startedAt: Date
+  ) throws -> CutSuggestEvent {
+    let payload = try CutSuggestion.decodeSuggestionPayload(
+      from: out, provenance: provenance(for: request), makeID: { UUID() })
+    guard !payload.suggestions.isEmpty else {
+      throw CutSuggestClientError.noSuggestions(
+        emptyRunDiagnostic(
+          meta: payload.meta,
+          launch: launch,
+          elapsed: Date().timeIntervalSince(startedAt)))
+    }
+    return .completed(payload.suggestions)
+  }
+
+  private static func emptyRunDiagnostic(
+    meta: CutSuggestion.WireMeta?,
+    launch: EngineLaunch,
+    elapsed: TimeInterval
+  ) -> String {
+    let helperMode = launch.isBundled ? "bundled helper" : "dev Python fallback"
+    let base =
+      meta?.diagnosticDescription
+      ?? "The helper returned an empty suggestions array without diagnostics."
+    let elapsedText = String(format: "%.1f", elapsed)
+    var lines = [
+      base,
+      "Helper: \(helperMode) at \(launch.executable.path).",
+      "Elapsed: \(elapsedText)s.",
+    ]
+    if elapsed < 2 {
+      lines.append(
+        "Because this finished almost instantly, it was probably served from cached LLM responses "
+          + "rather than a fresh provider call.")
+    }
+    return lines.joined(separator: "\n")
   }
 
   /// Classifies a nonzero-exit failure from the helper's stderr tail. A missing

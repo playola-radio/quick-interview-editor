@@ -63,9 +63,18 @@ class OpenAIClient:
         )
         with urllib.request.urlopen(req, timeout=self.timeout) as r:
             resp = json.load(r)
+        choice = resp["choices"][0]
+        finish_reason = choice.get("finish_reason")
+        text = choice["message"]["content"]
+        if finish_reason == "length":
+            raise RuntimeError(
+                f"OpenAI hit the output token limit for {purpose or 'prompt'} before completing JSON"
+            )
+        if not text.strip():
+            raise RuntimeError(f"OpenAI returned an empty response for {purpose or 'prompt'}")
         return LLMResponse(
-            text=resp["choices"][0]["message"]["content"],
-            usage=resp.get("usage", {}),
+            text=text,
+            usage={**resp.get("usage", {}), "finish_reason": finish_reason},
             model=self.model,
         )
 
@@ -80,7 +89,7 @@ class AnthropicClient:
 
     _JSON_SYSTEM = "You are a precise assistant. Reply with a single strict JSON object and nothing else."
 
-    def __init__(self, model: str, *, max_tokens: int = 4096):
+    def __init__(self, model: str, *, max_tokens: int = 8192):
         self.model = model
         self.max_tokens = max_tokens
 
@@ -95,12 +104,24 @@ class AnthropicClient:
             messages=[{"role": "user", "content": prompt}],
         )
         text = "".join(b.text for b in msg.content if getattr(b, "type", None) == "text")
+        stop_reason = getattr(msg, "stop_reason", None)
         usage = {}
         if getattr(msg, "usage", None) is not None:
             usage = {
                 "prompt_tokens": msg.usage.input_tokens,
                 "completion_tokens": msg.usage.output_tokens,
+                "stop_reason": stop_reason,
             }
+        if stop_reason == "max_tokens":
+            raise RuntimeError(
+                f"Anthropic hit max_tokens={self.max_tokens} for {purpose or 'prompt'} "
+                "before completing JSON"
+            )
+        if not text.strip():
+            raise RuntimeError(
+                f"Anthropic returned an empty response for {purpose or 'prompt'} "
+                f"(stop_reason={stop_reason!r})"
+            )
         return LLMResponse(text=_strip_json_fence(text), usage=usage, model=self.model)
 
 

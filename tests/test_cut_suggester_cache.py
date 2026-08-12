@@ -1,5 +1,6 @@
 """Disk cache for LLM calls: deterministic keys, replay, no-network guarantee."""
 
+import json
 import threading
 
 import pytest
@@ -17,6 +18,11 @@ class _FakeLLM:
     def complete(self, prompt, *, purpose=""):
         self.calls.append((prompt, purpose))
         return LLMResponse(text=f"answer:{len(self.calls)}", usage={}, model="fake")
+
+
+class _EmptyLLM:
+    def complete(self, prompt, *, purpose=""):
+        return LLMResponse(text="", usage={}, model="fake")
 
 
 def _client(cache_dir, inner=None, **over):
@@ -47,6 +53,38 @@ def test_live_mode_writes_through_and_replays_without_network(tmp_path):
     assert r2.text == "answer:1"
     assert r2.cached is True
     assert len(inner.calls) == 1  # inner was not called again
+
+
+def test_live_mode_recomputes_poisoned_empty_cache_entry(tmp_path):
+    path = _client(tmp_path, inner=None)._path("prompt")
+    tmp_path.mkdir(exist_ok=True)
+
+    with open(path, "w") as f:
+        json.dump({"response": {"text": "", "usage": {}, "model": "fake"}}, f)
+
+    inner = _FakeLLM()
+    resp = _client(tmp_path, inner=inner).complete("prompt", purpose="classify")
+
+    assert resp.text == "answer:1"
+    assert len(inner.calls) == 1
+    assert _client(tmp_path, inner=None).complete("prompt").text == "answer:1"
+
+
+def test_cached_only_mode_raises_on_poisoned_empty_cache_entry(tmp_path):
+    path = _client(tmp_path, inner=None)._path("prompt")
+    tmp_path.mkdir(exist_ok=True)
+
+    with open(path, "w") as f:
+        json.dump({"response": {"text": "", "usage": {}, "model": "fake"}}, f)
+
+    with pytest.raises(CacheMiss, match="cached response .* was empty"):
+        _client(tmp_path, inner=None).complete("prompt", purpose="classify")
+
+
+def test_live_mode_does_not_cache_empty_provider_response(tmp_path):
+    with pytest.raises(RuntimeError, match="empty response"):
+        _client(tmp_path, inner=_EmptyLLM()).complete("prompt", purpose="classify")
+    assert not _client(tmp_path, inner=None)._has("prompt")
 
 
 def test_write_leaves_no_temp_file_behind(tmp_path):

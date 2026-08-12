@@ -17,7 +17,8 @@ struct CachedTranscription: Sendable, Equatable {
 /// own base, so tab-close cleanup never deletes a cache-owned file.
 enum TranscriptCache {
   // On-disk manifest schema; distinct from TranscriptionCacheKey.schemaVersion (cache-KEY schema).
-  static let schemaVersion = 1
+  // v2 adds `audioByteCount` so a truncated/corrupt canonical.aiff is detected on lookup.
+  static let schemaVersion = 2
   static let planName = "plan.json"
   static let audioName = "canonical.aiff"
   static let manifestName = "manifest.json"
@@ -25,6 +26,11 @@ enum TranscriptCache {
   struct Manifest: Codable, Equatable {
     var schemaVersion: Int
     var key: String
+    var audioByteCount: Int64
+  }
+
+  private static func fileByteCount(_ url: URL) -> Int64? {
+    (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init)
   }
 
   static func baseDirectory() throws -> URL {
@@ -47,6 +53,7 @@ enum TranscriptCache {
       let manifest = try? JSONDecoder().decode(Manifest.self, from: manifestData),
       manifest.schemaVersion == schemaVersion,
       manifest.key == key,
+      fileByteCount(audioURL) == manifest.audioByteCount,
       let plan = try? EditPlan.decoded(from: planURL)
     else { return nil }
     return CachedTranscription(editPlan: plan, canonicalAudioURL: audioURL)
@@ -62,9 +69,11 @@ enum TranscriptCache {
     defer { try? fm.removeItem(at: tmp) }  // no-op once renamed away
 
     try JSONEncoder().encode(plan).write(to: tmp.appendingPathComponent(planName))
-    try fm.copyItem(at: canonicalAudioURL, to: tmp.appendingPathComponent(audioName))
+    let stagedAudio = tmp.appendingPathComponent(audioName)
+    try fm.copyItem(at: canonicalAudioURL, to: stagedAudio)
     // Manifest written LAST — its presence is the commit marker a lookup checks.
-    let manifest = Manifest(schemaVersion: schemaVersion, key: key)
+    let manifest = Manifest(
+      schemaVersion: schemaVersion, key: key, audioByteCount: fileByteCount(stagedAudio) ?? 0)
     try JSONEncoder().encode(manifest).write(to: tmp.appendingPathComponent(manifestName))
 
     let dest = base.appendingPathComponent(key)

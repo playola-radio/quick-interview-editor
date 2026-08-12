@@ -103,11 +103,23 @@ import Testing
     try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
     try JSONEncoder().encode(Fixtures.editPlan()).write(to: dir.appendingPathComponent("plan.json"))
     try Data("audio".utf8).write(to: dir.appendingPathComponent("canonical.aiff"))
+    // Size matches the on-disk audio so ONLY the key mismatch causes the miss.
     let manifest = TranscriptCache.Manifest(
-      schemaVersion: TranscriptCache.schemaVersion, key: "someOtherKey")
+      schemaVersion: TranscriptCache.schemaVersion, key: "someOtherKey", audioByteCount: 5)
     try JSONEncoder().encode(manifest).write(to: dir.appendingPathComponent("manifest.json"))
 
     let cache = TranscriptCacheClient.onDisk(base: base)
     #expect(cache.lookup("wrongName") == nil)
+  }
+
+  @Test func lookupMissesWhenAudioSizeDoesNotMatchManifest() throws {
+    let base = makeBase()
+    defer { try? FileManager.default.removeItem(at: base) }
+    let cache = TranscriptCacheClient.onDisk(base: base)
+    let stored = try cache.store(
+      "k", Fixtures.editPlan(), makeAIFF(base, bytes: "full-audio-bytes"))
+    // Corrupt/truncate the cached AIFF so its size no longer matches the manifest.
+    try Data("x".utf8).write(to: stored.canonicalAudioURL)
+    #expect(cache.lookup("k") == nil)  // size mismatch ⇒ not a valid hit
   }
 }

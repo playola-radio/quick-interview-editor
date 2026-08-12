@@ -24,6 +24,7 @@ struct RootTests {
 
   @Test func openingAFileAddsAndSelectsATab() {
     withDependencies {
+      $0.continuousClock = TestClock()
       $0.transcription.transcribe = { _, _, _ in neverCompleting() }
     } operation: {
       let model = RootModel()
@@ -36,6 +37,7 @@ struct RootTests {
 
   @Test func droppingTwoFilesOpensTwoTabs() {
     withDependencies {
+      $0.continuousClock = TestClock()
       $0.transcription.transcribe = { _, _, _ in neverCompleting() }
     } operation: {
       let model = RootModel()
@@ -46,6 +48,7 @@ struct RootTests {
 
   @Test func closingATabRemovesItAndFixesSelection() {
     withDependencies {
+      $0.continuousClock = TestClock()
       $0.transcription.transcribe = { _, _, _ in neverCompleting() }
     } operation: {
       let model = RootModel()
@@ -75,6 +78,7 @@ struct RootTests {
 
   @Test func nonAudioDropsAreIgnored() {
     withDependencies {
+      $0.continuousClock = TestClock()
       $0.transcription.transcribe = { _, _, _ in neverCompleting() }
     } operation: {
       let model = RootModel()
@@ -90,6 +94,7 @@ struct RootTests {
 
   @Test func dropsBeyondTheCapAreQueued() {
     withDependencies {
+      $0.continuousClock = TestClock()
       $0.transcription.transcribe = { _, _, _ in neverCompleting() }
     } operation: {
       let model = RootModel()
@@ -117,6 +122,7 @@ struct RootTests {
     defer { try? FileManager.default.removeItem(at: destination) }
 
     try await withDependencies {
+      $0.continuousClock = TestClock()
       $0.transcription.transcribe = { _, _, _ in
         AsyncThrowingStream {
           $0.yield(.completed(Fixtures.transcriptionResult(plan)))
@@ -153,6 +159,7 @@ struct RootTests {
 
   @Test func closingARunningTabPromotesAQueuedOne() {
     withDependencies {
+      $0.continuousClock = TestClock()
       $0.transcription.transcribe = { _, _, _ in neverCompleting() }
     } operation: {
       let model = RootModel()
@@ -215,6 +222,7 @@ struct RootTests {
     let plan = Fixtures.editPlan()
 
     await withDependencies {
+      $0.continuousClock = TestClock()
       $0.transcription.transcribe = { _, _, _ in
         AsyncThrowingStream {
           $0.yield(.completed(Fixtures.transcriptionResult(plan, canonicalAudioURL: canonical)))

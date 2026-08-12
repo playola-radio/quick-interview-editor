@@ -27,6 +27,10 @@ from .prompts import partition_prompt, stage2_prompt
 from .stitch import stitch_partitions
 
 
+class CutSuggesterOutputError(ValueError):
+    """Raised when a provider/cache response cannot be used as cutter JSON."""
+
+
 @dataclass
 class CutSuggestResult:
     candidates: list[CutCandidate]
@@ -45,15 +49,25 @@ def _noop_progress(**_kwargs: object) -> None:
     pass
 
 
+def _preview_response(text: str, limit: int = 240) -> str:
+    one_line = " ".join(text.strip().split())
+    return one_line[:limit] + ("…" if len(one_line) > limit else "")
+
+
 def parse_partition_response(text: str, a: int, b: int) -> list[TopicPartition]:
     """Parse a window's paragraph JSON, clamping spans into [a, b)."""
+    if not text.strip():
+        raise CutSuggesterOutputError("partition response was empty")
     try:
         data = json.loads(text)
-    except json.JSONDecodeError:
-        return []  # malformed provider/cache output -> no partitions
+    except json.JSONDecodeError as exc:
+        raise CutSuggesterOutputError(
+            "partition response was not valid JSON "
+            f"({exc.msg} at char {exc.pos}); response began with: {_preview_response(text)!r}"
+        ) from exc
     paras = data.get("paragraphs") if isinstance(data, dict) else None
     if not isinstance(paras, list):
-        return []
+        raise CutSuggesterOutputError("partition response did not contain a 'paragraphs' array")
     out: list[TopicPartition] = []
     for p in paras:
         if not isinstance(p, dict):
@@ -66,17 +80,29 @@ def parse_partition_response(text: str, a: int, b: int) -> list[TopicPartition]:
         start = max(a, min(start, b - 1))
         end = max(start, min(end, b - 1))
         out.append(TopicPartition(start, end, str(p.get("label", "")).strip()))
+    if not out:
+        raise CutSuggesterOutputError(
+            f"partition response contained no valid paragraphs ({len(paras)} raw item(s))"
+        )
     return out
 
 
 def parse_clip_response(text: str) -> list[dict]:
+    if not text.strip():
+        raise CutSuggesterOutputError(
+            "classification response was empty; the provider likely hit its output limit "
+            "or returned no text"
+        )
     try:
         data = json.loads(text)
-    except json.JSONDecodeError:
-        return []  # malformed provider/cache output -> no clips
+    except json.JSONDecodeError as exc:
+        raise CutSuggesterOutputError(
+            "classification response was not valid JSON "
+            f"({exc.msg} at char {exc.pos}); response began with: {_preview_response(text)!r}"
+        ) from exc
     clips = data.get("clips") if isinstance(data, dict) else None
     if not isinstance(clips, list):
-        return []
+        raise CutSuggesterOutputError("classification response did not contain a 'clips' array")
     return [c for c in clips if isinstance(c, dict)]
 
 

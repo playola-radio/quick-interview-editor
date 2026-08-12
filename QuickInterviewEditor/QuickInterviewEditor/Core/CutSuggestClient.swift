@@ -54,6 +54,10 @@ enum CutSuggestClientError: Error, Equatable, LocalizedError {
   /// The subprocess exited nonzero (provider/network failure, invalid request, a
   /// cache miss in cached-only mode, …). Carries the helper's stderr tail.
   case suggestFailed(String)
+  /// The subprocess exited cleanly but produced no usable candidates. Carries
+  /// run diagnostics so the UI can explain whether the model returned no clips,
+  /// clips were malformed, or all candidates were dropped by duration filters.
+  case noSuggestions(String)
   /// The subprocess exited cleanly but its stdout was not the expected suggestion
   /// JSON (non-JSON leaked, or a candidate was missing a required field).
   case decodeFailed(String)
@@ -68,6 +72,8 @@ enum CutSuggestClientError: Error, Equatable, LocalizedError {
       return "The cut-suggester could not authenticate with the model provider.\n\n\(detail)"
     case .suggestFailed(let detail):
       return "The cut-suggester failed.\n\n\(detail)"
+    case .noSuggestions(let detail):
+      return "The cut-suggester completed but produced no usable suggestions.\n\n\(detail)"
     case .decodeFailed(let detail):
       return "The cut-suggester returned output that could not be read.\n\n\(detail)"
     }

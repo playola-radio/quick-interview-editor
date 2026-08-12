@@ -49,7 +49,8 @@ def _load_audio_16k_mono(source: Path):
 
 
 def _aligned_segments(
-    source: Path, model_name: str, device: str, compute_type: str
+    source: Path, model_name: str, device: str, compute_type: str,
+    *, progress_callback=None,
 ) -> list[dict]:
     # Resolve model locations + offline flags from QIE_* env. In dev (no env)
     # this is a no-op and models download to the default caches as before; in
@@ -64,11 +65,29 @@ def _aligned_segments(
     # download); otherwise the caller's named model (e.g. "large-v2").
     whisper_arch = config.whisper_model_dir or model_name
 
+    # WhisperX passes each stage its OWN unscaled 0..100 progress (its
+    # `combined_progress` flag only scales the `print` line it emits, never
+    # the callback — verified against whisperx 3.8.6's asr.py/alignment.py).
+    # We own the stage mapping ourselves so the two stages combine into one
+    # monotonic 0.0..1.0 sweep: transcribe -> 0.0..0.5, align -> 0.5..1.0.
+    if progress_callback is not None:
+
+        def _transcribe_progress(pct):
+            progress_callback((pct / 100.0) * 0.5)
+
+        def _align_progress(pct):
+            progress_callback(0.5 + (pct / 100.0) * 0.5)
+    else:
+        _transcribe_progress = None
+        _align_progress = None
+
     audio = _load_audio_16k_mono(source)
     model = whisperx.load_model(
         whisper_arch, device, compute_type=compute_type, local_files_only=config.offline
     )
-    result = model.transcribe(audio, batch_size=16)
+    result = model.transcribe(
+        audio, batch_size=16, progress_callback=_transcribe_progress,
+    )
     # `model_cache_only=offline` forces the alignment model to load from disk only.
     # The packaged app ships just the English torchaudio align model; offline mode
     # therefore fails clearly for any other detected language instead of silently
@@ -81,7 +100,7 @@ def _aligned_segments(
     )
     aligned = whisperx.align(
         result["segments"], align_model, metadata, audio, device,
-        return_char_alignments=False,
+        return_char_alignments=False, progress_callback=_align_progress,
     )
     return aligned["segments"]
 
@@ -91,9 +110,12 @@ def transcribe_transcript(
     model_name: str = "large-v2",
     device: str = "cpu",
     compute_type: str = "int8",
+    *, progress_callback=None,
 ) -> Transcript:
     """Full transcription with per-word start/end grouped into segments."""
-    segments_raw = _aligned_segments(source, model_name, device, compute_type)
+    segments_raw = _aligned_segments(
+        source, model_name, device, compute_type, progress_callback=progress_callback
+    )
 
     words: list[RichWord] = []
     segments: list[Segment] = []

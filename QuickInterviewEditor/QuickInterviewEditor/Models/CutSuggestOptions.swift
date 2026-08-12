@@ -14,7 +14,7 @@ struct CutSuggestOptions: Equatable, Sendable {
 
   init(
     model: String = "claude-sonnet-5",
-    promptVersion: String = "v1",
+    promptVersion: String = "v2",
     productSpecVersion: String = ProductSpec.version,
     stage1Window: Int = 130,
     stage1Step: Int = 110
