@@ -2,8 +2,10 @@ import AppKit
 import SwiftUI
 
 /// A transparent AppKit layer over the waveform `Canvas`. It owns all waveform mouse
-/// input — scroll (zoom/pan), click (select / Shift-extend), and drag (pan) — and forwards
-/// only raw facts to `EditorModel`. The `Canvas` beneath stays a pure renderer.
+/// input — scroll (zoom/pan), click (select / Shift-extend), and drag (a Logic-style marquee
+/// area-selection) — and forwards only raw facts to `EditorModel`. Panning the view is on scroll/
+/// swipe (matching Logic, where a workspace drag marquee-selects rather than pans). The `Canvas`
+/// beneath stays a pure renderer.
 struct WaveformInteractionLayer: NSViewRepresentable {
   let model: EditorModel
 
@@ -44,17 +46,20 @@ struct WaveformInteractionLayer: NSViewRepresentable {
 
     override func mouseDragged(with event: NSEvent) {
       guard let start = dragStartX else { return }
-      let dx = localX(event) - start
+      let currentX = localX(event)
       if !didDrag {
-        guard abs(dx) >= dragThreshold else { return }
+        guard abs(currentX - start) >= dragThreshold else { return }
         didDrag = true
-        model?.waveform.dragScrollBegan()
+        // Shift is read at the moment the marquee begins so a mid-drag key change can't retarget it.
+        model?.waveformAreaSelectBegan(atX: start, extending: event.modifierFlags.contains(.shift))
       }
-      model?.waveform.dragScrolled(byPixels: dx)
+      model?.waveformAreaSelectChanged(toX: currentX)
     }
 
     override func mouseUp(with event: NSEvent) {
-      if !didDrag, let start = dragStartX {
+      if didDrag {
+        model?.waveformAreaSelectEnded(toX: localX(event))
+      } else if let start = dragStartX {
         model?.waveformClicked(atX: start, extending: event.modifierFlags.contains(.shift))
       }
       dragStartX = nil
