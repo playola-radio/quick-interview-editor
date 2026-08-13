@@ -209,21 +209,8 @@ enum LiveEngine {
           async let exitCode = proc.waitForExit()
 
           for await line in proc.stderrLines() {
-            guard line.hasPrefix("QIE_EVENT ") else { continue }
-            let json = Data(line.dropFirst("QIE_EVENT ".count).utf8)
-            guard
-              let wire = try? JSONDecoder().decode(WireEvent.self, from: json),
-              wire.type == "progress",
-              let phaseRaw = wire.phase,
-              let phase = EngineProgress.Phase(rawValue: phaseRaw)
-            else { continue }
-            continuation.yield(
-              .progress(
-                EngineProgress(
-                  phase: phase,
-                  message: wire.message ?? "",
-                  fraction: sanitizedFraction(wire.fraction)))
-            )
+            guard let progress = Self.parseProgressEvent(line) else { continue }
+            continuation.yield(.progress(progress))
           }
 
           let out = await stdoutData
@@ -279,8 +266,51 @@ enum LiveEngine {
   private struct WireEvent: Decodable {
     var type: String
     var phase: String?
+    var phaseIndex: Int?
+    var phaseCount: Int?
+    var label: String?
     var message: String?
     var fraction: Double?
+    enum CodingKeys: String, CodingKey {
+      case type, phase, label, message, fraction
+      case phaseIndex = "phase_index"
+      case phaseCount = "phase_count"
+    }
+    init(from decoder: Decoder) throws {
+      let container = try decoder.container(keyedBy: CodingKeys.self)
+      type = try container.decode(String.self, forKey: .type)
+      // Optional fields decode leniently: a wrong-typed field is ignored (nil) rather
+      // than failing the whole event, so one malformed field never drops an otherwise
+      // usable progress update.
+      phase = try? container.decodeIfPresent(String.self, forKey: .phase)
+      phaseIndex = try? container.decodeIfPresent(Int.self, forKey: .phaseIndex)
+      phaseCount = try? container.decodeIfPresent(Int.self, forKey: .phaseCount)
+      label = try? container.decodeIfPresent(String.self, forKey: .label)
+      message = try? container.decodeIfPresent(String.self, forKey: .message)
+      fraction = try? container.decodeIfPresent(Double.self, forKey: .fraction)
+    }
+  }
+
+  /// Parses one stderr line into an ``EngineProgress``, or nil for any line that
+  /// isn't a `QIE_EVENT` progress event. An unknown/renamed phase string is NOT
+  /// dropped — display is driven by the metadata + fraction, not by a known-phase
+  /// enum — so a future engine phase still renders. `fraction: null` reads the same
+  /// as an absent fraction (indeterminate).
+  static func parseProgressEvent(_ line: String) -> EngineProgress? {
+    guard line.hasPrefix("QIE_EVENT ") else { return nil }
+    let json = Data(line.dropFirst("QIE_EVENT ".count).utf8)
+    guard
+      let wire = try? JSONDecoder().decode(WireEvent.self, from: json),
+      wire.type == "progress",
+      let phaseRaw = wire.phase
+    else { return nil }
+    return EngineProgress(
+      phase: phaseRaw,
+      phaseIndex: wire.phaseIndex,
+      phaseCount: wire.phaseCount,
+      label: wire.label,
+      message: wire.message ?? "",
+      fraction: sanitizedFraction(wire.fraction))
   }
 
   /// Clamps a decoded progress fraction to `0...1`, dropping non-finite values

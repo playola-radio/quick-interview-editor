@@ -45,20 +45,24 @@ def _install_fake_whisperx(monkeypatch, calls):
     monkeypatch.setattr(backend, "_load_audio_16k_mono", lambda source: np.zeros(16000, dtype=np.float32))
 
 
-def test_progress_callback_mapped_to_unified_stage_halves(monkeypatch, tmp_path):
-    """Regression test for the bug where both stages swept the full 0..100
-    range: whisperx's progress_callback is unscaled per-stage (verified against
-    3.8.6's asr.py/alignment.py — `combined_progress` only scales the internal
-    `print`, never the callback). We must own the stage mapping ourselves so
-    transcribe occupies fraction 0.0..0.5 and align occupies 0.5..1.0.
+def test_progress_callback_reports_each_stage_unscaled(monkeypatch, tmp_path):
+    """Each WhisperX stage reports its OWN unscaled 0..1 progress, tagged with the
+    stage name — no folding into halves. whisperx's progress_callback is unscaled
+    per-stage (verified against 3.8.6's asr.py/alignment.py — `combined_progress`
+    only scales the internal `print`, never the callback). The CLI owns the phase
+    model (which stage is phase 1 vs 2); the backend just tags each stage.
     """
     calls = []
     _install_fake_whisperx(monkeypatch, calls)
     received = []
-    backend.transcribe_transcript(tmp_path / "x.wav", progress_callback=lambda p: received.append(p))
+    backend.transcribe_transcript(
+        tmp_path / "x.wav", progress_callback=lambda stage, f: received.append((stage, f))
+    )
     assert calls == ["transcribe", "align"]
-    # transcribe 25/50 (0..100) -> 0.125/0.25; align 75/100 (0..100) -> 0.875/1.0
-    assert received == [0.125, 0.25, 0.875, 1.0]
+    # transcribe 25/50 (0..100) -> 0.25/0.5; align 75/100 (0..100) -> 0.75/1.0
+    assert received == [
+        ("transcribe", 0.25), ("transcribe", 0.5), ("align", 0.75), ("align", 1.0),
+    ]
 
 
 def test_no_callback_still_works(monkeypatch, tmp_path):

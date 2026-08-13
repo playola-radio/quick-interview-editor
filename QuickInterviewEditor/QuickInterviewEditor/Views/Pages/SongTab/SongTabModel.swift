@@ -31,6 +31,16 @@ final class SongTabModel: ViewModel, Identifiable {
   var editor: EditorModel?
   private var maxFraction: Double?
   private var elapsedSeconds: Double = 0
+  /// The engine phase identity currently on screen — index plus raw name. A change in
+  /// either resets the monotonic clamp (a new phase starts its own 0–100%); the index
+  /// alone also lets us ignore a late event from an earlier phase. Keying on the name
+  /// too means an old-format message-only phase (no index) still drops the prior
+  /// phase's determinate fraction instead of freezing it.
+  private var currentPhaseIndex: Int?
+  private var currentPhaseName: String?
+  /// `elapsedSeconds` at the moment the current phase began, so the ETA measures
+  /// time spent in THIS phase (transcribe and align run at very different rates).
+  private var phaseStartElapsed: Double = 0
   @ObservationIgnored private var task: Task<Void, Never>?
   @ObservationIgnored private var tickTask: Task<Void, Never>?
   /// Fired when this tab frees or wants a transcription slot (finished, failed, or
@@ -65,37 +75,50 @@ final class SongTabModel: ViewModel, Identifiable {
   var canReimport: Bool { isLoaded }
   var showsProgress: Bool { isQueued || isTranscribing }
   var showsCancel: Bool { isQueued || isTranscribing }
-  var progressMessage: String {
+  /// The one-line progress headline: "Phase X of N · <label> · NN%". The phase-of-N
+  /// prefix appears only when the engine declared it; the percent only when the phase
+  /// is determinate. All the "which parts to show" logic lives here, not in the view.
+  var progressHeadline: String {
     switch phase {
     case .queued: return queuedMessage
-    case .transcribing(let progress): return progress?.message ?? startingMessage
+    case .transcribing(let progress):
+      guard let progress else { return startingMessage }
+      return Self.headline(for: progress, fraction: progressFraction)
     case .loaded, .failed: return ""
     }
+  }
+  static func headline(for progress: EngineProgress, fraction: Double?) -> String {
+    var parts: [String] = []
+    if let phaseOfN = progress.phaseOfNText { parts.append(phaseOfN) }
+    parts.append(progress.displayText)
+    if let fraction { parts.append("\(Int(fraction * 100))%") }
+    return parts.joined(separator: " · ")
   }
   var errorMessage: String? {
     if case .failed(let message) = phase { return message }
     return nil
   }
   var progressFraction: Double? {
-    guard case .transcribing(let progress) = phase,
-      let progress, progress.phase == .transcribing, progress.fraction != nil
-    else { return nil }
-    return maxFraction
+    guard case .transcribing = phase else { return nil }
+    return maxFraction  // nil for an indeterminate phase (e.g. Finalizing)
   }
   var isProgressDeterminate: Bool { progressFraction != nil }
   var determinateValue: Double { maxFraction ?? 0 }
-  static func etaText(elapsedSeconds: Double, fraction: Double) -> String? {
-    if fraction >= 0.5 { return "Aligning words — almost done" }
-    let progressRatio = fraction / 0.5  // progress within the transcribe half
-    guard progressRatio >= 0.05 else { return nil }  // too early to estimate
-    let remaining = elapsedSeconds * (1 - progressRatio) / progressRatio
-    if remaining < 60 { return "Less than a minute remaining" }
+  /// A per-phase estimate: time remaining *in this phase*, from time already spent in
+  /// it and the phase fraction. Held back until the phase has run a bit (fraction and
+  /// elapsed thresholds) so it doesn't jump around, and worded "in this phase" because
+  /// a whole-job number would lie (align is slower per-unit than transcribe).
+  static func phaseETAText(phaseElapsedSeconds: Double, fraction: Double) -> String? {
+    guard phaseElapsedSeconds >= 30, fraction >= 0.05 else { return nil }
+    let remaining = phaseElapsedSeconds * (1 - fraction) / fraction
+    if remaining < 60 { return "Less than a minute left in this phase" }
     let minutes = Int((remaining / 60).rounded())
-    return "About \(max(minutes, 1)) min remaining"
+    return "About \(max(minutes, 1)) min left in this phase"
   }
   var etaMessage: String? {
     guard let fraction = progressFraction else { return nil }
-    return Self.etaText(elapsedSeconds: elapsedSeconds, fraction: fraction)
+    return Self.phaseETAText(
+      phaseElapsedSeconds: elapsedSeconds - phaseStartElapsed, fraction: fraction)
   }
 
   // MARK: - User Actions
@@ -103,6 +126,9 @@ final class SongTabModel: ViewModel, Identifiable {
     task?.cancel()  // never leak/overtake a still-running task (e.g. rapid retry)
     phase = .transcribing(nil)  // mark running synchronously so the queue pump counts it
     maxFraction = nil
+    currentPhaseIndex = nil
+    currentPhaseName = nil
+    phaseStartElapsed = 0
     elapsedSeconds = 0
     startTicking()
     task = Task { await startTranscription() }
@@ -129,10 +155,7 @@ final class SongTabModel: ViewModel, Identifiable {
       for try await event in transcription.transcribe(sourceURL, fingerprint, policy) {
         switch event {
         case .progress(let progress):
-          if progress.phase == .transcribing, let fraction = progress.fraction {
-            maxFraction = max(maxFraction ?? 0, fraction)
-          }
-          phase = .transcribing(progress)
+          applyProgress(progress)
         case .completed(let result):
           editor = withDependencies(from: self) {
             EditorModel(
@@ -177,6 +200,29 @@ final class SongTabModel: ViewModel, Identifiable {
   }
 
   // MARK: - Private Helpers
+  /// Applies one engine progress event to the on-screen state. Resets the monotonic
+  /// clamp and the per-phase timer when the phase moves forward, ignores a late event
+  /// from an earlier phase, and clamps the fraction so the bar never jumps backward
+  /// within a phase.
+  private func applyProgress(_ progress: EngineProgress) {
+    // Normalize first: a malformed index (e.g. 999-of-3) becomes nil so it can never
+    // pin the phase high and make every real later phase look stale.
+    let incomingIndex = progress.validPhaseIndex
+    if let incoming = incomingIndex, let current = currentPhaseIndex, incoming < current {
+      return  // stale event from an earlier phase — keep the newer phase on screen
+    }
+    if incomingIndex != currentPhaseIndex || progress.phase != currentPhaseName {
+      currentPhaseIndex = incomingIndex
+      currentPhaseName = progress.phase
+      maxFraction = nil
+      phaseStartElapsed = elapsedSeconds
+    }
+    if let fraction = progress.fraction {
+      maxFraction = max(maxFraction ?? 0, fraction)
+    }
+    phase = .transcribing(progress)
+  }
+
   private func startTicking() {
     tickTask?.cancel()
     tickTask = Task { [weak self] in
