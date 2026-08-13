@@ -31,10 +31,13 @@ final class SongTabModel: ViewModel, Identifiable {
   var editor: EditorModel?
   private var maxFraction: Double?
   private var elapsedSeconds: Double = 0
-  /// The engine phase index currently on screen. Drives the monotonic-clamp reset
-  /// (a new phase starts its own 0–100%) and lets us ignore a late event from an
-  /// earlier phase.
+  /// The engine phase identity currently on screen — index plus raw name. A change in
+  /// either resets the monotonic clamp (a new phase starts its own 0–100%); the index
+  /// alone also lets us ignore a late event from an earlier phase. Keying on the name
+  /// too means an old-format message-only phase (no index) still drops the prior
+  /// phase's determinate fraction instead of freezing it.
   private var currentPhaseIndex: Int?
+  private var currentPhaseName: String?
   /// `elapsedSeconds` at the moment the current phase began, so the ETA measures
   /// time spent in THIS phase (transcribe and align run at very different rates).
   private var phaseStartElapsed: Double = 0
@@ -124,6 +127,7 @@ final class SongTabModel: ViewModel, Identifiable {
     phase = .transcribing(nil)  // mark running synchronously so the queue pump counts it
     maxFraction = nil
     currentPhaseIndex = nil
+    currentPhaseName = nil
     phaseStartElapsed = 0
     elapsedSeconds = 0
     startTicking()
@@ -206,8 +210,9 @@ final class SongTabModel: ViewModel, Identifiable {
     {
       return  // stale event from an earlier phase — keep the newer phase on screen
     }
-    if progress.phaseIndex != currentPhaseIndex {
+    if progress.phaseIndex != currentPhaseIndex || progress.phase != currentPhaseName {
       currentPhaseIndex = progress.phaseIndex
+      currentPhaseName = progress.phase
       maxFraction = nil
       phaseStartElapsed = elapsedSeconds
     }

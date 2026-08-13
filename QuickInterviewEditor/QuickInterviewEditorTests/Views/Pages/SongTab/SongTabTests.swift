@@ -281,6 +281,25 @@ struct SongTabTests {
     expectNoDifference(model.progressHeadline, "Phase 3 of 3 · Converting audio…")
   }
 
+  @Test func oldFormatMessageOnlyPhaseGoesIndeterminate() async {
+    // Old-format events carry no phase_index, so the clamp must reset on the raw phase
+    // name changing — otherwise a message-only tail phase would freeze the prior
+    // phase's determinate percent instead of showing a spinner.
+    let model = SongTabModel(sourceURL: URL(fileURLWithPath: "/tmp/a.wav"))
+    await withDependencies {
+      $0.transcription.transcribe = { _, _, _ in
+        stream([
+          .progress(.init(phase: "transcribing", message: "Transcribing", fraction: 0.5)),
+          .progress(.init(phase: "converting", message: "Converting audio")),
+        ])
+      }
+    } operation: {
+      await model.startTranscription()
+    }
+    #expect(model.isProgressDeterminate == false)
+    expectNoDifference(model.progressHeadline, "Converting audio")
+  }
+
   @Test func maxFractionResetsAcrossRuns() async {
     let model = SongTabModel(sourceURL: URL(fileURLWithPath: "/tmp/a.wav"))
     let callCount = LockIsolated(0)

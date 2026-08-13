@@ -92,7 +92,10 @@ class _PhaseEmitter:
             return
         f = max(0.0, min(1.0, f))
         whole = int(f * 100)
-        if self._last_percent is not None and whole == self._last_percent:
+        # Throttle to whole-percent steps AND enforce monotonicity within the phase:
+        # only emit when the percent strictly increases, so a stray lower fraction from
+        # the stage callback can never make the bar jump backward.
+        if self._last_percent is not None and whole <= self._last_percent:
             return
         self._last_percent = whole
         self._emit_fraction(f)

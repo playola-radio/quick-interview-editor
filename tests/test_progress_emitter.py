@@ -31,6 +31,15 @@ def test_throttles_within_same_whole_percent():
     assert [e["fraction"] for e in events] == [0.101, 0.11]
 
 
+def test_monotonic_within_phase_drops_backward_fractions():
+    events, emit = _collect()
+    em = _PhaseEmitter(1, 3, "transcribing", "Transcribing", "…", emit=emit)
+    em(0.50)
+    em(0.30)  # lower than the last emitted percent -> dropped (no backward jump)
+    em(0.51)  # forward again -> emits
+    assert [e["fraction"] for e in events] == [0.50, 0.51]
+
+
 def test_clamps_and_drops_nan_inf():
     events, emit = _collect()
     em = _PhaseEmitter(1, 3, "transcribing", "Transcribing", "…", emit=emit)
