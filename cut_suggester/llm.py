@@ -37,6 +37,18 @@ def _provider_for(model: str) -> str:
     raise ValueError(f"cannot infer provider for model {model!r}")
 
 
+def _supports_disabled_thinking(model: str) -> bool:
+    """Whether ``thinking={"type": "disabled"}`` is accepted by ``model``.
+
+    Claude Fable 5 and Mythos 5 always think and reject a disabled-thinking
+    request with HTTP 400, so the parameter must be omitted for them. Every other
+    current Claude model accepts it (Opus 5 only rejects it above ``high`` effort,
+    which we never set).
+    """
+    m = model.lower()
+    return "fable" not in m and "mythos" not in m
+
+
 class OpenAIClient:
     """Chat Completions over raw HTTP (matches the spike; no SDK dependency)."""
 
@@ -97,18 +109,22 @@ class AnthropicClient:
         import anthropic  # lazy: only needed for the Anthropic live path
 
         client = anthropic.Anthropic()
-        msg = client.messages.create(
-            model=self.model,
-            max_tokens=self.max_tokens,
-            # This is strict JSON extraction, not a reasoning task. On Claude 5
-            # models adaptive thinking is ON by default and shares the max_tokens
-            # budget with the answer text, so a large classify prompt can spend the
-            # whole budget on hidden thinking and return zero text. Disable it so the
-            # budget is the JSON output.
-            thinking={"type": "disabled"},
-            system=self._JSON_SYSTEM,
-            messages=[{"role": "user", "content": prompt}],
-        )
+        create_kwargs: dict = {
+            "model": self.model,
+            "max_tokens": self.max_tokens,
+            "system": self._JSON_SYSTEM,
+            "messages": [{"role": "user", "content": prompt}],
+        }
+        # This is strict JSON extraction, not a reasoning task. On Claude 5 models
+        # adaptive thinking is ON by default and shares the max_tokens budget with
+        # the answer text, so a large classify prompt can spend the whole budget on
+        # hidden thinking and return zero text. Disable thinking where the model
+        # supports it. Fable 5 / Mythos 5 always think and reject
+        # thinking={"type": "disabled"} with a 400, so we leave it unset there and
+        # rely on the generous max_tokens budget (and the max_tokens guard below).
+        if _supports_disabled_thinking(self.model):
+            create_kwargs["thinking"] = {"type": "disabled"}
+        msg = client.messages.create(**create_kwargs)
         text = "".join(b.text for b in msg.content if getattr(b, "type", None) == "text")
         stop_reason = getattr(msg, "stop_reason", None)
         usage = {}
