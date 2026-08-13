@@ -15,7 +15,7 @@ struct SongTabView: View {
         } else {
           ProgressView()
         }
-        Text(model.progressMessage).foregroundStyle(Color(white: 0.7))
+        Text(model.progressHeadline).foregroundStyle(Color(white: 0.7))
         Text(model.progressNote)
           .font(.caption)
           .multilineTextAlignment(.center)

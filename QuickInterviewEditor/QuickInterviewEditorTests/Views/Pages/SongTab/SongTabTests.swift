@@ -24,7 +24,7 @@ struct SongTabTests {
     await withDependencies {
       $0.transcription.transcribe = { _, _, _ in
         stream([
-          .progress(.init(phase: .transcribing, message: "Transcribing")),
+          .progress(.init(phase: "transcribing", message: "Transcribing")),
           .completed(Fixtures.transcriptionResult(plan, canonicalAudioURL: canonical)),
         ])
       }
@@ -37,19 +37,24 @@ struct SongTabTests {
     expectNoDifference(model.editor?.canonicalAudioURL, canonical)
   }
 
-  @Test func progressUpdatesMessageBeforeCompletion() async {
+  @Test func progressUpdatesHeadlineBeforeCompletion() async {
     let model = SongTabModel(sourceURL: URL(fileURLWithPath: "/clip.m4a"))
     await withDependencies {
       $0.transcription.transcribe = { _, _, _ in
         stream(
-          [.progress(.init(phase: .converting, message: "Converting audio"))],
+          [
+            .progress(
+              .init(
+                phase: "finalizing", phaseIndex: 3, phaseCount: 3, label: "Finalizing",
+                message: "Converting audio…"))
+          ],
           throwing: CancellationError())
       }
     } operation: {
       await model.startTranscription()
     }
-    // last observed progress message stays visible
-    expectNoDifference(model.progressMessage, "Converting audio")
+    // last observed progress stays visible
+    expectNoDifference(model.progressHeadline, "Phase 3 of 3 · Converting audio…")
   }
 
   @Test func failureSetsFailedPhaseWithMessage() async {
@@ -73,7 +78,7 @@ struct SongTabTests {
   @Test func startsQueued() {
     let model = SongTabModel(sourceURL: URL(fileURLWithPath: "/clip.m4a"))
     #expect(model.isQueued)
-    expectNoDifference(model.progressMessage, model.queuedMessage)
+    expectNoDifference(model.progressHeadline, model.queuedMessage)
   }
 
   @Test func completionInvokesOnReadyForNext() async {
@@ -152,38 +157,54 @@ struct SongTabTests {
     let model = SongTabModel(sourceURL: URL(fileURLWithPath: "/tmp/a.wav"))
     await withDependencies {
       $0.transcription.transcribe = { _, _, _ in
-        stream([.progress(.init(phase: .transcribing, message: "Preparing audio…"))])
+        stream([
+          .progress(
+            .init(
+              phase: "transcribing", phaseIndex: 1, phaseCount: 3, label: "Transcribing",
+              message: "Preparing audio…"))
+        ])
       }
     } operation: {
       await model.startTranscription()
     }
     #expect(model.isProgressDeterminate == false)
     expectNoDifference(model.progressFraction, nil)
+    expectNoDifference(model.progressHeadline, "Phase 1 of 3 · Preparing audio…")
   }
 
-  @Test func transcribingFractionIsDeterminate() async {
+  @Test func headlineShowsPhaseOfNLabelAndPercent() async {
     let model = SongTabModel(sourceURL: URL(fileURLWithPath: "/tmp/a.wav"))
     await withDependencies {
       $0.transcription.transcribe = { _, _, _ in
         stream([
-          .progress(.init(phase: .transcribing, message: "Transcribing audio…", fraction: 0.25))
+          .progress(
+            .init(
+              phase: "aligning", phaseIndex: 2, phaseCount: 3, label: "Aligning words",
+              message: "Aligning words", fraction: 0.42))
         ])
       }
     } operation: {
       await model.startTranscription()
     }
     #expect(model.isProgressDeterminate == true)
-    expectNoDifference(model.progressFraction, 0.25)
-    expectNoDifference(model.determinateValue, 0.25)
+    expectNoDifference(model.progressFraction, 0.42)
+    expectNoDifference(model.determinateValue, 0.42)
+    expectNoDifference(model.progressHeadline, "Phase 2 of 3 · Aligning words · 42%")
   }
 
-  @Test func fractionNeverMovesBackward() async {
+  @Test func fractionNeverMovesBackwardWithinPhase() async {
     let model = SongTabModel(sourceURL: URL(fileURLWithPath: "/tmp/a.wav"))
     await withDependencies {
       $0.transcription.transcribe = { _, _, _ in
         stream([
-          .progress(.init(phase: .transcribing, message: "x", fraction: 0.6)),
-          .progress(.init(phase: .transcribing, message: "x", fraction: 0.4)),
+          .progress(
+            .init(
+              phase: "transcribing", phaseIndex: 1, phaseCount: 3, label: "Transcribing",
+              message: "Transcribing", fraction: 0.6)),
+          .progress(
+            .init(
+              phase: "transcribing", phaseIndex: 1, phaseCount: 3, label: "Transcribing",
+              message: "Transcribing", fraction: 0.4)),
         ])
       }
     } operation: {
@@ -192,20 +213,72 @@ struct SongTabTests {
     expectNoDifference(model.progressFraction, 0.6)
   }
 
+  @Test func clampResetsWhenPhaseAdvances() async {
+    let model = SongTabModel(sourceURL: URL(fileURLWithPath: "/tmp/a.wav"))
+    await withDependencies {
+      $0.transcription.transcribe = { _, _, _ in
+        stream([
+          .progress(
+            .init(
+              phase: "transcribing", phaseIndex: 1, phaseCount: 3, label: "Transcribing",
+              message: "Transcribing", fraction: 0.9)),
+          .progress(
+            .init(
+              phase: "aligning", phaseIndex: 2, phaseCount: 3, label: "Aligning words",
+              message: "Aligning words", fraction: 0.1)),
+        ])
+      }
+    } operation: {
+      await model.startTranscription()
+    }
+    // Phase 2 starts its own 0–100%; phase 1's 0.9 doesn't pin it.
+    expectNoDifference(model.progressFraction, 0.1)
+    expectNoDifference(model.progressHeadline, "Phase 2 of 3 · Aligning words · 10%")
+  }
+
+  @Test func ignoresStaleEarlierPhaseEvent() async {
+    let model = SongTabModel(sourceURL: URL(fileURLWithPath: "/tmp/a.wav"))
+    await withDependencies {
+      $0.transcription.transcribe = { _, _, _ in
+        stream([
+          .progress(
+            .init(
+              phase: "aligning", phaseIndex: 2, phaseCount: 3, label: "Aligning words",
+              message: "Aligning words", fraction: 0.3)),
+          // A late phase-1 event arrives after phase 2 started; it must be ignored.
+          .progress(
+            .init(
+              phase: "transcribing", phaseIndex: 1, phaseCount: 3, label: "Transcribing",
+              message: "Transcribing", fraction: 0.9)),
+        ])
+      }
+    } operation: {
+      await model.startTranscription()
+    }
+    expectNoDifference(model.progressFraction, 0.3)
+    expectNoDifference(model.progressHeadline, "Phase 2 of 3 · Aligning words · 30%")
+  }
+
   @Test func tailPhaseGoesIndeterminate() async {
     let model = SongTabModel(sourceURL: URL(fileURLWithPath: "/tmp/a.wav"))
     await withDependencies {
       $0.transcription.transcribe = { _, _, _ in
         stream([
-          .progress(.init(phase: .transcribing, message: "x", fraction: 1.0)),
-          .progress(.init(phase: .converting, message: "Converting audio")),
+          .progress(
+            .init(
+              phase: "transcribing", phaseIndex: 1, phaseCount: 3, label: "Transcribing",
+              message: "Transcribing", fraction: 1.0)),
+          .progress(
+            .init(
+              phase: "finalizing", phaseIndex: 3, phaseCount: 3, label: "Finalizing",
+              message: "Converting audio…")),
         ])
       }
     } operation: {
       await model.startTranscription()
     }
     #expect(model.isProgressDeterminate == false)
-    expectNoDifference(model.progressMessage, "Converting audio")
+    expectNoDifference(model.progressHeadline, "Phase 3 of 3 · Converting audio…")
   }
 
   @Test func maxFractionResetsAcrossRuns() async {
@@ -219,8 +292,8 @@ struct SongTabTests {
           return count == 1
         }
         return isFirstRun
-          ? stream([.progress(.init(phase: .transcribing, message: "x", fraction: 0.8))])
-          : stream([.progress(.init(phase: .transcribing, message: "x", fraction: 0.1))])
+          ? stream([.progress(.init(phase: "transcribing", message: "x", fraction: 0.8))])
+          : stream([.progress(.init(phase: "transcribing", message: "x", fraction: 0.1))])
       }
     } operation: {
       await withCheckedContinuation { continuation in
@@ -239,38 +312,39 @@ struct SongTabTests {
     }
   }
 
-  @Test func etaTextBelowThresholdIsNil() {
-    expectNoDifference(SongTabModel.etaText(elapsedSeconds: 1, fraction: 0.01), nil)
-  }
-
-  @Test func etaTextDuringTranscribeFormatsRemaining() {
-    // fraction 0.25 -> within-transcribe p = 0.5; elapsed 120s -> remaining 120s.
+  @Test func phaseETABelowThresholdsIsNil() {
+    // Too early in the phase (elapsed) and too little progress (fraction).
     expectNoDifference(
-      SongTabModel.etaText(elapsedSeconds: 120, fraction: 0.25),
-      "About 2 min remaining")
-  }
-
-  @Test func etaTextUnderOneMinute() {
-    // p = 0.8, elapsed 120s -> remaining 30s.
+      SongTabModel.phaseETAText(phaseElapsedSeconds: 20, fraction: 0.5), nil)
     expectNoDifference(
-      SongTabModel.etaText(elapsedSeconds: 120, fraction: 0.4),
-      "Less than a minute remaining")
+      SongTabModel.phaseETAText(phaseElapsedSeconds: 60, fraction: 0.03), nil)
   }
 
-  @Test func etaTextWhileAligningIsNonNumeric() {
+  @Test func phaseETAFormatsRemainingInThisPhase() {
+    // fraction 0.25, elapsed 120s in-phase -> remaining 360s -> 6 min.
     expectNoDifference(
-      SongTabModel.etaText(elapsedSeconds: 300, fraction: 0.7),
-      "Aligning words — almost done")
+      SongTabModel.phaseETAText(phaseElapsedSeconds: 120, fraction: 0.25),
+      "About 6 min left in this phase")
   }
 
-  @Test func elapsedAdvancesWithClock() async {
+  @Test func phaseETAUnderOneMinute() {
+    // fraction 0.7, elapsed 120s -> remaining ~51s.
+    expectNoDifference(
+      SongTabModel.phaseETAText(phaseElapsedSeconds: 120, fraction: 0.7),
+      "Less than a minute left in this phase")
+  }
+
+  @Test func etaMeasuresElapsedWithinCurrentPhase() async {
     let clock = TestClock()
     let model = withDependencies {
       $0.continuousClock = clock
       $0.transcription.transcribe = { _, _, _ in
         AsyncThrowingStream { continuation in
           continuation.yield(
-            .progress(EngineProgress(phase: .transcribing, message: "x", fraction: 0.25)))
+            .progress(
+              EngineProgress(
+                phase: "transcribing", phaseIndex: 1, phaseCount: 3, label: "Transcribing",
+                message: "Transcribing", fraction: 0.25)))
           // leave the stream open so the tick task keeps running
         }
       }
@@ -281,8 +355,8 @@ struct SongTabTests {
     await withMainSerialExecutor {
       model.start()
       await clock.advance(by: .seconds(120))
-      // fraction 0.25 -> p 0.5, elapsed 120 -> remaining 120s
-      expectNoDifference(model.etaMessage, "About 2 min remaining")
+      // 120s in phase, fraction 0.25 -> remaining 360s -> 6 min.
+      expectNoDifference(model.etaMessage, "About 6 min left in this phase")
       model.cancel()
     }
   }

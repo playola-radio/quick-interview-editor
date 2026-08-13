@@ -174,7 +174,7 @@ import Testing
     let cache = TranscriptCacheClient.onDisk(base: base.appendingPathComponent("cache"))
     let plan = Fixtures.editPlan()
     let engineAIFF = makeAIFF(base)
-    let progress = EngineProgress(phase: .transcribing, message: "Transcribing…")
+    let progress = EngineProgress(phase: "transcribing", message: "Transcribing…")
 
     let events = try await withDependencies {
       $0.transcriptCache = cache

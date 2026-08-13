@@ -209,21 +209,8 @@ enum LiveEngine {
           async let exitCode = proc.waitForExit()
 
           for await line in proc.stderrLines() {
-            guard line.hasPrefix("QIE_EVENT ") else { continue }
-            let json = Data(line.dropFirst("QIE_EVENT ".count).utf8)
-            guard
-              let wire = try? JSONDecoder().decode(WireEvent.self, from: json),
-              wire.type == "progress",
-              let phaseRaw = wire.phase,
-              let phase = EngineProgress.Phase(rawValue: phaseRaw)
-            else { continue }
-            continuation.yield(
-              .progress(
-                EngineProgress(
-                  phase: phase,
-                  message: wire.message ?? "",
-                  fraction: sanitizedFraction(wire.fraction)))
-            )
+            guard let progress = Self.parseProgressEvent(line) else { continue }
+            continuation.yield(.progress(progress))
           }
 
           let out = await stdoutData
@@ -279,8 +266,38 @@ enum LiveEngine {
   private struct WireEvent: Decodable {
     var type: String
     var phase: String?
+    var phaseIndex: Int?
+    var phaseCount: Int?
+    var label: String?
     var message: String?
     var fraction: Double?
+    enum CodingKeys: String, CodingKey {
+      case type, phase, label, message, fraction
+      case phaseIndex = "phase_index"
+      case phaseCount = "phase_count"
+    }
+  }
+
+  /// Parses one stderr line into an ``EngineProgress``, or nil for any line that
+  /// isn't a `QIE_EVENT` progress event. An unknown/renamed phase string is NOT
+  /// dropped — display is driven by the metadata + fraction, not by a known-phase
+  /// enum — so a future engine phase still renders. `fraction: null` reads the same
+  /// as an absent fraction (indeterminate).
+  static func parseProgressEvent(_ line: String) -> EngineProgress? {
+    guard line.hasPrefix("QIE_EVENT ") else { return nil }
+    let json = Data(line.dropFirst("QIE_EVENT ".count).utf8)
+    guard
+      let wire = try? JSONDecoder().decode(WireEvent.self, from: json),
+      wire.type == "progress",
+      let phaseRaw = wire.phase
+    else { return nil }
+    return EngineProgress(
+      phase: phaseRaw,
+      phaseIndex: wire.phaseIndex,
+      phaseCount: wire.phaseCount,
+      label: wire.label,
+      message: wire.message ?? "",
+      fraction: sanitizedFraction(wire.fraction))
   }
 
   /// Clamps a decoded progress fraction to `0...1`, dropping non-finite values
