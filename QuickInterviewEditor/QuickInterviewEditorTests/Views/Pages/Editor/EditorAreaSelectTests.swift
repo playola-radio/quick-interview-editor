@@ -106,14 +106,17 @@ struct EditorAreaSelectTests {
 
   // MARK: - Playhead
 
-  @Test func releaseSnapsPlayheadToSelectionStartAndLeavesTransportStopped() {
+  @Test func releaseSnapsPlayheadScrollsTranscriptAndLeavesTransportStopped() {
     let model = editor()
     geometry(model)
     model.waveformAreaSelectBegan(atX: 350, extending: false)
     model.waveformAreaSelectChanged(toX: 600)
+    expectNoDifference(model.transcript.reveal, nil)  // no transcript scroll mid-drag
     model.waveformAreaSelectEnded(toX: 600)
     expectNoDifference(model.playheadSample, 70648)  // selection start
     expectNoDifference(model.transportPhase, .stopped)
+    // Release scrolls the transcript to the first selected word (word 2).
+    expectNoDifference(model.transcript.reveal?.wordID, 2)
   }
 
   @Test func playheadSnapIsSuppressedMidDragThenCommittedOnRelease() async {

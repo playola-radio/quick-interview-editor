@@ -502,6 +502,9 @@ final class EditorModel: ViewModel {
       while !Task.isCancelled {
         do { try await clock.sleep(for: .milliseconds(Self.autoScrollTickMs)) } catch { return }
         guard let self, self.areaSelectGeneration == generation else { return }
+        // Self-terminate if the drag is no longer active (e.g. the window lost mouse tracking and no
+        // `mouseUp` was delivered), rather than spinning every 16 ms for the model's lifetime.
+        guard self.isWaveformAreaSelecting, self.areaSelectDrag != nil else { return }
         self.autoScrollTick()
       }
     }
