@@ -708,6 +708,30 @@ struct EditorTests {
     expectNoDifference(model.transcript.followMode, .following)
   }
 
+  @Test func sliceNaturalEndResetsTranscriptFollowForNextSlice() async {
+    let gate = PlayerGate()
+    let model = editor()
+    let word = model.editPlan.words.first { $0.startSample != nil && $0.endSample != nil }!
+    addSlices(model, [(0, 1)])
+    let slice = model.slices[0]
+    await withDependencies {
+      $0.audioPlayer.play = { _, _, _, _ in await gate.play() }
+      $0.audioPlayer.stop = { _ in gate.release() }
+    } operation: {
+      let task = Task { await model.playSliceTapped(slice.id) }
+      await gate.awaitStarted()
+      // The transcript is following the slice, then the user scrolls away.
+      model.transcript.playheadChanged(sample: word.startSample!, isPlaying: true)
+      model.transcript.transcriptUserScrolled()
+      expectNoDifference(model.transcript.followMode, .userPaused)
+      gate.release()  // natural completion — the transport cleanup must reset transcript follow
+      await task.value
+    }
+    // Without the reset the next tick isn't a rising edge and follow would stay paused.
+    model.transcript.playheadChanged(sample: word.startSample!, isPlaying: true)
+    expectNoDifference(model.transcript.followMode, .following)
+  }
+
   // MARK: - Waveform sync
 
   /// Sets identity geometry (1 sample per pixel, no scroll) so xToSample(x) == x.

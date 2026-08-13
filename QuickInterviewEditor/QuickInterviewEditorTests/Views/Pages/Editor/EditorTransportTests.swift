@@ -529,6 +529,36 @@ struct EditorTransportTests {
     }
   }
 
+  @Test func staleSelectionTaskDoesNotYankCursorIntoNewPlayback() async {
+    let playGate = TransportGate()
+    let stopGate = TransportGate()
+    let model = editor()
+    selectWords(model.transcript, 0, 2)
+    model.addSliceTapped()  // clears the selection
+    let slice = model.slices[0]
+    selectWords(model.transcript, 6, 8)  // selection A, distinct from the slice's words
+    let rangeA = model.transcript.selectedSampleRange!
+    model.transportPhase = .playing(PlaybackSessionID())  // the transport owns playback
+    await withDependencies {
+      $0.audioPlayer.play = { _, _, _, _ in await playGate.play() }
+      $0.audioPlayer.stop = { _ in _ = await stopGate.play() }
+    } operation: {
+      let taskA = Task { await model.transportSelectionChanged(rangeA) }
+      await stopGate.awaitStarted()  // A is suspended inside its stop
+      // A slice shortcut B starts while A is stopping — it doesn't touch the selection.
+      let taskB = Task { await model.playSliceTapped(slice.id) }
+      await playGate.awaitStarted()
+      expectNoDifference(model.transportContext.sliceID, slice.id)
+      let cursorUnderB = model.playheadSample  // B positioned the cursor at its start
+      #expect(cursorUnderB != rangeA.lowerBound)
+      stopGate.release()  // A resumes and must bail — B is playing now
+      await taskA.value
+      expectNoDifference(model.playheadSample, cursorUnderB)  // NOT yanked to selection A's start
+      playGate.release()
+      await taskB.value
+    }
+  }
+
   // MARK: - Multi-tab supersede vs natural end
 
   @Test func supersededPlayLeavesCursorPutNotAtRangeEnd() async {

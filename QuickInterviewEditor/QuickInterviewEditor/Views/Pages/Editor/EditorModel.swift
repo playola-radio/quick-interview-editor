@@ -688,6 +688,10 @@ final class EditorModel: ViewModel {
     transportContext = .free
     transportOriginSample = nil
     transportRange = nil
+    // Reset transcript follow here too: on a cross-tab `.superseded` (and on a natural end whose
+    // final stop tick races this cleanup) `observePlayback` may never see a gated false tick, so
+    // without this a slice's `wasPlaying` stays true and the next slice misses its rising edge.
+    endTranscriptFollow()
   }
 
   /// Pause button. Freezes the cursor at the exact sample the player reports and holds the
@@ -739,13 +743,16 @@ final class EditorModel: ViewModel {
   /// Any active playback is stopped first — the cursor never jumps while audio keeps playing.
   ///
   /// `onChange` spawns one unstructured task per selection change, so two can overlap: after
-  /// awaiting the stop, bail if a newer selection has arrived, or the stale task would stamp the
-  /// old start over the newer one's.
+  /// awaiting the stop, bail if a newer selection has arrived — OR if a new playback started while
+  /// we were stopping (a slice/preview/audition shortcut, which doesn't touch the selection). Either
+  /// way the stale task must not snap the cursor over the newer state or into a live playback.
   func transportSelectionChanged(_ newRange: Range<Int>?) async {
     guard let newRange else { return }
     if transportPhase.session != nil {
       await endTransportPlayback()
-      guard transcript.selectedSampleRange == newRange else { return }
+      guard transcript.selectedSampleRange == newRange, transportPhase.session == nil else {
+        return
+      }
     }
     playheadSample = newRange.lowerBound
   }
