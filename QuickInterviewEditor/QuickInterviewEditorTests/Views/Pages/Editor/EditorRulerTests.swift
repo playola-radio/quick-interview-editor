@@ -81,6 +81,16 @@ struct EditorRulerTests {
     expectNoDifference(model.playheadSample, 777)  // unchanged: the mapping would be meaningless
   }
 
+  @Test func rulerMoveIsNoOpWhenViewportNotYetMeasured() {
+    let model = editor()
+    model.waveform.totalSamples = model.editPlan.source.durationSamples  // file length known...
+    model.waveform.viewportWidth = 0  // ...but layout hasn't measured the viewport yet
+    model.playheadSample = 555
+    model.rulerMovedPlayhead(toX: 40)  // spp is still the default 1; the mapping would be garbage
+    // Guarded on usable geometry, not just totalSamples.
+    expectNoDifference(model.playheadSample, 555)
+  }
+
   // MARK: - Interaction with the transport
 
   @Test func rulerMoveWhileStoppedJustMovesTheCursor() {
@@ -186,7 +196,8 @@ struct EditorRulerTests {
     await withDependencies {
       $0.audioPlayer.stop = { _ in _ = await stopGate.play() }  // suspend inside A's stop
     } operation: {
-      let snap = Task { await model.transportSelectionChanged(rangeA) }
+      let token = model.cursorMoveToken  // captured synchronously, as the view's onChange does
+      let snap = Task { await model.transportSelectionChanged(rangeA, cursorToken: token) }
       await stopGate.awaitStarted()  // the snap is suspended awaiting the stop
       model.rulerMovedPlayhead(toX: 7)  // ruler click lands during the suspension → 700
       expectNoDifference(model.playheadSample, 700)
@@ -195,6 +206,20 @@ struct EditorRulerTests {
       // Still where the ruler put it, not snapped to rangeA's start.
       expectNoDifference(model.playheadSample, 700)
     }
+  }
+
+  /// The no-playback version: a deferred selection snap (token captured at selection-change time)
+  /// must yield to a ruler click that lands before the snap task runs, even with nothing playing.
+  @Test func rulerMoveBeatsADeferredSelectionSnapWhenStopped() async {
+    let model = editor()
+    geometry(model, samplesPerPixel: 100, start: 0)
+    selectWords(model.transcript, 1, 3)  // selection A registered; onChange captures the token now
+    let rangeA = model.transcript.selectedSampleRange!
+    let token = model.cursorMoveToken
+    model.rulerMovedPlayhead(toX: 7)  // ruler click lands before the deferred snap runs → 700
+    // The deferred snap runs late; the ruler is the later action and wins.
+    await model.transportSelectionChanged(rangeA, cursorToken: token)
+    expectNoDifference(model.playheadSample, 700)
   }
 }
 

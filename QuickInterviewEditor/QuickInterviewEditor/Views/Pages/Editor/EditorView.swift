@@ -39,7 +39,10 @@ struct EditorView: View {
     .task { await model.observePlayback() }
     .onChange(of: model.fineTuneSessionKey, initial: true) { _, _ in model.syncEditSession() }
     .onChange(of: model.transcript.selectedSampleRange) { _, newRange in
-      Task { await model.transportSelectionChanged(newRange) }
+      // Capture the cursor token synchronously at the moment the selection changes, so a ruler click
+      // landing before this snap runs is seen as the newer cursor action and the snap yields to it.
+      let cursorToken = model.cursorMoveToken
+      Task { await model.transportSelectionChanged(newRange, cursorToken: cursorToken) }
     }
   }
 

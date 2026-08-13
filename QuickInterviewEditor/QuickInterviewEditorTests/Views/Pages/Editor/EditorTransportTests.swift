@@ -471,14 +471,14 @@ struct EditorTransportTests {
     model.playheadSample = 9999
     selectWords(model.transcript, 2, 4)
     let selection = model.transcript.selectedSampleRange!
-    await model.transportSelectionChanged(selection)
+    await model.transportSelectionChanged(selection, cursorToken: model.cursorMoveToken)
     expectNoDifference(model.playheadSample, selection.lowerBound)
   }
 
   @Test func clearingSelectionLeavesCursorPut() async {
     let model = editor()
     model.playheadSample = 5000
-    await model.transportSelectionChanged(nil)
+    await model.transportSelectionChanged(nil, cursorToken: model.cursorMoveToken)
     expectNoDifference(model.playheadSample, 5000)  // clearing the selection never moves the cursor
   }
 
@@ -492,11 +492,13 @@ struct EditorTransportTests {
     await withDependencies {
       $0.audioPlayer.stop = { _ in _ = await stopGate.play() }  // suspend inside A's stop
     } operation: {
-      let taskA = Task { await model.transportSelectionChanged(rangeA) }
+      let tokenA = model.cursorMoveToken
+      let taskA = Task { await model.transportSelectionChanged(rangeA, cursorToken: tokenA) }
       await stopGate.awaitStarted()  // A is now suspended awaiting the stop
       selectWords(model.transcript, 5, 7)  // selection B arrives
       let rangeB = model.transcript.selectedSampleRange!
-      await model.transportSelectionChanged(rangeB)  // B snaps immediately (no owner left)
+      // B snaps immediately (no owner left)
+      await model.transportSelectionChanged(rangeB, cursorToken: model.cursorMoveToken)
       expectNoDifference(model.playheadSample, rangeB.lowerBound)
       stopGate.release()  // A resumes and must bail on the stale selection
       await taskA.value
@@ -521,7 +523,8 @@ struct EditorTransportTests {
       #expect(model.isTransportPlaying)
       selectWords(model.transcript, 3, 5)
       let selection = model.transcript.selectedSampleRange!
-      await model.transportSelectionChanged(selection)  // stop first, then snap
+      // Stop first, then snap.
+      await model.transportSelectionChanged(selection, cursorToken: model.cursorMoveToken)
       await task.value
       #expect(stopped.value)
       expectNoDifference(model.transportPhase, .stopped)
@@ -543,7 +546,8 @@ struct EditorTransportTests {
       $0.audioPlayer.play = { _, _, _, _ in await playGate.play() }
       $0.audioPlayer.stop = { _ in _ = await stopGate.play() }
     } operation: {
-      let taskA = Task { await model.transportSelectionChanged(rangeA) }
+      let tokenA = model.cursorMoveToken
+      let taskA = Task { await model.transportSelectionChanged(rangeA, cursorToken: tokenA) }
       await stopGate.awaitStarted()  // A is suspended inside its stop
       // A slice shortcut B starts while A is stopping — it doesn't touch the selection.
       let taskB = Task { await model.playSliceTapped(slice.id) }

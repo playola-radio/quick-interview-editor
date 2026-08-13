@@ -751,18 +751,20 @@ final class EditorModel: ViewModel {
   /// awaiting the stop, bail if a newer selection has arrived — OR if a new playback started while
   /// we were stopping (a slice/preview/audition shortcut, which doesn't touch the selection). Either
   /// way the stale task must not snap the cursor over the newer state or into a live playback.
-  func transportSelectionChanged(_ newRange: Range<Int>?) async {
+  func transportSelectionChanged(_ newRange: Range<Int>?, cursorToken: Int) async {
     guard let newRange else { return }
     if transportPhase.session != nil {
-      let cursorEpoch = cursorMoveGeneration
       await endTransportPlayback()
-      // Bail if a newer selection arrived, a new playback started, OR a ruler move placed the cursor
-      // while we were stopping. A ruler click during this suspension changes neither the selection
-      // nor the session, so without the epoch its placement would be clobbered by this snap.
-      guard transcript.selectedSampleRange == newRange, transportPhase.session == nil,
-        cursorMoveGeneration == cursorEpoch
-      else { return }
+      // Bail if a newer selection arrived or a new playback started while we were stopping.
+      guard transcript.selectedSampleRange == newRange, transportPhase.session == nil else {
+        return
+      }
     }
+    // Bail if a ruler move placed the cursor since this selection change was registered — the ruler
+    // is the later user action and must win. `cursorToken` is captured synchronously in the view's
+    // `onChange`, so this catches a ruler click that landed before this task even ran (the
+    // no-playback path) as well as one during the stop suspension above (the playback path).
+    guard cursorMoveGeneration == cursorToken else { return }
     playheadSample = newRange.lowerBound
   }
 
@@ -776,11 +778,16 @@ final class EditorModel: ViewModel {
   /// session so a delayed cleanup can't kill newer or global playback. A no-op until the waveform
   /// geometry is loaded — before that the x→sample mapping is meaningless.
   func rulerMovedPlayhead(toX positionX: CGFloat) {
-    guard waveform.totalSamples > 0 else { return }
+    guard waveform.hasUsableGeometry else { return }
     stopTransportForRuler()
     playheadSample = clampedRulerSample(positionX)
     cursorMoveGeneration &+= 1
   }
+
+  /// Snapshot of the cursor-move counter, captured synchronously by the view when the transcript
+  /// selection changes and handed to `transportSelectionChanged`. It lets a deferred selection snap
+  /// tell whether a ruler placement has since taken authority over the cursor.
+  var cursorMoveToken: Int { cursorMoveGeneration }
 
   /// Tears down any active transport — playing OR paused — for a ruler move. A paused session still
   /// owns scheduled audio, so without this a later Play would `resume` the old paused audio instead

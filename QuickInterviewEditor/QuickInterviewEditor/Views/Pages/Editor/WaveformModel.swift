@@ -53,6 +53,11 @@ final class WaveformModel: ViewModel {
   // MARK: - View Helpers
   var hasWaveform: Bool { waveform != nil && totalSamples > 0 }
   var showsWaveform: Bool { hasWaveform && !isLoading }
+  /// True once the geometry is meaningful enough to map a view-x back to a plan sample: the file's
+  /// length is known, the viewport has been measured, and a real samples-per-pixel is set. Guards
+  /// ruler hit-mapping so a click during the async-load window (viewport still 0, spp still the
+  /// default 1) can't store a garbage cursor.
+  var hasUsableGeometry: Bool { totalSamples > 0 && viewportWidth > 0 && samplesPerPixel > 0 }
   var showsLoading: Bool { isLoading }
   var showsEmpty: Bool { !hasWaveform && !isLoading }
   var canZoomIn: Bool {
