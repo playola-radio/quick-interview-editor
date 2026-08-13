@@ -68,15 +68,15 @@ def _aligned_segments(
     # WhisperX passes each stage its OWN unscaled 0..100 progress (its
     # `combined_progress` flag only scales the `print` line it emits, never
     # the callback — verified against whisperx 3.8.6's asr.py/alignment.py).
-    # We own the stage mapping ourselves so the two stages combine into one
-    # monotonic 0.0..1.0 sweep: transcribe -> 0.0..0.5, align -> 0.5..1.0.
+    # We report each stage's own 0..1 fraction tagged with its name and leave the
+    # phase model (which stage is phase 1 vs 2) to the caller in cli.py.
     if progress_callback is not None:
 
         def _transcribe_progress(pct):
-            progress_callback((pct / 100.0) * 0.5)
+            progress_callback("transcribe", pct / 100.0)
 
         def _align_progress(pct):
-            progress_callback(0.5 + (pct / 100.0) * 0.5)
+            progress_callback("align", pct / 100.0)
     else:
         _transcribe_progress = None
         _align_progress = None

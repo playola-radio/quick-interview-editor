@@ -93,18 +93,32 @@ def test_plan_writes_nothing_beside_source(tmp_path):
     assert siblings == ["clip.wav"]  # no .transcript.json / .aiff / .edit-plan.json
 
 
-def test_plan_emits_progress_events_on_stderr(tmp_path):
+def test_plan_emits_per_phase_progress_events_on_stderr(tmp_path):
     _src, _work, proc = _run_plan(tmp_path)
-    phases = []
+    events = []
     for line in proc.stderr.splitlines():
         if line.startswith("QIE_EVENT "):
             evt = json.loads(line[len("QIE_EVENT "):])
             if evt.get("type") == "progress":
-                phases.append(evt["phase"])
-    assert "transcribing" in phases
-    assert "writing_plan" in phases
-    assert phases == sorted(phases, key=["transcribing", "converting",
-            "analyzing_silence", "writing_plan"].index)  # in canonical order
+                events.append(evt)
+    assert events, "expected progress events on stderr"
+    # Every progress event self-describes the phase model (index/count/label) so the
+    # app never hard-codes the pipeline shape.
+    for e in events:
+        assert e["phase_count"] == 3
+        assert 1 <= e["phase_index"] <= 3
+        assert e["label"]
+    # Phase indices only ever move forward within a run.
+    indices = [e["phase_index"] for e in events]
+    assert indices == sorted(indices)
+    # Phase 1 (transcribing) is announced; the tail is the distinct finalizing phase.
+    assert indices[0] == 1
+    assert events[0]["phase"] == "transcribing"
+    assert events[-1]["phase"] == "finalizing"
+    assert events[-1]["phase_index"] == 3
+    # This run uses a seeded (cached) transcript, so the real transcribe/align
+    # sub-progress is skipped -> no fabricated "aligning" 100%.
+    assert all(e["phase"] != "aligning" for e in events)
 
 
 def _run_plan_seeded(tmp_path: Path, words):

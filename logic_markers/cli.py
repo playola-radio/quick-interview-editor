@@ -41,22 +41,45 @@ def _emit_event(event: dict) -> None:
     print(f"QIE_EVENT {json.dumps(event)}", file=sys.stderr, flush=True)
 
 
-def _progress(phase: str, message: str) -> None:
-    _emit_event({"type": "progress", "phase": phase, "message": message})
+def _progress(
+    phase: str,
+    message: str,
+    *,
+    index: int | None = None,
+    count: int | None = None,
+    label: str | None = None,
+) -> None:
+    event: dict = {"type": "progress", "phase": phase, "message": message}
+    if index is not None:
+        event["phase_index"] = index
+    if count is not None:
+        event["phase_count"] = count
+    if label is not None:
+        event["label"] = label
+    _emit_event(event)
 
 
-class _ProgressEmitter:
-    """Turns a unified 0.0-1.0 progress fraction into throttled QIE_EVENT lines.
+class _PhaseEmitter:
+    """Throttles ONE ordered phase's 0.0-1.0 progress into QIE_EVENT lines.
 
-    The two WhisperX stages (transcribe, align) are each mapped to their half
-    of the 0.0..1.0 range upstream in `whisperx_backend._aligned_segments`, so
-    this emitter receives one already-monotonic fraction. Emits the first
-    callback unconditionally, then only when the whole-number percent changes,
-    and clamps/drops junk. `finish()` guarantees a final 1.0 (unless nothing
-    fired, e.g. a cached transcript, or 100 already emitted).
+    Each phase (transcribe, align, …) gets its own emitter carrying a fixed
+    `phase_index`/`phase_count`/`label`, so the app renders "Phase X of N" without
+    knowing the pipeline shape. Emits the first callback unconditionally, then only
+    when the whole-number percent changes, clamps/drops junk, and is monotonic
+    within the phase. `finish()` guarantees a final 1.0 for THIS phase — but only
+    when the phase actually emitted something, so a skipped phase (e.g. a cached
+    transcript that never runs alignment) never fabricates 100%.
     """
 
-    def __init__(self, emit=_emit_event) -> None:
+    def __init__(
+        self, index: int, count: int, phase: str, label: str, message: str,
+        emit=_emit_event,
+    ) -> None:
+        self._index = index
+        self._count = count
+        self._phase = phase
+        self._label = label
+        self._message = message
         self._emit = emit
         self._last_percent: int | None = None
 
@@ -82,15 +105,46 @@ class _ProgressEmitter:
 
     def _emit_fraction(self, fraction: float) -> None:
         fraction = max(0.0, min(1.0, fraction))
-        label = "Aligning words…" if fraction >= 0.5 else "Transcribing audio…"
         self._emit(
             {
                 "type": "progress",
-                "phase": "transcribing",
-                "message": label,
+                "phase": self._phase,
+                "phase_index": self._index,
+                "phase_count": self._count,
+                "label": self._label,
+                "message": self._message,
                 "fraction": round(fraction, 4),
             }
         )
+
+
+class _StageRouter:
+    """Routes WhisperX's `(stage, fraction)` callbacks to per-phase emitters.
+
+    The backend reports each stage's own unscaled 0..1 progress tagged with its
+    name; the CLI owns which stage is which phase. On the first `align` callback we
+    finish the transcribe phase (cap it at 100%) before alignment starts, so phase
+    indices only ever move forward on the wire.
+    """
+
+    def __init__(self, transcribe: _PhaseEmitter, align: _PhaseEmitter) -> None:
+        self._transcribe = transcribe
+        self._align = align
+        self._align_started = False
+
+    def __call__(self, stage: str, fraction: float) -> None:
+        if stage == "transcribe":
+            self._transcribe(fraction)
+        elif stage == "align":
+            if not self._align_started:
+                self._align_started = True
+                self._transcribe.finish()
+            self._align(fraction)
+
+    def finish(self) -> None:
+        # Cap whichever phases actually emitted; no-op for skipped ones.
+        self._transcribe.finish()
+        self._align.finish()
 
 
 def _load_or_transcribe_transcript(source: Path, refresh: bool) -> Transcript:
@@ -346,14 +400,27 @@ def run_plan(source: Path, work_dir: Path, sample_rate: int, refresh: bool = Fal
     """Analyze (no cut): transcript + canonical AIFF + samples + silences → edit-plan dict."""
     work_dir.mkdir(parents=True, exist_ok=True)
 
-    _progress("transcribing", "Preparing audio…")
-    _transcribe_progress = _ProgressEmitter()
+    # The `plan` pipeline is a fixed 3-phase run, declared on every event so the app
+    # renders "Phase X of N" without hard-coding the shape: (1) Transcribing and
+    # (2) Aligning words are the slow, determinate WhisperX stages; (3) Finalizing
+    # covers convert + silence + build (fast, indeterminate, message advances).
+    phase_count = 3
+    # Phase 1 starts indeterminate: WhisperX's cold model load can sit here a while
+    # before the first real transcribe fraction arrives.
+    _progress("transcribing", "Preparing audio…",
+              index=1, count=phase_count, label="Transcribing")
+    transcribe_progress = _PhaseEmitter(
+        1, phase_count, "transcribing", "Transcribing", "Transcribing audio…")
+    align_progress = _PhaseEmitter(
+        2, phase_count, "aligning", "Aligning words", "Aligning words…")
+    stage_progress = _StageRouter(transcribe_progress, align_progress)
     transcript = _load_or_transcribe_transcript_in(
-        source, work_dir, refresh, on_progress=_transcribe_progress
+        source, work_dir, refresh, on_progress=stage_progress
     )
-    _transcribe_progress.finish()
+    stage_progress.finish()
 
-    _progress("converting", "Converting audio")
+    _progress("finalizing", "Converting audio…",
+              index=3, count=phase_count, label="Finalizing")
     # The canonical PCM AIFF that backs the app's waveform, playback, and render
     # (roadmap decision 4). It is left on disk in `work_dir` for the app to copy
     # into its own cache before the scratch dir is cleaned up.
@@ -389,10 +456,12 @@ def run_plan(source: Path, work_dir: Path, sample_rate: int, refresh: bool = Fal
     )
     transcript = Transcript(words=filled, segments=transcript.segments)
 
-    _progress("analyzing_silence", "Finding silence")
+    _progress("finalizing", "Finding silence…",
+              index=3, count=phase_count, label="Finalizing")
     silences = detect_silences(mono, sr, **SILENCE_PARAMS)
 
-    _progress("writing_plan", "Preparing transcript")
+    _progress("finalizing", "Preparing transcript…",
+              index=3, count=phase_count, label="Finalizing")
     return build_edit_plan(
         source_path=source, sample_rate=sr, channels=channels,
         total_samples=total_samples, params={**SNAP_PARAMS, **SILENCE_PARAMS},
