@@ -37,6 +37,7 @@ struct WaveformView: View {
 
   private var header: some View {
     HStack(spacing: 12) {
+      TransportPanelView(model: model)
       Text(model.waveform.caption)
         .font(.system(size: 11, weight: .semibold)).tracking(1.5)
         .foregroundStyle(Color(white: 0.44))
@@ -131,7 +132,7 @@ private struct WaveformPlayhead: View {
   let model: EditorModel
 
   var body: some View {
-    if let positionX = model.waveform.playheadX {
+    if let positionX = model.playheadX {
       Rectangle()
         .fill(Color(red: 0.96, green: 0.86, blue: 0.4))
         .frame(width: 1.5)

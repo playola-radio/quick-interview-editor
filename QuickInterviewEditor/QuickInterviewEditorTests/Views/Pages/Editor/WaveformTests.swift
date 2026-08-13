@@ -119,12 +119,8 @@ struct WaveformTests {
 
   @Test func playheadXOnlyWhenInsideViewport() {
     let model = makeModel(totalSamples: 100_000, viewportWidth: 100, samplesPerPixel: 10)
-    model.playheadSample = 500
-    #expect(model.playheadX == 50)
-    model.playheadSample = 5000  // x 500 -> off-screen
-    #expect(model.playheadX == nil)
-    model.playheadSample = nil
-    #expect(model.playheadX == nil)
+    #expect(model.playheadX(for: 500) == 50)
+    #expect(model.playheadX(for: 5000) == nil)  // x 500 -> off-screen
   }
 
   // MARK: - zoom / scroll

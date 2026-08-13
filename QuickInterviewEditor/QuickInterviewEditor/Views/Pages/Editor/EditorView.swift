@@ -38,6 +38,9 @@ struct EditorView: View {
     .task { await model.loadWaveform() }
     .task { await model.observePlayback() }
     .onChange(of: model.fineTuneSessionKey, initial: true) { _, _ in model.syncEditSession() }
+    .onChange(of: model.transcript.selectedSampleRange) { _, newRange in
+      Task { await model.transportSelectionChanged(newRange) }
+    }
   }
 
   @ViewBuilder private var rightPanel: some View {

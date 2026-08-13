@@ -17,8 +17,9 @@ struct AudioPlayerClient: Sendable {
   /// Pauses `session` if it is the current playback, freezing the node in place; returns the
   /// exact resting plan sample (nil if `session` is not current). Does not end the `play` call.
   var pause: @Sendable (PlaybackSessionID) async -> Int?
-  /// Resumes `session` if it is the current paused playback; otherwise no-op.
-  var resume: @Sendable (PlaybackSessionID) async -> Void
+  /// Resumes `session` if it is the current paused playback. Returns whether it is now playing,
+  /// so a caller can keep its UI honest when a restart fails (e.g. the engine stopped mid-pause).
+  var resume: @Sendable (PlaybackSessionID) async -> Bool
   /// Stops the current playback if `session` is nil or matches it; otherwise no-op.
   var stop: @Sendable (PlaybackSessionID?) async -> Void
   /// A stream of playback positions in PLAN samples while a slice plays, terminated by an
@@ -49,13 +50,16 @@ extension AudioPlayerClient: TestDependencyKey {
       reportIssue("AudioPlayerClient.pause called without a test override")
       return nil
     },
-    resume: { _ in reportIssue("AudioPlayerClient.resume called without a test override") },
+    resume: { _ in
+      reportIssue("AudioPlayerClient.resume called without a test override")
+      return false
+    },
     stop: { _ in reportIssue("AudioPlayerClient.stop called without a test override") },
     positions: { AsyncStream { $0.finish() } }
   )
 
   static let previewValue = AudioPlayerClient(
-    play: { _, _, _, _ in }, pause: { _ in nil }, resume: { _ in },
+    play: { _, _, _, _ in }, pause: { _ in nil }, resume: { _ in true },
     stop: { _ in }, positions: { AsyncStream { $0.finish() } })
 }
 
@@ -228,23 +232,25 @@ private actor LivePlayerBox {
     return planSample
   }
 
-  /// Resumes a paused session: restart the node and the tick loop. No-op if `session`
-  /// isn't current or the node is already playing.
-  func resume(session: PlaybackSessionID) {
-    guard currentSession == session, !node.isPlaying else { return }
+  /// Resumes a paused session: restart the node and the tick loop. Returns whether the session
+  /// is now playing — false if `session` isn't current, or true if it was already playing.
+  func resume(session: PlaybackSessionID) -> Bool {
+    guard currentSession == session else { return false }
+    if node.isPlaying { return true }
     // An interruption/device-change can stop the engine while the session stays current;
     // restart it before `node.play()`. If the restart fails, surface it and stay paused
-    // rather than fake a silent resume — the caller can retry or stop.
+    // rather than fake a silent resume — the caller keeps its UI paused and can retry or stop.
     if !engine.isRunning {
       do {
         try engine.start()
       } catch {
         reportIssue(error)
-        return
+        return false
       }
     }
     node.play()
     startTicking()
+    return true
   }
 
   /// Invalidate the current segment: bump the generation, resume the waiter, and

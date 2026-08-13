@@ -496,7 +496,7 @@ struct EditorTests {
 
   // MARK: - Playhead (playback position)
 
-  @Test func observePlaybackMapsPositionThenClearsOnExit() async {
+  @Test func observePlaybackMovesCursorAndKeepsItOnExit() async {
     let model = editor()
     let session = PlaybackSessionID()
     model.playingSliceID = UUID()  // this editor owns playback
@@ -508,16 +508,16 @@ struct EditorTests {
       let task = Task { await model.observePlayback() }
       continuation.yield(
         PlaybackPosition(sessionID: session, sample: 1000, isPlaying: true))
-      await settle { model.waveform.playheadSample == 1000 }
-      #expect(model.waveform.playheadSample == 1000)  // maps the live position
+      await settle { model.playheadSample == 1000 }
+      #expect(model.playheadSample == 1000)  // maps the live position
       continuation.finish()  // stands in for the task being cancelled / stream ending
       await task.value
-      #expect(model.waveform.playheadSample == nil)  // cleared on exit — no phantom marker
+      #expect(model.playheadSample == 1000)  // persists after exit — the cursor is never cleared
     }
   }
 
   @Test func observePlaybackIgnoresTicksWhenThisEditorIsNotPlaying() async {
-    let model = editor()  // playingSliceID is nil — another tab owns playback
+    let model = editor()  // owns no playback — another tab owns it; cursor rests at 0
     let (stream, continuation) = AsyncStream.makeStream(of: PlaybackPosition.self)
     await withDependencies {
       $0.audioPlayer.positions = { stream }
@@ -526,13 +526,13 @@ struct EditorTests {
       continuation.yield(
         PlaybackPosition(sessionID: PlaybackSessionID(), sample: 5000, isPlaying: true))
       await settle { false }  // let the tick be processed
-      #expect(model.waveform.playheadSample == nil)  // never adopts another tab's position
+      #expect(model.playheadSample == 0)  // never adopts another tab's position
       continuation.finish()
       await task.value
     }
   }
 
-  @Test func observePlaybackClearsPlayheadOnStopTick() async {
+  @Test func observePlaybackKeepsCursorOnStopTick() async {
     let model = editor()
     let session = PlaybackSessionID()
     model.playingSliceID = UUID()  // this editor owns playback
@@ -544,12 +544,12 @@ struct EditorTests {
       let task = Task { await model.observePlayback() }
       continuation.yield(
         PlaybackPosition(sessionID: session, sample: 1000, isPlaying: true))
-      await settle { model.waveform.playheadSample == 1000 }
-      // stop tick
+      await settle { model.playheadSample == 1000 }
+      // A false/final tick ends transcript follow but must NOT move the persistent cursor.
       continuation.yield(
         PlaybackPosition(sessionID: session, sample: 1200, isPlaying: false))
-      await settle { model.waveform.playheadSample == nil }
-      #expect(model.waveform.playheadSample == nil)
+      await settle { false }  // let the false tick be processed
+      #expect(model.playheadSample == 1000)  // cursor stays where the audio last played
       continuation.finish()
       await task.value
     }
@@ -567,12 +567,12 @@ struct EditorTests {
       let task = Task { await model.observePlayback() }
       continuation.yield(
         PlaybackPosition(sessionID: session, sample: 1000, isPlaying: true))
-      await settle { model.waveform.playheadSample == 1000 }
-      // A straggler tick from a superseded/foreign session must NOT move the playhead.
+      await settle { model.playheadSample == 1000 }
+      // A straggler tick from a superseded/foreign session must NOT move the cursor.
       continuation.yield(
         PlaybackPosition(sessionID: PlaybackSessionID(), sample: 9999, isPlaying: true))
       await settle { false }  // let the foreign tick be processed
-      #expect(model.waveform.playheadSample == 1000)  // unchanged — foreign tick ignored
+      #expect(model.playheadSample == 1000)  // unchanged — foreign tick ignored
       continuation.finish()
       await task.value
     }
