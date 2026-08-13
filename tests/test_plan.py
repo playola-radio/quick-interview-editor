@@ -93,7 +93,10 @@ def test_plan_writes_nothing_beside_source(tmp_path):
     assert siblings == ["clip.wav"]  # no .transcript.json / .aiff / .edit-plan.json
 
 
-def test_plan_emits_per_phase_progress_events_on_stderr(tmp_path):
+def test_plan_cache_hit_skips_to_finalizing_phase(tmp_path):
+    # `_run_plan` seeds a transcript, so transcription is a cache hit. The event
+    # contract requires cached runs to skip phases 1-2 entirely: the very first
+    # progress event must already be phase 3 (Finalizing), never a phantom phase 1.
     _src, _work, proc = _run_plan(tmp_path)
     events = []
     for line in proc.stderr.splitlines():
@@ -106,19 +109,12 @@ def test_plan_emits_per_phase_progress_events_on_stderr(tmp_path):
     # app never hard-codes the pipeline shape.
     for e in events:
         assert e["phase_count"] == 3
-        assert 1 <= e["phase_index"] <= 3
         assert e["label"]
-    # Phase indices only ever move forward within a run.
-    indices = [e["phase_index"] for e in events]
-    assert indices == sorted(indices)
-    # Phase 1 (transcribing) is announced; the tail is the distinct finalizing phase.
-    assert indices[0] == 1
-    assert events[0]["phase"] == "transcribing"
-    assert events[-1]["phase"] == "finalizing"
-    assert events[-1]["phase_index"] == 3
-    # This run uses a seeded (cached) transcript, so the real transcribe/align
-    # sub-progress is skipped -> no fabricated "aligning" 100%.
-    assert all(e["phase"] != "aligning" for e in events)
+    # A cache hit emits ONLY the finalizing phase — no phantom transcribe/align events,
+    # and the first event the app sees is phase 3.
+    assert all(e["phase_index"] == 3 for e in events)
+    assert all(e["phase"] == "finalizing" for e in events)
+    assert events[0]["phase_index"] == 3
 
 
 def _run_plan_seeded(tmp_path: Path, words):

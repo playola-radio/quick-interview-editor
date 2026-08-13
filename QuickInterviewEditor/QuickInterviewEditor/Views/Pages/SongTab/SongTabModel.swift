@@ -205,13 +205,14 @@ final class SongTabModel: ViewModel, Identifiable {
   /// from an earlier phase, and clamps the fraction so the bar never jumps backward
   /// within a phase.
   private func applyProgress(_ progress: EngineProgress) {
-    if let incoming = progress.phaseIndex, let current = currentPhaseIndex,
-      incoming < current
-    {
+    // Normalize first: a malformed index (e.g. 999-of-3) becomes nil so it can never
+    // pin the phase high and make every real later phase look stale.
+    let incomingIndex = progress.validPhaseIndex
+    if let incoming = incomingIndex, let current = currentPhaseIndex, incoming < current {
       return  // stale event from an earlier phase — keep the newer phase on screen
     }
-    if progress.phaseIndex != currentPhaseIndex || progress.phase != currentPhaseName {
-      currentPhaseIndex = progress.phaseIndex
+    if incomingIndex != currentPhaseIndex || progress.phase != currentPhaseName {
+      currentPhaseIndex = incomingIndex
       currentPhaseName = progress.phase
       maxFraction = nil
       phaseStartElapsed = elapsedSeconds

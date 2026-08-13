@@ -1,11 +1,12 @@
 import math
+from typing import Callable
 
 from logic_markers.cli import _PhaseEmitter, _StageRouter
 
 
-def _collect():
-    events = []
-    return events, (lambda e: events.append(e))
+def _collect() -> tuple[list, Callable]:
+    events: list = []
+    return events, events.append
 
 
 def test_first_callback_always_emits_with_phase_metadata():

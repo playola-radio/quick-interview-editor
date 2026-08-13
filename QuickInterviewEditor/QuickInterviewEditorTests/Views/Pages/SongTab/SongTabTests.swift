@@ -259,6 +259,32 @@ struct SongTabTests {
     expectNoDifference(model.progressHeadline, "Phase 2 of 3 · Aligning words · 30%")
   }
 
+  @Test func invalidHighPhaseIndexDoesNotPoisonLaterValidPhase() async {
+    // A malformed index (999 of 3) must normalize away, not pin the phase high —
+    // otherwise a subsequent valid phase 2 would look stale and be ignored forever.
+    let model = SongTabModel(sourceURL: URL(fileURLWithPath: "/tmp/a.wav"))
+    await withDependencies {
+      $0.transcription.transcribe = { _, _, _ in
+        stream([
+          .progress(
+            .init(
+              phase: "bogus", phaseIndex: 999, phaseCount: 3, label: "Bogus",
+              message: "Bogus", fraction: 0.4)),
+          .progress(
+            .init(
+              phase: "aligning", phaseIndex: 2, phaseCount: 3, label: "Aligning words",
+              message: "Aligning words", fraction: 0.3)),
+        ])
+      }
+    } operation: {
+      await model.startTranscription()
+    }
+    // The later valid phase 2 is honored (not dropped as stale), and its own 0–100%
+    // is shown rather than the bogus event's 40%.
+    expectNoDifference(model.progressFraction, 0.3)
+    expectNoDifference(model.progressHeadline, "Phase 2 of 3 · Aligning words · 30%")
+  }
+
   @Test func tailPhaseGoesIndeterminate() async {
     let model = SongTabModel(sourceURL: URL(fileURLWithPath: "/tmp/a.wav"))
     await withDependencies {

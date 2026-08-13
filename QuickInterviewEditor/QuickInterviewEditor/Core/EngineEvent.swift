@@ -43,12 +43,22 @@ struct EngineProgress: Equatable, Sendable {
     self.fraction = fraction
   }
 
-  /// "Phase X of N", shown only when the engine sent sane 1-based metadata. Old-format
-  /// events (or malformed index/count) return nil, so the app just drops the prefix.
-  var phaseOfNText: String? {
+  /// The phase index, but only when it forms sane 1-based metadata (`1...phaseCount`).
+  /// Old-format events (no index) and malformed metadata (e.g. `index 999, count 3`)
+  /// normalize to nil, so a bogus index is never used for ordering or the "Phase X of
+  /// N" prefix — otherwise it would pin `currentPhaseIndex` high and make every real
+  /// later phase look stale.
+  var validPhaseIndex: Int? {
     guard let index = phaseIndex, let count = phaseCount,
       count >= 1, index >= 1, index <= count
     else { return nil }
+    return index
+  }
+
+  /// "Phase X of N", shown only when the engine sent sane 1-based metadata. Old-format
+  /// events (or malformed index/count) return nil, so the app just drops the prefix.
+  var phaseOfNText: String? {
+    guard let index = validPhaseIndex, let count = phaseCount else { return nil }
     return "Phase \(index) of \(count)"
   }
 

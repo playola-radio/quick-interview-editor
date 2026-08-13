@@ -165,14 +165,21 @@ def _load_or_transcribe_transcript(source: Path, refresh: bool) -> Transcript:
 
 
 def _load_or_transcribe_transcript_in(
-    source: Path, work_dir: Path, refresh: bool, *, on_progress=None
+    source: Path, work_dir: Path, refresh: bool, *, on_progress=None, on_start=None
 ) -> Transcript:
-    """Same as `_load_or_transcribe_transcript`, but cached in `work_dir` (never beside source)."""
+    """Same as `_load_or_transcribe_transcript`, but cached in `work_dir` (never beside source).
+
+    `on_start` (if given) fires only when a real transcription is about to run — never
+    on a cache hit — so the caller can announce the transcribe phase without emitting it
+    for cached runs (which skip straight to finalizing).
+    """
     from .whisperx_backend import transcribe_transcript
 
     cache = work_dir / (source.name + ".transcript.json")
     if cache.exists() and not refresh:
         return Transcript.from_dict(json.loads(cache.read_text()))
+    if on_start is not None:
+        on_start()
     transcript = transcribe_transcript(source, progress_callback=on_progress)
     cache.write_text(json.dumps(transcript.to_dict(), indent=2))
     return transcript
@@ -408,17 +415,21 @@ def run_plan(source: Path, work_dir: Path, sample_rate: int, refresh: bool = Fal
     # (2) Aligning words are the slow, determinate WhisperX stages; (3) Finalizing
     # covers convert + silence + build (fast, indeterminate, message advances).
     phase_count = 3
-    # Phase 1 starts indeterminate: WhisperX's cold model load can sit here a while
-    # before the first real transcribe fraction arrives.
-    _progress("transcribing", "Preparing audio…",
-              index=1, count=phase_count, label="Transcribing")
     transcribe_progress = _PhaseEmitter(
         1, phase_count, "transcribing", "Transcribing", "Transcribing audio…")
     align_progress = _PhaseEmitter(
         2, phase_count, "aligning", "Aligning words", "Aligning words…")
     stage_progress = _StageRouter(transcribe_progress, align_progress)
+
+    def _announce_transcribing() -> None:
+        # Phase 1 starts indeterminate: WhisperX's cold model load can sit here a while
+        # before the first real transcribe fraction arrives. Fired only on a cache miss
+        # (via on_start), so a cached run skips phases 1–2 and jumps to Finalizing.
+        _progress("transcribing", "Preparing audio…",
+                  index=1, count=phase_count, label="Transcribing")
+
     transcript = _load_or_transcribe_transcript_in(
-        source, work_dir, refresh, on_progress=stage_progress
+        source, work_dir, refresh, on_progress=stage_progress, on_start=_announce_transcribing
     )
     stage_progress.finish()
 
