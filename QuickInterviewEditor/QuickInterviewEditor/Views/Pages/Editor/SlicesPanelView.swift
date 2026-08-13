@@ -121,8 +121,10 @@ private struct SliceCard: View {
       .buttonStyle(.plain)
       .accessibilityLabel(model.revealClipLabel)
       HStack(spacing: 8) {
+        // A pure Play shortcut into the global transport (ruling F: no per-slice Stop — the
+        // transport panel owns Pause/Stop). The row highlights below while this slice plays.
         Button(row.playButtonLabel) {
-          Task { await model.playStopTapped(row.id) }
+          Task { await model.playSliceTapped(row.id) }
         }
         Button(model.fineTuneLabel) {
           model.sliceSelected(row.id)
@@ -143,7 +145,11 @@ private struct SliceCard: View {
       }
     }
     .padding(12)
-    .background(Color(white: 0.08))
+    // A subtle transport-accent tint marks the slice the one playhead is currently playing (the
+    // per-slice Stop is gone; this is the row's "playing" indicator).
+    .background(
+      row.isPlaying ? Color(red: 0.96, green: 0.86, blue: 0.4).opacity(0.12) : Color(white: 0.08)
+    )
     .clipShape(RoundedRectangle(cornerRadius: 11))
     .overlay(
       RoundedRectangle(cornerRadius: 11)

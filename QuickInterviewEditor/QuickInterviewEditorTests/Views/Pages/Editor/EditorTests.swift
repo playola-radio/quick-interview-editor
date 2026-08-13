@@ -238,12 +238,12 @@ struct EditorTests {
     } operation: {
       let task = Task { await model.playSliceTapped(slice.id) }
       await gate.awaitStarted()
-      expectNoDifference(model.playingSliceID, slice.id)
+      expectNoDifference(model.transportContext.sliceID, slice.id)
       // Undoing the add removes the currently-playing slice; reconcile must stop playback.
       await model.undoTapped()
       await task.value
       expectNoDifference(model.slices, [])
-      expectNoDifference(model.playingSliceID, nil)
+      expectNoDifference(model.transportContext.sliceID, nil)
       #expect(stopped.value)
     }
   }
@@ -266,7 +266,7 @@ struct EditorTests {
       await gate.awaitStarted()
       // Undoing the Slice 2 add leaves the playing Slice 1 intact — playback continues.
       await model.undoTapped()
-      expectNoDifference(model.playingSliceID, playing.id)
+      expectNoDifference(model.transportContext.sliceID, playing.id)
       #expect(!stopped.value)
       gate.release()  // finish the test cleanly
       await task.value
@@ -323,14 +323,14 @@ struct EditorTests {
     } operation: {
       let task = Task { await model.playSliceTapped(slice.id) }
       await gate.awaitStarted()
-      expectNoDifference(model.playingSliceID, slice.id)
+      expectNoDifference(model.transportContext.sliceID, slice.id)
       // Playback reads the canonical AIFF, not the original source.
       expectNoDifference(recorded.value?.0, model.canonicalAudioURL)
       expectNoDifference(recorded.value?.1, slice.startSample..<slice.endSample)
       expectNoDifference(recorded.value?.2, model.editPlan.source.sampleRate)
       gate.release()  // natural completion
       await task.value
-      expectNoDifference(model.playingSliceID, nil)
+      expectNoDifference(model.transportContext.sliceID, nil)
     }
   }
 
@@ -345,14 +345,14 @@ struct EditorTests {
     } operation: {
       let slicePlay = Task { await model.playSliceTapped(slice.id) }
       await gate.awaitStarted()
-      expectNoDifference(model.playingSliceID, slice.id)
+      expectNoDifference(model.transportContext.sliceID, slice.id)
       // Open a fine-tune session on the slice, then preview its draft.
       model.sliceSelected(slice.id)
       let preview = Task { await model.previewEditTapped() }
       await gate.awaitStarted()
       // The slice is no longer the owner; the preview took over.
-      expectNoDifference(model.playingSliceID, nil)
-      #expect(model.isPreviewingDraft)
+      expectNoDifference(model.transportContext.sliceID, nil)
+      #expect(model.transportContext == .draftPreview)
       gate.release()
       await slicePlay.value
       await preview.value
@@ -373,11 +373,11 @@ struct EditorTests {
       await gate.awaitStarted()
       await model.stopPlaybackTapped()
       await task.value
-      expectNoDifference(model.playingSliceID, nil)
+      expectNoDifference(model.transportContext.sliceID, nil)
     }
   }
 
-  @Test func playStopTappedTogglesPlayback() async {
+  @Test func sliceShortcutPlaysThenTransportStops() async {
     let gate = PlayerGate()
     let model = editor()
     selectWords(model.transcript, 0, 1)
@@ -387,12 +387,13 @@ struct EditorTests {
       $0.audioPlayer.play = { _, _, _, _ in await gate.play() }
       $0.audioPlayer.stop = { _ in gate.release() }
     } operation: {
-      let task = Task { await model.playStopTapped(slice.id) }
+      let task = Task { await model.playSliceTapped(slice.id) }  // pure Play shortcut
       await gate.awaitStarted()
-      expectNoDifference(model.playingSliceID, slice.id)
-      await model.playStopTapped(slice.id)  // second tap stops
+      expectNoDifference(model.transportContext.sliceID, slice.id)
+      await model.transportStopTapped()  // the global transport owns Stop now (no per-slice Stop)
       await task.value
-      expectNoDifference(model.playingSliceID, nil)
+      expectNoDifference(model.transportContext.sliceID, nil)
+      expectNoDifference(model.transportContext, .free)
     }
   }
 
@@ -408,10 +409,10 @@ struct EditorTests {
         await model.playSliceTapped(slice.id)
       }
     }
-    expectNoDifference(model.playingSliceID, nil)
+    expectNoDifference(model.transportContext.sliceID, nil)
   }
 
-  @Test func sliceRowPlayButtonLabelReflectsPlayingState() async {
+  @Test func sliceRowHighlightsWhilePlayingAndButtonStaysPlay() async {
     let gate = PlayerGate()
     let model = editor()
     for pair in [(0, 1), (2, 3)] {
@@ -420,17 +421,21 @@ struct EditorTests {
     }
     let first = model.slices[0]
     let second = model.slices[1]
+    expectNoDifference(model.sliceRows[id: first.id]?.isPlaying, false)
     expectNoDifference(model.sliceRows[id: first.id]?.playButtonLabel, model.playLabel)
     await withDependencies {
       $0.audioPlayer.play = { _, _, _, _ in await gate.play() }
       $0.audioPlayer.stop = { _ in gate.release() }
     } operation: {
-      let task = Task { await model.playStopTapped(first.id) }
+      let task = Task { await model.playSliceTapped(first.id) }
       await gate.awaitStarted()
-      expectNoDifference(model.sliceRows[id: first.id]?.playButtonLabel, model.stopLabel)
-      expectNoDifference(model.sliceRows[id: second.id]?.playButtonLabel, model.playLabel)
+      // Only the playing row highlights; the button is a pure "Play" shortcut (ruling F: no Stop).
+      expectNoDifference(model.sliceRows[id: first.id]?.isPlaying, true)
+      expectNoDifference(model.sliceRows[id: second.id]?.isPlaying, false)
+      expectNoDifference(model.sliceRows[id: first.id]?.playButtonLabel, model.playLabel)
       gate.release()
       await task.value
+      expectNoDifference(model.sliceRows[id: first.id]?.isPlaying, false)
     }
   }
 
@@ -452,7 +457,7 @@ struct EditorTests {
       await gate.awaitStarted()
       await model.deleteSlice(slice.id)
       await task.value
-      expectNoDifference(model.playingSliceID, nil)
+      expectNoDifference(model.transportContext.sliceID, nil)
       #expect(stopped.value)
       #expect(model.slices[id: slice.id] == nil)
     }
@@ -500,8 +505,8 @@ struct EditorTests {
   @Test func observePlaybackMovesCursorAndKeepsItOnExit() async {
     let model = editor()
     let session = PlaybackSessionID()
-    model.playingSliceID = UUID()  // this editor owns playback
-    model.currentPlaybackSession = session
+    model.transportContext = .slice(UUID())  // this editor owns slice playback
+    model.transportPhase = .playing(session)
     let (stream, continuation) = AsyncStream.makeStream(of: PlaybackPosition.self)
     await withDependencies {
       $0.audioPlayer.positions = { stream }
@@ -536,8 +541,8 @@ struct EditorTests {
   @Test func observePlaybackKeepsCursorOnStopTick() async {
     let model = editor()
     let session = PlaybackSessionID()
-    model.playingSliceID = UUID()  // this editor owns playback
-    model.currentPlaybackSession = session
+    model.transportContext = .slice(UUID())  // this editor owns slice playback
+    model.transportPhase = .playing(session)
     let (stream, continuation) = AsyncStream.makeStream(of: PlaybackPosition.self)
     await withDependencies {
       $0.audioPlayer.positions = { stream }
@@ -559,8 +564,8 @@ struct EditorTests {
   @Test func observePlaybackIgnoresTicksFromASupersededSession() async {
     let model = editor()
     let session = PlaybackSessionID()
-    model.playingSliceID = UUID()  // this editor owns playback
-    model.currentPlaybackSession = session
+    model.transportContext = .slice(UUID())  // this editor owns slice playback
+    model.transportPhase = .playing(session)
     let (stream, continuation) = AsyncStream.makeStream(of: PlaybackPosition.self)
     await withDependencies {
       $0.audioPlayer.positions = { stream }
@@ -591,7 +596,7 @@ struct EditorTests {
     } operation: {
       let task = Task { await model.playSliceTapped(slice.id) }
       await gate.awaitStarted()
-      let session = model.currentPlaybackSession
+      let session = model.transportPhase.session
       #expect(session != nil)
       await model.stopPlaybackTapped()
       gate.release()
@@ -603,7 +608,7 @@ struct EditorTests {
 
   @Test func stopWhenIdleDoesNotStealAnotherTabsPlayback() async {
     let stopCalled = LockIsolated(false)
-    let model = editor()  // owns no playback: currentPlaybackSession == nil
+    let model = editor()  // owns no playback: transportPhase is .stopped
     await withDependencies {
       $0.audioPlayer.stop = { _ in stopCalled.setValue(true) }
     } operation: {
@@ -623,17 +628,17 @@ struct EditorTests {
     } operation: {
       let first = Task { await model.playSliceTapped(slice.id) }
       await gate.awaitStarted()
-      let s1 = model.currentPlaybackSession
+      let s1 = model.transportPhase.session
       // Restart the SAME slice: supersedes S1 with a new session S2 while S1 is still in flight.
       let second = Task { await model.playSliceTapped(slice.id) }
       await gate.awaitStarted()
-      let s2 = model.currentPlaybackSession
+      let s2 = model.transportPhase.session
       #expect(s1 != s2)
       // Complete ONLY the stale S1 play; its completion must NOT clear the newer S2 owner.
       gate.releaseFirst()
       await first.value
-      #expect(model.playingSliceID == slice.id)  // still owned by S2's playback
-      expectNoDifference(model.currentPlaybackSession, s2)
+      #expect(model.transportContext.sliceID == slice.id)  // still owned by S2's playback
+      expectNoDifference(model.transportPhase.session, s2)
       gate.release()  // let S2 finish
       await second.value
     }
@@ -655,8 +660,8 @@ struct EditorTests {
       await model.playSliceTapped(id)
     }
     #expect(!played.value)  // empty range refused before touching the player
-    #expect(model.playingSliceID == nil)
-    #expect(model.currentPlaybackSession == nil)
+    #expect(model.transportContext.sliceID == nil)
+    #expect(model.transportPhase.session == nil)
   }
 
   @Test func playingASlicePastEndOfAudioIsANoOp() async {
@@ -677,8 +682,8 @@ struct EditorTests {
       await model.playSliceTapped(model.slices[0].id)
     }
     #expect(!played.value)  // past-EOF range refused before touching the player
-    #expect(model.playingSliceID == nil)
-    #expect(model.currentPlaybackSession == nil)
+    #expect(model.transportContext.sliceID == nil)
+    #expect(model.transportPhase.session == nil)
   }
 
   @Test func stoppingPlaybackResetsTranscriptFollowForNextSlice() async {
@@ -688,7 +693,8 @@ struct EditorTests {
     model.transcript.playheadChanged(sample: word.startSample!, isPlaying: true)
     model.transcript.transcriptUserScrolled()
     expectNoDifference(model.transcript.followMode, .userPaused)
-    model.playingSliceID = UUID()
+    model.transportContext = .slice(UUID())
+    model.transportPhase = .playing(PlaybackSessionID())
 
     await withDependencies {
       $0.audioPlayer.stop = { _ in }

@@ -171,10 +171,9 @@ private actor LivePlayerBox {
     // any current playback. Callers guard this already, so treat it as an immediate finish.
     guard frameCount > 0 else { return .finished }
 
-    // Tear down any current playback without a stop tick: playing slice B directly while
-    // A plays keeps `playingSliceID` set, so a `false` tick here would briefly flash this
-    // tab's playhead to nil before B's first position arrives. The new ticking task emits
-    // shortly.
+    // Tear down any current playback without a stop tick: starting playback B directly while
+    // A plays keeps the transport owner set, so a `false` tick here would briefly flash this
+    // tab's playhead before B's first position arrives. The new ticking task emits shortly.
     supersede(broadcastStop: false)
     currentSession = session
     startPlanSample = max(0, range.lowerBound)

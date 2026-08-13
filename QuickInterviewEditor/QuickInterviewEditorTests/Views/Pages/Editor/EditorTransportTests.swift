@@ -46,8 +46,8 @@ private final class TransportGate: @unchecked Sendable {
 /// A minimal stand-in for the ONE shared player two editor tabs contend over. `play` supersedes any
 /// in-flight play (resuming it `.superseded`) and suspends as the new current; the test finishes the
 /// current play explicitly. Reproduces the cross-tab supersede the single-session gates can't: the
-/// backgrounded tab's own `currentPlaybackSession` stays set because the foreground tab never touches
-/// it, so only the `.superseded` return distinguishes it from a natural end.
+/// backgrounded tab's own `transportPhase` still holds its session because the foreground tab never
+/// touches it, so only the `.superseded` return distinguishes it from a natural end.
 private actor SharedFakePlayer {
   private var current: CheckedContinuation<PlaybackEnd, Never>?
   private let startedContinuation: AsyncStream<Void>.Continuation
@@ -209,7 +209,7 @@ struct EditorTransportTests {
     }
     expectNoDifference(model.playheadSample, 1000)  // a failed play must not jump to the range end
     expectNoDifference(model.transportPhase, .stopped)
-    #expect(model.currentPlaybackSession == nil)
+    #expect(model.transportPhase.session == nil)
   }
 
   @Test func naturalCompletionLeavesCursorAtRangeEnd() async {
@@ -227,7 +227,7 @@ struct EditorTransportTests {
       await task.value
       expectNoDifference(model.transportPhase, .stopped)
       expectNoDifference(model.playheadSample, end)  // left where the audio ended
-      #expect(model.currentPlaybackSession == nil)
+      #expect(model.transportPhase.session == nil)
     }
   }
 
@@ -244,7 +244,7 @@ struct EditorTransportTests {
     } operation: {
       let task = Task { await model.transportPlayTapped() }
       await gate.awaitStarted()
-      let session = model.currentPlaybackSession
+      let session = model.transportPhase.session
       await model.transportPauseTapped()
       expectNoDifference(model.playheadSample, 4321)  // frozen at the exact reported sample
       #expect(model.isTransportPaused)
@@ -258,8 +258,7 @@ struct EditorTransportTests {
   @Test func pausedCursorIgnoresBufferedTick() async {
     let model = editor()
     let session = PlaybackSessionID()
-    model.transportPhase = .paused(session)
-    model.currentPlaybackSession = session
+    model.transportPhase = .paused(session)  // the session is carried by the phase now
     model.playheadSample = 4321  // the exact sample `pause` froze the cursor at
     let (stream, continuation) = AsyncStream.makeStream(of: PlaybackPosition.self)
     await withDependencies {
@@ -291,7 +290,7 @@ struct EditorTransportTests {
     } operation: {
       let task = Task { await model.transportPlayTapped() }
       await gate.awaitStarted()
-      let session = model.currentPlaybackSession
+      let session = model.transportPhase.session
       await model.transportPauseTapped()
       await model.transportPlayTapped()  // resume
       #expect(resumed.value)
@@ -314,7 +313,7 @@ struct EditorTransportTests {
     } operation: {
       let task = Task { await model.transportPlayTapped() }
       await gate.awaitStarted()
-      let session = model.currentPlaybackSession
+      let session = model.transportPhase.session
       await model.transportPauseTapped()
       await model.transportPlayTapped()  // resume attempt fails
       #expect(model.isTransportPaused)  // stays paused — the panel doesn't claim to be playing
@@ -340,18 +339,18 @@ struct EditorTransportTests {
     } operation: {
       let task = Task { await model.transportPlayTapped() }
       await gate.awaitStarted()
-      let session = model.currentPlaybackSession
+      let session = model.transportPhase.session
       model.playheadSample = 8000  // simulate the cursor having advanced during playback
       await model.transportStopTapped()
       await task.value
       expectNoDifference(model.playheadSample, 1000)  // back to the origin
       expectNoDifference(model.transportPhase, .stopped)
-      #expect(model.currentPlaybackSession == nil)
+      #expect(model.transportPhase.session == nil)
       expectNoDifference(stoppedSession.value, session)  // stopped OUR session, not stop(nil)
     }
   }
 
-  // MARK: - Coexistence with legacy owners
+  // MARK: - Coexistence with the convenience shortcuts
 
   @Test func startingASliceSupersedesTheTransport() async {
     let gate = TransportGate()
@@ -369,30 +368,39 @@ struct EditorTransportTests {
       #expect(model.isTransportPlaying)
       let slicePlay = Task { await model.playSliceTapped(slice.id) }
       await gate.awaitStarted()
-      expectNoDifference(model.transportPhase, .stopped)  // the slice took over
-      expectNoDifference(model.playingSliceID, slice.id)
+      // The slice IS the transport now — it took over the context and keeps playing.
+      expectNoDifference(model.transportContext.sliceID, slice.id)
+      #expect(model.isTransportPlaying)
       gate.release()
       await transport.value
       await slicePlay.value
     }
   }
 
-  @Test func beginningPlaybackNeverResetsTheCursor() async {
+  @Test func sliceShortcutSetsContextCursorAndRangeThenPlays() async {
     let gate = TransportGate()
+    let recorded = LockIsolated<(URL, Range<Int>, Int)?>(nil)
     let model = editor()
     model.playheadSample = 7777
     selectWords(model.transcript, 0, 2)
     model.addSliceTapped()
     let slice = model.slices[0]
     await withDependencies {
-      $0.audioPlayer.play = { _, _, _, _ in await gate.play() }
+      $0.audioPlayer.play = recordingPlay(recorded, gate)
       $0.audioPlayer.stop = { _ in gate.release() }
     } operation: {
       let task = Task { await model.playSliceTapped(slice.id) }
       await gate.awaitStarted()
-      expectNoDifference(model.playheadSample, 7777)  // supersession preserved the cursor
-      await model.stopPlaybackTapped()
+      // The shortcut selects the clip (context), positions the cursor + origin at its start, and
+      // plays its range through the one transport.
+      expectNoDifference(model.transportContext, .slice(slice.id))
+      expectNoDifference(model.playheadSample, slice.startSample)
+      expectNoDifference(model.transportOriginSample, slice.startSample)
+      expectNoDifference(recorded.value?.1, slice.startSample..<slice.endSample)
+      #expect(model.isTransportPlaying)
+      await model.transportStopTapped()
       await task.value
+      expectNoDifference(model.playheadSample, slice.startSample)  // Stop → origin (slice start)
     }
   }
 
@@ -432,7 +440,7 @@ struct EditorTransportTests {
     }
   }
 
-  @Test func spaceStopsALegacySliceOwner() async {
+  @Test func spaceStopsAPlayingSlice() async {
     let gate = TransportGate()
     let stopped = LockIsolated(false)
     let model = editor()
@@ -448,9 +456,10 @@ struct EditorTransportTests {
     } operation: {
       let task = Task { await model.playSliceTapped(slice.id) }
       await gate.awaitStarted()
-      await model.transportPlayStopTapped()  // stops the slice owner
+      await model.transportPlayStopTapped()  // a slice IS the transport now — Space stops it
       await task.value
-      expectNoDifference(model.playingSliceID, nil)
+      expectNoDifference(model.transportContext.sliceID, nil)
+      expectNoDifference(model.transportContext, .free)
       #expect(stopped.value)
     }
   }
@@ -480,9 +489,8 @@ struct EditorTransportTests {
     let rangeA = model.transcript.selectedSampleRange!
     let session = PlaybackSessionID()
     model.transportPhase = .playing(session)  // A's reconciliation must stop this first
-    model.currentPlaybackSession = session
     await withDependencies {
-      $0.audioPlayer.stop = { _ in await stopGate.play() }  // suspend inside A's stopAllPlayback
+      $0.audioPlayer.stop = { _ in _ = await stopGate.play() }  // suspend inside A's stop
     } operation: {
       let taskA = Task { await model.transportSelectionChanged(rangeA) }
       await stopGate.awaitStarted()  // A is now suspended awaiting the stop
@@ -544,7 +552,7 @@ struct EditorTransportTests {
       await task.value
       expectNoDifference(model.playheadSample, 1000)  // NOT durationSamples
       expectNoDifference(model.transportPhase, .stopped)
-      #expect(model.currentPlaybackSession == nil)
+      #expect(model.transportPhase.session == nil)
     }
   }
 
@@ -571,7 +579,7 @@ struct EditorTransportTests {
       // Background tab A: superseded, not completed — cursor stays put, transport resets.
       expectNoDifference(tabA.playheadSample, 1000)
       expectNoDifference(tabA.transportPhase, .stopped)
-      #expect(tabA.currentPlaybackSession == nil)
+      #expect(tabA.transportPhase.session == nil)
       #expect(tabB.isTransportPlaying)
       await shared.finishCurrent()  // B finishes naturally
       await playB.value
