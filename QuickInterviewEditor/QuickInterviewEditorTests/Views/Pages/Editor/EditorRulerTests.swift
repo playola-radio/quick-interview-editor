@@ -29,6 +29,13 @@ struct EditorRulerTests {
     for _ in 0..<1000 where !condition() { await Task.yield() }
   }
 
+  private func selectWords(_ transcript: TranscriptPageModel, _ first: Int, _ last: Int) {
+    transcript.transcriptDragBegan(
+      atUTF16Offset: transcript.document.wordRanges[first].range.location)
+    transcript.transcriptDragged(
+      toUTF16Offset: transcript.document.wordRanges[last].range.location)
+  }
+
   private func gatedPlay(_ gate: RulerPlayGate)
     -> @Sendable (URL, Range<Int>, Int, PlaybackSessionID) async throws -> PlaybackEnd
   {
@@ -156,10 +163,7 @@ struct EditorRulerTests {
   @Test func rulerMoveDoesNotClearTheSelection() {
     let model = editor()
     geometry(model, samplesPerPixel: 100, start: 0)
-    model.transcript.transcriptDragBegan(
-      atUTF16Offset: model.transcript.document.wordRanges[1].range.location)
-    model.transcript.transcriptDragged(
-      toUTF16Offset: model.transcript.document.wordRanges[4].range.location)
+    selectWords(model.transcript, 1, 4)
     let selection = model.transcript.selectedSampleRange
     #expect(selection != nil)
 
@@ -167,6 +171,30 @@ struct EditorRulerTests {
     expectNoDifference(model.playheadSample, 300)
     // Ruling D: a ruler move never clears the selection.
     expectNoDifference(model.transcript.selectedSampleRange, selection)
+  }
+
+  /// A ruler click landing while `transportSelectionChanged` is suspended awaiting its stop must
+  /// win: that snap changes neither the selection nor the session, so only the cursor-move epoch
+  /// tells it a ruler placement happened and it must bail instead of clobbering the ruler position.
+  @Test func rulerMoveDuringSuspendedSelectionSnapIsNotClobbered() async {
+    let stopGate = RulerPlayGate()
+    let model = editor()
+    geometry(model, samplesPerPixel: 100, start: 0)
+    selectWords(model.transcript, 1, 3)  // selection A
+    let rangeA = model.transcript.selectedSampleRange!
+    model.transportPhase = .playing(PlaybackSessionID())  // A's snap must stop this first
+    await withDependencies {
+      $0.audioPlayer.stop = { _ in _ = await stopGate.play() }  // suspend inside A's stop
+    } operation: {
+      let snap = Task { await model.transportSelectionChanged(rangeA) }
+      await stopGate.awaitStarted()  // the snap is suspended awaiting the stop
+      model.rulerMovedPlayhead(toX: 7)  // ruler click lands during the suspension → 700
+      expectNoDifference(model.playheadSample, 700)
+      stopGate.release()  // the snap resumes and must NOT clobber the ruler position
+      await snap.value
+      // Still where the ruler put it, not snapped to rangeA's start.
+      expectNoDifference(model.playheadSample, 700)
+    }
   }
 }
 

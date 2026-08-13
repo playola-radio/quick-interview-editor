@@ -103,6 +103,10 @@ final class EditorModel: ViewModel {
   var transportOriginSample: Int?
   /// What the transport is currently playing, captured at Play. Non-observed — internal bookkeeping.
   @ObservationIgnored private var transportRange: Range<Int>?
+  /// Bumped whenever a ruler move authoritatively places the cursor. A suspended selection-snap
+  /// (`transportSelectionChanged`) captures this before awaiting its stop and bails if it changed, so
+  /// a ruler click landing during that suspension isn't overwritten by the resuming snap.
+  @ObservationIgnored private var cursorMoveGeneration = 0
   var exportPhase: ExportPhase = .idle
   var destinationURL: URL?
   /// Which pane the right column shows. The clips list and the cut-suggester share the
@@ -750,10 +754,14 @@ final class EditorModel: ViewModel {
   func transportSelectionChanged(_ newRange: Range<Int>?) async {
     guard let newRange else { return }
     if transportPhase.session != nil {
+      let cursorEpoch = cursorMoveGeneration
       await endTransportPlayback()
-      guard transcript.selectedSampleRange == newRange, transportPhase.session == nil else {
-        return
-      }
+      // Bail if a newer selection arrived, a new playback started, OR a ruler move placed the cursor
+      // while we were stopping. A ruler click during this suspension changes neither the selection
+      // nor the session, so without the epoch its placement would be clobbered by this snap.
+      guard transcript.selectedSampleRange == newRange, transportPhase.session == nil,
+        cursorMoveGeneration == cursorEpoch
+      else { return }
     }
     playheadSample = newRange.lowerBound
   }
@@ -771,6 +779,7 @@ final class EditorModel: ViewModel {
     guard waveform.totalSamples > 0 else { return }
     stopTransportForRuler()
     playheadSample = clampedRulerSample(positionX)
+    cursorMoveGeneration &+= 1
   }
 
   /// Tears down any active transport — playing OR paused — for a ruler move. A paused session still
