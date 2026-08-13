@@ -46,6 +46,22 @@ struct EngineEventTests {
     expectNoDifference(LiveEngine.parseProgressEvent(line)?.fraction, nil)
   }
 
+  @Test func malformedMetadataFieldsAreIgnoredNotDropped() {
+    // Wrong JSON types on optional fields must not drop the whole event: the message
+    // and any well-typed field still render; the bad fields fall back to nil.
+    let line =
+      "QIE_EVENT "
+      + #"{"type":"progress","phase":"transcribing","phase_index":"two","phase_count":3,"#
+      + #""fraction":"soon","message":"Transcribing"}"#
+    let progress = LiveEngine.parseProgressEvent(line)
+    expectNoDifference(progress?.phase, "transcribing")
+    expectNoDifference(progress?.message, "Transcribing")
+    expectNoDifference(progress?.phaseIndex, nil)  // "two" ignored
+    expectNoDifference(progress?.phaseCount, 3)  // well-typed field kept
+    expectNoDifference(progress?.fraction, nil)  // "soon" ignored
+    expectNoDifference(progress?.phaseOfNText, nil)  // index missing -> no prefix
+  }
+
   @Test func nonProgressAndNonEventLinesAreIgnored() {
     #expect(LiveEngine.parseProgressEvent("plain stderr noise") == nil)
     #expect(LiveEngine.parseProgressEvent(#"QIE_EVENT {"type":"other"}"#) == nil)

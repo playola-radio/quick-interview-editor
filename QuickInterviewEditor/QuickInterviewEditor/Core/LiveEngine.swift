@@ -276,6 +276,19 @@ enum LiveEngine {
       case phaseIndex = "phase_index"
       case phaseCount = "phase_count"
     }
+    init(from decoder: Decoder) throws {
+      let container = try decoder.container(keyedBy: CodingKeys.self)
+      type = try container.decode(String.self, forKey: .type)
+      // Optional fields decode leniently: a wrong-typed field is ignored (nil) rather
+      // than failing the whole event, so one malformed field never drops an otherwise
+      // usable progress update.
+      phase = try? container.decodeIfPresent(String.self, forKey: .phase)
+      phaseIndex = try? container.decodeIfPresent(Int.self, forKey: .phaseIndex)
+      phaseCount = try? container.decodeIfPresent(Int.self, forKey: .phaseCount)
+      label = try? container.decodeIfPresent(String.self, forKey: .label)
+      message = try? container.decodeIfPresent(String.self, forKey: .message)
+      fraction = try? container.decodeIfPresent(Double.self, forKey: .fraction)
+    }
   }
 
   /// Parses one stderr line into an ``EngineProgress``, or nil for any line that
