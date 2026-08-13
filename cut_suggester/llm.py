@@ -89,7 +89,7 @@ class AnthropicClient:
 
     _JSON_SYSTEM = "You are a precise assistant. Reply with a single strict JSON object and nothing else."
 
-    def __init__(self, model: str, *, max_tokens: int = 8192):
+    def __init__(self, model: str, *, max_tokens: int = 16000):
         self.model = model
         self.max_tokens = max_tokens
 
@@ -100,6 +100,12 @@ class AnthropicClient:
         msg = client.messages.create(
             model=self.model,
             max_tokens=self.max_tokens,
+            # This is strict JSON extraction, not a reasoning task. On Claude 5
+            # models adaptive thinking is ON by default and shares the max_tokens
+            # budget with the answer text, so a large classify prompt can spend the
+            # whole budget on hidden thinking and return zero text. Disable it so the
+            # budget is the JSON output.
+            thinking={"type": "disabled"},
             system=self._JSON_SYSTEM,
             messages=[{"role": "user", "content": prompt}],
         )
