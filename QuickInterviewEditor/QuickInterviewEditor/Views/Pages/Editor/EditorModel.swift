@@ -19,6 +19,7 @@ final class EditorModel: ViewModel {
   @ObservationIgnored @Dependency(\.audioPlayer) var audioPlayer
   @ObservationIgnored @Dependency(\.engine) var engine
   @ObservationIgnored @Dependency(\.workspace) var workspace
+  @ObservationIgnored @Dependency(\.continuousClock) var clock
 
   // MARK: - Initialization
   /// The user's original file — used **only** to name exported clips (its stem).
@@ -108,6 +109,18 @@ final class EditorModel: ViewModel {
   /// this at selection-change time (via `cursorMoveToken`) and bails if it changed, so it can neither
   /// clobber a newer ruler placement nor stop a playback that started after the selection changed.
   @ObservationIgnored private var cursorMoveGeneration = 0
+  /// True while a waveform marquee drag is in progress. The deferred selection→playhead snap
+  /// (`transportSelectionChanged`) bails while this is set, so the dozens of live selection updates
+  /// a drag emits don't churn the transport; the snap is committed exactly once on release.
+  @ObservationIgnored private var isWaveformAreaSelecting = false
+  /// Transient state for the in-progress marquee drag (nil when not dragging). `anchorSample` is
+  /// captured in plan samples (not a view-x) so a mid-drag zoom or resize can't corrupt the fixed
+  /// end of the selection.
+  @ObservationIgnored private var areaSelectDrag: WaveformAreaSelectDrag?
+  /// The running auto-scroll loop while the pointer sits past a viewport edge (nil otherwise).
+  @ObservationIgnored private var autoScrollTask: Task<Void, Never>?
+  /// Bumped each time a marquee drag begins so a stale auto-scroll tick from a previous drag bails.
+  @ObservationIgnored private var areaSelectGeneration = 0
   var exportPhase: ExportPhase = .idle
   var destinationURL: URL?
   /// Which pane the right column shows. The clips list and the cut-suggester share the
@@ -371,6 +384,179 @@ final class EditorModel: ViewModel {
     } else {
       transcript.selectWord(wordID)
     }
+  }
+
+  // MARK: - Waveform area selection (Logic-style marquee)
+  /// Auto-scroll tick cadence and speed (in view pixels per tick, later converted to samples via the
+  /// current `samplesPerPixel` so the feel is stable at any zoom). `Gain` maps overshoot-past-the-edge
+  /// to speed; the min keeps a barely-past-edge drag moving, the max keeps a far-past drag controllable.
+  private static let autoScrollTickMs = 16
+  private static let autoScrollGain = 0.5
+  private static let minAutoScrollPixelsPerTick: CGFloat = 4
+  private static let maxAutoScrollPixelsPerTick: CGFloat = 40
+
+  /// Waveform body drag ⇒ a Logic-style marquee. `startX` fixes the anchor edge (in plan samples);
+  /// holding Shift with an existing selection extends it instead of starting fresh. Begins live
+  /// selection immediately so the transcript + waveform highlight track the drag. A no-op until the
+  /// geometry is loaded (the x→sample mapping is meaningless before then).
+  func waveformAreaSelectBegan(atX startX: CGFloat, extending: Bool) {
+    guard waveform.hasUsableGeometry else { return }
+    cancelAutoScroll()
+    areaSelectGeneration &+= 1
+    let existingAnchorID = extending ? transcript.selectionAnchorID : nil
+    let existingAnchorSample = existingAnchorID.flatMap(anchorSample(forWord:))
+    areaSelectDrag = WaveformAreaSelectDrag(
+      anchorSample: clampedSample(waveform.xToSample(startX)),
+      currentX: startX,
+      existingAnchorID: existingAnchorSample == nil ? nil : existingAnchorID,
+      existingAnchorSample: existingAnchorSample)
+    isWaveformAreaSelecting = true
+    updateMarqueeSelection()
+  }
+
+  /// A pointer move during the marquee: re-extends the live selection and, when the pointer is past a
+  /// viewport edge, starts (or keeps) the auto-scroll loop; back inside, it stops.
+  func waveformAreaSelectChanged(toX positionX: CGFloat) {
+    guard isWaveformAreaSelecting, areaSelectDrag != nil else { return }
+    areaSelectDrag?.currentX = positionX
+    updateMarqueeSelection()
+    if isPointerPastEdge(positionX) {
+      startAutoScrollIfNeeded()
+    } else {
+      cancelAutoScroll()
+    }
+  }
+
+  /// Release: stops any auto-scroll, commits the final selection, and — only if it resolved to words —
+  /// snaps the playhead to the selection start (claiming cursor authority so a straggler snap can't
+  /// undo it) and scrolls the transcript to it. A drag that ended over pure silence clears instead.
+  func waveformAreaSelectEnded(toX positionX: CGFloat) {
+    guard isWaveformAreaSelecting, areaSelectDrag != nil else { return }
+    areaSelectDrag?.currentX = positionX
+    cancelAutoScroll()
+    let resolved = marqueeAnchorFocus()
+    areaSelectDrag = nil
+    isWaveformAreaSelecting = false
+    // Retire this drag's epoch too (not only `Began`), so a tick already resumed past its sleep bails
+    // on the generation guard even before the next drag starts.
+    areaSelectGeneration &+= 1
+    guard let (anchor, focus) = resolved else {
+      transcript.clearSelectionTapped()
+      return
+    }
+    // Commit/reveal are NOT gated on `selectWords`' "did it change" return: the resolved IDs always
+    // come from `editPlan.words`, and a release that lands on the same words the last tick set must
+    // still snap the playhead and scroll the transcript.
+    transcript.selectWords(anchorID: anchor, focusID: focus)
+    commitMarqueePlayhead()
+    transcript.revealSelection()
+  }
+
+  /// Live selection during the drag: sets the anchor/focus for the current marquee, but leaves an
+  /// existing selection untouched when the marquee currently covers no word's midpoint (dragging
+  /// through silence shouldn't flicker the highlight off and back on).
+  private func updateMarqueeSelection() {
+    guard let (anchor, focus) = marqueeAnchorFocus() else { return }
+    transcript.selectWords(anchorID: anchor, focusID: focus)
+  }
+
+  /// Resolves the current drag to the anchor/focus word IDs, or nil when the marquee covers no word.
+  /// The overlapped set (words whose midpoint falls in the range) is in transcript order; the drag
+  /// direction decides which end is the anchor. Shift-extend keeps the pre-drag anchor and moves only
+  /// the focus to the dragged edge. When the pointer is off-screen (auto-scrolling) its x is clamped
+  /// to the visible edge, so the far edge is re-read from wherever the viewport has scrolled to.
+  private func marqueeAnchorFocus() -> (anchor: Word.ID, focus: Word.ID)? {
+    guard let drag = areaSelectDrag else { return nil }
+    let fixedSample = drag.existingAnchorSample ?? drag.anchorSample
+    let clampedX = min(max(0, drag.currentX), waveform.viewportWidth)
+    let focusSample = clampedSample(waveform.xToSample(clampedX))
+    let lower = min(fixedSample, focusSample)
+    let upper = max(max(fixedSample, focusSample), lower + 1)  // never an empty range
+    let ids = wordIDs(overlapping: lower..<upper, words: editPlan.words)
+    guard let first = ids.first, let last = ids.last else { return nil }
+    if let existing = drag.existingAnchorID {
+      return (existing, focusSample >= fixedSample ? last : first)
+    }
+    return focusSample >= drag.anchorSample ? (first, last) : (last, first)
+  }
+
+  /// The synchronous, ordered playhead commit for a finished marquee — mirrors `rulerMovedPlayhead`:
+  /// stop the transport, place the cursor at the selection start, and bump the cursor-move epoch so a
+  /// deferred selection snap captured earlier in the drag bails instead of clobbering this placement.
+  private func commitMarqueePlayhead() {
+    guard let range = transcript.selectedSampleRange else { return }
+    stopTransportForRuler()
+    playheadSample = range.lowerBound
+    cursorMoveGeneration &+= 1
+  }
+
+  private func isPointerPastEdge(_ positionX: CGFloat) -> Bool {
+    positionX < 0 || positionX > waveform.viewportWidth
+  }
+
+  private func startAutoScrollIfNeeded() {
+    guard autoScrollTask == nil else { return }
+    let clock = clock
+    let generation = areaSelectGeneration
+    autoScrollTask = Task { [weak self] in
+      while !Task.isCancelled {
+        do { try await clock.sleep(for: .milliseconds(Self.autoScrollTickMs)) } catch { return }
+        guard let self, self.areaSelectGeneration == generation else { return }
+        // Self-terminate if the drag is no longer active (e.g. the window lost mouse tracking and no
+        // `mouseUp` was delivered), rather than spinning every 16 ms for the model's lifetime.
+        guard self.isWaveformAreaSelecting, self.areaSelectDrag != nil else { return }
+        self.autoScrollTick()
+      }
+    }
+  }
+
+  private func cancelAutoScroll() {
+    autoScrollTask?.cancel()
+    autoScrollTask = nil
+  }
+
+  /// One auto-scroll step: pan the viewport toward the off-edge pointer, then re-extend the marquee to
+  /// the newly revealed edge. Skips the selection update when the viewport didn't move (already at a
+  /// document bound) so a pinned pointer doesn't emit redundant selection writes.
+  private func autoScrollTick() {
+    guard isWaveformAreaSelecting, let drag = areaSelectDrag, waveform.hasUsableGeometry
+    else { return }
+    let pixelsPerTick = autoScrollPixelsPerTick(currentX: drag.currentX)
+    guard pixelsPerTick != 0 else { return }
+    let before = waveform.visibleStartSample
+    let deltaSamples = Int((Double(pixelsPerTick) * waveform.samplesPerPixel).rounded())
+    waveform.scrolled(toStartSample: before + deltaSamples)
+    guard waveform.visibleStartSample != before else { return }
+    updateMarqueeSelection()
+  }
+
+  /// Signed view-pixels to pan this tick: negative past the left edge, positive past the right, 0 when
+  /// the pointer is inside. Speed scales with how far past the edge the pointer is, clamped so it's
+  /// smooth at any zoom (samples/tick is derived from this by the caller).
+  private func autoScrollPixelsPerTick(currentX: CGFloat) -> CGFloat {
+    let overshoot: CGFloat
+    let direction: CGFloat
+    if currentX < 0 {
+      overshoot = -currentX
+      direction = -1
+    } else if currentX > waveform.viewportWidth {
+      overshoot = currentX - waveform.viewportWidth
+      direction = 1
+    } else {
+      return 0
+    }
+    let speed = min(
+      Self.maxAutoScrollPixelsPerTick,
+      max(Self.minAutoScrollPixelsPerTick, overshoot * Self.autoScrollGain))
+    return direction * speed
+  }
+
+  private func clampedSample(_ sample: Int) -> Int {
+    min(max(0, sample), waveform.totalSamples)
+  }
+
+  private func anchorSample(forWord id: Word.ID) -> Int? {
+    editPlan.words.first(where: { $0.id == id })?.startSample
   }
 
   // swiftlint:disable function_parameter_count
@@ -757,6 +943,10 @@ final class EditorModel: ViewModel {
   /// way the stale task must not snap the cursor over the newer state or into a live playback.
   func transportSelectionChanged(_ newRange: Range<Int>?, cursorToken: Int) async {
     guard let newRange else { return }
+    // A marquee drag emits a live selection change on every pointer move; suppress the snap for the
+    // duration of the drag so it doesn't churn the transport. `waveformAreaSelectEnded` commits the
+    // playhead once, synchronously, when the drag finishes.
+    guard !isWaveformAreaSelecting else { return }
     // Bail BEFORE touching playback if the cursor has been placed by a later action — a ruler move or
     // a transport start — since this selection change was registered. `cursorToken` is captured
     // synchronously in the view's `onChange`, so a ruler click or a Play that ran before this deferred
@@ -1327,4 +1517,15 @@ struct FineTuneSessionKey: Equatable {
   var activeSliceID: Slice.ID?
   var activeSliceRange: Range<Int>?
   var selection: Range<Int>?
+}
+
+/// Transient state for an in-progress waveform marquee drag. `anchorSample` is the fixed edge in
+/// plan samples (captured once, so a mid-drag zoom/resize can't move it); `currentX` is the live
+/// dragged edge in view coordinates. For a Shift-extend, `existingAnchorSample`/`existingAnchorID`
+/// hold the pre-drag selection anchor that the extend must preserve.
+private struct WaveformAreaSelectDrag {
+  var anchorSample: Int
+  var currentX: CGFloat
+  var existingAnchorID: Word.ID?
+  var existingAnchorSample: Int?
 }
