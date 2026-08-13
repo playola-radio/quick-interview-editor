@@ -91,6 +91,18 @@ struct EditorRulerTests {
     expectNoDifference(model.playheadSample, 555)
   }
 
+  @Test func rulerMoveIsNoOpWhileWaveformLoading() {
+    let model = editor()
+    model.waveform.totalSamples = model.editPlan.source.durationSamples  // length set early in load
+    model.waveform.viewportWidth = 1000
+    model.waveform.samplesPerPixel = 1  // still the default; the real fit isn't set until load ends
+    model.waveform.isLoading = true  // mid-decode
+    model.playheadSample = 555
+    model.rulerMovedPlayhead(toX: 40)
+    // Guarded on !isLoading: mapping with the default spp during the decode window is garbage.
+    expectNoDifference(model.playheadSample, 555)
+  }
+
   // MARK: - Interaction with the transport
 
   @Test func rulerMoveWhileStoppedJustMovesTheCursor() {
@@ -220,6 +232,38 @@ struct EditorRulerTests {
     // The deferred snap runs late; the ruler is the later action and wins.
     await model.transportSelectionChanged(rangeA, cursorToken: token)
     expectNoDifference(model.playheadSample, 700)
+  }
+
+  /// A deferred selection snap must not stop a transport the user started AFTER changing the
+  /// selection: the Play takes cursor authority (bumping the generation), so the stale snap bails
+  /// before touching playback instead of stopping it and snapping the cursor back.
+  @Test func deferredSelectionSnapDoesNotStopALaterPlay() async {
+    let gate = RulerPlayGate()
+    let stopped = LockIsolated(false)
+    let model = editor()
+    geometry(model, samplesPerPixel: 100, start: 0)
+    selectWords(model.transcript, 1, 3)  // selection A; the view would capture the token here
+    let rangeA = model.transcript.selectedSampleRange!
+    let token = model.cursorMoveToken
+    model.playheadSample = rangeA.lowerBound  // a valid play start within the selection
+    await withDependencies {
+      $0.audioPlayer.play = gatedPlay(gate)
+      $0.audioPlayer.stop = { _ in
+        stopped.setValue(true)
+        gate.release()
+      }
+    } operation: {
+      // Play starts after the selection change.
+      let play = Task { await model.transportPlayTapped() }
+      await gate.awaitStarted()
+      #expect(model.isTransportPlaying)
+      // The deferred snap runs late; it must bail, not stop the Play the user just started.
+      await model.transportSelectionChanged(rangeA, cursorToken: token)
+      #expect(model.isTransportPlaying)
+      #expect(!stopped.value)
+      await model.transportStopTapped()
+      await play.value
+    }
   }
 }
 
