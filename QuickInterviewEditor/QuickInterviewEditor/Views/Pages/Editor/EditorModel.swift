@@ -769,9 +769,16 @@ final class EditorModel: ViewModel {
   /// Selection reconciliation, driven by `EditorView.onChange(of: transcript.selectedSampleRange)`.
   /// A new selection snaps the cursor to its start; clearing the selection leaves the cursor put.
   /// Any active playback is stopped first — the cursor never jumps while audio keeps playing.
+  ///
+  /// `onChange` spawns one unstructured task per selection change, so two can overlap: after
+  /// awaiting the stop, bail if a newer selection has arrived, or the stale task would stamp the
+  /// old start over the newer one's.
   func transportSelectionChanged(_ newRange: Range<Int>?) async {
     guard let newRange else { return }
-    if hasPlaybackOwner { await stopAllPlayback() }
+    if hasPlaybackOwner {
+      await stopAllPlayback()
+      guard transcript.selectedSampleRange == newRange else { return }
+    }
     playheadSample = newRange.lowerBound
   }
 

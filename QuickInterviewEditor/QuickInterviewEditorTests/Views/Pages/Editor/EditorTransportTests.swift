@@ -436,6 +436,29 @@ struct EditorTransportTests {
     expectNoDifference(model.playheadSample, 5000)  // clearing the selection never moves the cursor
   }
 
+  @Test func staleSelectionTaskDoesNotOverwriteNewerCursor() async {
+    let stopGate = TransportGate()
+    let model = editor()
+    selectWords(model.transcript, 1, 3)  // selection A
+    let rangeA = model.transcript.selectedSampleRange!
+    let session = PlaybackSessionID()
+    model.transportPhase = .playing(session)  // A's reconciliation must stop this first
+    model.currentPlaybackSession = session
+    await withDependencies {
+      $0.audioPlayer.stop = { _ in await stopGate.play() }  // suspend inside A's stopAllPlayback
+    } operation: {
+      let taskA = Task { await model.transportSelectionChanged(rangeA) }
+      await stopGate.awaitStarted()  // A is now suspended awaiting the stop
+      selectWords(model.transcript, 5, 7)  // selection B arrives
+      let rangeB = model.transcript.selectedSampleRange!
+      await model.transportSelectionChanged(rangeB)  // B snaps immediately (no owner left)
+      expectNoDifference(model.playheadSample, rangeB.lowerBound)
+      stopGate.release()  // A resumes and must bail on the stale selection
+      await taskA.value
+      expectNoDifference(model.playheadSample, rangeB.lowerBound)  // A did NOT clobber B
+    }
+  }
+
   @Test func selectionChangeStopsActivePlaybackThenSnaps() async {
     let gate = TransportGate()
     let stopped = LockIsolated(false)
