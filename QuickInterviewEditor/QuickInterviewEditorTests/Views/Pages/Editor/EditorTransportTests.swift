@@ -354,6 +354,49 @@ struct EditorTransportTests {
       #expect(stopped.value)
     }
   }
+
+  // MARK: - Selection snap
+
+  @Test func selectionSnapsCursorToSelectionStart() async {
+    let model = editor()
+    model.playheadSample = 9999
+    selectWords(model.transcript, 2, 4)
+    let selection = model.transcript.selectedSampleRange!
+    await model.transportSelectionChanged(selection)
+    expectNoDifference(model.playheadSample, selection.lowerBound)
+  }
+
+  @Test func clearingSelectionLeavesCursorPut() async {
+    let model = editor()
+    model.playheadSample = 5000
+    await model.transportSelectionChanged(nil)
+    expectNoDifference(model.playheadSample, 5000)  // clearing the selection never moves the cursor
+  }
+
+  @Test func selectionChangeStopsActivePlaybackThenSnaps() async {
+    let gate = TransportGate()
+    let stopped = LockIsolated(false)
+    let model = editor()
+    model.playheadSample = 1000
+    await withDependencies {
+      $0.audioPlayer.play = { _, _, _, _ in await gate.play() }
+      $0.audioPlayer.stop = { _ in
+        stopped.setValue(true)
+        gate.release()
+      }
+    } operation: {
+      let task = Task { await model.transportPlayTapped() }
+      await gate.awaitStarted()
+      #expect(model.isTransportPlaying)
+      selectWords(model.transcript, 3, 5)
+      let selection = model.transcript.selectedSampleRange!
+      await model.transportSelectionChanged(selection)  // stop first, then snap
+      await task.value
+      #expect(stopped.value)
+      expectNoDifference(model.transportPhase, .stopped)
+      expectNoDifference(model.playheadSample, selection.lowerBound)
+    }
+  }
 }
 
 // swiftlint:enable large_tuple

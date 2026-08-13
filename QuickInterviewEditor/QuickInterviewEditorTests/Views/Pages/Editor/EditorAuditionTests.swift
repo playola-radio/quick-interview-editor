@@ -313,7 +313,7 @@ struct EditorAuditionTests {
     } operation: {
       let task = Task { await model.auditionInTapped() }
       await gate.awaitStarted()
-      await model.auditionSpaceTapped()  // playing → stop
+      await model.transportPlayStopTapped()  // playing → stop
       await task.value
       expectNoDifference(model.audition, nil)
       #expect(stopped.value)
@@ -336,52 +336,10 @@ struct EditorAuditionTests {
     } operation: {
       let task = Task { await model.playSliceTapped(slice.id) }
       await gate.awaitStarted()
-      await model.auditionSpaceTapped()  // stops whatever the editor owns
+      await model.transportPlayStopTapped()  // stops whatever the editor owns
       await task.value
       expectNoDifference(model.playingSliceID, nil)
       #expect(stopped.value)
-    }
-  }
-
-  @Test func spaceWhenIdleReplaysLastAudition() async {
-    let gate = AuditionGate()
-    let recorded = LockIsolated<(URL, Range<Int>, Int)?>(nil)
-    let model = editor()
-    selectWords(model.transcript, 3, 6)
-    let region = model.activeEditingRange!
-    let preRoll = Int(model.auditionPreRollSeconds * Double(model.editPlan.source.sampleRate))
-    await withDependencies {
-      $0.audioPlayer.play = recordingPlay(recorded, gate)
-      $0.audioPlayer.stop = { _ in gate.release() }
-    } operation: {
-      let out = Task { await model.auditionOutTapped() }  // last audition = .cutOut
-      await gate.awaitStarted()
-      gate.release()
-      await out.value
-      expectNoDifference(model.audition, nil)
-      // Idle now: Space replays the out-cut, not the in-cut.
-      let replay = Task { await model.auditionSpaceTapped() }
-      await gate.awaitStarted()
-      expectNoDifference(model.audition, .cutOut)
-      expectNoDifference(recorded.value?.1, max(0, region.upperBound - preRoll)..<region.upperBound)
-      gate.release()
-      await replay.value
-    }
-  }
-
-  @Test func spaceWhenIdleWithNoHistoryPlaysInCut() async {
-    let gate = AuditionGate()
-    let model = editor()
-    selectWords(model.transcript, 2, 4)
-    await withDependencies {
-      $0.audioPlayer.play = { _, _, _, _ in await gate.play() }
-      $0.audioPlayer.stop = { _ in gate.release() }
-    } operation: {
-      let task = Task { await model.auditionSpaceTapped() }
-      await gate.awaitStarted()
-      expectNoDifference(model.audition, .cutIn)
-      gate.release()
-      await task.value
     }
   }
 

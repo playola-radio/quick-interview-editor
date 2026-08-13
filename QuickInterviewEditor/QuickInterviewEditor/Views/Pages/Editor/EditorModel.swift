@@ -93,8 +93,6 @@ final class EditorModel: ViewModel {
   /// Which boundary audition is currently playing, or nil. The third playback owner
   /// alongside `playingSliceID` and `isPreviewingDraft`.
   var audition: AuditionMode?
-  /// The last audition the user triggered this session — replayed by Space when idle.
-  @ObservationIgnored private var lastAudition: AuditionMode?
   /// Bumped each time an audition starts or is superseded, so a stale completing audition
   /// task can't clear a newer owner's state (mirrors `previewGeneration`).
   @ObservationIgnored private var auditionGeneration = 0
@@ -760,6 +758,15 @@ final class EditorModel: ViewModel {
     await transportPlayTapped()
   }
 
+  /// Selection reconciliation, driven by `EditorView.onChange(of: transcript.selectedSampleRange)`.
+  /// A new selection snaps the cursor to its start; clearing the selection leaves the cursor put.
+  /// Any active playback is stopped first — the cursor never jumps while audio keeps playing.
+  func transportSelectionChanged(_ newRange: Range<Int>?) async {
+    guard let newRange else { return }
+    if hasPlaybackOwner { await stopAllPlayback() }
+    playheadSample = newRange.lowerBound
+  }
+
   // MARK: - Fine-tune editing
   /// Opens the fine-tune pane on a slice and starts an edit session anchored to its current
   /// range. Choosing the slice explicitly (rather than from ambient state) is what makes it
@@ -1014,7 +1021,6 @@ final class EditorModel: ViewModel {
     beginExclusivePlayback()
     let generation = auditionGeneration
     audition = mode
-    lastAudition = mode
     let session = PlaybackSessionID()
     currentPlaybackSession = session
     do {
@@ -1031,24 +1037,14 @@ final class EditorModel: ViewModel {
     }
   }
 
-  /// Space: stop whatever the editor is playing; if idle, replay the last audition, else in-cut.
-  func auditionSpaceTapped() async {
-    if playingSliceID != nil || isPreviewingDraft || audition != nil {
-      await stopAllPlayback()
-      return
-    }
-    switch lastAudition ?? .cutIn {
-    case .cutIn: await auditionInTapped()
-    case .cutOut: await auditionOutTapped()
-    }
-  }
-
-  /// Routes a captured key to its action so the key-monitor view stays logic-free.
+  /// Routes a captured key to its action so the key-monitor view stays logic-free. `[`/`]`
+  /// audition the cut edges; Space is the transport Play/Stop (Logic parity) — it stops an
+  /// active audition (or any owner) and otherwise starts the transport from the cursor.
   func auditionKeyPressed(_ key: AuditionKey) async {
     switch key {
     case .cutIn: await auditionInTapped()
     case .cutOut: await auditionOutTapped()
-    case .space: await auditionSpaceTapped()
+    case .space: await transportPlayStopTapped()
     }
   }
 
