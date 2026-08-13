@@ -104,6 +104,17 @@ final class EditorModel: ViewModel {
   /// a delayed cleanup can't stop a newer/global playback). Internal so tests can drive it,
   /// mirroring `playingSliceID`. The future `TransportState` absorbs this as `phase`.
   @ObservationIgnored var currentPlaybackSession: PlaybackSessionID?
+  /// The interview transport's UI phase. Distinct from `currentPlaybackSession` (session
+  /// ownership for ALL owners): this tracks only the always-visible Play/Pause/Stop transport.
+  /// The two stay separate until PR 4 collapses the owners into one `TransportState`.
+  var transportPhase: TransportPhase = .stopped
+  /// THE persistent, always-visible playhead cursor, in plan samples. Follows audio during
+  /// playback and stays put when stopped/paused (never hidden). Formerly `WaveformModel.playheadSample`.
+  var playheadSample = 0
+  /// Where the transport last started playing; Stop returns the cursor here.
+  var transportOriginSample: Int?
+  /// What the transport is currently playing, captured at Play. Non-observed — internal bookkeeping.
+  @ObservationIgnored private var transportRange: Range<Int>?
   var exportPhase: ExportPhase = .idle
   var destinationURL: URL?
   /// Which pane the right column shows. The clips list and the cut-suggester share the
@@ -212,6 +223,10 @@ final class EditorModel: ViewModel {
   var waveformHighlightSpan: WaveformSpan? { activeEditingRange.flatMap(waveform.span(for:)) }
   var waveformRedSpans: [WaveformSpan] { redRanges.compactMap(waveform.span(for:)) }
 
+  /// View-x of the persistent cursor, or nil when it's scrolled out of the viewport. The model
+  /// owns the cursor sample; the waveform supplies the geometry, so the view stays logic-free.
+  var playheadX: CGFloat? { waveform.playheadX(for: playheadSample) }
+
   // MARK: - View Helpers
   /// The panel's plain "Add slice" builds from the raw selection, so it's disabled whenever any
   /// fine-tune draft is unsaved — a tuned pending selection (whose adjustments it would discard)
@@ -298,27 +313,30 @@ final class EditorModel: ViewModel {
       durationSamples: editPlan.source.durationSamples)
   }
 
-  /// Streams playback positions from the (shared) player into the waveform playhead.
-  /// The player is global — only one slice plays at a time — so ticks are applied only
-  /// when THIS editor owns the playback (`playingSliceID != nil`); otherwise this editor
-  /// clears its playhead, so another tab's playback never drives the wrong waveform.
+  /// True while THIS editor owns some active playback — a slice, a draft preview, an audition,
+  /// or the interview transport. Gates which position ticks may move the persistent cursor.
+  private var hasPlaybackOwner: Bool {
+    playingSliceID != nil || isPreviewingDraft || audition != nil || transportPhase.session != nil
+  }
+
+  /// Streams playback positions from the (shared) player into the persistent playhead cursor.
+  /// The player is global — only one thing plays at a time — so ticks move the cursor only
+  /// while THIS editor owns the playback AND the tick is tagged with our current session. The
+  /// cursor is never cleared here: it persists where the audio (or the user) last left it, so
+  /// a false/final tick or another tab's tick can't blank or yank it.
   func observePlayback() async {
     for await position in audioPlayer.positions() {
-      guard playingSliceID != nil || isPreviewingDraft || audition != nil else {
-        if waveform.playheadSample != nil { waveform.playheadSample = nil }
-        continue
-      }
-      // We own an active playback; apply ONLY ticks from our current session. A tick from a
-      // superseded session (a buffered straggler) or another tab is ignored — never clear the
-      // playhead here, or a foreign tick would blank our active marker.
+      guard hasPlaybackOwner else { continue }
       guard position.sessionID == currentPlaybackSession else { continue }
-      waveform.playheadSample = position.isPlaying ? position.sample : nil
-      transcript.playheadChanged(
-        sample: position.sample, isPlaying: position.isPlaying && playingSliceID != nil)
+      if position.isPlaying {
+        playheadSample = position.sample
+        transcript.playheadChanged(sample: position.sample, isPlaying: playingSliceID != nil)
+      } else if playingSliceID != nil {
+        // A false tick from a slice ends transcript follow (so the next slice reads as a rising
+        // edge) but leaves the cursor exactly where the audio stopped.
+        endTranscriptFollow()
+      }
     }
-    // The loop also exits when the view's task is cancelled (tab switch / disappear);
-    // clear the playhead so a stale marker doesn't linger when the tab reactivates.
-    waveform.playheadSample = nil
   }
 
   /// Takes exclusive ownership of the single global player for a new playback: clears every
@@ -594,16 +612,7 @@ final class EditorModel: ViewModel {
       playingSliceID = nil
       currentPlaybackSession = nil
       endTranscriptFollow()
-      clearRestingPlayhead()
     }
-  }
-
-  /// On a normal stop/finish the player's `isPlaying:false` tick already clears the playhead,
-  /// but a cross-tab supersession sends no stop tick for our old session. So when a completion
-  /// finds THIS editor's session is the one that ended, clear the resting marker too — otherwise
-  /// a superseded tab could keep a stale playhead until its next (never-arriving) tick.
-  private func clearRestingPlayhead() {
-    if waveform.playheadSample != nil { waveform.playheadSample = nil }
   }
 
   func stopPlaybackTapped() async {
@@ -817,7 +826,6 @@ final class EditorModel: ViewModel {
       isPreviewingDraft = false
       if currentPlaybackSession == session {
         currentPlaybackSession = nil
-        clearRestingPlayhead()
       }
     }
   }
@@ -898,7 +906,6 @@ final class EditorModel: ViewModel {
       audition = nil
       if currentPlaybackSession == session {
         currentPlaybackSession = nil
-        clearRestingPlayhead()
       }
     }
   }
@@ -1152,6 +1159,22 @@ final class EditorModel: ViewModel {
     let dy = Double(hasPreciseDeltas ? deltaY : deltaY * pointsPerScrollLine)
     // spp *= factor; scrolling "away" should zoom in (spp < 1). Flip the sign in QA if inverted.
     return pow(2.0, -dy / pixelsPerZoomDouble)
+  }
+}
+
+/// The interview transport's phase. `playing`/`paused` carry the session that owns the audio,
+/// so a stale tick or a superseding owner can be told apart from the current one.
+enum TransportPhase: Equatable {
+  case stopped
+  case playing(PlaybackSessionID)
+  case paused(PlaybackSessionID)
+
+  /// The session backing this phase, or nil when stopped.
+  var session: PlaybackSessionID? {
+    switch self {
+    case .stopped: return nil
+    case .playing(let session), .paused(let session): return session
+    }
   }
 }
 

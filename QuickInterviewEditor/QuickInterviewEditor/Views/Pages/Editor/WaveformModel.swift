@@ -6,10 +6,10 @@ import Observation
 
 /// All waveform geometry, zoom, and hit-testing math for the editor — the sample↔pixel
 /// core the app's trust depends on. Owns only geometry state; it does not know transcript
-/// semantics. ``EditorModel`` mediates: it derives selection/red ranges from the transcript
-/// and turns them into spans via `span(for:)`, and maps a tapped x back to a word.
-/// `playheadSample` is the one value pushed in (from the playback stream). Every coordinate
-/// is in PLAN samples.
+/// semantics or where the playhead is. ``EditorModel`` mediates: it derives selection/red
+/// ranges from the transcript and turns them into spans via `span(for:)`, maps a tapped x
+/// back to a word, and asks for the cursor's x via `playheadX(for:)`. Every coordinate is in
+/// PLAN samples.
 @MainActor
 @Observable
 final class WaveformModel: ViewModel {
@@ -38,9 +38,6 @@ final class WaveformModel: ViewModel {
   /// the selection that was fitted — restore only applies if the selection hasn't changed.
   /// Cleared by any manual zoom/pan so the next Z fits fresh instead of restoring stale state.
   @ObservationIgnored private var fitRestore: FitRestore?
-
-  /// Current playback position, pushed in from the playback stream; nil when stopped.
-  var playheadSample: Int?
 
   // MARK: - Display Text
   let caption = "WAVEFORM"
@@ -128,9 +125,11 @@ final class WaveformModel: ViewModel {
     return WaveformSpan(positionX: clippedStart, width: clippedEnd - clippedStart)
   }
 
-  var playheadX: CGFloat? {
-    guard let playheadSample, viewportWidth > 0 else { return nil }
-    let posX = sampleToX(playheadSample)
+  /// View-x of the persistent playhead cursor at `sample`, or nil when it falls outside the
+  /// viewport. Pure geometry — ``EditorModel`` owns the cursor sample and asks for its x.
+  func playheadX(for sample: Int) -> CGFloat? {
+    guard viewportWidth > 0 else { return nil }
+    let posX = sampleToX(sample)
     guard posX >= 0, posX <= viewportWidth else { return nil }
     return posX
   }

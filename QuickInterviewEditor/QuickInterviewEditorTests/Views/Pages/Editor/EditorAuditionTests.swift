@@ -279,11 +279,11 @@ struct EditorAuditionTests {
       let task = Task { await model.observePlayback() }
       continuation.yield(
         PlaybackPosition(sessionID: session, sample: 2000, isPlaying: true))
-      await settle { model.waveform.playheadSample == 2000 }
-      #expect(model.waveform.playheadSample == 2000)
+      await settle { model.playheadSample == 2000 }
+      #expect(model.playheadSample == 2000)
       continuation.finish()
       await task.value
-      #expect(model.waveform.playheadSample == nil)
+      #expect(model.playheadSample == 2000)  // persists after exit — the cursor is never cleared
     }
   }
 
