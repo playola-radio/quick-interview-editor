@@ -505,7 +505,7 @@ final class EditorModel: ViewModel {
     if let playing = playingSliceID, slices[id: playing] == nil {
       playingSliceID = nil
       endTranscriptFollow()
-      await audioPlayer.stop()
+      await audioPlayer.stop(nil)
     }
     if let active = activeSliceID {
       if let slice = slices[id: active] {
@@ -531,7 +531,7 @@ final class EditorModel: ViewModel {
     guard isPreviewingDraft else { return }
     previewGeneration &+= 1
     isPreviewingDraft = false
-    await audioPlayer.stop()
+    await audioPlayer.stop(nil)
   }
 
   /// Stops an in-flight audition from an async context, ordered (awaited) rather than
@@ -541,7 +541,7 @@ final class EditorModel: ViewModel {
     guard audition != nil else { return }
     auditionGeneration &+= 1
     audition = nil
-    await audioPlayer.stop()
+    await audioPlayer.stop(nil)
   }
 
   func playSliceTapped(_ id: Slice.ID) async {
@@ -550,7 +550,8 @@ final class EditorModel: ViewModel {
     playingSliceID = id
     do {
       try await audioPlayer.play(
-        canonicalAudioURL, slice.startSample..<slice.endSample, editPlan.source.sampleRate)
+        canonicalAudioURL, slice.startSample..<slice.endSample, editPlan.source.sampleRate,
+        PlaybackSessionID())
     } catch {
       reportIssue(error)
     }
@@ -563,7 +564,7 @@ final class EditorModel: ViewModel {
   func stopPlaybackTapped() async {
     playingSliceID = nil
     endTranscriptFollow()
-    await audioPlayer.stop()
+    await audioPlayer.stop(nil)
   }
 
   /// Tells the transcript a slice's playback has ended or been superseded. `observePlayback`
@@ -651,7 +652,7 @@ final class EditorModel: ViewModel {
     isPreviewingDraft = false
     Task {
       guard previewGeneration == generation, playingSliceID == nil else { return }
-      await audioPlayer.stop()
+      await audioPlayer.stop(nil)
     }
   }
 
@@ -668,7 +669,7 @@ final class EditorModel: ViewModel {
       guard auditionGeneration == generation, playingSliceID == nil, !isPreviewingDraft else {
         return
       }
-      await audioPlayer.stop()
+      await audioPlayer.stop(nil)
     }
   }
 
@@ -749,7 +750,8 @@ final class EditorModel: ViewModel {
     let generation = previewGeneration
     isPreviewingDraft = true
     do {
-      try await audioPlayer.play(canonicalAudioURL, range, editPlan.source.sampleRate)
+      try await audioPlayer.play(
+        canonicalAudioURL, range, editPlan.source.sampleRate, PlaybackSessionID())
     } catch {
       reportIssue(error)
     }
@@ -759,7 +761,7 @@ final class EditorModel: ViewModel {
   func stopPreviewTapped() async {
     previewGeneration &+= 1
     isPreviewingDraft = false
-    await audioPlayer.stop()
+    await audioPlayer.stop(nil)
   }
 
   // MARK: - Audition
@@ -819,7 +821,8 @@ final class EditorModel: ViewModel {
     audition = mode
     lastAudition = mode
     do {
-      try await audioPlayer.play(canonicalAudioURL, range, editPlan.source.sampleRate)
+      try await audioPlayer.play(
+        canonicalAudioURL, range, editPlan.source.sampleRate, PlaybackSessionID())
     } catch {
       reportIssue(error)
     }
@@ -850,7 +853,7 @@ final class EditorModel: ViewModel {
   /// Stops any editor-owned playback (slice, preview, or audition) and clears all owners.
   private func stopAllPlayback() async {
     beginExclusivePlayback()
-    await audioPlayer.stop()
+    await audioPlayer.stop(nil)
   }
 
   private func beginEditIfNeeded() {

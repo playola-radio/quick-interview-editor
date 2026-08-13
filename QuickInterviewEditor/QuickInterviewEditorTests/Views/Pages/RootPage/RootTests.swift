@@ -131,7 +131,7 @@ struct RootTests {
       }
       $0.engine.renderSlices = { _ in stream }
       $0.workspace.reveal = { _ in }
-      $0.audioPlayer.stop = {}  // closeTab also stops playback
+      $0.audioPlayer.stop = { _ in }  // closeTab also stops playback
     } operation: {
       let model = RootModel()
       model.filePicked(URL(fileURLWithPath: "/clip.m4a"))
@@ -229,7 +229,7 @@ struct RootTests {
           $0.finish()
         }
       }
-      $0.audioPlayer.stop = {}  // closeTab also stops playback
+      $0.audioPlayer.stop = { _ in }  // closeTab also stops playback
     } operation: {
       let model = RootModel()
       model.filePicked(URL(fileURLWithPath: "/clip.m4a"))

@@ -489,7 +489,7 @@ struct EditorFineTuneTests {
     let stopped = LockIsolated(false)
 
     await withDependencies {
-      $0.audioPlayer.stop = { stopped.setValue(true) }
+      $0.audioPlayer.stop = { _ in stopped.setValue(true) }
     } operation: {
       model.cancelEditTapped()  // must fully abandon the edit, including the preview
       #expect(!model.isPreviewingDraft)
@@ -509,7 +509,7 @@ struct EditorFineTuneTests {
     let stopped = LockIsolated(false)
 
     await withDependencies {
-      $0.audioPlayer.stop = { stopped.setValue(true) }
+      $0.audioPlayer.stop = { _ in stopped.setValue(true) }
     } operation: {
       await model.undoTapped()  // restores the original range → reconcile re-anchors the pane
       #expect(!model.isPreviewingDraft)  // preview of the stale range was stopped
@@ -526,7 +526,7 @@ struct EditorFineTuneTests {
     let stopped = LockIsolated(false)
 
     await withDependencies {
-      $0.audioPlayer.stop = { stopped.setValue(true) }
+      $0.audioPlayer.stop = { _ in stopped.setValue(true) }
     } operation: {
       model.commitEditTapped()  // pending Save closes the pane
       #expect(!model.isPreviewingDraft)  // flag cleared with the pane
@@ -544,7 +544,7 @@ struct EditorFineTuneTests {
 
     let stopped = LockIsolated(false)
     await withDependencies {
-      $0.audioPlayer.stop = { stopped.setValue(true) }
+      $0.audioPlayer.stop = { _ in stopped.setValue(true) }
     } operation: {
       await model.previewToggleTapped()  // toggles to stop while previewing
     }
@@ -560,7 +560,7 @@ struct EditorFineTuneTests {
     let stopped = LockIsolated(false)
 
     await withDependencies {
-      $0.audioPlayer.stop = { stopped.setValue(true) }
+      $0.audioPlayer.stop = { _ in stopped.setValue(true) }
     } operation: {
       // Retarget to a new transcript selection.
       selectWords(model.transcript, 5, 7)
@@ -578,8 +578,8 @@ struct EditorFineTuneTests {
     let gate = PreviewPlayGate()
 
     await withDependencies {
-      $0.audioPlayer.play = { _, _, _ in await gate.play() }
-      $0.audioPlayer.stop = {}
+      $0.audioPlayer.play = { _, _, _, _ in await gate.play() }
+      $0.audioPlayer.stop = { _ in }
     } operation: {
       let first = Task { await model.previewEditTapped() }  // generation 1, suspends
       await gate.awaitStarted()
@@ -610,7 +610,7 @@ struct EditorFineTuneTests {
     let recorded = LockIsolated<Range<Int>?>(nil)
 
     await withDependencies {
-      $0.audioPlayer.play = { _, range, _ in recorded.setValue(range) }
+      $0.audioPlayer.play = { _, range, _, _ in recorded.setValue(range) }
     } operation: {
       await model.previewEditTapped()
     }
