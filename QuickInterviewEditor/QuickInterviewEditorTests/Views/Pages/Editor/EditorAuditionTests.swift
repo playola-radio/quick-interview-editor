@@ -269,14 +269,16 @@ struct EditorAuditionTests {
 
   @Test func observePlaybackMovesPlayheadWhileAuditioning() async {
     let model = editor()
+    let session = PlaybackSessionID()
     model.audition = .cutIn  // this editor owns audition playback
+    model.currentPlaybackSession = session
     let (stream, continuation) = AsyncStream.makeStream(of: PlaybackPosition.self)
     await withDependencies {
       $0.audioPlayer.positions = { stream }
     } operation: {
       let task = Task { await model.observePlayback() }
       continuation.yield(
-        PlaybackPosition(sessionID: PlaybackSessionID(), sample: 2000, isPlaying: true))
+        PlaybackPosition(sessionID: session, sample: 2000, isPlaying: true))
       await settle { model.waveform.playheadSample == 2000 }
       #expect(model.waveform.playheadSample == 2000)
       continuation.finish()
