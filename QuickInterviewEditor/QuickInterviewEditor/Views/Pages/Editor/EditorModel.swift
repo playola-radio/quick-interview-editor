@@ -326,6 +326,9 @@ final class EditorModel: ViewModel {
     for await position in audioPlayer.positions() {
       guard hasPlaybackOwner else { continue }
       guard position.sessionID == currentPlaybackSession else { continue }
+      // A paused transport owns the session but the cursor is frozen at the exact sample `pause`
+      // returned; a buffered straggler tick for that session must not thaw it.
+      if isTransportPaused { continue }
       if position.isPlaying {
         playheadSample = position.sample
         transcript.playheadChanged(sample: position.sample, isPlaying: playingSliceID != nil)
@@ -685,8 +688,10 @@ final class EditorModel: ViewModel {
     case .playing:
       return
     case .paused(let session):
-      await audioPlayer.resume(session)
-      guard currentPlaybackSession == session else { return }
+      let resumed = await audioPlayer.resume(session)
+      // Stay paused if the player couldn't actually resume (e.g. an engine restart failed) so the
+      // panel doesn't claim to be playing while silent; re-guard the session after the await too.
+      guard currentPlaybackSession == session, resumed else { return }
       transportPhase = .playing(session)
       return
     case .stopped:
@@ -699,15 +704,18 @@ final class EditorModel: ViewModel {
     transportOriginSample = range.lowerBound
     transportRange = range
     transportPhase = .playing(session)
+    var failed = false
     do {
       try await audioPlayer.play(canonicalAudioURL, range, editPlan.source.sampleRate, session)
     } catch {
       reportIssue(error)
+      failed = true
     }
-    // Natural end: if we're still the current playback (Stop/supersede already nil the session),
-    // leave the cursor at the range end and return to stopped.
+    // If we're still the current playback (Stop/supersede already nil the session), return to
+    // stopped. A natural end lands the cursor at the range end; a failed play leaves it put — a
+    // play that never started must not look like it reached the end and lose the cursor.
     if currentPlaybackSession == session {
-      playheadSample = range.upperBound
+      if !failed { playheadSample = range.upperBound }
       currentPlaybackSession = nil
       transportPhase = .stopped
       transportOriginSample = nil

@@ -55,6 +55,9 @@ struct EditorTransportTests {
     transcript.transcriptDragged(
       toUTF16Offset: transcript.document.wordRanges[last].range.location)
   }
+  private func settle(until condition: () -> Bool) async {
+    for _ in 0..<1000 where !condition() { await Task.yield() }
+  }
 
   private func recordingPlay(
     _ recorded: LockIsolated<(URL, Range<Int>, Int)?>, _ gate: TransportGate
@@ -157,6 +160,21 @@ struct EditorTransportTests {
     expectNoDifference(model.transportPhase, .stopped)
   }
 
+  @Test func playFailureLeavesCursorPutAndResetsTransport() async {
+    let model = editor()
+    model.playheadSample = 1000
+    await withDependencies {
+      $0.audioPlayer.play = { _, _, _, _ in throw EngineClientError.engineFailed("boom") }
+    } operation: {
+      await withKnownIssue {
+        await model.transportPlayTapped()
+      }
+    }
+    expectNoDifference(model.playheadSample, 1000)  // a failed play must not jump to the range end
+    expectNoDifference(model.transportPhase, .stopped)
+    #expect(model.currentPlaybackSession == nil)
+  }
+
   @Test func naturalCompletionLeavesCursorAtRangeEnd() async {
     let gate = TransportGate()
     let model = editor()
@@ -200,6 +218,26 @@ struct EditorTransportTests {
     }
   }
 
+  @Test func pausedCursorIgnoresBufferedTick() async {
+    let model = editor()
+    let session = PlaybackSessionID()
+    model.transportPhase = .paused(session)
+    model.currentPlaybackSession = session
+    model.playheadSample = 4321  // the exact sample `pause` froze the cursor at
+    let (stream, continuation) = AsyncStream.makeStream(of: PlaybackPosition.self)
+    await withDependencies {
+      $0.audioPlayer.positions = { stream }
+    } operation: {
+      let task = Task { await model.observePlayback() }
+      // A buffered straggler tick for the paused session must NOT thaw the frozen cursor.
+      continuation.yield(PlaybackPosition(sessionID: session, sample: 9000, isPlaying: true))
+      await settle { false }  // let the tick be processed
+      expectNoDifference(model.playheadSample, 4321)
+      continuation.finish()
+      await task.value
+    }
+  }
+
   @Test func resumeContinuesTheSameSession() async {
     let gate = TransportGate()
     let resumed = LockIsolated(false)
@@ -208,7 +246,10 @@ struct EditorTransportTests {
     await withDependencies {
       $0.audioPlayer.play = { _, _, _, _ in await gate.play() }
       $0.audioPlayer.pause = { _ in 4321 }
-      $0.audioPlayer.resume = { _ in resumed.setValue(true) }
+      $0.audioPlayer.resume = { _ in
+        resumed.setValue(true)
+        return true
+      }
       $0.audioPlayer.stop = { _ in gate.release() }
     } operation: {
       let task = Task { await model.transportPlayTapped() }
@@ -219,6 +260,28 @@ struct EditorTransportTests {
       #expect(resumed.value)
       #expect(model.isTransportPlaying)
       expectNoDifference(model.transportPhase, .playing(session!))
+      await model.transportStopTapped()
+      await task.value
+    }
+  }
+
+  @Test func resumeFailureLeavesTransportPaused() async {
+    let gate = TransportGate()
+    let model = editor()
+    model.playheadSample = 1000
+    await withDependencies {
+      $0.audioPlayer.play = { _, _, _, _ in await gate.play() }
+      $0.audioPlayer.pause = { _ in 4321 }
+      $0.audioPlayer.resume = { _ in false }  // engine restart failed
+      $0.audioPlayer.stop = { _ in gate.release() }
+    } operation: {
+      let task = Task { await model.transportPlayTapped() }
+      await gate.awaitStarted()
+      let session = model.currentPlaybackSession
+      await model.transportPauseTapped()
+      await model.transportPlayTapped()  // resume attempt fails
+      #expect(model.isTransportPaused)  // stays paused — the panel doesn't claim to be playing
+      expectNoDifference(model.transportPhase, .paused(session!))
       await model.transportStopTapped()
       await task.value
     }
