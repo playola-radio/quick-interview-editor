@@ -26,13 +26,14 @@ private final class AuditionGate: @unchecked Sendable {
     startedContinuation = continuation
   }
   /// Signals "started", then suspends until `release()`.
-  func play() async {
+  func play() async -> PlaybackEnd {
     startedContinuation.yield(())
     await withCheckedContinuation { cont in
       lock.lock()
       continuations.append(cont)
       lock.unlock()
     }
+    return .finished
   }
   /// Resumes every currently-suspended `play()` (natural completion, or a `stop`).
   func release() {
@@ -76,10 +77,10 @@ struct EditorAuditionTests {
 
   private func recordingPlay(
     _ recorded: LockIsolated<(URL, Range<Int>, Int)?>, _ gate: AuditionGate
-  ) -> @Sendable (URL, Range<Int>, Int, PlaybackSessionID) async throws -> Void {
+  ) -> @Sendable (URL, Range<Int>, Int, PlaybackSessionID) async throws -> PlaybackEnd {
     { url, range, rate, _ in
       recorded.setValue((url, range, rate))
-      await gate.play()
+      return await gate.play()
     }
   }
 
@@ -160,7 +161,10 @@ struct EditorAuditionTests {
     #expect(model.activeEditingRange == nil)
     #expect(!model.canAudition)
     await withDependencies {
-      $0.audioPlayer.play = { _, _, _, _ in played.setValue(true) }
+      $0.audioPlayer.play = { _, _, _, _ in
+        played.setValue(true)
+        return .finished
+      }
     } operation: {
       await model.auditionInTapped()
       await model.auditionOutTapped()
@@ -225,7 +229,7 @@ struct EditorAuditionTests {
     await withDependencies {
       $0.audioPlayer.play = { _, _, _, _ in
         starts.withValue { $0 += 1 }
-        await gate.play()
+        return await gate.play()
       }
       $0.audioPlayer.stop = { _ in gate.release() }
     } operation: {

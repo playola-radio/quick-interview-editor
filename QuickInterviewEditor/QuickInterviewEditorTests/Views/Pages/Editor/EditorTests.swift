@@ -22,7 +22,7 @@ private final class PlayerGate: @unchecked Sendable {
   /// Stand-in for `audioPlayer.play`: signals "started", then suspends until `release()`.
   /// Queues its continuation rather than overwriting a prior one, so a test that starts a
   /// second (superseding) playback before releasing the first can still resolve both.
-  func play() async {
+  func play() async -> PlaybackEnd {
     startedContinuation.yield(())
     await withCheckedContinuation { cont in
       lock.lock()
@@ -34,6 +34,7 @@ private final class PlayerGate: @unchecked Sendable {
       releaseConts.append(cont)
       lock.unlock()
     }
+    return .finished
   }
 
   /// Stand-in for `audioPlayer.stop` (and for natural completion in a test): resumes every
@@ -316,7 +317,7 @@ struct EditorTests {
     await withDependencies {
       $0.audioPlayer.play = { url, range, rate, _ in
         recorded.setValue((url, range, rate))
-        await gate.play()
+        return await gate.play()
       }
       $0.audioPlayer.stop = { _ in gate.release() }
     } operation: {
@@ -646,7 +647,10 @@ struct EditorTests {
     let id = model.slices[0].id
     model.slices[0].endSample = model.slices[0].startSample
     await withDependencies {
-      $0.audioPlayer.play = { _, _, _, _ in played.setValue(true) }
+      $0.audioPlayer.play = { _, _, _, _ in
+        played.setValue(true)
+        return .finished
+      }
     } operation: {
       await model.playSliceTapped(id)
     }
@@ -665,7 +669,10 @@ struct EditorTests {
     model.slices[0].startSample = dur
     model.slices[0].endSample = dur + 1000
     await withDependencies {
-      $0.audioPlayer.play = { _, _, _, _ in played.setValue(true) }
+      $0.audioPlayer.play = { _, _, _, _ in
+        played.setValue(true)
+        return .finished
+      }
     } operation: {
       await model.playSliceTapped(model.slices[0].id)
     }

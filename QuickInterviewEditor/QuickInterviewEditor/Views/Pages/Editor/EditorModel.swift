@@ -606,7 +606,7 @@ final class EditorModel: ViewModel {
     let session = PlaybackSessionID()
     currentPlaybackSession = session
     do {
-      try await audioPlayer.play(
+      _ = try await audioPlayer.play(
         canonicalAudioURL, slice.startSample..<slice.endSample, editPlan.source.sampleRate,
         session)
     } catch {
@@ -704,18 +704,21 @@ final class EditorModel: ViewModel {
     transportOriginSample = range.lowerBound
     transportRange = range
     transportPhase = .playing(session)
-    var failed = false
+    let outcome: PlaybackEnd
     do {
-      try await audioPlayer.play(canonicalAudioURL, range, editPlan.source.sampleRate, session)
+      outcome = try await audioPlayer.play(
+        canonicalAudioURL, range, editPlan.source.sampleRate, session)
     } catch {
       reportIssue(error)
-      failed = true
+      outcome = .stopped
     }
-    // If we're still the current playback (Stop/supersede already nil the session), return to
-    // stopped. A natural end lands the cursor at the range end; a failed play leaves it put — a
-    // play that never started must not look like it reached the end and lose the cursor.
+    // If we're still the current playback (our own Stop/supersede already niled the session), return
+    // to stopped. Only a natural `.finished` lands the cursor at the range end. `.superseded` here
+    // means ANOTHER tab took over the shared player — our session is still set because that tab never
+    // touched it — so we must reset our transport WITHOUT jumping the cursor to the end. A failed
+    // play (`.stopped`) likewise leaves the cursor put.
     if currentPlaybackSession == session {
-      if !failed { playheadSample = range.upperBound }
+      if outcome == .finished { playheadSample = range.upperBound }
       currentPlaybackSession = nil
       transportPhase = .stopped
       transportOriginSample = nil
@@ -960,7 +963,7 @@ final class EditorModel: ViewModel {
     let session = PlaybackSessionID()
     currentPlaybackSession = session
     do {
-      try await audioPlayer.play(
+      _ = try await audioPlayer.play(
         canonicalAudioURL, range, editPlan.source.sampleRate, session)
     } catch {
       reportIssue(error)
@@ -1039,7 +1042,7 @@ final class EditorModel: ViewModel {
     let session = PlaybackSessionID()
     currentPlaybackSession = session
     do {
-      try await audioPlayer.play(
+      _ = try await audioPlayer.play(
         canonicalAudioURL, range, editPlan.source.sampleRate, session)
     } catch {
       reportIssue(error)

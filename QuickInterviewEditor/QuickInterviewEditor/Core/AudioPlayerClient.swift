@@ -10,10 +10,21 @@ struct PlaybackSessionID: Hashable, Sendable {
   init(rawValue: UUID = UUID()) { self.rawValue = rawValue }
 }
 
+/// Why a `play` call returned. `finished` = the segment played to its end (the caller may
+/// rest the cursor at the range end); `stopped` = a `stop` on this session ended it; `superseded`
+/// = a newer `play` (this tab or, crucially, another tab sharing the one player) took over. Only
+/// `finished` should move the resting cursor to the range end — a superseded background tab must
+/// leave its cursor where it was, not jump it to the end.
+enum PlaybackEnd: Sendable, Equatable {
+  case finished
+  case stopped
+  case superseded
+}
+
 struct AudioPlayerClient: Sendable {
-  /// Plays url from range.lowerBound to range.upperBound (samples) and returns when playback
-  /// finishes or `stop`/a superseding `play` is called. `session` tags this playback's ticks.
-  var play: @Sendable (URL, Range<Int>, Int, PlaybackSessionID) async throws -> Void
+  /// Plays url from range.lowerBound to range.upperBound (samples) and returns how it ended when
+  /// playback finishes or `stop`/a superseding `play` is called. `session` tags this playback's ticks.
+  var play: @Sendable (URL, Range<Int>, Int, PlaybackSessionID) async throws -> PlaybackEnd
   /// Pauses `session` if it is the current playback, freezing the node in place; returns the
   /// exact resting plan sample (nil if `session` is not current). Does not end the `play` call.
   var pause: @Sendable (PlaybackSessionID) async -> Int?
@@ -42,7 +53,7 @@ extension AudioPlayerClient: DependencyKey {
 
 extension AudioPlayerClient: TestDependencyKey {
   static let testValue = AudioPlayerClient(
-    play: { _, _, _, _ in
+    play: { _, _, _, _ -> PlaybackEnd in
       reportIssue("AudioPlayerClient.play called without a test override")
       throw EngineClientError.unimplemented("AudioPlayerClient.play")
     },
@@ -59,7 +70,7 @@ extension AudioPlayerClient: TestDependencyKey {
   )
 
   static let previewValue = AudioPlayerClient(
-    play: { _, _, _, _ in }, pause: { _ in nil }, resume: { _ in true },
+    play: { _, _, _, _ in .finished }, pause: { _ in nil }, resume: { _ in true },
     stop: { _ in }, positions: { AsyncStream { $0.finish() } })
 }
 
@@ -107,7 +118,7 @@ extension AudioPlayerClient {
 private actor LivePlayerBox {
   private let engine = AVAudioEngine()
   private let node = AVAudioPlayerNode()
-  private var continuation: CheckedContinuation<Void, Never>?
+  private var continuation: CheckedContinuation<PlaybackEnd, Never>?
   private var generation = 0
 
   /// Position-stream plumbing. `startPlanSample` + `playRatio` convert the node's native
@@ -147,7 +158,7 @@ private actor LivePlayerBox {
   /// another `play()` supersedes it.
   func play(
     url: URL, range: Range<Int>, planSampleRate: Int, session: PlaybackSessionID
-  ) async throws {
+  ) async throws -> PlaybackEnd {
     let file = try AVAudioFile(forReading: url)
     let nativeRate = file.processingFormat.sampleRate
     let ratio = nativeRate / Double(max(1, planSampleRate))
@@ -157,8 +168,8 @@ private actor LivePlayerBox {
     let clampedEnd = min(endFrame, file.length)
     let frameCount = AVAudioFrameCount(max(0, clampedEnd - clampedStart))
     // An empty range can't come from a valid selection; no-op without disturbing
-    // any current playback.
-    guard frameCount > 0 else { return }
+    // any current playback. Callers guard this already, so treat it as an immediate finish.
+    guard frameCount > 0 else { return .finished }
 
     // Tear down any current playback without a stop tick: playing slice B directly while
     // A plays keeps `playingSliceID` set, so a `false` tick here would briefly flash this
@@ -195,18 +206,18 @@ private actor LivePlayerBox {
     // `file`. The completion callback hops back onto this actor, so it cannot run
     // `complete` until we suspend here and free the actor — by which point
     // `continuation` is already set.
-    await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+    return await withCheckedContinuation { (cont: CheckedContinuation<PlaybackEnd, Never>) in
       continuation = cont
     }
   }
 
   func stop(session: PlaybackSessionID?) {
     guard let session else {
-      supersede()  // nil = stop whatever is playing
+      supersede(reason: .stopped)  // nil = stop whatever is playing
       return
     }
     guard currentSession == session else { return }
-    supersede()
+    supersede(reason: .stopped)
   }
 
   /// Freezes the node in place and returns the exact plan sample it stopped at. No
@@ -257,14 +268,17 @@ private actor LivePlayerBox {
   /// stop the engine — all on the actor, so it can't race the render thread. Pass
   /// `broadcastStop: false` when a new segment starts immediately after (a slice switch),
   /// so the playhead isn't flashed to nil between the two.
-  private func supersede(broadcastStop: Bool = true) {
+  /// `reason` tells the suspended `play` caller why it woke: `.stopped` from a `stop`, `.superseded`
+  /// from a newer `play` taking over (the default). The caller uses this to decide whether to rest
+  /// the cursor at the range end (only on a natural `.finished`, never here).
+  private func supersede(broadcastStop: Bool = true, reason: PlaybackEnd = .superseded) {
     generation += 1
     let waiter = continuation
     continuation = nil
     stopTicking(broadcastStop: broadcastStop)
     stopNode()
     currentSession = nil
-    waiter?.resume()
+    waiter?.resume(returning: reason)
   }
 
   private func complete(generation completedGeneration: Int) {
@@ -273,7 +287,7 @@ private actor LivePlayerBox {
     stopTicking()
     stopNode()
     currentSession = nil
-    waiter.resume()
+    waiter.resume(returning: .finished)
   }
 
   /// Polls the node's render position ~30 Hz and yields plan-sample positions.

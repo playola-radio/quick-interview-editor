@@ -21,13 +21,14 @@ private final class TransportGate: @unchecked Sendable {
     started = AsyncStream { continuation = $0 }
     startedContinuation = continuation
   }
-  func play() async {
+  func play() async -> PlaybackEnd {
     startedContinuation.yield(())
     await withCheckedContinuation { cont in
       lock.lock()
       continuations.append(cont)
       lock.unlock()
     }
+    return .finished
   }
   func release() {
     lock.lock()
@@ -35,6 +36,39 @@ private final class TransportGate: @unchecked Sendable {
     continuations = []
     lock.unlock()
     for cont in conts { cont.resume() }
+  }
+  func awaitStarted() async {
+    var it = started.makeAsyncIterator()
+    _ = await it.next()
+  }
+}
+
+/// A minimal stand-in for the ONE shared player two editor tabs contend over. `play` supersedes any
+/// in-flight play (resuming it `.superseded`) and suspends as the new current; the test finishes the
+/// current play explicitly. Reproduces the cross-tab supersede the single-session gates can't: the
+/// backgrounded tab's own `currentPlaybackSession` stays set because the foreground tab never touches
+/// it, so only the `.superseded` return distinguishes it from a natural end.
+private actor SharedFakePlayer {
+  private var current: CheckedContinuation<PlaybackEnd, Never>?
+  private let startedContinuation: AsyncStream<Void>.Continuation
+  let started: AsyncStream<Void>
+  init() {
+    var continuation: AsyncStream<Void>.Continuation!
+    started = AsyncStream { continuation = $0 }
+    startedContinuation = continuation
+  }
+  func play() async -> PlaybackEnd {
+    if let current {
+      self.current = nil
+      current.resume(returning: .superseded)
+    }
+    startedContinuation.yield(())
+    return await withCheckedContinuation { self.current = $0 }
+  }
+  func finishCurrent() {
+    guard let current else { return }
+    self.current = nil
+    current.resume(returning: .finished)
   }
   func awaitStarted() async {
     var it = started.makeAsyncIterator()
@@ -61,10 +95,10 @@ struct EditorTransportTests {
 
   private func recordingPlay(
     _ recorded: LockIsolated<(URL, Range<Int>, Int)?>, _ gate: TransportGate
-  ) -> @Sendable (URL, Range<Int>, Int, PlaybackSessionID) async throws -> Void {
+  ) -> @Sendable (URL, Range<Int>, Int, PlaybackSessionID) async throws -> PlaybackEnd {
     { url, range, rate, _ in
       recorded.setValue((url, range, rate))
-      await gate.play()
+      return await gate.play()
     }
   }
 
@@ -151,7 +185,10 @@ struct EditorTransportTests {
     let model = editor()
     model.playheadSample = model.editPlan.source.durationSamples
     await withDependencies {
-      $0.audioPlayer.play = { _, _, _, _ in played.setValue(true) }
+      $0.audioPlayer.play = { _, _, _, _ in
+        played.setValue(true)
+        return .finished
+      }
     } operation: {
       await model.transportPlayTapped()
     }
@@ -481,6 +518,64 @@ struct EditorTransportTests {
       #expect(stopped.value)
       expectNoDifference(model.transportPhase, .stopped)
       expectNoDifference(model.playheadSample, selection.lowerBound)
+    }
+  }
+
+  // MARK: - Multi-tab supersede vs natural end
+
+  @Test func supersededPlayLeavesCursorPutNotAtRangeEnd() async {
+    let gate = TransportGate()
+    let model = editor()
+    model.playheadSample = 1000
+    await withDependencies {
+      // Another tab took over the shared player: `play` returns `.superseded` while our own session
+      // is still set (the other tab can't touch it). The transport must reset without jumping the
+      // cursor to the range end.
+      $0.audioPlayer.play = { _, _, _, _ in
+        _ = await gate.play()
+        return .superseded
+      }
+      $0.audioPlayer.stop = { _ in gate.release() }
+    } operation: {
+      let task = Task { await model.transportPlayTapped() }
+      await gate.awaitStarted()
+      #expect(model.isTransportPlaying)
+      gate.release()  // resolves play() → .superseded
+      await task.value
+      expectNoDifference(model.playheadSample, 1000)  // NOT durationSamples
+      expectNoDifference(model.transportPhase, .stopped)
+      #expect(model.currentPlaybackSession == nil)
+    }
+  }
+
+  @Test func backgroundTabSupersededByAnotherTabKeepsItsCursor() async {
+    let shared = SharedFakePlayer()
+    let client = AudioPlayerClient(
+      play: { _, _, _, _ in await shared.play() },
+      pause: { _ in nil }, resume: { _ in true },
+      stop: { _ in }, positions: { AsyncStream { $0.finish() } })
+    let tabA = editor()
+    let tabB = editor()
+    tabA.playheadSample = 1000
+    tabB.playheadSample = 5000
+    let durationB = tabB.editPlan.source.durationSamples
+    await withDependencies {
+      $0.audioPlayer = client
+    } operation: {
+      let playA = Task { await tabA.transportPlayTapped() }
+      await shared.awaitStarted()
+      #expect(tabA.isTransportPlaying)
+      let playB = Task { await tabB.transportPlayTapped() }
+      await shared.awaitStarted()  // B supersedes A on the shared player
+      await playA.value
+      // Background tab A: superseded, not completed — cursor stays put, transport resets.
+      expectNoDifference(tabA.playheadSample, 1000)
+      expectNoDifference(tabA.transportPhase, .stopped)
+      #expect(tabA.currentPlaybackSession == nil)
+      #expect(tabB.isTransportPlaying)
+      await shared.finishCurrent()  // B finishes naturally
+      await playB.value
+      expectNoDifference(tabB.playheadSample, durationB)  // foreground tab lands at the range end
     }
   }
 }

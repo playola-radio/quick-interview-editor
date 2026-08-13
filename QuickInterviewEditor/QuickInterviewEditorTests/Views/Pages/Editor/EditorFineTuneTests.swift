@@ -19,13 +19,14 @@ private final class PreviewPlayGate: @unchecked Sendable {
     startedContinuation = continuation
   }
 
-  func play() async {
+  func play() async -> PlaybackEnd {
     startedContinuation.yield(())
     await withCheckedContinuation { cont in
       lock.lock()
       continuations.append(cont)
       lock.unlock()
     }
+    return .finished
   }
 
   func releaseFirst() {
@@ -615,7 +616,10 @@ struct EditorFineTuneTests {
     let recorded = LockIsolated<Range<Int>?>(nil)
 
     await withDependencies {
-      $0.audioPlayer.play = { _, range, _, _ in recorded.setValue(range) }
+      $0.audioPlayer.play = { _, range, _, _ in
+        recorded.setValue(range)
+        return .finished
+      }
     } operation: {
       await model.previewEditTapped()
     }
