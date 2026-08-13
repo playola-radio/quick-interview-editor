@@ -167,9 +167,11 @@ private actor LivePlayerBox {
     let clampedStart = min(startFrame, file.length)
     let clampedEnd = min(endFrame, file.length)
     let frameCount = AVAudioFrameCount(max(0, clampedEnd - clampedStart))
-    // An empty range can't come from a valid selection; no-op without disturbing
-    // any current playback. Callers guard this already, so treat it as an immediate finish.
-    guard frameCount > 0 else { return .finished }
+    // An empty range can't come from a valid selection; no-op without disturbing any current
+    // playback. This can also be reached when the canonical file is shorter than the plan's declared
+    // duration (the range clamps to empty against `file.length`). Report `.stopped`, not `.finished`,
+    // so a caller never rests its cursor at the range end for audio that never played.
+    guard frameCount > 0 else { return .stopped }
 
     // Tear down any current playback without a stop tick: starting playback B directly while
     // A plays keeps the transport owner set, so a `false` tick here would briefly flash this

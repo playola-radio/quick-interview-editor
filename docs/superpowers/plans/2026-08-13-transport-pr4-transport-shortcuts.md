@@ -56,7 +56,7 @@
 - `PlaybackEnd` enum; `LivePlayerBox` continuation carries it (`complete`/`stop`/`supersede` reasons).
 - Update `testValue`/`previewValue` and all four model call sites + all test `play` overrides.
 - Transport natural-end uses `end == .finished` (was `!failed`).
-- Tests: `.superseded` return leaves cursor put; a shared-fake-box multi-tab supersede test.
+- Tests: a `.superseded` return leaves the resting cursor unchanged, not at `range.upperBound`; add a shared-fake-box multi-tab supersede test.
 
 ### Stage B — collapse owners into `TransportContext` + shortcuts
 - Add `TransportContext` + `transportContext`; remove `currentPlaybackSession`,

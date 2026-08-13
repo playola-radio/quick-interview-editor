@@ -333,6 +333,13 @@ final class EditorModel: ViewModel {
   /// new session/context *after* this, via `beginTransportPlayback`.
   private func beginExclusivePlayback() {
     endTranscriptFollow()
+    resetTransportState()
+  }
+
+  /// Clears every field of the transport's ownership state (phase/context/origin/range) back to the
+  /// stopped/`.free` baseline — never touching `playheadSample`. The single place transport state
+  /// resets, so a future field can't be missed by one of the several cleanup paths.
+  private func resetTransportState() {
     transportPhase = .stopped
     transportContext = .free
     transportOriginSample = nil
@@ -684,10 +691,7 @@ final class EditorModel: ViewModel {
     // (`.stopped`) likewise leaves the cursor put.
     guard transportPhase.session == session else { return }
     if outcome == .finished { playheadSample = range.upperBound }
-    transportPhase = .stopped
-    transportContext = .free
-    transportOriginSample = nil
-    transportRange = nil
+    resetTransportState()
     // Reset transcript follow here too: on a cross-tab `.superseded` (and on a natural end whose
     // final stop tick races this cleanup) `observePlayback` may never see a gated false tick, so
     // without this a slice's `wasPlaying` stays true and the next slice misses its rising edge.
@@ -719,10 +723,7 @@ final class EditorModel: ViewModel {
   /// a delayed cleanup can't kill newer/global playback.
   private func endTransportPlayback() async {
     let session = transportPhase.session
-    transportPhase = .stopped
-    transportContext = .free
-    transportOriginSample = nil
-    transportRange = nil
+    resetTransportState()
     endTranscriptFollow()
     await stopOwnedPlayback(session)
   }
@@ -824,10 +825,7 @@ final class EditorModel: ViewModel {
     case .free, .slice: return
     }
     let session = transportPhase.session
-    transportPhase = .stopped
-    transportContext = .free
-    transportOriginSample = nil
-    transportRange = nil
+    resetTransportState()
     endTranscriptFollow()
     Task { await stopOwnedPlayback(session) }
   }
