@@ -341,7 +341,9 @@ final class EditorModel: ViewModel {
 
   /// Takes exclusive ownership of the single global player for a new playback: clears every
   /// other owner's flag and bumps their generation tokens so a stale completing task can't
-  /// clear the new owner's state. The caller sets its own owner *after* calling this.
+  /// clear the new owner's state. The caller sets its own owner *after* calling this. It clears
+  /// the interview-transport owner too (so a slice/preview/audition supersedes the transport, and
+  /// vice versa) but never resets `playheadSample` — the persistent cursor survives supersession.
   private func beginExclusivePlayback() {
     playingSliceID = nil
     endTranscriptFollow()
@@ -349,6 +351,9 @@ final class EditorModel: ViewModel {
     isPreviewingDraft = false
     auditionGeneration &+= 1
     audition = nil
+    transportPhase = .stopped
+    transportOriginSample = nil
+    transportRange = nil
     currentPlaybackSession = nil
   }
 
@@ -637,6 +642,122 @@ final class EditorModel: ViewModel {
     } else {
       await playSliceTapped(id)
     }
+  }
+
+  // MARK: - Transport
+  let transportPlayLabel = "Play"
+  let transportPauseLabel = "Pause"
+  let transportStopLabel = "Stop"
+
+  var isTransportPlaying: Bool {
+    if case .playing = transportPhase { return true }
+    return false
+  }
+  var isTransportPaused: Bool {
+    if case .paused = transportPhase { return true }
+    return false
+  }
+
+  /// Play is available when paused (resume) or when the cursor has somewhere to play to; never
+  /// while already playing.
+  var canTransportPlay: Bool {
+    if isTransportPlaying { return false }
+    return isTransportPaused || transportPlayableRange != nil
+  }
+  var canTransportPause: Bool { isTransportPlaying }
+  var canTransportStop: Bool { isTransportPlaying || isTransportPaused }
+
+  /// What a Play-from-stopped would play: from the cursor to the selection's end (if a selection
+  /// is active) else end-of-audio, clamped to the file. Nil when the cursor is at/after that end,
+  /// so Play is a no-op (Logic: pressing Play with the cursor past the region does nothing).
+  private var transportPlayableRange: Range<Int>? {
+    let end = min(
+      transcript.selectedSampleRange?.upperBound ?? editPlan.source.durationSamples,
+      editPlan.source.durationSamples)
+    let start = playheadSample
+    guard start >= 0, start < end else { return nil }
+    return start..<end
+  }
+
+  /// Play button / resume. From paused, resumes the frozen session. From stopped, starts at the
+  /// cursor and runs to the selection end (or end-of-audio), recording the origin Stop returns to.
+  /// The `play` await stays suspended across pause/resume until stop, supersede, or natural end.
+  func transportPlayTapped() async {
+    switch transportPhase {
+    case .playing:
+      return
+    case .paused(let session):
+      await audioPlayer.resume(session)
+      guard currentPlaybackSession == session else { return }
+      transportPhase = .playing(session)
+      return
+    case .stopped:
+      break
+    }
+    guard let range = transportPlayableRange else { return }
+    beginExclusivePlayback()
+    let session = PlaybackSessionID()
+    currentPlaybackSession = session
+    transportOriginSample = range.lowerBound
+    transportRange = range
+    transportPhase = .playing(session)
+    do {
+      try await audioPlayer.play(canonicalAudioURL, range, editPlan.source.sampleRate, session)
+    } catch {
+      reportIssue(error)
+    }
+    // Natural end: if we're still the current playback (Stop/supersede already nil the session),
+    // leave the cursor at the range end and return to stopped.
+    if currentPlaybackSession == session {
+      playheadSample = range.upperBound
+      currentPlaybackSession = nil
+      transportPhase = .stopped
+      transportOriginSample = nil
+      transportRange = nil
+    }
+  }
+
+  /// Pause button. Freezes the cursor at the exact sample the player reports and holds the
+  /// suspended `play` call in flight. Re-guards the session after the await so a pause landing
+  /// after a supersession doesn't stamp a stale phase over the new owner.
+  func transportPauseTapped() async {
+    guard case .playing(let session) = transportPhase else { return }
+    let sample = await audioPlayer.pause(session)
+    guard currentPlaybackSession == session else { return }
+    if let sample { playheadSample = sample }
+    transportPhase = .paused(session)
+  }
+
+  /// Stop button. Returns the cursor to the origin immediately, clears the transport, then stops
+  /// the audio. Niling the session first means the suspended `play`'s natural-end cleanup won't
+  /// run and overwrite the origin.
+  func transportStopTapped() async {
+    let session = transportPhase.session
+    if let origin = transportOriginSample { playheadSample = origin }
+    transportPhase = .stopped
+    transportOriginSample = nil
+    transportRange = nil
+    currentPlaybackSession = nil
+    await stopOwnedPlayback(session)
+  }
+
+  /// Space (Logic parity): Play/Stop toggle for the transport. Stops whatever is playing —
+  /// the transport (to origin) or any legacy slice/preview/audition owner — and otherwise starts
+  /// the transport from the cursor (resuming when paused).
+  func transportPlayStopTapped() async {
+    if isTransportPlaying {
+      await transportStopTapped()
+      return
+    }
+    if isTransportPaused {
+      await transportPlayTapped()
+      return
+    }
+    if playingSliceID != nil || isPreviewingDraft || audition != nil {
+      await stopAllPlayback()
+      return
+    }
+    await transportPlayTapped()
   }
 
   // MARK: - Fine-tune editing

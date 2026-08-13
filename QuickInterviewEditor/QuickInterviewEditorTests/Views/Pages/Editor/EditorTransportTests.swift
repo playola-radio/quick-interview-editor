@@ -1,0 +1,359 @@
+import CustomDump
+import Dependencies
+import Foundation
+import Testing
+
+@testable import QuickInterviewEditor
+
+// swiftlint:disable large_tuple
+// The (URL, Range<Int>, Int) recorded-call tuple mirrors `audioPlayer.play`'s three
+// leading arguments, so it recurs across the gate helper and the tests that assert on a call.
+
+/// Suspends each `play` until released; reports starts. Holds an array of continuations so two
+/// overlapping plays (a supersession) both suspend and resume together. Mirrors AuditionGate.
+private final class TransportGate: @unchecked Sendable {
+  private let lock = NSLock()
+  private var continuations: [CheckedContinuation<Void, Never>] = []
+  private let startedContinuation: AsyncStream<Void>.Continuation
+  let started: AsyncStream<Void>
+  init() {
+    var continuation: AsyncStream<Void>.Continuation!
+    started = AsyncStream { continuation = $0 }
+    startedContinuation = continuation
+  }
+  func play() async {
+    startedContinuation.yield(())
+    await withCheckedContinuation { cont in
+      lock.lock()
+      continuations.append(cont)
+      lock.unlock()
+    }
+  }
+  func release() {
+    lock.lock()
+    let conts = continuations
+    continuations = []
+    lock.unlock()
+    for cont in conts { cont.resume() }
+  }
+  func awaitStarted() async {
+    var it = started.makeAsyncIterator()
+    _ = await it.next()
+  }
+}
+
+@MainActor
+struct EditorTransportTests {
+  private func editor(_ plan: EditPlan = Fixtures.editPlan()) -> EditorModel {
+    EditorModel(
+      sourceURL: URL(fileURLWithPath: "/clip.m4a"),
+      canonicalAudioURL: Fixtures.canonicalAudioURL, editPlan: plan)
+  }
+  private func selectWords(_ transcript: TranscriptPageModel, _ first: Int, _ last: Int) {
+    transcript.transcriptDragBegan(
+      atUTF16Offset: transcript.document.wordRanges[first].range.location)
+    transcript.transcriptDragged(
+      toUTF16Offset: transcript.document.wordRanges[last].range.location)
+  }
+
+  private func recordingPlay(
+    _ recorded: LockIsolated<(URL, Range<Int>, Int)?>, _ gate: TransportGate
+  ) -> @Sendable (URL, Range<Int>, Int, PlaybackSessionID) async throws -> Void {
+    { url, range, rate, _ in
+      recorded.setValue((url, range, rate))
+      await gate.play()
+    }
+  }
+
+  // MARK: - Panel flags
+
+  @Test func panelFlagsWhenStoppedWithPlayableCursor() {
+    let model = editor()
+    model.playheadSample = 1000  // mid-file, no selection → a playable range exists
+    #expect(model.canTransportPlay)
+    #expect(!model.canTransportPause)
+    #expect(!model.canTransportStop)
+    #expect(!model.isTransportPlaying)
+    #expect(!model.isTransportPaused)
+  }
+
+  @Test func playDisabledWhenCursorAtEndOfAudio() {
+    let model = editor()
+    model.playheadSample = model.editPlan.source.durationSamples  // nothing left to play
+    #expect(!model.canTransportPlay)
+  }
+
+  @Test func panelFlagsWhilePlaying() {
+    let model = editor()
+    model.transportPhase = .playing(PlaybackSessionID())
+    #expect(!model.canTransportPlay)
+    #expect(model.canTransportPause)
+    #expect(model.canTransportStop)
+    #expect(model.isTransportPlaying)
+  }
+
+  @Test func panelFlagsWhilePaused() {
+    let model = editor()
+    model.transportPhase = .paused(PlaybackSessionID())
+    #expect(model.canTransportPlay)  // resume
+    #expect(!model.canTransportPause)
+    #expect(model.canTransportStop)
+    #expect(model.isTransportPaused)
+  }
+
+  // MARK: - Play
+
+  @Test func playStartsFromCursorToEndOfAudioAndRecordsOrigin() async {
+    let gate = TransportGate()
+    let recorded = LockIsolated<(URL, Range<Int>, Int)?>(nil)
+    let model = editor()
+    model.playheadSample = 1000
+    await withDependencies {
+      $0.audioPlayer.play = recordingPlay(recorded, gate)
+      $0.audioPlayer.stop = { _ in gate.release() }
+    } operation: {
+      let task = Task { await model.transportPlayTapped() }
+      await gate.awaitStarted()
+      #expect(model.isTransportPlaying)
+      expectNoDifference(model.transportOriginSample, 1000)
+      expectNoDifference(recorded.value?.0, model.canonicalAudioURL)
+      expectNoDifference(recorded.value?.1, 1000..<model.editPlan.source.durationSamples)
+      expectNoDifference(recorded.value?.2, model.editPlan.source.sampleRate)
+      await model.transportStopTapped()
+      await task.value
+    }
+  }
+
+  @Test func playEndsAtSelectionEndWhenSelectionActive() async {
+    let gate = TransportGate()
+    let recorded = LockIsolated<(URL, Range<Int>, Int)?>(nil)
+    let model = editor()
+    selectWords(model.transcript, 1, 4)
+    let selection = model.transcript.selectedSampleRange!
+    model.playheadSample = selection.lowerBound
+    await withDependencies {
+      $0.audioPlayer.play = recordingPlay(recorded, gate)
+      $0.audioPlayer.stop = { _ in gate.release() }
+    } operation: {
+      let task = Task { await model.transportPlayTapped() }
+      await gate.awaitStarted()
+      expectNoDifference(recorded.value?.1, selection.lowerBound..<selection.upperBound)
+      await model.transportStopTapped()
+      await task.value
+    }
+  }
+
+  @Test func playIsNoOpWhenCursorPastPlayableEnd() async {
+    let played = LockIsolated(false)
+    let model = editor()
+    model.playheadSample = model.editPlan.source.durationSamples
+    await withDependencies {
+      $0.audioPlayer.play = { _, _, _, _ in played.setValue(true) }
+    } operation: {
+      await model.transportPlayTapped()
+    }
+    #expect(!played.value)
+    #expect(!model.isTransportPlaying)
+    expectNoDifference(model.transportPhase, .stopped)
+  }
+
+  @Test func naturalCompletionLeavesCursorAtRangeEnd() async {
+    let gate = TransportGate()
+    let model = editor()
+    model.playheadSample = 1000
+    let end = model.editPlan.source.durationSamples
+    await withDependencies {
+      $0.audioPlayer.play = { _, _, _, _ in await gate.play() }
+      $0.audioPlayer.stop = { _ in gate.release() }
+    } operation: {
+      let task = Task { await model.transportPlayTapped() }
+      await gate.awaitStarted()
+      gate.release()  // natural completion (no Stop)
+      await task.value
+      expectNoDifference(model.transportPhase, .stopped)
+      expectNoDifference(model.playheadSample, end)  // left where the audio ended
+      #expect(model.currentPlaybackSession == nil)
+    }
+  }
+
+  // MARK: - Pause / resume
+
+  @Test func pauseFreezesCursorAtReportedSampleAndHoldsPlay() async {
+    let gate = TransportGate()
+    let model = editor()
+    model.playheadSample = 1000
+    await withDependencies {
+      $0.audioPlayer.play = { _, _, _, _ in await gate.play() }
+      $0.audioPlayer.pause = { _ in 4321 }
+      $0.audioPlayer.stop = { _ in gate.release() }
+    } operation: {
+      let task = Task { await model.transportPlayTapped() }
+      await gate.awaitStarted()
+      let session = model.currentPlaybackSession
+      await model.transportPauseTapped()
+      expectNoDifference(model.playheadSample, 4321)  // frozen at the exact reported sample
+      #expect(model.isTransportPaused)
+      expectNoDifference(model.transportPhase, .paused(session!))
+      #expect(!task.isCancelled)  // the play call is still in flight
+      await model.transportStopTapped()
+      await task.value
+    }
+  }
+
+  @Test func resumeContinuesTheSameSession() async {
+    let gate = TransportGate()
+    let resumed = LockIsolated(false)
+    let model = editor()
+    model.playheadSample = 1000
+    await withDependencies {
+      $0.audioPlayer.play = { _, _, _, _ in await gate.play() }
+      $0.audioPlayer.pause = { _ in 4321 }
+      $0.audioPlayer.resume = { _ in resumed.setValue(true) }
+      $0.audioPlayer.stop = { _ in gate.release() }
+    } operation: {
+      let task = Task { await model.transportPlayTapped() }
+      await gate.awaitStarted()
+      let session = model.currentPlaybackSession
+      await model.transportPauseTapped()
+      await model.transportPlayTapped()  // resume
+      #expect(resumed.value)
+      #expect(model.isTransportPlaying)
+      expectNoDifference(model.transportPhase, .playing(session!))
+      await model.transportStopTapped()
+      await task.value
+    }
+  }
+
+  // MARK: - Stop
+
+  @Test func stopReturnsCursorToOrigin() async {
+    let gate = TransportGate()
+    let stoppedSession = LockIsolated<PlaybackSessionID?>(nil)
+    let model = editor()
+    model.playheadSample = 1000
+    await withDependencies {
+      $0.audioPlayer.play = { _, _, _, _ in await gate.play() }
+      $0.audioPlayer.stop = { session in
+        stoppedSession.setValue(session)
+        gate.release()
+      }
+    } operation: {
+      let task = Task { await model.transportPlayTapped() }
+      await gate.awaitStarted()
+      let session = model.currentPlaybackSession
+      model.playheadSample = 8000  // simulate the cursor having advanced during playback
+      await model.transportStopTapped()
+      await task.value
+      expectNoDifference(model.playheadSample, 1000)  // back to the origin
+      expectNoDifference(model.transportPhase, .stopped)
+      #expect(model.currentPlaybackSession == nil)
+      expectNoDifference(stoppedSession.value, session)  // stopped OUR session, not stop(nil)
+    }
+  }
+
+  // MARK: - Coexistence with legacy owners
+
+  @Test func startingASliceSupersedesTheTransport() async {
+    let gate = TransportGate()
+    let model = editor()
+    model.playheadSample = 1000
+    selectWords(model.transcript, 0, 2)
+    model.addSliceTapped()
+    let slice = model.slices[0]
+    await withDependencies {
+      $0.audioPlayer.play = { _, _, _, _ in await gate.play() }
+      $0.audioPlayer.stop = { _ in gate.release() }
+    } operation: {
+      let transport = Task { await model.transportPlayTapped() }
+      await gate.awaitStarted()
+      #expect(model.isTransportPlaying)
+      let slicePlay = Task { await model.playSliceTapped(slice.id) }
+      await gate.awaitStarted()
+      expectNoDifference(model.transportPhase, .stopped)  // the slice took over
+      expectNoDifference(model.playingSliceID, slice.id)
+      gate.release()
+      await transport.value
+      await slicePlay.value
+    }
+  }
+
+  @Test func beginningPlaybackNeverResetsTheCursor() async {
+    let gate = TransportGate()
+    let model = editor()
+    model.playheadSample = 7777
+    selectWords(model.transcript, 0, 2)
+    model.addSliceTapped()
+    let slice = model.slices[0]
+    await withDependencies {
+      $0.audioPlayer.play = { _, _, _, _ in await gate.play() }
+      $0.audioPlayer.stop = { _ in gate.release() }
+    } operation: {
+      let task = Task { await model.playSliceTapped(slice.id) }
+      await gate.awaitStarted()
+      expectNoDifference(model.playheadSample, 7777)  // supersession preserved the cursor
+      await model.stopPlaybackTapped()
+      await task.value
+    }
+  }
+
+  // MARK: - Space (Play/Stop)
+
+  @Test func spaceStartsTransportWhenIdle() async {
+    let gate = TransportGate()
+    let model = editor()
+    model.playheadSample = 1000
+    await withDependencies {
+      $0.audioPlayer.play = { _, _, _, _ in await gate.play() }
+      $0.audioPlayer.stop = { _ in gate.release() }
+    } operation: {
+      let task = Task { await model.transportPlayStopTapped() }
+      await gate.awaitStarted()
+      #expect(model.isTransportPlaying)
+      await model.transportStopTapped()
+      await task.value
+    }
+  }
+
+  @Test func spaceStopsTransportWhenPlaying() async {
+    let gate = TransportGate()
+    let model = editor()
+    model.playheadSample = 1000
+    await withDependencies {
+      $0.audioPlayer.play = { _, _, _, _ in await gate.play() }
+      $0.audioPlayer.stop = { _ in gate.release() }
+    } operation: {
+      let task = Task { await model.transportPlayTapped() }
+      await gate.awaitStarted()
+      model.playheadSample = 8000
+      await model.transportPlayStopTapped()  // playing → stop to origin
+      await task.value
+      expectNoDifference(model.transportPhase, .stopped)
+      expectNoDifference(model.playheadSample, 1000)
+    }
+  }
+
+  @Test func spaceStopsALegacySliceOwner() async {
+    let gate = TransportGate()
+    let stopped = LockIsolated(false)
+    let model = editor()
+    selectWords(model.transcript, 0, 2)
+    model.addSliceTapped()
+    let slice = model.slices[0]
+    await withDependencies {
+      $0.audioPlayer.play = { _, _, _, _ in await gate.play() }
+      $0.audioPlayer.stop = { _ in
+        stopped.setValue(true)
+        gate.release()
+      }
+    } operation: {
+      let task = Task { await model.playSliceTapped(slice.id) }
+      await gate.awaitStarted()
+      await model.transportPlayStopTapped()  // stops the slice owner
+      await task.value
+      expectNoDifference(model.playingSliceID, nil)
+      #expect(stopped.value)
+    }
+  }
+}
+
+// swiftlint:enable large_tuple

@@ -37,6 +37,7 @@ struct WaveformView: View {
 
   private var header: some View {
     HStack(spacing: 12) {
+      TransportPanelView(model: model)
       Text(model.waveform.caption)
         .font(.system(size: 11, weight: .semibold)).tracking(1.5)
         .foregroundStyle(Color(white: 0.44))
