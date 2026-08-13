@@ -8,13 +8,13 @@ import Testing
 struct AudioPlayerClientTests {
   @Test func testValuePlayFailsCleanlyWithoutOverride() async {
     await withKnownIssue {
-      try await AudioPlayerClient.testValue.play(
+      _ = try await AudioPlayerClient.testValue.play(
         URL(fileURLWithPath: "/x"), 0..<10, 44100, PlaybackSessionID())
     }
   }
 
   @Test func previewValuePlayIsANoOp() async throws {
-    try await AudioPlayerClient.previewValue.play(
+    _ = try await AudioPlayerClient.previewValue.play(
       URL(fileURLWithPath: "/x"), 0..<10, 44100, PlaybackSessionID())
     await AudioPlayerClient.previewValue.stop(nil)
   }

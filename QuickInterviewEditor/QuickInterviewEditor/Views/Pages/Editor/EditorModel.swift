@@ -80,34 +80,24 @@ final class EditorModel: ViewModel {
   /// Undo/redo history over `slices` only — never selection, zoom, playback, or export
   /// phase. Every slice mutation routes through `mutateSlices`, which records here.
   var sliceUndo = UndoStack<IdentifiedArrayOf<Slice>>()
-  var playingSliceID: Slice.ID?
-  /// The slice currently open in the fine-tune pane. Distinct from `playingSliceID` — a
+  /// The slice currently open in the fine-tune pane. Edit-target state, NOT playback state — a
   /// slice can be active (being edited) without playing, and vice versa.
   var activeSliceID: Slice.ID?
-  /// True while the fine-tune pane's "preview edit" is playing the draft range, so the
-  /// waveform playhead follows it even though no slice is "playing" in the panel sense.
-  var isPreviewingDraft = false
-  /// Bumped each time preview playback starts or is superseded, so a stale completing preview
-  /// task can't clear a newer one's state.
-  @ObservationIgnored private var previewGeneration = 0
-  /// Which boundary audition is currently playing, or nil. The third playback owner
-  /// alongside `playingSliceID` and `isPreviewingDraft`.
-  var audition: AuditionMode?
-  /// Bumped each time an audition starts or is superseded, so a stale completing audition
-  /// task can't clear a newer owner's state (mirrors `previewGeneration`).
-  @ObservationIgnored private var auditionGeneration = 0
-  /// The `PlaybackSessionID` of the playback THIS editor started, or nil when it owns none.
-  /// `observePlayback` applies only ticks tagged with this session (so a stale/superseded or
-  /// another tab's tick can't move this waveform), and the model stops via `stop(session)` (so
-  /// a delayed cleanup can't stop a newer/global playback). Internal so tests can drive it,
-  /// mirroring `playingSliceID`. The future `TransportState` absorbs this as `phase`.
-  @ObservationIgnored var currentPlaybackSession: PlaybackSessionID?
-  /// The interview transport's UI phase. Distinct from `currentPlaybackSession` (session
-  /// ownership for ALL owners): this tracks only the always-visible Play/Pause/Stop transport.
-  /// The two stay separate until PR 4 collapses the owners into one `TransportState`.
+  /// The interview transport's phase. `.playing`/`.paused` carry the `PlaybackSessionID` that owns
+  /// the one shared player, so a stale/superseded tick (or another tab's) can be told from the
+  /// current one, and the model stops via `stop(session)` so a delayed cleanup can't kill newer or
+  /// global playback. This is the single session slot for EVERY playback now: slice, preview,
+  /// audition, and free scrubbing all run through the transport (the session is `transportPhase.session`).
   var transportPhase: TransportPhase = .stopped
+  /// Which convenience shortcut (if any) owns the current playback. `.free` is plain scrubbing; the
+  /// others record that a saved slice, the fine-tune preview, or a boundary audition drove Play, so
+  /// the derived display props (row highlight, preview/audition labels, status text) reflect it.
+  /// Always reset to `.free` when the transport returns to `.stopped`.
+  var transportContext: TransportContext = .free
   /// THE persistent, always-visible playhead cursor, in plan samples. Follows audio during
-  /// playback and stays put when stopped/paused (never hidden). Formerly `WaveformModel.playheadSample`.
+  /// playback and stays put when stopped/paused (never hidden). Kept a SEPARATE observed property
+  /// (not folded into a transport struct) so its ~30 Hz updates don't invalidate views that read
+  /// `transportPhase`/`transportContext` (the panel, the slice list).
   var playheadSample = 0
   /// Where the transport last started playing; Stop returns the cursor here.
   var transportOriginSample: Int?
@@ -289,8 +279,10 @@ final class EditorModel: ViewModel {
           isTight: !slice.warnings.isEmpty,
           warningLabel: slice.warnings.isEmpty ? "" : tightBadgeLabel,
           warningHelp: slice.warnings.isEmpty ? "" : tightBadgeHelp,
-          isPlaying: playingSliceID == slice.id,
-          playButtonLabel: playingSliceID == slice.id ? stopLabel : playLabel,
+          // The row highlights while its slice is the transport's context; the button is a pure
+          // Play shortcut now (no per-slice Stop — the global transport owns Pause/Stop, ruling F).
+          isPlaying: transportContext.sliceID == slice.id,
+          playButtonLabel: playLabel,
           isActive: activeSliceID == slice.id,
           // The fine-tune button switches the edit target, which `sliceSelected` rejects while
           // another draft is unsaved — disable it then so it doesn't look broken when clicked.
@@ -311,51 +303,47 @@ final class EditorModel: ViewModel {
       durationSamples: editPlan.source.durationSamples)
   }
 
-  /// True while THIS editor owns some active playback — a slice, a draft preview, an audition,
-  /// or the interview transport. Gates which position ticks may move the persistent cursor.
-  private var hasPlaybackOwner: Bool {
-    playingSliceID != nil || isPreviewingDraft || audition != nil || transportPhase.session != nil
-  }
-
   /// Streams playback positions from the (shared) player into the persistent playhead cursor.
-  /// The player is global — only one thing plays at a time — so ticks move the cursor only
-  /// while THIS editor owns the playback AND the tick is tagged with our current session. The
-  /// cursor is never cleared here: it persists where the audio (or the user) last left it, so
-  /// a false/final tick or another tab's tick can't blank or yank it.
+  /// The player is global — only one thing plays at a time — so ticks move the cursor only while
+  /// THIS editor owns the playback (its `transportPhase` holds a session) AND the tick is tagged
+  /// with that session. The cursor is never cleared here: it persists where the audio (or the user)
+  /// last left it, so a false/final tick or another tab's tick can't blank or yank it.
   func observePlayback() async {
     for await position in audioPlayer.positions() {
-      guard hasPlaybackOwner else { continue }
-      guard position.sessionID == currentPlaybackSession else { continue }
+      guard let session = transportPhase.session, position.sessionID == session else { continue }
       // A paused transport owns the session but the cursor is frozen at the exact sample `pause`
       // returned; a buffered straggler tick for that session must not thaw it.
       if isTransportPaused { continue }
       if position.isPlaying {
         playheadSample = position.sample
-        transcript.playheadChanged(sample: position.sample, isPlaying: playingSliceID != nil)
-      } else if playingSliceID != nil {
-        // A false tick from a slice ends transcript follow (so the next slice reads as a rising
-        // edge) but leaves the cursor exactly where the audio stopped.
+        // Only slice playback drives transcript auto-scroll follow (preview/audition/free do not).
+        transcript.playheadChanged(sample: position.sample, isPlaying: transportContext.isSlice)
+      } else if transportContext.isSlice {
+        // A false tick during slice playback ends transcript follow (so the next slice reads as a
+        // rising edge) but leaves the cursor exactly where the audio stopped.
         endTranscriptFollow()
       }
     }
   }
 
-  /// Takes exclusive ownership of the single global player for a new playback: clears every
-  /// other owner's flag and bumps their generation tokens so a stale completing task can't
-  /// clear the new owner's state. The caller sets its own owner *after* calling this. It clears
-  /// the interview-transport owner too (so a slice/preview/audition supersedes the transport, and
-  /// vice versa) but never resets `playheadSample` — the persistent cursor survives supersession.
+  /// Clears the transport owner so a new playback can take over: it resets the phase/context/range
+  /// to stopped (dropping the previous session, so the old suspended `play`'s post-await guard fails
+  /// and its cleanup no-ops) and resets transcript follow so the new play reads as a rising edge. It
+  /// never resets `playheadSample` — the persistent cursor survives supersession. Callers set the
+  /// new session/context *after* this, via `beginTransportPlayback`.
   private func beginExclusivePlayback() {
-    playingSliceID = nil
     endTranscriptFollow()
-    previewGeneration &+= 1
-    isPreviewingDraft = false
-    auditionGeneration &+= 1
-    audition = nil
+    resetTransportState()
+  }
+
+  /// Clears every field of the transport's ownership state (phase/context/origin/range) back to the
+  /// stopped/`.free` baseline — never touching `playheadSample`. The single place transport state
+  /// resets, so a future field can't be missed by one of the several cleanup paths.
+  private func resetTransportState() {
     transportPhase = .stopped
+    transportContext = .free
     transportOriginSample = nil
     transportRange = nil
-    currentPlaybackSession = nil
   }
 
   /// Stops the given session, or does nothing if it's nil. A nil session means THIS editor
@@ -546,12 +534,8 @@ final class EditorModel: ViewModel {
   /// slice is gone (clearing its target + draft). Centralized so every removal path behaves
   /// the same.
   private func reconcilePlayback() async {
-    if let playing = playingSliceID, slices[id: playing] == nil {
-      let session = currentPlaybackSession
-      playingSliceID = nil
-      currentPlaybackSession = nil
-      endTranscriptFollow()
-      await stopOwnedPlayback(session)
+    if case .slice(let playing) = transportContext, slices[id: playing] == nil {
+      await endTransportPlayback()
     }
     if let active = activeSliceID {
       if let slice = slices[id: active] {
@@ -572,77 +556,47 @@ final class EditorModel: ViewModel {
     }
   }
 
-  /// Stops draft preview from an async context, ordered (awaited) rather than fire-and-forget.
+  /// Stops a playing draft preview from an async context, ordered (awaited). No-op unless the
+  /// preview is the current transport context.
   private func stopPreviewIfPlaying() async {
-    guard isPreviewingDraft else { return }
-    let session = currentPlaybackSession
-    previewGeneration &+= 1
-    isPreviewingDraft = false
-    currentPlaybackSession = nil
-    await stopOwnedPlayback(session)
+    guard case .draftPreview = transportContext else { return }
+    await endTransportPlayback()
   }
 
-  /// Stops an in-flight audition from an async context, ordered (awaited) rather than
-  /// fire-and-forget — used when the active slice an audition was anchored to is removed or
-  /// re-anchored, so the audition of a now-stale range doesn't keep playing to end-of-file.
+  /// Stops an in-flight audition from an async context, ordered (awaited) — used when the active
+  /// slice an audition was anchored to is removed or re-anchored, so the audition of a now-stale
+  /// range doesn't keep playing to end-of-file. No-op unless an audition is the current context.
   private func stopAuditionIfPlaying() async {
-    guard audition != nil else { return }
-    let session = currentPlaybackSession
-    auditionGeneration &+= 1
-    audition = nil
-    currentPlaybackSession = nil
-    await stopOwnedPlayback(session)
+    guard case .audition = transportContext else { return }
+    await endTransportPlayback()
   }
 
+  /// Convenience shortcut: play a saved slice through the one transport. Positions the cursor at the
+  /// slice start, tags the context so the row highlights, and lets the global Play/Pause/Stop govern
+  /// it. Refuses an empty or past-EOF range (it would no-op `play()` without superseding, orphaning
+  /// current playback) before touching the player.
   func playSliceTapped(_ id: Slice.ID) async {
-    // A range that is empty — or entirely past the audio's end, so it clamps to empty in the
-    // player — would make play() a no-op WITHOUT superseding current playback, orphaning it
-    // after we've cleared our owner below. Refuse it here (mirrors auditionRegion's clamp).
     guard let slice = slices[id: id] else { return }
     let playableEnd = min(slice.endSample, editPlan.source.durationSamples)
     guard slice.startSample < playableEnd else { return }
-    beginExclusivePlayback()
-    playingSliceID = id
-    let session = PlaybackSessionID()
-    currentPlaybackSession = session
-    do {
-      try await audioPlayer.play(
-        canonicalAudioURL, slice.startSample..<slice.endSample, editPlan.source.sampleRate,
-        session)
-    } catch {
-      reportIssue(error)
-    }
-    // Clear only if WE are still the current playback. Keying on the session (not `id`) is what
-    // makes restarting the SAME slice safe: an old completion can't clear the newer play's owner.
-    if currentPlaybackSession == session {
-      playingSliceID = nil
-      currentPlaybackSession = nil
-      endTranscriptFollow()
-    }
+    await beginTransportPlayback(
+      range: slice.startSample..<slice.endSample, context: .slice(id))
   }
 
+  /// Stops this editor's playback for a lifecycle cleanup (tab switch/close, reimport). Clears the
+  /// transport and stops only OUR session — never `stop(nil)` — so an idle editor's cleanup can't
+  /// steal another tab's playback. Leaves the cursor where the audio was (not returned to origin):
+  /// this is a teardown, not a user Stop.
   func stopPlaybackTapped() async {
-    let session = currentPlaybackSession
-    playingSliceID = nil
-    currentPlaybackSession = nil
-    endTranscriptFollow()
-    await stopOwnedPlayback(session)
+    await endTransportPlayback()
   }
 
-  /// Tells the transcript a slice's playback has ended or been superseded. `observePlayback`
-  /// stops pushing ticks the moment `playingSliceID` clears, so without this the transcript's
-  /// `wasPlaying` would stay true and the next slice's start wouldn't read as a rising edge —
-  /// leaving follow parked in `.userPaused` if the user had scrolled away.
+  /// Tells the transcript playback has ended or been superseded. `observePlayback` stops pushing
+  /// ticks the moment the session clears, so without this the transcript's `wasPlaying` would stay
+  /// true and the next slice's start wouldn't read as a rising edge — leaving follow parked in
+  /// `.userPaused` if the user had scrolled away.
   private func endTranscriptFollow() {
     transcript.playheadChanged(sample: nil, isPlaying: false)
-  }
-
-  func playStopTapped(_ id: Slice.ID) async {
-    if playingSliceID == id {
-      await stopPlaybackTapped()
-    } else {
-      await playSliceTapped(id)
-    }
   }
 
   // MARK: - Transport
@@ -681,8 +635,7 @@ final class EditorModel: ViewModel {
   }
 
   /// Play button / resume. From paused, resumes the frozen session. From stopped, starts at the
-  /// cursor and runs to the selection end (or end-of-audio), recording the origin Stop returns to.
-  /// The `play` await stays suspended across pause/resume until stop, supersede, or natural end.
+  /// cursor and runs to the selection end (or end-of-audio) as plain `.free` scrubbing.
   func transportPlayTapped() async {
     switch transportPhase {
     case .playing:
@@ -691,36 +644,58 @@ final class EditorModel: ViewModel {
       let resumed = await audioPlayer.resume(session)
       // Stay paused if the player couldn't actually resume (e.g. an engine restart failed) so the
       // panel doesn't claim to be playing while silent; re-guard the session after the await too.
-      guard currentPlaybackSession == session, resumed else { return }
+      guard transportPhase.session == session, resumed else { return }
       transportPhase = .playing(session)
       return
     case .stopped:
       break
     }
     guard let range = transportPlayableRange else { return }
+    await beginTransportPlayback(range: range, context: .free)
+  }
+
+  /// The one funnel every playback flows through — plain Play (`.free`) and the slice/preview/
+  /// audition shortcuts alike — so one phase machine, one cursor, and one Pause/Stop govern them.
+  /// The `range` is EXPLICIT (never recomputed from the selection): the cursor is positioned at its
+  /// start, `originSample` records where Stop returns, and `context` records which shortcut owns it.
+  /// The `play` await stays suspended across pause/resume until stop, supersede, or natural end.
+  private func beginTransportPlayback(range explicitRange: Range<Int>, context: TransportContext)
+    async
+  {
+    // Clamp to the file so a natural finish can rest the cursor at a valid sample (callers guard
+    // degenerate ranges already; this is the single safety net and the one place the cursor-at-end
+    // is derived from). An empty clamp returns before superseding, so it can't orphan playback.
+    let upper = min(explicitRange.upperBound, editPlan.source.durationSamples)
+    let lower = max(0, min(explicitRange.lowerBound, upper))
+    guard lower < upper else { return }
+    let range = lower..<upper
     beginExclusivePlayback()
     let session = PlaybackSessionID()
-    currentPlaybackSession = session
+    transportContext = context
     transportOriginSample = range.lowerBound
     transportRange = range
+    playheadSample = range.lowerBound
     transportPhase = .playing(session)
-    var failed = false
+    let outcome: PlaybackEnd
     do {
-      try await audioPlayer.play(canonicalAudioURL, range, editPlan.source.sampleRate, session)
+      outcome = try await audioPlayer.play(
+        canonicalAudioURL, range, editPlan.source.sampleRate, session)
     } catch {
       reportIssue(error)
-      failed = true
+      outcome = .stopped
     }
-    // If we're still the current playback (Stop/supersede already nil the session), return to
-    // stopped. A natural end lands the cursor at the range end; a failed play leaves it put — a
-    // play that never started must not look like it reached the end and lose the cursor.
-    if currentPlaybackSession == session {
-      if !failed { playheadSample = range.upperBound }
-      currentPlaybackSession = nil
-      transportPhase = .stopped
-      transportOriginSample = nil
-      transportRange = nil
-    }
+    // Clean up only if we're still the current playback (our own Stop/supersede already replaced the
+    // session). Only a natural `.finished` lands the cursor at the range end. `.superseded` here
+    // means ANOTHER tab took over the shared player — our session is still set because that tab never
+    // touched it — so reset the transport WITHOUT jumping the cursor to the end. A failed play
+    // (`.stopped`) likewise leaves the cursor put.
+    guard transportPhase.session == session else { return }
+    if outcome == .finished { playheadSample = range.upperBound }
+    resetTransportState()
+    // Reset transcript follow here too: on a cross-tab `.superseded` (and on a natural end whose
+    // final stop tick races this cleanup) `observePlayback` may never see a gated false tick, so
+    // without this a slice's `wasPlaying` stays true and the next slice misses its rising edge.
+    endTranscriptFollow()
   }
 
   /// Pause button. Freezes the cursor at the exact sample the player reports and holds the
@@ -729,41 +704,39 @@ final class EditorModel: ViewModel {
   func transportPauseTapped() async {
     guard case .playing(let session) = transportPhase else { return }
     let sample = await audioPlayer.pause(session)
-    guard currentPlaybackSession == session else { return }
+    guard transportPhase.session == session else { return }
     if let sample { playheadSample = sample }
     transportPhase = .paused(session)
   }
 
-  /// Stop button. Returns the cursor to the origin immediately, clears the transport, then stops
-  /// the audio. Niling the session first means the suspended `play`'s natural-end cleanup won't
-  /// run and overwrite the origin.
+  /// Stop button. Returns the cursor to the origin, then clears the transport and stops the audio.
+  /// Clearing the session (in `endTransportPlayback`) before awaiting the stop means the suspended
+  /// `play`'s natural-end cleanup won't run and overwrite the origin.
   func transportStopTapped() async {
-    let session = transportPhase.session
     if let origin = transportOriginSample { playheadSample = origin }
-    transportPhase = .stopped
-    transportOriginSample = nil
-    transportRange = nil
-    currentPlaybackSession = nil
+    await endTransportPlayback()
+  }
+
+  /// Clears the transport and stops the audio WITHOUT returning the cursor to origin. Used for
+  /// supersession/teardown/reconciliation stops (a retarget, a removed slice, a tab close) where the
+  /// user didn't press Stop, so the cursor stays where the audio left it. Stops only OUR session so
+  /// a delayed cleanup can't kill newer/global playback.
+  private func endTransportPlayback() async {
+    let session = transportPhase.session
+    resetTransportState()
+    endTranscriptFollow()
     await stopOwnedPlayback(session)
   }
 
-  /// Space (Logic parity): Play/Stop toggle for the transport. Stops whatever is playing —
-  /// the transport (to origin) or any legacy slice/preview/audition owner — and otherwise starts
-  /// the transport from the cursor (resuming when paused).
+  /// Space (Logic parity): Play/Stop toggle. Every owner now runs through the transport, so a
+  /// non-stopped phase means something is playing — stop it (to origin); paused resumes; otherwise
+  /// start from the cursor.
   func transportPlayStopTapped() async {
     if isTransportPlaying {
       await transportStopTapped()
-      return
+    } else {
+      await transportPlayTapped()  // resumes when paused, starts from the cursor when stopped
     }
-    if isTransportPaused {
-      await transportPlayTapped()
-      return
-    }
-    if playingSliceID != nil || isPreviewingDraft || audition != nil {
-      await stopAllPlayback()
-      return
-    }
-    await transportPlayTapped()
   }
 
   /// Selection reconciliation, driven by `EditorView.onChange(of: transcript.selectedSampleRange)`.
@@ -771,13 +744,16 @@ final class EditorModel: ViewModel {
   /// Any active playback is stopped first — the cursor never jumps while audio keeps playing.
   ///
   /// `onChange` spawns one unstructured task per selection change, so two can overlap: after
-  /// awaiting the stop, bail if a newer selection has arrived, or the stale task would stamp the
-  /// old start over the newer one's.
+  /// awaiting the stop, bail if a newer selection has arrived — OR if a new playback started while
+  /// we were stopping (a slice/preview/audition shortcut, which doesn't touch the selection). Either
+  /// way the stale task must not snap the cursor over the newer state or into a live playback.
   func transportSelectionChanged(_ newRange: Range<Int>?) async {
     guard let newRange else { return }
-    if hasPlaybackOwner {
-      await stopAllPlayback()
-      guard transcript.selectedSampleRange == newRange else { return }
+    if transportPhase.session != nil {
+      await endTransportPlayback()
+      guard transcript.selectedSampleRange == newRange, transportPhase.session == nil else {
+        return
+      }
     }
     playheadSample = newRange.lowerBound
   }
@@ -808,8 +784,7 @@ final class EditorModel: ViewModel {
       // Don't tear down ANY unsaved edit (existing-slice or tuned pending selection) just because
       // the target went nil — the user must Save or Cancel first.
       if fineTune.target != nil, !fineTune.hasUnsavedChange {
-        cancelPreviewIfNeeded()  // closing the pane removes the Stop-preview control
-        cancelAuditionIfNeeded()
+        cancelPreviewOrAuditionIfNeeded()  // closing the pane removes the region + Stop control
         fineTune.clear()
       }
       return
@@ -830,8 +805,7 @@ final class EditorModel: ViewModel {
     if shouldBegin {
       // Retargeting to a different session must not leave an old preview playing — the new pane
       // would show "Stop preview" and the playhead would follow the stale range.
-      cancelPreviewIfNeeded()
-      cancelAuditionIfNeeded()
+      cancelPreviewOrAuditionIfNeeded()
       // A transcript selection taking over releases the previously active slice, so clearing the
       // selection later doesn't silently reopen the pane on a stale slice.
       if case .pendingSelection = target { activeSliceID = nil }
@@ -839,41 +813,21 @@ final class EditorModel: ViewModel {
     }
   }
 
-  /// Stops an in-progress draft preview when the session retargets away from it. Clears the flag
-  /// synchronously so the pane label and playhead ownership update at once, then stops the audio
-  /// on a task. The stop is guarded so a stale cancel can never stop newer playback: it fires only
-  /// if no newer preview (generation unchanged) AND no slice playback (`playingSliceID == nil`)
-  /// has taken over this editor's player in the meantime.
-  private func cancelPreviewIfNeeded() {
-    guard isPreviewingDraft else { return }
-    let session = currentPlaybackSession
-    previewGeneration &+= 1
-    let generation = previewGeneration
-    isPreviewingDraft = false
-    currentPlaybackSession = nil
-    Task {
-      guard previewGeneration == generation, playingSliceID == nil else { return }
-      await stopOwnedPlayback(session)
+  /// Stops an in-progress preview or audition when the fine-tune session retargets or closes away
+  /// from it, so the pane label, status line, and playhead don't keep claiming a range the editor no
+  /// longer shows. Clears the transport synchronously (so the label/ownership update at once), then
+  /// stops the audio on a task capturing the session first — the player actor gates `stop(session)`,
+  /// so a stale cancel can never stop newer or global playback (what the old generation tokens
+  /// guarded). A no-op unless a preview or audition is the current context.
+  private func cancelPreviewOrAuditionIfNeeded() {
+    switch transportContext {
+    case .draftPreview, .audition: break
+    case .free, .slice: return
     }
-  }
-
-  /// Stops an in-flight audition when the session retargets away from it, so the status line and
-  /// playhead don't keep claiming an audition of a range the editor no longer shows. Mirrors
-  /// `cancelPreviewIfNeeded`: clears the flag synchronously, stops audio on a guarded task that
-  /// fires only if no newer playback (slice/preview/newer audition) has taken over.
-  private func cancelAuditionIfNeeded() {
-    guard audition != nil else { return }
-    let session = currentPlaybackSession
-    auditionGeneration &+= 1
-    let generation = auditionGeneration
-    audition = nil
-    currentPlaybackSession = nil
-    Task {
-      guard auditionGeneration == generation, playingSliceID == nil, !isPreviewingDraft else {
-        return
-      }
-      await stopOwnedPlayback(session)
-    }
+    let session = transportPhase.session
+    resetTransportState()
+    endTranscriptFollow()
+    Task { await stopOwnedPlayback(session) }
   }
 
   func cutInDragged(toInsetX positionX: CGFloat) {
@@ -911,8 +865,7 @@ final class EditorModel: ViewModel {
       mutateSlices { $0.append(slice) }
       nextSliceNumber += 1
       // Closing the pane removes the region, so stop any preview or audition of the draft first.
-      cancelPreviewIfNeeded()
-      cancelAuditionIfNeeded()
+      cancelPreviewOrAuditionIfNeeded()
       fineTune.clear()
       transcript.clearSelectionTapped()
     }
@@ -923,62 +876,36 @@ final class EditorModel: ViewModel {
   /// first — it was playing the now-discarded draft — then re-syncs so a selection made (but
   /// held) during the edit can take over the pane.
   func cancelEditTapped() {
-    cancelPreviewIfNeeded()
-    cancelAuditionIfNeeded()
+    cancelPreviewOrAuditionIfNeeded()
     fineTune.resetDraft()
     syncEditSession()
   }
 
   /// The preview button reflects playback state so a single control both starts and stops it.
   var previewButtonLabel: String {
-    isPreviewingDraft ? fineTune.previewStopLabel : fineTune.previewEditLabel
+    if case .draftPreview = transportContext { return fineTune.previewStopLabel }
+    return fineTune.previewEditLabel
   }
 
+  /// Preview is a transport shortcut: tapping while it's the playing context stops the one transport,
+  /// otherwise it starts the preview.
   func previewToggleTapped() async {
-    if isPreviewingDraft {
-      await stopPreviewTapped()
+    if case .draftPreview = transportContext {
+      await transportStopTapped()
     } else {
       await previewEditTapped()
     }
   }
 
-  /// Preview the in-progress draft (falls back to the committed range). Uses a distinct
-  /// playback identity so slice-panel rows don't flip to "Stop". A generation token guards the
-  /// completion: only the latest preview clears the flag, so a superseded older task can't turn
-  /// off a newer preview (mirrors `playSliceTapped`'s id check).
+  /// Preview the in-progress draft (falls back to the committed range) through the one transport,
+  /// tagged `.draftPreview` so the slice rows don't highlight. Refuses an empty or past-EOF range
+  /// (it would no-op `play()` without superseding, orphaning current playback) before touching the
+  /// player.
   func previewEditTapped() async {
-    // A range that is empty — or entirely past the audio's end (clamps to empty in the player)
-    // — would no-op play() without superseding, orphaning current playback after we clear our
-    // owner below; refuse it (audition already clamps this way).
     guard let range = fineTune.draftRange ?? fineTune.committedRange else { return }
     let playableEnd = min(range.upperBound, editPlan.source.durationSamples)
     guard range.lowerBound < playableEnd else { return }
-    beginExclusivePlayback()
-    previewGeneration &+= 1
-    let generation = previewGeneration
-    isPreviewingDraft = true
-    let session = PlaybackSessionID()
-    currentPlaybackSession = session
-    do {
-      try await audioPlayer.play(
-        canonicalAudioURL, range, editPlan.source.sampleRate, session)
-    } catch {
-      reportIssue(error)
-    }
-    if previewGeneration == generation {
-      isPreviewingDraft = false
-      if currentPlaybackSession == session {
-        currentPlaybackSession = nil
-      }
-    }
-  }
-
-  func stopPreviewTapped() async {
-    let session = currentPlaybackSession
-    previewGeneration &+= 1
-    isPreviewingDraft = false
-    currentPlaybackSession = nil
-    await stopOwnedPlayback(session)
+    await beginTransportPlayback(range: range, context: .draftPreview)
   }
 
   // MARK: - Audition
@@ -992,7 +919,7 @@ final class EditorModel: ViewModel {
   }
   /// The region drawn on the waveform, if it's a non-empty range worth auditioning. Clamped to
   /// the file's duration so a corrupt slice/selection range past EOF can't produce a range the
-  /// player silently clamps to empty, leaving stale audio playing with all owner flags nil.
+  /// player silently clamps to empty, leaving stale audio playing.
   private var auditionRegion: Range<Int>? {
     guard let region = activeEditingRange else { return nil }
     let upper = min(region.upperBound, editPlan.source.durationSamples)
@@ -1001,73 +928,53 @@ final class EditorModel: ViewModel {
     return lower..<upper
   }
   var canAudition: Bool { auditionRegion != nil }
-  var isAuditioningIn: Bool { audition == .cutIn }
-  var isAuditioningOut: Bool { audition == .cutOut }
+  var isAuditioningIn: Bool { transportContext == .audition(.cutIn) }
+  var isAuditioningOut: Bool { transportContext == .audition(.cutOut) }
   var auditionStatusText: String? {
-    switch audition {
+    switch transportContext.auditionMode {
     case .cutIn: return "Auditioning in-cut — Space to stop"
     case .cutOut: return "Auditioning out-cut — Space to stop"
     case .none: return nil
     }
   }
 
-  /// In-cut: drop in at the region's start and play forward to end-of-file.
+  /// In-cut: drop in at the region's start and play forward to end-of-file, through the one
+  /// transport. A toggle: tapping while it's the active audition stops it; tapping the other edge
+  /// switches (supersedes).
   func auditionInTapped() async {
+    if transportContext == .audition(.cutIn) {
+      await transportStopTapped()
+      return
+    }
     guard let region = auditionRegion else { return }
     let end = editPlan.source.durationSamples
     guard region.lowerBound < end else { return }
-    await startAudition(.cutIn, range: region.lowerBound..<end)
+    await beginTransportPlayback(range: region.lowerBound..<end, context: .audition(.cutIn))
   }
 
-  /// Out-cut: play a pre-roll ending exactly at the region's out-point, stopping on the cut.
-  /// The pre-roll may begin before the region's own start (clamped at 0).
+  /// Out-cut: play a pre-roll ending exactly at the region's out-point, stopping on the cut, through
+  /// the one transport. A toggle, mirroring `auditionInTapped`. The pre-roll may begin before the
+  /// region's own start (clamped at 0).
   func auditionOutTapped() async {
+    if transportContext == .audition(.cutOut) {
+      await transportStopTapped()
+      return
+    }
     guard let region = auditionRegion else { return }
     let end = region.upperBound
     let start = max(0, end - auditionPreRollSamples)
-    await startAudition(.cutOut, range: start..<end)
-  }
-
-  /// Shared audition start. `beginExclusivePlayback`'s generation bump is this call's token —
-  /// only the latest audition clears `audition` on completion, so mashing keys can't leave
-  /// stale UI (mirrors `playSliceTapped`'s id check and `previewEditTapped`'s generation check).
-  private func startAudition(_ mode: AuditionMode, range: Range<Int>) async {
-    guard !range.isEmpty else { return }
-    beginExclusivePlayback()
-    let generation = auditionGeneration
-    audition = mode
-    let session = PlaybackSessionID()
-    currentPlaybackSession = session
-    do {
-      try await audioPlayer.play(
-        canonicalAudioURL, range, editPlan.source.sampleRate, session)
-    } catch {
-      reportIssue(error)
-    }
-    if auditionGeneration == generation {
-      audition = nil
-      if currentPlaybackSession == session {
-        currentPlaybackSession = nil
-      }
-    }
+    await beginTransportPlayback(range: start..<end, context: .audition(.cutOut))
   }
 
   /// Routes a captured key to its action so the key-monitor view stays logic-free. `[`/`]`
-  /// audition the cut edges; Space is the transport Play/Stop (Logic parity) — it stops an
-  /// active audition (or any owner) and otherwise starts the transport from the cursor.
+  /// audition the cut edges (toggling off if already active); Space is the transport Play/Stop
+  /// (Logic parity) — it stops whatever plays and otherwise starts the transport from the cursor.
   func auditionKeyPressed(_ key: AuditionKey) async {
     switch key {
     case .cutIn: await auditionInTapped()
     case .cutOut: await auditionOutTapped()
     case .space: await transportPlayStopTapped()
     }
-  }
-
-  /// Stops any editor-owned playback (slice, preview, or audition) and clears all owners.
-  private func stopAllPlayback() async {
-    let session = currentPlaybackSession
-    beginExclusivePlayback()
-    await stopOwnedPlayback(session)
   }
 
   private func beginEditIfNeeded() {
@@ -1307,6 +1214,33 @@ enum TransportPhase: Equatable {
     case .stopped: return nil
     case .playing(let session), .paused(let session): return session
     }
+  }
+}
+
+/// Which convenience shortcut (if any) owns the current transport playback — the collapse of the
+/// three former playback owners (`playingSliceID`, `isPreviewingDraft`, `audition`) into one value.
+/// `.free` is plain scrubbing; the others let the derived display props reflect what's playing.
+enum TransportContext: Equatable {
+  case free
+  case slice(Slice.ID)
+  case draftPreview
+  case audition(EditorModel.AuditionMode)
+
+  /// True while a saved slice is the playing context — the only context that drives transcript
+  /// auto-scroll follow and the slice-row "playing" highlight.
+  var isSlice: Bool {
+    if case .slice = self { return true }
+    return false
+  }
+  /// The playing slice's id, or nil when a slice isn't the current context.
+  var sliceID: Slice.ID? {
+    if case .slice(let id) = self { return id }
+    return nil
+  }
+  /// The auditioning boundary, or nil when an audition isn't the current context.
+  var auditionMode: EditorModel.AuditionMode? {
+    if case .audition(let mode) = self { return mode }
+    return nil
   }
 }
 

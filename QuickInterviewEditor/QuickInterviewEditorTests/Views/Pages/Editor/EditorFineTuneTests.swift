@@ -19,13 +19,14 @@ private final class PreviewPlayGate: @unchecked Sendable {
     startedContinuation = continuation
   }
 
-  func play() async {
+  func play() async -> PlaybackEnd {
     startedContinuation.yield(())
     await withCheckedContinuation { cont in
       lock.lock()
       continuations.append(cont)
       lock.unlock()
     }
+    return .finished
   }
 
   func releaseFirst() {
@@ -485,15 +486,15 @@ struct EditorFineTuneTests {
     let slice = model.slices[0]
     model.sliceSelected(slice.id)
     model.cutOutNudged(byMs: 10)  // dirty slice edit
-    model.isPreviewingDraft = true  // preview in flight
-    model.currentPlaybackSession = PlaybackSessionID()
+    model.transportContext = .draftPreview  // preview in flight
+    model.transportPhase = .playing(PlaybackSessionID())
     let stopped = LockIsolated(false)
 
     await withDependencies {
       $0.audioPlayer.stop = { _ in stopped.setValue(true) }
     } operation: {
       model.cancelEditTapped()  // must fully abandon the edit, including the preview
-      #expect(!model.isPreviewingDraft)
+      #expect(model.transportContext != .draftPreview)
       for _ in 0..<100 where !stopped.value { await Task.yield() }
     }
     #expect(stopped.value)
@@ -506,15 +507,15 @@ struct EditorFineTuneTests {
     model.sliceSelected(slice.id)
     model.cutOutNudged(byMs: 10)
     model.commitEditTapped()  // slice now at the edited range, committed
-    model.isPreviewingDraft = true  // preview the committed slice
-    model.currentPlaybackSession = PlaybackSessionID()
+    model.transportContext = .draftPreview  // preview the committed slice
+    model.transportPhase = .playing(PlaybackSessionID())
     let stopped = LockIsolated(false)
 
     await withDependencies {
       $0.audioPlayer.stop = { _ in stopped.setValue(true) }
     } operation: {
       await model.undoTapped()  // restores the original range → reconcile re-anchors the pane
-      #expect(!model.isPreviewingDraft)  // preview of the stale range was stopped
+      #expect(model.transportContext != .draftPreview)  // preview of the stale range was stopped
     }
     #expect(stopped.value)
   }
@@ -524,15 +525,15 @@ struct EditorFineTuneTests {
     selectWords(model.transcript, 0, 2)
     model.syncEditSession()
     model.cutOutNudged(byMs: 10)  // tuned pending draft
-    model.isPreviewingDraft = true  // preview in flight
-    model.currentPlaybackSession = PlaybackSessionID()
+    model.transportContext = .draftPreview  // preview in flight
+    model.transportPhase = .playing(PlaybackSessionID())
     let stopped = LockIsolated(false)
 
     await withDependencies {
       $0.audioPlayer.stop = { _ in stopped.setValue(true) }
     } operation: {
       model.commitEditTapped()  // pending Save closes the pane
-      #expect(!model.isPreviewingDraft)  // flag cleared with the pane
+      #expect(model.transportContext != .draftPreview)  // flag cleared with the pane
       for _ in 0..<100 where !stopped.value { await Task.yield() }
     }
     #expect(stopped.value)  // audio stopped, not orphaned
@@ -542,8 +543,8 @@ struct EditorFineTuneTests {
   @Test func previewButtonTogglesToStopWhilePreviewing() async {
     let model = editor()
     expectNoDifference(model.previewButtonLabel, model.fineTune.previewEditLabel)
-    model.isPreviewingDraft = true
-    model.currentPlaybackSession = PlaybackSessionID()
+    model.transportContext = .draftPreview
+    model.transportPhase = .playing(PlaybackSessionID())
     expectNoDifference(model.previewButtonLabel, model.fineTune.previewStopLabel)
 
     let stopped = LockIsolated(false)
@@ -553,15 +554,15 @@ struct EditorFineTuneTests {
       await model.previewToggleTapped()  // toggles to stop while previewing
     }
     #expect(stopped.value)
-    #expect(!model.isPreviewingDraft)
+    #expect(model.transportContext != .draftPreview)
   }
 
   @Test func retargetingTheSessionStopsAnInProgressPreview() async {
     let model = editor()
     addSlice(model, 0, 1)
     model.sliceSelected(model.slices[0].id)
-    model.isPreviewingDraft = true  // stand in for a preview in flight
-    model.currentPlaybackSession = PlaybackSessionID()
+    model.transportContext = .draftPreview  // stand in for a preview in flight
+    model.transportPhase = .playing(PlaybackSessionID())
     let stopped = LockIsolated(false)
 
     await withDependencies {
@@ -570,7 +571,7 @@ struct EditorFineTuneTests {
       // Retarget to a new transcript selection.
       selectWords(model.transcript, 5, 7)
       model.syncEditSession()
-      #expect(!model.isPreviewingDraft)  // flag cleared synchronously
+      #expect(model.transportContext != .draftPreview)  // flag cleared synchronously
       for _ in 0..<100 where !stopped.value { await Task.yield() }
     }
     #expect(stopped.value)  // audio stopped
@@ -586,22 +587,22 @@ struct EditorFineTuneTests {
       $0.audioPlayer.play = { _, _, _, _ in await gate.play() }
       $0.audioPlayer.stop = { _ in }
     } operation: {
-      let first = Task { await model.previewEditTapped() }  // generation 1, suspends
+      let first = Task { await model.previewEditTapped() }  // session 1, suspends
       await gate.awaitStarted()
-      #expect(model.isPreviewingDraft)
+      #expect(model.transportContext == .draftPreview)
 
-      let second = Task { await model.previewEditTapped() }  // generation 2, suspends
+      let second = Task { await model.previewEditTapped() }  // session 2, suspends
       await gate.awaitStarted()
-      #expect(model.isPreviewingDraft)
+      #expect(model.transportContext == .draftPreview)
 
       gate.releaseFirst()  // the OLD preview completes — must not clear the newer one's flag
       for _ in 0..<100 { await Task.yield() }
-      #expect(model.isPreviewingDraft)  // generation 2 still owns the preview
+      #expect(model.transportContext == .draftPreview)  // session 2 still owns the preview
 
       gate.releaseAll()
       await first.value
       await second.value
-      #expect(!model.isPreviewingDraft)  // generation 2 completes → cleared
+      #expect(model.transportContext != .draftPreview)  // session 2 completes → cleared
     }
   }
 
@@ -615,12 +616,43 @@ struct EditorFineTuneTests {
     let recorded = LockIsolated<Range<Int>?>(nil)
 
     await withDependencies {
-      $0.audioPlayer.play = { _, range, _, _ in recorded.setValue(range) }
+      $0.audioPlayer.play = { _, range, _, _ in
+        recorded.setValue(range)
+        return .finished
+      }
     } operation: {
       await model.previewEditTapped()
     }
     expectNoDifference(recorded.value, draft)  // preview plays the DRAFT, not the committed range
-    expectNoDifference(model.playingSliceID, nil)  // distinct from panel playback
-    #expect(!model.isPreviewingDraft)
+    expectNoDifference(model.transportContext.sliceID, nil)  // distinct from panel playback
+    #expect(model.transportContext != .draftPreview)
+  }
+
+  @Test func previewShortcutSetsContextCursorAndRangeThenPlays() async {
+    let gate = PreviewPlayGate()
+    let recorded = LockIsolated<Range<Int>?>(nil)
+    let model = editor()
+    addSlice(model, 0, 3)
+    model.sliceSelected(model.slices[0].id)
+    model.cutOutNudged(byMs: 10)
+    let draft = model.fineTune.draftRange!
+    await withDependencies {
+      $0.audioPlayer.play = { _, range, _, _ in
+        recorded.setValue(range)
+        return await gate.play()
+      }
+      $0.audioPlayer.stop = { _ in gate.releaseAll() }
+    } operation: {
+      let task = Task { await model.previewEditTapped() }
+      await gate.awaitStarted()
+      // The shortcut tags the context, positions the cursor at the draft start, and plays the draft.
+      expectNoDifference(model.transportContext, .draftPreview)
+      expectNoDifference(model.playheadSample, draft.lowerBound)
+      expectNoDifference(recorded.value, draft)
+      #expect(model.isTransportPlaying)
+      await model.transportStopTapped()
+      await task.value
+      expectNoDifference(model.playheadSample, draft.lowerBound)  // Stop → origin (draft start)
+    }
   }
 }

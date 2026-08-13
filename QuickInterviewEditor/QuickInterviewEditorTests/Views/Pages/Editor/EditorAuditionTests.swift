@@ -26,13 +26,14 @@ private final class AuditionGate: @unchecked Sendable {
     startedContinuation = continuation
   }
   /// Signals "started", then suspends until `release()`.
-  func play() async {
+  func play() async -> PlaybackEnd {
     startedContinuation.yield(())
     await withCheckedContinuation { cont in
       lock.lock()
       continuations.append(cont)
       lock.unlock()
     }
+    return .finished
   }
   /// Resumes every currently-suspended `play()` (natural completion, or a `stop`).
   func release() {
@@ -76,10 +77,10 @@ struct EditorAuditionTests {
 
   private func recordingPlay(
     _ recorded: LockIsolated<(URL, Range<Int>, Int)?>, _ gate: AuditionGate
-  ) -> @Sendable (URL, Range<Int>, Int, PlaybackSessionID) async throws -> Void {
+  ) -> @Sendable (URL, Range<Int>, Int, PlaybackSessionID) async throws -> PlaybackEnd {
     { url, range, rate, _ in
       recorded.setValue((url, range, rate))
-      await gate.play()
+      return await gate.play()
     }
   }
 
@@ -96,14 +97,14 @@ struct EditorAuditionTests {
     } operation: {
       let task = Task { await model.auditionOutTapped() }
       await gate.awaitStarted()
-      expectNoDifference(model.audition, .cutOut)
+      expectNoDifference(model.transportContext.auditionMode, .cutOut)
       expectNoDifference(recorded.value?.0, model.canonicalAudioURL)
       expectNoDifference(
         recorded.value?.1, max(0, region.upperBound - preRoll)..<region.upperBound)
       expectNoDifference(recorded.value?.2, model.editPlan.source.sampleRate)
       gate.release()
       await task.value
-      expectNoDifference(model.audition, nil)
+      expectNoDifference(model.transportContext.auditionMode, nil)
     }
   }
 
@@ -146,7 +147,9 @@ struct EditorAuditionTests {
     } operation: {
       let task = Task { await model.auditionInTapped() }
       await gate.awaitStarted()
-      expectNoDifference(model.audition, .cutIn)
+      // The shortcut tags the context, positions the cursor at the region start, and plays the range.
+      expectNoDifference(model.transportContext.auditionMode, .cutIn)
+      expectNoDifference(model.playheadSample, region.lowerBound)
       expectNoDifference(
         recorded.value?.1, region.lowerBound..<model.editPlan.source.durationSamples)
       gate.release()
@@ -160,13 +163,16 @@ struct EditorAuditionTests {
     #expect(model.activeEditingRange == nil)
     #expect(!model.canAudition)
     await withDependencies {
-      $0.audioPlayer.play = { _, _, _, _ in played.setValue(true) }
+      $0.audioPlayer.play = { _, _, _, _ in
+        played.setValue(true)
+        return .finished
+      }
     } operation: {
       await model.auditionInTapped()
       await model.auditionOutTapped()
     }
     #expect(!played.value)
-    expectNoDifference(model.audition, nil)
+    expectNoDifference(model.transportContext.auditionMode, nil)
   }
 
   @Test func startingAuditionSupersedesSlicePlayback() async {
@@ -181,12 +187,12 @@ struct EditorAuditionTests {
     } operation: {
       let slicePlay = Task { await model.playSliceTapped(slice.id) }
       await gate.awaitStarted()
-      expectNoDifference(model.playingSliceID, slice.id)
+      expectNoDifference(model.transportContext.sliceID, slice.id)
       selectWords(model.transcript, 3, 5)  // a region to audition
       let audition = Task { await model.auditionInTapped() }
       await gate.awaitStarted()
-      expectNoDifference(model.playingSliceID, nil)  // slice ownership released
-      expectNoDifference(model.audition, .cutIn)
+      expectNoDifference(model.transportContext.sliceID, nil)  // slice ownership released
+      expectNoDifference(model.transportContext.auditionMode, .cutIn)
       gate.release()
       await slicePlay.value
       await audition.value
@@ -206,38 +212,38 @@ struct EditorAuditionTests {
       selectWords(model.transcript, 3, 5)
       let audition = Task { await model.auditionOutTapped() }
       await gate.awaitStarted()
-      expectNoDifference(model.audition, .cutOut)
+      expectNoDifference(model.transportContext.auditionMode, .cutOut)
       let slicePlay = Task { await model.playSliceTapped(slice.id) }
       await gate.awaitStarted()
-      expectNoDifference(model.audition, nil)  // audition ownership released
-      expectNoDifference(model.playingSliceID, slice.id)
+      expectNoDifference(model.transportContext.auditionMode, nil)  // audition ownership released
+      expectNoDifference(model.transportContext.sliceID, slice.id)
       gate.release()
       await audition.value
       await slicePlay.value
     }
   }
 
-  @Test func rePressingRestartsSameAudition() async {
+  @Test func rePressingActiveAuditionStopsIt() async {
     let gate = AuditionGate()
-    let starts = LockIsolated(0)
+    let stopped = LockIsolated(false)
     let model = editor()
     selectWords(model.transcript, 3, 5)
     await withDependencies {
-      $0.audioPlayer.play = { _, _, _, _ in
-        starts.withValue { $0 += 1 }
-        await gate.play()
+      $0.audioPlayer.play = { _, _, _, _ in await gate.play() }
+      $0.audioPlayer.stop = { _ in
+        stopped.setValue(true)
+        gate.release()
       }
-      $0.audioPlayer.stop = { _ in gate.release() }
     } operation: {
-      let first = Task { await model.auditionOutTapped() }
+      let task = Task { await model.auditionOutTapped() }
       await gate.awaitStarted()
-      let second = Task { await model.auditionOutTapped() }  // re-press supersedes
-      await gate.awaitStarted()
-      expectNoDifference(model.audition, .cutOut)
-      #expect(starts.value == 2)
-      gate.release()
-      await first.value
-      await second.value
+      expectNoDifference(model.transportContext.auditionMode, .cutOut)
+      // Re-pressing the active edge toggles the audition off through the transport (ruling: the
+      // button doubles as the stop control for its mode).
+      await model.auditionOutTapped()
+      await task.value
+      expectNoDifference(model.transportContext.auditionMode, nil)
+      #expect(stopped.value)
     }
   }
 
@@ -249,29 +255,29 @@ struct EditorAuditionTests {
       $0.audioPlayer.play = { _, _, _, _ in await gate.play() }
       $0.audioPlayer.stop = { _ in gate.release() }
     } operation: {
-      // stale owner .cutOut (older generation)
+      // stale owner .cutOut (older session)
       let first = Task { await model.auditionOutTapped() }
       await gate.awaitStarted()
       let second = Task { await model.auditionInTapped() }  // newer owner .cutIn
       await gate.awaitStarted()
-      expectNoDifference(model.audition, .cutIn)
+      expectNoDifference(model.transportContext.auditionMode, .cutIn)
       // Complete ONLY the stale .cutOut play; the newer .cutIn play stays suspended.
       gate.releaseFirst()
       await first.value
-      // The stale completion's generation guard must have left the newer owner intact.
-      expectNoDifference(model.audition, .cutIn)
+      // The stale completion's session guard must have left the newer owner intact.
+      expectNoDifference(model.transportContext.auditionMode, .cutIn)
       // Now finish the newer one; it clears itself.
       gate.release()
       await second.value
-      expectNoDifference(model.audition, nil)
+      expectNoDifference(model.transportContext.auditionMode, nil)
     }
   }
 
   @Test func observePlaybackMovesPlayheadWhileAuditioning() async {
     let model = editor()
     let session = PlaybackSessionID()
-    model.audition = .cutIn  // this editor owns audition playback
-    model.currentPlaybackSession = session
+    model.transportContext = .audition(.cutIn)  // this editor owns audition playback
+    model.transportPhase = .playing(session)
     let (stream, continuation) = AsyncStream.makeStream(of: PlaybackPosition.self)
     await withDependencies {
       $0.audioPlayer.positions = { stream }
@@ -293,7 +299,7 @@ struct EditorAuditionTests {
     #expect(model.auditionStatusText == nil)
     selectWords(model.transcript, 1, 3)
     expectNoDifference(model.canAudition, true)
-    model.audition = .cutOut
+    model.transportContext = .audition(.cutOut)
     #expect(model.isAuditioningOut)
     #expect(!model.isAuditioningIn)
     expectNoDifference(model.auditionStatusText, "Auditioning out-cut — Space to stop")
@@ -315,7 +321,7 @@ struct EditorAuditionTests {
       await gate.awaitStarted()
       await model.transportPlayStopTapped()  // playing → stop
       await task.value
-      expectNoDifference(model.audition, nil)
+      expectNoDifference(model.transportContext.auditionMode, nil)
       #expect(stopped.value)
     }
   }
@@ -338,7 +344,7 @@ struct EditorAuditionTests {
       await gate.awaitStarted()
       await model.transportPlayStopTapped()  // stops whatever the editor owns
       await task.value
-      expectNoDifference(model.playingSliceID, nil)
+      expectNoDifference(model.transportContext.sliceID, nil)
       #expect(stopped.value)
     }
   }
@@ -355,7 +361,7 @@ struct EditorAuditionTests {
     } operation: {
       let task = Task { await model.auditionKeyPressed(.cutIn) }
       await gate.awaitStarted()
-      expectNoDifference(model.audition, .cutIn)
+      expectNoDifference(model.transportContext.auditionMode, .cutIn)
       expectNoDifference(
         recorded.value?.1, region.lowerBound..<model.editPlan.source.durationSamples)
       gate.release()
@@ -380,10 +386,10 @@ struct EditorAuditionTests {
     } operation: {
       let task = Task { await model.auditionInTapped() }
       await gate.awaitStarted()
-      expectNoDifference(model.audition, .cutIn)
+      expectNoDifference(model.transportContext.auditionMode, .cutIn)
       await model.deleteSlice(slice.id)  // removes the active slice mid-audition
       await task.value
-      expectNoDifference(model.audition, nil)
+      expectNoDifference(model.transportContext.auditionMode, nil)
       #expect(stopped.value)
       #expect(model.slices[id: slice.id] == nil)
     }
@@ -403,12 +409,12 @@ struct EditorAuditionTests {
     } operation: {
       let task = Task { await model.auditionInTapped() }
       await gate.awaitStarted()
-      expectNoDifference(model.audition, .cutIn)
+      expectNoDifference(model.transportContext.auditionMode, .cutIn)
       // Selecting different words retargets the fine-tune session, which must stop the stale audition.
       selectWords(model.transcript, 4, 6)
       model.syncEditSession()
       await task.value  // completes only when the guarded stop task releases the gate
-      expectNoDifference(model.audition, nil)
+      expectNoDifference(model.transportContext.auditionMode, nil)
       #expect(stopped.value)
     }
   }
@@ -453,12 +459,12 @@ struct EditorAuditionTests {
     } operation: {
       let task = Task { await model.auditionInTapped() }
       await gate.awaitStarted()
-      expectNoDifference(model.audition, .cutIn)
+      expectNoDifference(model.transportContext.auditionMode, .cutIn)
       // Committing the pending selection closes the pane and clears the region — the audition of
       // the now-saved draft must stop instead of playing on with nothing shown.
       model.commitEditTapped()
       await task.value  // completes only when the guarded stop task releases the gate
-      expectNoDifference(model.audition, nil)
+      expectNoDifference(model.transportContext.auditionMode, nil)
       #expect(stopped.value)
     }
   }
@@ -479,12 +485,12 @@ struct EditorAuditionTests {
     } operation: {
       let task = Task { await model.auditionInTapped() }
       await gate.awaitStarted()
-      expectNoDifference(model.audition, .cutIn)
+      expectNoDifference(model.transportContext.auditionMode, .cutIn)
       // Cancelling reverts the draft to the committed range — the audition of the discarded draft
       // must stop rather than keep playing a range the waveform no longer shows.
       model.cancelEditTapped()
       await task.value
-      expectNoDifference(model.audition, nil)
+      expectNoDifference(model.transportContext.auditionMode, nil)
       #expect(stopped.value)
     }
   }
