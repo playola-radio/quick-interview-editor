@@ -103,6 +103,11 @@ final class EditorModel: ViewModel {
   var transportOriginSample: Int?
   /// What the transport is currently playing, captured at Play. Non-observed — internal bookkeeping.
   @ObservationIgnored private var transportRange: Range<Int>?
+  /// Bumped whenever something authoritatively places the cursor outside the selection-snap path — a
+  /// ruler move or a transport start. A deferred selection snap (`transportSelectionChanged`) captures
+  /// this at selection-change time (via `cursorMoveToken`) and bails if it changed, so it can neither
+  /// clobber a newer ruler placement nor stop a playback that started after the selection changed.
+  @ObservationIgnored private var cursorMoveGeneration = 0
   var exportPhase: ExportPhase = .idle
   var destinationURL: URL?
   /// Which pane the right column shows. The clips list and the cut-suggester share the
@@ -675,6 +680,9 @@ final class EditorModel: ViewModel {
     transportOriginSample = range.lowerBound
     transportRange = range
     playheadSample = range.lowerBound
+    // A transport start authoritatively places the cursor, so it takes cursor authority too: a
+    // selection snap deferred from before this Play must bail rather than stop us and snap back.
+    cursorMoveGeneration &+= 1
     transportPhase = .playing(session)
     let outcome: PlaybackEnd
     do {
@@ -747,15 +755,62 @@ final class EditorModel: ViewModel {
   /// awaiting the stop, bail if a newer selection has arrived — OR if a new playback started while
   /// we were stopping (a slice/preview/audition shortcut, which doesn't touch the selection). Either
   /// way the stale task must not snap the cursor over the newer state or into a live playback.
-  func transportSelectionChanged(_ newRange: Range<Int>?) async {
+  func transportSelectionChanged(_ newRange: Range<Int>?, cursorToken: Int) async {
     guard let newRange else { return }
+    // Bail BEFORE touching playback if the cursor has been placed by a later action — a ruler move or
+    // a transport start — since this selection change was registered. `cursorToken` is captured
+    // synchronously in the view's `onChange`, so a ruler click or a Play that ran before this deferred
+    // task fires makes this stale: it must neither snap over that placement nor stop that new playback.
+    guard cursorMoveGeneration == cursorToken else { return }
     if transportPhase.session != nil {
       await endTransportPlayback()
-      guard transcript.selectedSampleRange == newRange, transportPhase.session == nil else {
-        return
-      }
+      // Re-check across the stop await: a newer selection, a new playback, or a ruler move (which
+      // bumps the generation) all invalidate this snap.
+      guard transcript.selectedSampleRange == newRange, transportPhase.session == nil,
+        cursorMoveGeneration == cursorToken
+      else { return }
     }
     playheadSample = newRange.lowerBound
+  }
+
+  // MARK: - Ruler
+  /// Ruler click/drag: positions the persistent cursor at the ruler's view-x, mapping x → plan
+  /// sample via the shared waveform geometry (clamped to `[0, durationSamples]`). No drag-to-scrub
+  /// while playing in v1 — a ruler interaction during playback (or while paused) stops the transport
+  /// first, mirroring the selection-snap rule, leaving the cursor where the user placed it rather
+  /// than where the audio was. The cursor move is SYNCHRONOUS and ordered, so a fast drag lands it
+  /// on the last event's sample (no stale-async-task race); the audio stop is fire-and-forget on OUR
+  /// session so a delayed cleanup can't kill newer or global playback. A no-op until the waveform
+  /// geometry is loaded — before that the x→sample mapping is meaningless.
+  func rulerMovedPlayhead(toX positionX: CGFloat) {
+    guard waveform.hasUsableGeometry else { return }
+    stopTransportForRuler()
+    playheadSample = clampedRulerSample(positionX)
+    cursorMoveGeneration &+= 1
+  }
+
+  /// Snapshot of the cursor-move counter, captured synchronously by the view when the transcript
+  /// selection changes and handed to `transportSelectionChanged`. It lets a deferred selection snap
+  /// tell whether a ruler placement has since taken authority over the cursor.
+  var cursorMoveToken: Int { cursorMoveGeneration }
+
+  /// Tears down any active transport — playing OR paused — for a ruler move. A paused session still
+  /// owns scheduled audio, so without this a later Play would `resume` the old paused audio instead
+  /// of playing from the newly placed cursor. Resets ownership synchronously (so `observePlayback`
+  /// stops applying ticks at once, and the suspended `beginTransportPlayback` guard fails, never
+  /// jumping the cursor to the range end) and stops OUR session off the main actor — exactly the
+  /// `cancelPreviewOrAuditionIfNeeded` pattern.
+  private func stopTransportForRuler() {
+    guard let session = transportPhase.session else { return }
+    resetTransportState()
+    endTranscriptFollow()
+    Task { await stopOwnedPlayback(session) }
+  }
+
+  /// The ruler's view-x mapped to a plan sample, clamped to a valid cursor position. `durationSamples`
+  /// (end-of-audio) is inclusive: it's a legal resting cursor where Play is a correct no-op.
+  private func clampedRulerSample(_ positionX: CGFloat) -> Int {
+    min(max(0, waveform.xToSample(positionX)), editPlan.source.durationSamples)
   }
 
   // MARK: - Fine-tune editing

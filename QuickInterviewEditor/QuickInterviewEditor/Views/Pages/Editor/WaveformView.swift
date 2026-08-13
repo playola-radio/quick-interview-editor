@@ -12,6 +12,7 @@ struct WaveformView: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
       header
+      WaveformRulerView(model: model)
       ZStack(alignment: .leading) {
         Color(white: 0.024)
         content
