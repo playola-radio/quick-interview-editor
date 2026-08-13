@@ -98,6 +98,12 @@ final class EditorModel: ViewModel {
   /// Bumped each time an audition starts or is superseded, so a stale completing audition
   /// task can't clear a newer owner's state (mirrors `previewGeneration`).
   @ObservationIgnored private var auditionGeneration = 0
+  /// The `PlaybackSessionID` of the playback THIS editor started, or nil when it owns none.
+  /// `observePlayback` applies only ticks tagged with this session (so a stale/superseded or
+  /// another tab's tick can't move this waveform), and the model stops via `stop(session)` (so
+  /// a delayed cleanup can't stop a newer/global playback). Internal so tests can drive it,
+  /// mirroring `playingSliceID`. The future `TransportState` absorbs this as `phase`.
+  @ObservationIgnored var currentPlaybackSession: PlaybackSessionID?
   var exportPhase: ExportPhase = .idle
   var destinationURL: URL?
   /// Which pane the right column shows. The clips list and the cut-suggester share the
@@ -302,6 +308,10 @@ final class EditorModel: ViewModel {
         if waveform.playheadSample != nil { waveform.playheadSample = nil }
         continue
       }
+      // We own an active playback; apply ONLY ticks from our current session. A tick from a
+      // superseded session (a buffered straggler) or another tab is ignored — never clear the
+      // playhead here, or a foreign tick would blank our active marker.
+      guard position.sessionID == currentPlaybackSession else { continue }
       waveform.playheadSample = position.isPlaying ? position.sample : nil
       transcript.playheadChanged(
         sample: position.sample, isPlaying: position.isPlaying && playingSliceID != nil)
@@ -321,6 +331,16 @@ final class EditorModel: ViewModel {
     isPreviewingDraft = false
     auditionGeneration &+= 1
     audition = nil
+    currentPlaybackSession = nil
+  }
+
+  /// Stops the given session, or does nothing if it's nil. A nil session means THIS editor
+  /// owns no playback, so there is nothing of ours to stop — and calling `stop(nil)` would
+  /// stop whatever is playing globally, stealing another tab's playback. Every model stop path
+  /// routes through here so an idle editor's cleanup (close tab, reimport) can't steal.
+  private func stopOwnedPlayback(_ session: PlaybackSessionID?) async {
+    guard let session else { return }
+    await audioPlayer.stop(session)
   }
 
   /// Waveform → transcript: a click at view-x selects the word whose audio contains that
@@ -503,9 +523,11 @@ final class EditorModel: ViewModel {
   /// the same.
   private func reconcilePlayback() async {
     if let playing = playingSliceID, slices[id: playing] == nil {
+      let session = currentPlaybackSession
       playingSliceID = nil
+      currentPlaybackSession = nil
       endTranscriptFollow()
-      await audioPlayer.stop(nil)
+      await stopOwnedPlayback(session)
     }
     if let active = activeSliceID {
       if let slice = slices[id: active] {
@@ -529,9 +551,11 @@ final class EditorModel: ViewModel {
   /// Stops draft preview from an async context, ordered (awaited) rather than fire-and-forget.
   private func stopPreviewIfPlaying() async {
     guard isPreviewingDraft else { return }
+    let session = currentPlaybackSession
     previewGeneration &+= 1
     isPreviewingDraft = false
-    await audioPlayer.stop(nil)
+    currentPlaybackSession = nil
+    await stopOwnedPlayback(session)
   }
 
   /// Stops an in-flight audition from an async context, ordered (awaited) rather than
@@ -539,32 +563,55 @@ final class EditorModel: ViewModel {
   /// re-anchored, so the audition of a now-stale range doesn't keep playing to end-of-file.
   private func stopAuditionIfPlaying() async {
     guard audition != nil else { return }
+    let session = currentPlaybackSession
     auditionGeneration &+= 1
     audition = nil
-    await audioPlayer.stop(nil)
+    currentPlaybackSession = nil
+    await stopOwnedPlayback(session)
   }
 
   func playSliceTapped(_ id: Slice.ID) async {
+    // A range that is empty — or entirely past the audio's end, so it clamps to empty in the
+    // player — would make play() a no-op WITHOUT superseding current playback, orphaning it
+    // after we've cleared our owner below. Refuse it here (mirrors auditionRegion's clamp).
     guard let slice = slices[id: id] else { return }
+    let playableEnd = min(slice.endSample, editPlan.source.durationSamples)
+    guard slice.startSample < playableEnd else { return }
     beginExclusivePlayback()
     playingSliceID = id
+    let session = PlaybackSessionID()
+    currentPlaybackSession = session
     do {
       try await audioPlayer.play(
         canonicalAudioURL, slice.startSample..<slice.endSample, editPlan.source.sampleRate,
-        PlaybackSessionID())
+        session)
     } catch {
       reportIssue(error)
     }
-    if playingSliceID == id {
+    // Clear only if WE are still the current playback. Keying on the session (not `id`) is what
+    // makes restarting the SAME slice safe: an old completion can't clear the newer play's owner.
+    if currentPlaybackSession == session {
       playingSliceID = nil
+      currentPlaybackSession = nil
       endTranscriptFollow()
+      clearRestingPlayhead()
     }
   }
 
+  /// On a normal stop/finish the player's `isPlaying:false` tick already clears the playhead,
+  /// but a cross-tab supersession sends no stop tick for our old session. So when a completion
+  /// finds THIS editor's session is the one that ended, clear the resting marker too — otherwise
+  /// a superseded tab could keep a stale playhead until its next (never-arriving) tick.
+  private func clearRestingPlayhead() {
+    if waveform.playheadSample != nil { waveform.playheadSample = nil }
+  }
+
   func stopPlaybackTapped() async {
+    let session = currentPlaybackSession
     playingSliceID = nil
+    currentPlaybackSession = nil
     endTranscriptFollow()
-    await audioPlayer.stop(nil)
+    await stopOwnedPlayback(session)
   }
 
   /// Tells the transcript a slice's playback has ended or been superseded. `observePlayback`
@@ -647,12 +694,14 @@ final class EditorModel: ViewModel {
   /// has taken over this editor's player in the meantime.
   private func cancelPreviewIfNeeded() {
     guard isPreviewingDraft else { return }
+    let session = currentPlaybackSession
     previewGeneration &+= 1
     let generation = previewGeneration
     isPreviewingDraft = false
+    currentPlaybackSession = nil
     Task {
       guard previewGeneration == generation, playingSliceID == nil else { return }
-      await audioPlayer.stop(nil)
+      await stopOwnedPlayback(session)
     }
   }
 
@@ -662,14 +711,16 @@ final class EditorModel: ViewModel {
   /// fires only if no newer playback (slice/preview/newer audition) has taken over.
   private func cancelAuditionIfNeeded() {
     guard audition != nil else { return }
+    let session = currentPlaybackSession
     auditionGeneration &+= 1
     let generation = auditionGeneration
     audition = nil
+    currentPlaybackSession = nil
     Task {
       guard auditionGeneration == generation, playingSliceID == nil, !isPreviewingDraft else {
         return
       }
-      await audioPlayer.stop(nil)
+      await stopOwnedPlayback(session)
     }
   }
 
@@ -744,24 +795,39 @@ final class EditorModel: ViewModel {
   /// completion: only the latest preview clears the flag, so a superseded older task can't turn
   /// off a newer preview (mirrors `playSliceTapped`'s id check).
   func previewEditTapped() async {
+    // A range that is empty — or entirely past the audio's end (clamps to empty in the player)
+    // — would no-op play() without superseding, orphaning current playback after we clear our
+    // owner below; refuse it (audition already clamps this way).
     guard let range = fineTune.draftRange ?? fineTune.committedRange else { return }
+    let playableEnd = min(range.upperBound, editPlan.source.durationSamples)
+    guard range.lowerBound < playableEnd else { return }
     beginExclusivePlayback()
     previewGeneration &+= 1
     let generation = previewGeneration
     isPreviewingDraft = true
+    let session = PlaybackSessionID()
+    currentPlaybackSession = session
     do {
       try await audioPlayer.play(
-        canonicalAudioURL, range, editPlan.source.sampleRate, PlaybackSessionID())
+        canonicalAudioURL, range, editPlan.source.sampleRate, session)
     } catch {
       reportIssue(error)
     }
-    if previewGeneration == generation { isPreviewingDraft = false }
+    if previewGeneration == generation {
+      isPreviewingDraft = false
+      if currentPlaybackSession == session {
+        currentPlaybackSession = nil
+        clearRestingPlayhead()
+      }
+    }
   }
 
   func stopPreviewTapped() async {
+    let session = currentPlaybackSession
     previewGeneration &+= 1
     isPreviewingDraft = false
-    await audioPlayer.stop(nil)
+    currentPlaybackSession = nil
+    await stopOwnedPlayback(session)
   }
 
   // MARK: - Audition
@@ -820,13 +886,21 @@ final class EditorModel: ViewModel {
     let generation = auditionGeneration
     audition = mode
     lastAudition = mode
+    let session = PlaybackSessionID()
+    currentPlaybackSession = session
     do {
       try await audioPlayer.play(
-        canonicalAudioURL, range, editPlan.source.sampleRate, PlaybackSessionID())
+        canonicalAudioURL, range, editPlan.source.sampleRate, session)
     } catch {
       reportIssue(error)
     }
-    if auditionGeneration == generation { audition = nil }
+    if auditionGeneration == generation {
+      audition = nil
+      if currentPlaybackSession == session {
+        currentPlaybackSession = nil
+        clearRestingPlayhead()
+      }
+    }
   }
 
   /// Space: stop whatever the editor is playing; if idle, replay the last audition, else in-cut.
@@ -852,8 +926,9 @@ final class EditorModel: ViewModel {
 
   /// Stops any editor-owned playback (slice, preview, or audition) and clears all owners.
   private func stopAllPlayback() async {
+    let session = currentPlaybackSession
     beginExclusivePlayback()
-    await audioPlayer.stop(nil)
+    await stopOwnedPlayback(session)
   }
 
   private func beginEditIfNeeded() {

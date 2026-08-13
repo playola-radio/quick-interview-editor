@@ -486,6 +486,7 @@ struct EditorFineTuneTests {
     model.sliceSelected(slice.id)
     model.cutOutNudged(byMs: 10)  // dirty slice edit
     model.isPreviewingDraft = true  // preview in flight
+    model.currentPlaybackSession = PlaybackSessionID()
     let stopped = LockIsolated(false)
 
     await withDependencies {
@@ -506,6 +507,7 @@ struct EditorFineTuneTests {
     model.cutOutNudged(byMs: 10)
     model.commitEditTapped()  // slice now at the edited range, committed
     model.isPreviewingDraft = true  // preview the committed slice
+    model.currentPlaybackSession = PlaybackSessionID()
     let stopped = LockIsolated(false)
 
     await withDependencies {
@@ -523,6 +525,7 @@ struct EditorFineTuneTests {
     model.syncEditSession()
     model.cutOutNudged(byMs: 10)  // tuned pending draft
     model.isPreviewingDraft = true  // preview in flight
+    model.currentPlaybackSession = PlaybackSessionID()
     let stopped = LockIsolated(false)
 
     await withDependencies {
@@ -540,6 +543,7 @@ struct EditorFineTuneTests {
     let model = editor()
     expectNoDifference(model.previewButtonLabel, model.fineTune.previewEditLabel)
     model.isPreviewingDraft = true
+    model.currentPlaybackSession = PlaybackSessionID()
     expectNoDifference(model.previewButtonLabel, model.fineTune.previewStopLabel)
 
     let stopped = LockIsolated(false)
@@ -557,6 +561,7 @@ struct EditorFineTuneTests {
     addSlice(model, 0, 1)
     model.sliceSelected(model.slices[0].id)
     model.isPreviewingDraft = true  // stand in for a preview in flight
+    model.currentPlaybackSession = PlaybackSessionID()
     let stopped = LockIsolated(false)
 
     await withDependencies {

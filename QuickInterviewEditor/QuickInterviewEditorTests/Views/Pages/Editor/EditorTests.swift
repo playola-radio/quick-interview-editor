@@ -47,6 +47,15 @@ private final class PlayerGate: @unchecked Sendable {
     for cont in conts { cont.resume() }
   }
 
+  /// Resumes only the oldest suspended `play()`, leaving newer ones suspended — lets a test
+  /// complete a stale (superseded) play in isolation before the newer play finishes.
+  func releaseFirst() {
+    lock.lock()
+    let cont = releaseConts.isEmpty ? nil : releaseConts.removeFirst()
+    lock.unlock()
+    cont?.resume()
+  }
+
   func awaitStarted() async {
     var iterator = started.makeAsyncIterator()
     _ = await iterator.next()
@@ -489,14 +498,16 @@ struct EditorTests {
 
   @Test func observePlaybackMapsPositionThenClearsOnExit() async {
     let model = editor()
+    let session = PlaybackSessionID()
     model.playingSliceID = UUID()  // this editor owns playback
+    model.currentPlaybackSession = session
     let (stream, continuation) = AsyncStream.makeStream(of: PlaybackPosition.self)
     await withDependencies {
       $0.audioPlayer.positions = { stream }
     } operation: {
       let task = Task { await model.observePlayback() }
       continuation.yield(
-        PlaybackPosition(sessionID: PlaybackSessionID(), sample: 1000, isPlaying: true))
+        PlaybackPosition(sessionID: session, sample: 1000, isPlaying: true))
       await settle { model.waveform.playheadSample == 1000 }
       #expect(model.waveform.playheadSample == 1000)  // maps the live position
       continuation.finish()  // stands in for the task being cancelled / stream ending
@@ -523,23 +534,144 @@ struct EditorTests {
 
   @Test func observePlaybackClearsPlayheadOnStopTick() async {
     let model = editor()
+    let session = PlaybackSessionID()
     model.playingSliceID = UUID()  // this editor owns playback
+    model.currentPlaybackSession = session
     let (stream, continuation) = AsyncStream.makeStream(of: PlaybackPosition.self)
     await withDependencies {
       $0.audioPlayer.positions = { stream }
     } operation: {
       let task = Task { await model.observePlayback() }
       continuation.yield(
-        PlaybackPosition(sessionID: PlaybackSessionID(), sample: 1000, isPlaying: true))
+        PlaybackPosition(sessionID: session, sample: 1000, isPlaying: true))
       await settle { model.waveform.playheadSample == 1000 }
       // stop tick
       continuation.yield(
-        PlaybackPosition(sessionID: PlaybackSessionID(), sample: 1200, isPlaying: false))
+        PlaybackPosition(sessionID: session, sample: 1200, isPlaying: false))
       await settle { model.waveform.playheadSample == nil }
       #expect(model.waveform.playheadSample == nil)
       continuation.finish()
       await task.value
     }
+  }
+
+  @Test func observePlaybackIgnoresTicksFromASupersededSession() async {
+    let model = editor()
+    let session = PlaybackSessionID()
+    model.playingSliceID = UUID()  // this editor owns playback
+    model.currentPlaybackSession = session
+    let (stream, continuation) = AsyncStream.makeStream(of: PlaybackPosition.self)
+    await withDependencies {
+      $0.audioPlayer.positions = { stream }
+    } operation: {
+      let task = Task { await model.observePlayback() }
+      continuation.yield(
+        PlaybackPosition(sessionID: session, sample: 1000, isPlaying: true))
+      await settle { model.waveform.playheadSample == 1000 }
+      // A straggler tick from a superseded/foreign session must NOT move the playhead.
+      continuation.yield(
+        PlaybackPosition(sessionID: PlaybackSessionID(), sample: 9999, isPlaying: true))
+      await settle { false }  // let the foreign tick be processed
+      #expect(model.waveform.playheadSample == 1000)  // unchanged — foreign tick ignored
+      continuation.finish()
+      await task.value
+    }
+  }
+
+  @Test func stopPlaybackUsesTheCurrentSessionNotNil() async {
+    let gate = PlayerGate()
+    let stoppedSession = LockIsolated<PlaybackSessionID?>(nil)
+    let model = editor()
+    addSlices(model, [(0, 1)])
+    let slice = model.slices[0]
+    await withDependencies {
+      $0.audioPlayer.play = { _, _, _, _ in await gate.play() }
+      $0.audioPlayer.stop = { session in stoppedSession.setValue(session) }
+    } operation: {
+      let task = Task { await model.playSliceTapped(slice.id) }
+      await gate.awaitStarted()
+      let session = model.currentPlaybackSession
+      #expect(session != nil)
+      await model.stopPlaybackTapped()
+      gate.release()
+      await task.value
+      // Stopped OUR session, not stop(nil) — so a delayed cleanup can't kill newer/global playback.
+      expectNoDifference(stoppedSession.value, session)
+    }
+  }
+
+  @Test func stopWhenIdleDoesNotStealAnotherTabsPlayback() async {
+    let stopCalled = LockIsolated(false)
+    let model = editor()  // owns no playback: currentPlaybackSession == nil
+    await withDependencies {
+      $0.audioPlayer.stop = { _ in stopCalled.setValue(true) }
+    } operation: {
+      await model.stopPlaybackTapped()  // e.g. close-tab / reimport cleanup on an idle editor
+    }
+    #expect(!stopCalled.value)  // nothing owned → no stop(nil) → can't steal another tab
+  }
+
+  @Test func stalePlayCompletionDoesNotClearANewerSameSliceSession() async {
+    let gate = PlayerGate()
+    let model = editor()
+    addSlices(model, [(0, 1)])
+    let slice = model.slices[0]
+    await withDependencies {
+      $0.audioPlayer.play = { _, _, _, _ in await gate.play() }
+      $0.audioPlayer.stop = { _ in }
+    } operation: {
+      let first = Task { await model.playSliceTapped(slice.id) }
+      await gate.awaitStarted()
+      let s1 = model.currentPlaybackSession
+      // Restart the SAME slice: supersedes S1 with a new session S2 while S1 is still in flight.
+      let second = Task { await model.playSliceTapped(slice.id) }
+      await gate.awaitStarted()
+      let s2 = model.currentPlaybackSession
+      #expect(s1 != s2)
+      // Complete ONLY the stale S1 play; its completion must NOT clear the newer S2 owner.
+      gate.releaseFirst()
+      await first.value
+      #expect(model.playingSliceID == slice.id)  // still owned by S2's playback
+      expectNoDifference(model.currentPlaybackSession, s2)
+      gate.release()  // let S2 finish
+      await second.value
+    }
+  }
+
+  @Test func playingADegenerateSliceIsANoOp() async {
+    let played = LockIsolated(false)
+    let model = editor()
+    addSlices(model, [(0, 1)])
+    // Collapse the slice to a zero-length range; playing it must not disturb playback state.
+    let id = model.slices[0].id
+    model.slices[0].endSample = model.slices[0].startSample
+    await withDependencies {
+      $0.audioPlayer.play = { _, _, _, _ in played.setValue(true) }
+    } operation: {
+      await model.playSliceTapped(id)
+    }
+    #expect(!played.value)  // empty range refused before touching the player
+    #expect(model.playingSliceID == nil)
+    #expect(model.currentPlaybackSession == nil)
+  }
+
+  @Test func playingASlicePastEndOfAudioIsANoOp() async {
+    let played = LockIsolated(false)
+    let model = editor()
+    addSlices(model, [(0, 1)])
+    // Non-empty in plan samples but entirely past the audio's end: it clamps to empty in the
+    // player, which would no-op WITHOUT superseding and orphan current playback.
+    let dur = model.editPlan.source.durationSamples
+    model.slices[0].startSample = dur
+    model.slices[0].endSample = dur + 1000
+    await withDependencies {
+      $0.audioPlayer.play = { _, _, _, _ in played.setValue(true) }
+    } operation: {
+      await model.playSliceTapped(model.slices[0].id)
+    }
+    #expect(!played.value)  // past-EOF range refused before touching the player
+    #expect(model.playingSliceID == nil)
+    #expect(model.currentPlaybackSession == nil)
   }
 
   @Test func stoppingPlaybackResetsTranscriptFollowForNextSlice() async {
