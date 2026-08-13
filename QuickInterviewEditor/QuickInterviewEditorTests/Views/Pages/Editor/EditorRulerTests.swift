@@ -1,0 +1,205 @@
+import CustomDump
+import Dependencies
+import Foundation
+import Testing
+
+@testable import QuickInterviewEditor
+
+@MainActor
+struct EditorRulerTests {
+  private func editor(_ plan: EditPlan = Fixtures.editPlan()) -> EditorModel {
+    EditorModel(
+      sourceURL: URL(fileURLWithPath: "/clip.m4a"),
+      canonicalAudioURL: Fixtures.canonicalAudioURL, editPlan: plan)
+  }
+
+  /// Installs explicit waveform geometry (no audio decode) so `xToSample` is meaningful:
+  /// `xToSample(x) == start + floor(x * samplesPerPixel)`.
+  private func geometry(
+    _ model: EditorModel, samplesPerPixel: Double = 100, start: Int = 0,
+    viewportWidth: CGFloat = 1000
+  ) {
+    model.waveform.totalSamples = model.editPlan.source.durationSamples
+    model.waveform.viewportWidth = viewportWidth
+    model.waveform.samplesPerPixel = samplesPerPixel
+    model.waveform.visibleStartSample = start
+  }
+
+  private func settle(until condition: () -> Bool) async {
+    for _ in 0..<1000 where !condition() { await Task.yield() }
+  }
+
+  private func gatedPlay(_ gate: RulerPlayGate)
+    -> @Sendable (URL, Range<Int>, Int, PlaybackSessionID) async throws -> PlaybackEnd
+  {
+    { _, _, _, _ in await gate.play() }
+  }
+
+  // MARK: - Mapping + clamping
+
+  @Test func rulerClickMapsViewXToPlanSample() {
+    let model = editor()
+    geometry(model, samplesPerPixel: 100, start: 0)
+    model.rulerMovedPlayhead(toX: 5)  // 0 + floor(5 * 100) = 500
+    expectNoDifference(model.playheadSample, 500)
+  }
+
+  @Test func rulerClickHonorsScrolledStartAndZoom() {
+    let model = editor()
+    geometry(model, samplesPerPixel: 50, start: 2000)
+    model.rulerMovedPlayhead(toX: 10)  // 2000 + floor(10 * 50) = 2500
+    expectNoDifference(model.playheadSample, 2500)
+  }
+
+  @Test func rulerClickClampsNegativeXToZero() {
+    let model = editor()
+    geometry(model, samplesPerPixel: 100, start: 0)
+    model.playheadSample = 4321
+    model.rulerMovedPlayhead(toX: -25)  // would map below 0
+    expectNoDifference(model.playheadSample, 0)
+  }
+
+  @Test func rulerClickClampsPastEndToDurationSamples() {
+    let model = editor()
+    let duration = model.editPlan.source.durationSamples
+    geometry(model, samplesPerPixel: 100, start: 0)
+    model.rulerMovedPlayhead(toX: 100_000)  // 10,000,000 samples, well past EOF
+    expectNoDifference(model.playheadSample, duration)  // EOF is a valid resting cursor
+  }
+
+  @Test func rulerMoveIsNoOpWithoutWaveformGeometry() {
+    let model = editor()
+    model.playheadSample = 777  // no geometry loaded → totalSamples == 0
+    model.rulerMovedPlayhead(toX: 40)
+    expectNoDifference(model.playheadSample, 777)  // unchanged: the mapping would be meaningless
+  }
+
+  // MARK: - Interaction with the transport
+
+  @Test func rulerMoveWhileStoppedJustMovesTheCursor() {
+    let model = editor()
+    geometry(model, samplesPerPixel: 100, start: 0)
+    model.rulerMovedPlayhead(toX: 3)
+    expectNoDifference(model.playheadSample, 300)
+    expectNoDifference(model.transportPhase, .stopped)
+  }
+
+  @Test func rulerMoveDuringPlaybackStopsThenMovesToClick() async {
+    let gate = RulerPlayGate()
+    let stoppedSession = LockIsolated<PlaybackSessionID?>(nil)
+    let model = editor()
+    geometry(model, samplesPerPixel: 100, start: 0)
+    model.playheadSample = 1000
+    await withDependencies {
+      $0.audioPlayer.play = gatedPlay(gate)
+      $0.audioPlayer.stop = { session in
+        stoppedSession.setValue(session)
+        gate.release()
+      }
+    } operation: {
+      let task = Task { await model.transportPlayTapped() }
+      await gate.awaitStarted()
+      #expect(model.isTransportPlaying)
+      let session = model.transportPhase.session
+      model.playheadSample = 8000  // audio "advanced" the cursor during playback
+
+      model.rulerMovedPlayhead(toX: 6)  // stops the transport, then snaps to floor(6*100)=600
+      expectNoDifference(model.transportPhase, .stopped)  // reset synchronously
+      expectNoDifference(model.playheadSample, 600)  // where the user clicked, not the range end
+
+      await settle { stoppedSession.value != nil }
+      expectNoDifference(stoppedSession.value, session)  // stopped OUR session, not stop(nil)
+      await task.value
+      expectNoDifference(model.playheadSample, 600)  // the superseded play never moved it
+    }
+  }
+
+  @Test func rulerMoveWhilePausedStopsAndMoves() async {
+    let gate = RulerPlayGate()
+    let stopped = LockIsolated(false)
+    let model = editor()
+    geometry(model, samplesPerPixel: 100, start: 0)
+    model.playheadSample = 1000
+    await withDependencies {
+      $0.audioPlayer.play = gatedPlay(gate)
+      $0.audioPlayer.pause = { _ in 4321 }
+      $0.audioPlayer.stop = { _ in
+        stopped.setValue(true)
+        gate.release()
+      }
+    } operation: {
+      let task = Task { await model.transportPlayTapped() }
+      await gate.awaitStarted()
+      await model.transportPauseTapped()
+      #expect(model.isTransportPaused)  // paused session still owns scheduled audio
+
+      model.rulerMovedPlayhead(toX: 2)  // must tear down the paused session, then move
+      expectNoDifference(model.transportPhase, .stopped)
+      expectNoDifference(model.playheadSample, 200)
+
+      await settle { stopped.value }
+      #expect(stopped.value)
+      await task.value
+    }
+  }
+
+  @Test func fastRulerDragLandsOnTheLastEventSample() {
+    let model = editor()
+    geometry(model, samplesPerPixel: 100, start: 0)
+    // A drag delivers ordered synchronous move events; the cursor tracks the latest one.
+    model.rulerMovedPlayhead(toX: 1)
+    model.rulerMovedPlayhead(toX: 4)
+    model.rulerMovedPlayhead(toX: 9)
+    expectNoDifference(model.playheadSample, 900)
+  }
+
+  @Test func rulerMoveDoesNotClearTheSelection() {
+    let model = editor()
+    geometry(model, samplesPerPixel: 100, start: 0)
+    model.transcript.transcriptDragBegan(
+      atUTF16Offset: model.transcript.document.wordRanges[1].range.location)
+    model.transcript.transcriptDragged(
+      toUTF16Offset: model.transcript.document.wordRanges[4].range.location)
+    let selection = model.transcript.selectedSampleRange
+    #expect(selection != nil)
+
+    model.rulerMovedPlayhead(toX: 3)
+    expectNoDifference(model.playheadSample, 300)
+    // Ruling D: a ruler move never clears the selection.
+    expectNoDifference(model.transcript.selectedSampleRange, selection)
+  }
+}
+
+/// Suspends each `play` until released so a ruler interaction can act against a genuinely in-flight
+/// transport. Mirrors `EditorTransportTests`'s gate (file-private there); kept local to this suite.
+private final class RulerPlayGate: @unchecked Sendable {
+  private let lock = NSLock()
+  private var continuations: [CheckedContinuation<Void, Never>] = []
+  private let startedContinuation: AsyncStream<Void>.Continuation
+  let started: AsyncStream<Void>
+  init() {
+    var continuation: AsyncStream<Void>.Continuation!
+    started = AsyncStream { continuation = $0 }
+    startedContinuation = continuation
+  }
+  func play() async -> PlaybackEnd {
+    startedContinuation.yield(())
+    await withCheckedContinuation { cont in
+      lock.lock()
+      continuations.append(cont)
+      lock.unlock()
+    }
+    return .finished
+  }
+  func release() {
+    lock.lock()
+    let conts = continuations
+    continuations = []
+    lock.unlock()
+    for cont in conts { cont.resume() }
+  }
+  func awaitStarted() async {
+    var it = started.makeAsyncIterator()
+    _ = await it.next()
+  }
+}

@@ -758,6 +758,40 @@ final class EditorModel: ViewModel {
     playheadSample = newRange.lowerBound
   }
 
+  // MARK: - Ruler
+  /// Ruler click/drag: positions the persistent cursor at the ruler's view-x, mapping x → plan
+  /// sample via the shared waveform geometry (clamped to `[0, durationSamples]`). No drag-to-scrub
+  /// while playing in v1 — a ruler interaction during playback (or while paused) stops the transport
+  /// first, mirroring the selection-snap rule, leaving the cursor where the user placed it rather
+  /// than where the audio was. The cursor move is SYNCHRONOUS and ordered, so a fast drag lands it
+  /// on the last event's sample (no stale-async-task race); the audio stop is fire-and-forget on OUR
+  /// session so a delayed cleanup can't kill newer or global playback. A no-op until the waveform
+  /// geometry is loaded — before that the x→sample mapping is meaningless.
+  func rulerMovedPlayhead(toX positionX: CGFloat) {
+    guard waveform.totalSamples > 0 else { return }
+    stopTransportForRuler()
+    playheadSample = clampedRulerSample(positionX)
+  }
+
+  /// Tears down any active transport — playing OR paused — for a ruler move. A paused session still
+  /// owns scheduled audio, so without this a later Play would `resume` the old paused audio instead
+  /// of playing from the newly placed cursor. Resets ownership synchronously (so `observePlayback`
+  /// stops applying ticks at once, and the suspended `beginTransportPlayback` guard fails, never
+  /// jumping the cursor to the range end) and stops OUR session off the main actor — exactly the
+  /// `cancelPreviewOrAuditionIfNeeded` pattern.
+  private func stopTransportForRuler() {
+    guard let session = transportPhase.session else { return }
+    resetTransportState()
+    endTranscriptFollow()
+    Task { await stopOwnedPlayback(session) }
+  }
+
+  /// The ruler's view-x mapped to a plan sample, clamped to a valid cursor position. `durationSamples`
+  /// (end-of-audio) is inclusive: it's a legal resting cursor where Play is a correct no-op.
+  private func clampedRulerSample(_ positionX: CGFloat) -> Int {
+    min(max(0, waveform.xToSample(positionX)), editPlan.source.durationSamples)
+  }
+
   // MARK: - Fine-tune editing
   /// Opens the fine-tune pane on a slice and starts an edit session anchored to its current
   /// range. Choosing the slice explicitly (rather than from ambient state) is what makes it
