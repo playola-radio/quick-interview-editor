@@ -7,14 +7,9 @@ import Testing
 
 @MainActor
 struct TranscriptPageTests {
-  private func runTogetherID(_ model: TranscriptPageModel, text: String) -> Word.ID {
-    model.editPlan!.words.first { $0.text == text }!.id
-  }
-
   @Test func initWithEditPlanPopulatesWordsImmediately() {
     let model = TranscriptPageModel(editPlan: Fixtures.editPlan())
     expectNoDifference(model.document.wordRanges.count, 122)
-    #expect(model.runTogetherWordIDSet.contains(runTogetherID(model, text: "want")))
   }
 
   @Test func initWithV2PlanExposesPauseParagraphs() {
@@ -55,7 +50,6 @@ struct TranscriptPageTests {
       let model = TranscriptPageModel(planURL: URL(fileURLWithPath: "/unused"))
       await model.viewAppeared()
       expectNoDifference(model.document.wordRanges.count, 122)
-      #expect(model.runTogetherWordIDSet.contains(runTogetherID(model, text: "want")))
     }
   }
 
@@ -95,18 +89,6 @@ struct TranscriptPageTests {
     model.clearSelectionTapped()
     #expect(!model.hasSelection)
     expectNoDifference(model.selectedWordIDSet, [])
-  }
-
-  @Test func sensitivityChangesRunTogetherCount() async {
-    let model = await loadedModel()
-    model.sensitivityChanged(10)
-    let tight = model.runTogetherCount
-    model.sensitivityChanged(80)
-    let loose = model.runTogetherCount
-    #expect(tight < loose)
-    // default 30 flags the known 25-pair set → 40 unique words on this fixture
-    model.sensitivityChanged(30)
-    #expect(model.runTogetherCount > 0)
   }
 
   // MARK: - Synthetic-plan regression tests

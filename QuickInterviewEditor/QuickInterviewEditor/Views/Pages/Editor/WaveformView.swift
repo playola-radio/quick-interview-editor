@@ -87,21 +87,19 @@ struct WaveformView: View {
   }
 }
 
-/// Draws the min/max columns plus the highlight and red overlays. Reads only geometry +
+/// Draws the min/max columns plus the highlight overlay. Reads only geometry +
 /// selection state (never the playhead), so playhead ticks don't force it to redraw.
 private struct WaveformCanvas: View {
   let model: EditorModel
 
   private let waveColor = Color(white: 0.62)
   private let highlightColor = Color.white.opacity(0.14)
-  private let redColor = Color(red: 0.8, green: 0.4, blue: 0.4)
 
   var body: some View {
     // Read observed model output here so SwiftUI re-renders on change; the Canvas
     // closure then draws the captured values.
     let columns = model.waveform.visibleColumns()
     let highlight = model.waveformHighlightSpan
-    let reds = model.waveformRedSpans
     Canvas { context, size in
       let midY = size.height / 2
       let scale = size.height / 2 * 0.9
@@ -109,11 +107,6 @@ private struct WaveformCanvas: View {
         context.fill(
           Path(CGRect(x: highlight.positionX, y: 0, width: highlight.width, height: size.height)),
           with: .color(highlightColor))
-      }
-      for red in reds {
-        context.fill(
-          Path(CGRect(x: red.positionX, y: 0, width: red.width, height: size.height)),
-          with: .color(redColor.opacity(0.28)))
       }
       var path = Path()
       for column in columns {

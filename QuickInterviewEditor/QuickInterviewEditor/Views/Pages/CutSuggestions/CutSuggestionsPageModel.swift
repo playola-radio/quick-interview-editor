@@ -202,6 +202,14 @@ final class CutSuggestionsPageModel: ViewModel {
     actionMessage = nil
   }
 
+  /// Un-accepts a previously accepted suggestion, flipping it back to pending in the sidecar.
+  /// The editor pairs this with removing the minted slice so a toggled-off approval leaves
+  /// neither an accepted suggestion nor a lingering exportable slice.
+  func resetTapped(_ id: CutSuggestion.ID) {
+    $projectState.withLock { $0.resetSuggestion(id) }
+    actionMessage = nil
+  }
+
   /// Presents the key-entry sheet; on save/clear it refreshes the resolved-key state and
   /// dismisses.
   func addAPIKeyTapped() {

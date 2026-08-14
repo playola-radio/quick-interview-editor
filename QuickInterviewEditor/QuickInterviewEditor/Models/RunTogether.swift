@@ -6,8 +6,8 @@ struct WordGap: Equatable {
   let gapMs: Double
 }
 
-/// Adjacent-word gaps in milliseconds, computed once so sensitivity changes filter
-/// records instead of re-walking every word's timestamps.
+/// Adjacent-word gaps in milliseconds. Consumed by pause-paragraph grouping to split
+/// the transcript where the silence between words is long enough.
 func wordGaps(_ words: [Word]) -> [WordGap] {
   var gaps: [WordGap] = []
   for index in 0..<max(0, words.count - 1) {
@@ -21,13 +21,4 @@ func wordGaps(_ words: [Word]) -> [WordGap] {
     gaps.append(WordGap(leftID: cur.id, rightID: next.id, gapMs: gapMs))
   }
   return gaps
-}
-
-func runTogetherWordIDs(gaps: [WordGap], maxGapMs: Double) -> Set<Word.ID> {
-  var ids: Set<Word.ID> = []
-  for gap in gaps where gap.gapMs < maxGapMs {
-    ids.insert(gap.leftID)
-    ids.insert(gap.rightID)
-  }
-  return ids
 }

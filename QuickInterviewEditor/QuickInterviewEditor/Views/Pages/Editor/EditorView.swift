@@ -35,6 +35,7 @@ struct EditorView: View {
       }
     )
     .background(EditorKeyMonitor(model: model))
+    .background(ClipKeyMonitor(model: model))
     .task { await model.loadWaveform() }
     .task { await model.observePlayback() }
     .onChange(of: model.fineTuneSessionKey, initial: true) { _, _ in model.syncEditSession() }

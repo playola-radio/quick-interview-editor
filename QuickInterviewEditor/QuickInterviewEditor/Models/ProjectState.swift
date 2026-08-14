@@ -62,6 +62,10 @@ extension ProjectState {
     cutSuggestions[id: id]?.reject()
   }
 
+  mutating func resetSuggestion(_ id: CutSuggestion.ID) {
+    cutSuggestions[id: id]?.resetToPending()
+  }
+
   /// Suggestions ordered for display: pending first, then by ascending `rank`, with
   /// higher `score` breaking ties. `id` is the final tie-break for a stable order.
   var rankedSuggestions: [CutSuggestion] {

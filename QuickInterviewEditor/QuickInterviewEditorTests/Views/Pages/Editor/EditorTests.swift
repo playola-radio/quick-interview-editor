@@ -795,16 +795,6 @@ struct EditorTests {
     #expect(model.waveformHighlightSpan != nil)
   }
 
-  @Test func redRangesTrackRunTogetherWordsAndSensitivity() {
-    let model = editor()
-    model.transcript.sensitivityChanged(10)
-    let tight = model.redRanges.count
-    model.transcript.sensitivityChanged(80)
-    let loose = model.redRanges.count
-    #expect(tight < loose)
-    for range in model.redRanges { #expect(range.lowerBound < range.upperBound) }
-  }
-
   @Test func loadWaveformPopulatesChildViaClientFromCanonicalURL() async {
     let plan = Fixtures.editPlan()
     let fixture = Waveform.pyramid(

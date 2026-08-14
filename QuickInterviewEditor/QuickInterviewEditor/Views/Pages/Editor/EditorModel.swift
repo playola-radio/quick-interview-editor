@@ -11,6 +11,17 @@ enum EditorKey {
   case zoomFit
 }
 
+/// The clip-navigation shortcuts (Logic-style, bare keys) the clip key monitor delivers to the
+/// current-clip API: J/K step, ⏎ approve, ⌫ reject, F focus. Space stays with the transport
+/// monitor (it routes to play-current-clip or the transport toggle in `auditionKeyPressed`).
+enum ClipKey {
+  case next
+  case previous
+  case approve
+  case reject
+  case focus
+}
+
 @MainActor
 @Observable
 final class EditorModel: ViewModel {
@@ -78,6 +89,14 @@ final class EditorModel: ViewModel {
 
   // MARK: - Properties
   var slices: IdentifiedArrayOf<Slice> = []
+  /// The transient "current" clip in the unified clip list — the target of the current-clip
+  /// shortcuts (approve/reject/focus/play). NOT a `ClipState` and never persisted: it's the
+  /// keyboard/selection focus, not an accept decision. Written only through `selectClip`.
+  var currentClipID: EditorClip.ID?
+  /// Manual slices the user rejected. Kept in `slices` (so undo/rename still work) but rendered
+  /// struck-through and excluded from export. In-memory only — a reject decision on a manual
+  /// clip doesn't survive relaunch (the suggestion sidecar is the only persisted decision store).
+  var rejectedManualSliceIDs: Set<Slice.ID> = []
   /// Undo/redo history over `slices` only — never selection, zoom, playback, or export
   /// phase. Every slice mutation routes through `mutateSlices`, which records here.
   var sliceUndo = UndoStack<IdentifiedArrayOf<Slice>>()
@@ -217,17 +236,9 @@ final class EditorModel: ViewModel {
   /// The selected audio range, mirrored from the transcript selection.
   var highlightedSampleRange: Range<Int>? { transcript.selectedSampleRange }
 
-  /// Sample ranges of the run-together (tight-join) words to paint red. Reads the
-  /// transcript's already-computed `runTogetherSampleRanges` (same gap function + live
-  /// sensitivity), so the waveform's red always matches the transcript's without
-  /// recomputing it. Words missing sample bounds are excluded.
-  var redRanges: [Range<Int>] { transcript.runTogetherSampleRanges }
-
-  /// Waveform render data, geometry delegated to the child and combined with the
-  /// transcript-derived ranges here (the view reads these; it decides nothing). The highlight
-  /// tracks `activeEditingRange`, so it follows a fine-tune drag live.
+  /// Waveform highlight geometry, delegated to the child (the view reads this; it decides
+  /// nothing). The highlight tracks `activeEditingRange`, so it follows a fine-tune drag live.
   var waveformHighlightSpan: WaveformSpan? { activeEditingRange.flatMap(waveform.span(for:)) }
-  var waveformRedSpans: [WaveformSpan] { redRanges.compactMap(waveform.span(for:)) }
 
   /// View-x of the persistent cursor, or nil when it's scrolled out of the viewport. The model
   /// owns the cursor sample; the waveform supplies the geometry, so the view stays logic-free.
@@ -251,7 +262,7 @@ final class EditorModel: ViewModel {
     if case .exporting = exportPhase { return true }
     return false
   }
-  var canExportAll: Bool { !slices.isEmpty && !isExporting && !hasUncommittedSliceEdit }
+  var canExportAll: Bool { !exportableSlices.isEmpty && !isExporting && !hasUncommittedSliceEdit }
   var canExportSlice: Bool { !isExporting && !hasUncommittedSliceEdit }
 
   var exportStatusMessage: String {
@@ -310,6 +321,64 @@ final class EditorModel: ViewModel {
   }
 
   let fineTuneLabel = "Edit cuts"
+
+  // MARK: - Clips (unified read model)
+  /// The unified clip list: every ranked cut suggestion (mapped to suggested/approved/rejected)
+  /// followed by every manual slice that isn't already a suggestion's accepted clip. Accepted
+  /// suggestions with a minted slice prefer the slice's name/words/snippet/range so the card and
+  /// the exported file agree. `order` is the element's final index, so the view has a stable index.
+  var clips: [EditorClip] {
+    let suggestionList = cutSuggestions.suggestions
+    let suggestionIDs = Set(suggestionList.map(\.id))
+    var result: [EditorClip] = []
+    for suggestion in suggestionList {
+      let state: ClipState
+      switch suggestion.status {
+      case .pending: state = .suggested
+      case .accepted: state = .approved
+      case .rejected: state = .rejected
+      }
+      let title: String
+      let wordIDs: [Word.ID]
+      let range: Range<Int>?
+      let snippet: String
+      if suggestion.status == .accepted, let slice = slices[id: suggestion.id] {
+        title = slice.name
+        wordIDs = slice.wordIDs
+        range = slice.startSample..<slice.endSample
+        snippet = slice.snippet
+      } else {
+        let trimmed = suggestion.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        title = trimmed.isEmpty ? suggestion.productType.displayLabel : trimmed
+        wordIDs = suggestion.wordIDs
+        range =
+          suggestion.startSample < suggestion.endSample
+          ? suggestion.startSample..<suggestion.endSample : nil
+        snippet = sliceSnippet(for: suggestion.wordIDs, words: editPlan.words)
+      }
+      result.append(
+        EditorClip(
+          id: suggestion.id, source: .suggestion(suggestion.id), title: title, state: state,
+          wordIDs: wordIDs, range: range, snippet: snippet, order: result.count))
+    }
+    for slice in slices where !suggestionIDs.contains(slice.id) {
+      result.append(
+        EditorClip(
+          id: slice.id, source: .manualSlice(slice.id), title: slice.name,
+          state: rejectedManualSliceIDs.contains(slice.id) ? .rejected : .approved,
+          wordIDs: slice.wordIDs, range: slice.startSample..<slice.endSample,
+          snippet: slice.snippet, order: result.count))
+    }
+    return result
+  }
+
+  /// The resolved current clip, or nil when nothing is current (or the current id no longer
+  /// resolves — e.g. its suggestion was regenerated away).
+  var currentClip: EditorClip? { currentClipID.flatMap { id in clips.first { $0.id == id } } }
+
+  /// The slices export actually renders: every slice minus the manual ones the user rejected
+  /// (suggestion-rejected slices are already removed from `slices` on reject).
+  var exportableSlices: [Slice] { slices.filter { !rejectedManualSliceIDs.contains($0.id) } }
 
   // MARK: - User Actions
   /// Builds the waveform peak pyramid for the canonical audio, in plan-sample
@@ -657,6 +726,148 @@ final class EditorModel: ViewModel {
   func zoomWaveformToSelection() {
     guard let range = transcript.selectedSampleRange else { return }
     waveform.zoomToFit(range, paddingFraction: waveformFramePadding)
+  }
+
+  // MARK: - Clip actions
+  /// The one writer of `currentClipID`. Makes a clip current and selects its words in the
+  /// transcript (the waveform highlight follows that selection), then scrolls the transcript to
+  /// it. Does NOT open the fine-tune pane or set `activeSliceID` — that's `focusCurrentClip`. A
+  /// no-op for an id that doesn't resolve to a clip.
+  func selectClip(_ id: EditorClip.ID) {
+    guard let clip = clips.first(where: { $0.id == id }) else { return }
+    currentClipID = id
+    // Endpoints are the earliest/latest words by transcript position (not the array's first/last),
+    // mirroring `cutSuggestionSelected`/`revealWords`, so an unsorted `wordIDs` still frames right.
+    let positions = clip.wordIDs.compactMap { wordID in
+      editPlan.words.firstIndex(where: { $0.id == wordID })
+    }
+    guard let lower = positions.min(), let upper = positions.max(),
+      transcript.selectWords(anchorID: editPlan.words[lower].id, focusID: editPlan.words[upper].id)
+    else { return }
+    transcript.revealSelection()
+  }
+
+  /// Makes the next clip current, wrapping past the end. Starts at the first clip when nothing is
+  /// current yet; a no-op when there are no clips.
+  func nextClip() {
+    let all = clips
+    guard !all.isEmpty else { return }
+    guard let current = currentClipID, let index = all.firstIndex(where: { $0.id == current })
+    else {
+      selectClip(all[0].id)
+      return
+    }
+    selectClip(all[(index + 1) % all.count].id)
+  }
+
+  /// Makes the previous clip current, wrapping past the start. Starts at the last clip when
+  /// nothing is current yet; a no-op when there are no clips.
+  func previousClip() {
+    let all = clips
+    guard !all.isEmpty else { return }
+    guard let current = currentClipID, let index = all.firstIndex(where: { $0.id == current })
+    else {
+      selectClip(all[all.count - 1].id)
+      return
+    }
+    selectClip(all[(index - 1 + all.count) % all.count].id)
+  }
+
+  /// Approves the current clip. A suggested candidate is accepted (validated: a stale/invalid one
+  /// surfaces a message and mints no slice); an already-approved suggestion toggles back to pending
+  /// and drops its slice; a rejected suggestion becomes approved in one press. Manual clips have no
+  /// suggested state, so this is a no-op for them.
+  func approveCurrentClip() async {
+    guard let clip = currentClip else { return }
+    switch clip.source {
+    case .suggestion(let id):
+      switch clip.state {
+      case .suggested, .rejected:
+        cutSuggestions.acceptTapped(id)
+      case .approved:
+        cutSuggestions.resetTapped(id)
+        // Dropping the minted slice is a slice removal like any other: reconcile so a stale
+        // `activeSliceID`, fine-tune session, or transport context on it doesn't dangle.
+        mutateSlices { $0.remove(id: id) }
+        await reconcilePlayback()
+      }
+    case .manualSlice:
+      return
+    }
+  }
+
+  /// Rejects the current clip. A suggestion is marked rejected in the sidecar and any slice it
+  /// minted is removed so a rejected clip is never still exported; a manual clip is added to the
+  /// in-memory rejected set (the slice is kept, struck-through, and excluded from export).
+  func rejectCurrentClip() async {
+    guard let clip = currentClip else { return }
+    switch clip.source {
+    case .suggestion(let id):
+      cutSuggestions.rejectTapped(id)
+      if slices[id: id] != nil {
+        // Removing the minted slice must reconcile like any other slice removal, so a stale
+        // `activeSliceID`, fine-tune session, or transport context on it doesn't dangle.
+        mutateSlices { $0.remove(id: id) }
+        await reconcilePlayback()
+      }
+    case .manualSlice(let id):
+      rejectedManualSliceIDs.insert(id)
+    }
+  }
+
+  /// Frames the current clip on the waveform and opens the fine-tune pane on it: a slice-backed
+  /// clip becomes the active slice (a full edit session, exactly like selecting a slice); a
+  /// suggestion-backed clip opens a pending-selection session over its range. A no-op with no
+  /// current clip or no valid range.
+  func focusCurrentClip() {
+    guard let clip = currentClip, let range = clip.range else { return }
+    waveform.zoomToFit(range, paddingFraction: waveformFramePadding)
+    if slices[id: clip.id] != nil {
+      sliceSelected(clip.id)
+    } else {
+      // Opening a pending-selection session directly bypasses `sliceSelected`'s guard, so honor
+      // it here too: never stomp a held, unsaved draft on another target — Save/Cancel first.
+      guard !fineTune.hasUnsavedChange else { return }
+      fineTune.begin(target: .pendingSelection, range: range)
+    }
+  }
+
+  /// Plays the current clip's range through the one transport funnel (as plain `.free` scrubbing).
+  /// A no-op with no current clip or an empty/past-EOF range.
+  func playCurrentClip() async {
+    guard let clip = currentClip, let range = clip.range else { return }
+    let playableEnd = min(range.upperBound, editPlan.source.durationSamples)
+    guard range.lowerBound < playableEnd else { return }
+    // A slice-backed clip plays as that slice (row highlight + slice-playback reconciliation);
+    // a suggestion-only clip has no slice, so it plays as plain `.free` scrubbing.
+    let context: TransportContext = slices[id: clip.id] != nil ? .slice(clip.id) : .free
+    await beginTransportPlayback(range: range, context: context)
+  }
+
+  /// Routes a captured clip-navigation key to its action so the key-monitor view stays logic-free.
+  /// Returns whether the key was consumed (only when there was something to act on), so an
+  /// out-of-context ⏎/⌫ isn't silently swallowed.
+  func clipKeyDown(_ key: ClipKey) -> Bool {
+    switch key {
+    case .next:
+      guard !clips.isEmpty else { return false }
+      nextClip()
+    case .previous:
+      guard !clips.isEmpty else { return false }
+      previousClip()
+    case .approve:
+      guard currentClip != nil else { return false }
+      // Approve/reject reconcile playback, so they're async now; dispatch on the main actor like
+      // the audition monitor does while keeping the consumed decision synchronous.
+      Task { await approveCurrentClip() }
+    case .reject:
+      guard currentClip != nil else { return false }
+      Task { await rejectCurrentClip() }
+    case .focus:
+      guard currentClip != nil else { return false }
+      focusCurrentClip()
+    }
+    return true
   }
 
   func addSliceTapped() {
@@ -1218,7 +1429,20 @@ final class EditorModel: ViewModel {
     switch key {
     case .cutIn: await auditionInTapped()
     case .cutOut: await auditionOutTapped()
-    case .space: await transportPlayStopTapped()
+    case .space:
+      // Space keeps its Play/Stop role: if anything is playing or paused it stops (Logic parity).
+      // Only from a full stop, and with a clip actually current (re-resolved, not a stale id), does
+      // Space play that clip's range; otherwise it's the plain transport start.
+      switch transportPhase {
+      case .playing, .paused:
+        await transportPlayStopTapped()
+      case .stopped:
+        if currentClip != nil {
+          await playCurrentClip()
+        } else {
+          await transportPlayStopTapped()
+        }
+      }
     }
   }
 
@@ -1228,13 +1452,16 @@ final class EditorModel: ViewModel {
 
   // MARK: - Export Actions
   func exportSliceTapped(_ id: Slice.ID) {
-    guard !isExporting, !hasUncommittedSliceEdit, let slice = slices[id: id] else { return }
+    guard !isExporting, !hasUncommittedSliceEdit, !rejectedManualSliceIDs.contains(id),
+      let slice = slices[id: id]
+    else { return }
     startExport([slice])
   }
 
   func exportAllTapped() {
-    guard !isExporting, !hasUncommittedSliceEdit, !slices.isEmpty else { return }
-    startExport(Array(slices))
+    let targets = exportableSlices
+    guard !isExporting, !hasUncommittedSliceEdit, !targets.isEmpty else { return }
+    startExport(targets)
   }
 
   func cancelExportTapped() {
