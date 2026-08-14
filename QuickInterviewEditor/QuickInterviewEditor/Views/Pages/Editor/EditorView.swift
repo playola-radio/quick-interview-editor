@@ -6,8 +6,14 @@ struct EditorView: View {
   var body: some View {
     HStack(spacing: 0) {
       VStack(spacing: 0) {
-        TranscriptPageView(model: model.transcript)
-          .frame(maxWidth: .infinity, maxHeight: .infinity)
+        TranscriptPageView(
+          model: model.transcript,
+          cards: model.visibleClipCards,
+          rail: model.clipMapSegments,
+          counts: model.clipCountsSummary,
+          clipActions: clipActions
+        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         Divider()
         WaveformView(model: model)
         if model.showsFineTunePane {
@@ -45,6 +51,20 @@ struct EditorView: View {
       let cursorToken = model.cursorMoveToken
       Task { await model.transportSelectionChanged(newRange, cursorToken: cursorToken) }
     }
+  }
+
+  private var clipActions: TranscriptClipActions {
+    TranscriptClipActions(
+      cardTapped: { model.clipCardTapped($0) },
+      railTapped: { model.selectClip($0) },
+      play: { id in Task { await model.playClipTapped(id) } },
+      armAddStart: { model.armAddTapped($0, side: .start) },
+      armAddEnd: { model.armAddTapped($0, side: .end) },
+      wordPicked: { model.pointAndAddPicked($0) },
+      gripBegan: { model.clipGripDragBegan() },
+      gripStep: { model.clipGripDragged($0) },
+      gripEnded: { model.clipGripDragEnded() }
+    )
   }
 
   @ViewBuilder private var rightPanel: some View {

@@ -2,10 +2,18 @@ import SwiftUI
 
 struct TranscriptPageView: View {
   @Bindable var model: TranscriptPageModel
+  /// EditorModel-derived clip render data + actions (decision B: passed in, not a back-reference).
+  let cards: [ClipCardVM]
+  let rail: [ClipMapSegment]
+  let counts: String
+  let clipActions: TranscriptClipActions
 
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
       header
+      if !rail.isEmpty {
+        ClipMapRailView(segments: rail, counts: counts, onSegmentTapped: clipActions.railTapped)
+      }
       TranscriptTextView(
         model: model,
         text: model.plainTranscriptText,
@@ -14,7 +22,11 @@ struct TranscriptPageView: View {
         selected: model.selectedWordIDSet,
         scrollTarget: model.scrollTargetWordID,
         followMode: model.followMode,
-        reveal: model.reveal
+        reveal: model.reveal,
+        cards: cards,
+        clipsOnly: model.clipsOnly,
+        armedAddSide: model.armedAddSide,
+        clipActions: clipActions
       )
       .frame(maxWidth: .infinity, maxHeight: .infinity)
       controls
@@ -40,13 +52,28 @@ struct TranscriptPageView: View {
   }
 
   private var header: some View {
-    HStack {
+    HStack(spacing: 12) {
       Text(model.transcriptCaption)
         .font(.system(size: 11, weight: .semibold)).tracking(1.5)
         .foregroundStyle(Color(white: 0.44))
+      Picker(model.clipFilterPickerLabel, selection: filterBinding) {
+        ForEach(model.clipFilters) { filter in
+          Text(filter.label).tag(filter)
+        }
+      }
+      .pickerStyle(.segmented).labelsHidden().fixedSize()
+      Toggle(model.clipsOnlyLabel, isOn: clipsOnlyBinding)
+        .toggleStyle(.checkbox).font(.system(size: 11))
       Spacer()
       zoomControls
     }
+  }
+
+  private var filterBinding: Binding<ClipFilter> {
+    Binding(get: { model.clipFilter }, set: { model.clipFilterChanged($0) })
+  }
+  private var clipsOnlyBinding: Binding<Bool> {
+    Binding(get: { model.clipsOnly }, set: { _ in model.clipsOnlyToggled() })
   }
 
   private var zoomControls: some View {

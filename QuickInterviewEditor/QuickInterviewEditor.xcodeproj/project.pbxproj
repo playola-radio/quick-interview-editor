@@ -138,6 +138,7 @@
 		D970D20B9114E1FA8DE104E8 /* WaveformRulerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEBD3CE61A857D32C1924CE2 /* WaveformRulerView.swift */; };
 		D9C4768EAE67DC98FCA42E18 /* ImportPageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 990E56AF2E3DE415036CB683 /* ImportPageView.swift */; };
 		DB11FB675227EDA325DFFAA3 /* EditPlanV2DecodeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98AF849A99658DB929493E32 /* EditPlanV2DecodeTests.swift */; };
+		DC04040688E1B83B063CB24B /* TranscriptClipCardsUI.swift in Sources */ = {isa = PBXBuildFile; fileRef = A68397363471D048A916C984 /* TranscriptClipCardsUI.swift */; };
 		DC3D8E449E7D4C241C8A6AE3 /* TransportPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7ED94B792CC5DE39305E419C /* TransportPanelView.swift */; };
 		DD99E6411A86BBC89EBA9304 /* ClipKeyMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51DDAA995D54BA99479BC18C /* ClipKeyMonitor.swift */; };
 		DFF2BE6BF71CD47B32F3AC29 /* EditorCutSuggestionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4287CEBB69E788B90E6B9E97 /* EditorCutSuggestionTests.swift */; };
@@ -263,6 +264,7 @@
 		A0DEF39E5B43A75E1E9A1639 /* LiveCutSuggester.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveCutSuggester.swift; sourceTree = "<group>"; };
 		A35A55F4A7BCE34794D5F40C /* TranscriptUnitTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptUnitTests.swift; sourceTree = "<group>"; };
 		A511ABB1DCF300B770180B1C /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
+		A68397363471D048A916C984 /* TranscriptClipCardsUI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptClipCardsUI.swift; sourceTree = "<group>"; };
 		AA63E7ECDFDB52558698373C /* LiveModelDownloader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveModelDownloader.swift; sourceTree = "<group>"; };
 		AB635A5E82DDE743A20CB620 /* EditorClipTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorClipTests.swift; sourceTree = "<group>"; };
 		ABF0F60A435BA7F0A8421D4A /* EditorClipPersistenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorClipPersistenceTests.swift; sourceTree = "<group>"; };
@@ -518,6 +520,7 @@
 		90703CF8F17806E2573F3803 /* TranscriptPage */ = {
 			isa = PBXGroup;
 			children = (
+				A68397363471D048A916C984 /* TranscriptClipCardsUI.swift */,
 				238BBB22C13D9B5453A89ECD /* TranscriptPageModel.swift */,
 				89BCD2B81DFD4899212F05EB /* TranscriptPageView.swift */,
 				C7A511F2FE1806A3BA6DF28F /* TranscriptTextView.swift */,
@@ -1016,6 +1019,7 @@
 				3BD760F25135C28E6E0870F6 /* SongTabView.swift in Sources */,
 				2238F1BAA3FE18846A8B3937 /* SourceFingerprint.swift in Sources */,
 				50DC45152877EC4196AE477F /* TranscriptCache.swift in Sources */,
+				DC04040688E1B83B063CB24B /* TranscriptClipCardsUI.swift in Sources */,
 				30221A20518EEBD15C46AAB2 /* TranscriptDocument.swift in Sources */,
 				5A3FA7A5CB3395E469F8AB41 /* TranscriptHash.swift in Sources */,
 				F89547D7DD5C6573803BD544 /* TranscriptPageModel.swift in Sources */,

@@ -1,10 +1,21 @@
 import AppKit
 import SwiftUI
 
-/// Dumb TextKit-1 renderer. Owns the AppKit objects and converts points to UTF-16
-/// offsets; every decision (which word, selection, follow) lives in the model. The
-/// model-derived values it repaints from are passed in as explicit inputs so SwiftUI
-/// registers them as dependencies and calls `updateNSView` when they change.
+/// A dumb NSTextAttachment cell that reserves a fixed block of vertical space for a clip card
+/// but draws nothing — the interactive card is a separately-positioned `NSHostingView` overlay
+/// (decision C: no attachment view-providers for interactive controls).
+final class ClipPlaceholderCell: NSTextAttachmentCell {
+  var reservedSize: NSSize = .zero
+  override func cellSize() -> NSSize { reservedSize }
+  override func draw(withFrame cellFrame: NSRect, in controlView: NSView?) {}
+  override func cellBaselineOffset() -> NSPoint { .zero }
+}
+
+/// TextKit-1 renderer, C3 hybrid: the transcript text is one document, and each clip lifts out of
+/// flow as a placeholder attachment that reserves vertical space with a positioned SwiftUI card
+/// (`NSHostingView`) drawn over it. Text measurement, the word→UTF-16 map, scroll-to-word, and
+/// long-transcript layout stay in TextKit; every decision lives in the model. Model-derived
+/// values are explicit inputs so SwiftUI calls `updateNSView` when they change.
 struct TranscriptTextView: NSViewRepresentable {
   let model: TranscriptPageModel
   let text: String
@@ -14,6 +25,10 @@ struct TranscriptTextView: NSViewRepresentable {
   let scrollTarget: Word.ID?
   let followMode: TranscriptFollowMode
   let reveal: TranscriptReveal?
+  let cards: [ClipCardVM]
+  let clipsOnly: Bool
+  let armedAddSide: ArmedAddSide?
+  let clipActions: TranscriptClipActions
 
   func makeCoordinator() -> Coordinator { Coordinator(model: model) }
 
@@ -22,9 +37,6 @@ struct TranscriptTextView: NSViewRepresentable {
     scroll.hasVerticalScroller = true
     scroll.drawsBackground = false
 
-    // Canonical TextKit-1 "text view in a scroll view" configuration: the text view grows
-    // vertically with its content while its width tracks the clip view, so a long transcript
-    // wraps to the viewport width and scrolls instead of being clipped.
     let contentSize = scroll.contentSize
     let textView = HitTestingTextView()
     textView.coordinator = context.coordinator
@@ -50,17 +62,23 @@ struct TranscriptTextView: NSViewRepresentable {
     context.coordinator.textView = textView
     context.coordinator.scrollView = scroll
     context.coordinator.paragraphSpacing = paragraphSpacing
+    context.coordinator.clipActions = clipActions
     context.coordinator.observeScroll()
-    context.coordinator.rebuildText(text: text, fontSize: fontSize, selected: selected)
+    context.coordinator.apply(
+      text: text, fontSize: fontSize, selected: selected, scrollTarget: scrollTarget,
+      followMode: followMode, reveal: reveal, cards: cards, clipsOnly: clipsOnly,
+      armedAddSide: armedAddSide)
     return scroll
   }
 
   func updateNSView(_ nsView: NSScrollView, context: Context) {
     context.coordinator.model = model
     context.coordinator.paragraphSpacing = paragraphSpacing
+    context.coordinator.clipActions = clipActions
     context.coordinator.apply(
-      text: text, fontSize: fontSize, selected: selected,
-      scrollTarget: scrollTarget, followMode: followMode, reveal: reveal)
+      text: text, fontSize: fontSize, selected: selected, scrollTarget: scrollTarget,
+      followMode: followMode, reveal: reveal, cards: cards, clipsOnly: clipsOnly,
+      armedAddSide: armedAddSide)
   }
 
   @MainActor
@@ -69,12 +87,25 @@ struct TranscriptTextView: NSViewRepresentable {
     weak var textView: NSTextView?
     weak var scrollView: NSScrollView?
     var paragraphSpacing: Double = 0
+    var clipActions: TranscriptClipActions?
+    var armedAddSide: ArmedAddSide?
+
     private var lastText = ""
     private var lastSelected: Set<Word.ID> = []
     private var lastFontSize: Double = 0
     private var lastScrollTarget: Word.ID?
     private var lastFollowMode: TranscriptFollowMode = .following
     private var lastReveal: TranscriptReveal?
+    private var lastCards: [ClipCardVM] = []
+    private var lastClipsOnly = false
+    private var lastWidth: CGFloat = 0
+
+    /// Non-clip word → its UTF-16 range in the interleaved document, in transcript order.
+    private var wordRanges: [TranscriptWordRange] = []
+    /// Emitted clip → the placeholder attachment's character index (for card placement).
+    private var cardAnchors: [(id: EditorClip.ID, location: Int)] = []
+    /// Live hosting views for the placed cards, keyed by clip id (reused across updates).
+    private var cardHosts: [EditorClip.ID: NSHostingView<ClipCardView>] = [:]
 
     init(model: TranscriptPageModel) { self.model = model }
 
@@ -84,90 +115,231 @@ struct TranscriptTextView: NSViewRepresentable {
       calibratedRed: 0.80, green: 0.40, blue: 0.40, alpha: 0.30)
     private static let selectedFG = NSColor.white
     private static let normalFG = NSColor(calibratedWhite: 0.56, alpha: 1)
+    private static let dimmedFG = NSColor(calibratedWhite: 0.20, alpha: 1)  // clips-only #333
 
-    func rebuildText(text: String, fontSize: Double, selected: Set<Word.ID>) {
-      guard let storage = textView?.textStorage else { return }
-      let attr = NSMutableAttributedString(string: text)
-      let full = NSRange(location: 0, length: attr.length)
-      attr.addAttribute(.font, value: NSFont.systemFont(ofSize: fontSize), range: full)
-      attr.addAttribute(.foregroundColor, value: Self.normalFG, range: full)
-      // The newline between paragraphs makes each pause-paragraph its own TextKit
-      // paragraph; this spacing renders the break as a visible vertical gap. Applied
-      // over the full range so it survives the incremental color/selection updates.
-      let paragraphStyle = NSMutableParagraphStyle()
-      paragraphStyle.paragraphSpacing = paragraphSpacing
-      attr.addAttribute(.paragraphStyle, value: paragraphStyle, range: full)
-      storage.setAttributedString(attr)
-      lastText = text
-      lastFontSize = fontSize
-      lastSelected = []
-      applySelection(added: selected, removed: [])
-      lastSelected = selected
-    }
-
+    // MARK: - Apply
     // swiftlint:disable:next function_parameter_count
     func apply(
-      text: String, fontSize: Double, selected: Set<Word.ID>,
-      scrollTarget: Word.ID?, followMode: TranscriptFollowMode, reveal: TranscriptReveal?
+      text: String, fontSize: Double, selected: Set<Word.ID>, scrollTarget: Word.ID?,
+      followMode: TranscriptFollowMode, reveal: TranscriptReveal?, cards: [ClipCardVM],
+      clipsOnly: Bool, armedAddSide: ArmedAddSide?
     ) {
-      guard let storage = textView?.textStorage, let textView else { return }
+      self.armedAddSide = armedAddSide
+      guard let textView else { return }
+      let width = cardWidth()
 
-      if text != lastText {
-        rebuildText(text: text, fontSize: fontSize, selected: selected)
-        return
-      }
-
-      if fontSize != lastFontSize {
-        storage.addAttribute(
-          .font, value: NSFont.systemFont(ofSize: fontSize),
-          range: NSRange(location: 0, length: storage.length))
+      // A structural change (text, the set/geometry of cards, clips-only dim, font, or a width
+      // that reflows the cards) rebuilds the interleaved document + repositions the card overlays.
+      let structural =
+        text != lastText || cards != lastCards || clipsOnly != lastClipsOnly
+        || fontSize != lastFontSize || abs(width - lastWidth) > 0.5
+      if structural {
+        rebuild(text: text, fontSize: fontSize, cards: cards, clipsOnly: clipsOnly, width: width)
+        lastText = text
+        lastCards = cards
+        lastClipsOnly = clipsOnly
         lastFontSize = fontSize
+        lastWidth = width
+        lastSelected = []
       }
 
       let selAdded = selected.subtracting(lastSelected)
       let selRemoved = lastSelected.subtracting(selected)
-      applySelection(added: selAdded, removed: selRemoved)
+      applySelection(added: selAdded, removed: selRemoved, clipsOnly: clipsOnly)
       lastSelected = selected
 
-      // Resuming follow (userPaused → following) must re-scroll to the current target
-      // even if its ID is unchanged: playback can stop and restart while the playhead
-      // sits in the same word, and without this the view would stay parked where the
-      // user left it. Clearing `lastScrollTarget` lets the guard below re-apply.
-      if followMode == .following, lastFollowMode == .userPaused {
-        lastScrollTarget = nil
-      }
+      if followMode == .following, lastFollowMode == .userPaused { lastScrollTarget = nil }
       lastFollowMode = followMode
 
       if let target = scrollTarget, target != lastScrollTarget,
         followMode == .following, let range = range(for: target)
       {
-        // Programmatic auto-scroll goes through neither `scrollWheel` nor live-scroll,
-        // so it can never be mistaken for a user scroll — no guard flag needed.
         textView.scrollRangeToVisible(range)
         lastScrollTarget = target
       }
 
-      // An explicit reveal (clicking a suggestion or clip) scrolls regardless of `followMode` —
-      // the user asked to jump here, so a prior manual scroll must not suppress it. The token in
-      // `TranscriptReveal` changes on every request, so re-revealing the same word re-scrolls.
       if let reveal, reveal != lastReveal {
-        if let range = range(for: reveal.wordID) {
-          textView.scrollRangeToVisible(range)
-        }
+        if let range = range(for: reveal.wordID) { textView.scrollRangeToVisible(range) }
         lastReveal = reveal
       }
     }
 
-    private func range(for id: Word.ID) -> NSRange? {
-      model.document.wordRanges.first { $0.wordID == id }?.range
+    /// The pixel width a card (and its placeholder) should occupy — the text container's usable
+    /// width. Cards fill the reading column edge-to-edge.
+    private func cardWidth() -> CGFloat {
+      guard let textView else { return 0 }
+      let inset = textView.textContainerInset.width
+      let padding = textView.textContainer?.lineFragmentPadding ?? 0
+      return max(0, textView.bounds.width - inset * 2 - padding * 2)
     }
 
-    private func applySelection(added: Set<Word.ID>, removed: Set<Word.ID>) {
+    // MARK: - Rebuild (interleave text + card placeholders)
+    private func rebuild(
+      text: String, fontSize: Double, cards: [ClipCardVM], clipsOnly: Bool, width: CGFloat
+    ) {
       guard let storage = textView?.textStorage else { return }
+      let orderedWords = self.orderedWords(in: text)
+      let placement = clipPlacement(cards: cards, orderedWords: orderedWords)
+
+      let cardHeights = measuredCardHeights(cards: cards, width: width)
+      let baseFG = clipsOnly ? Self.dimmedFG : Self.normalFG
+      let paragraph = NSMutableParagraphStyle()
+      paragraph.paragraphSpacing = paragraphSpacing
+
+      let attr = NSMutableAttributedString()
+      var ranges: [TranscriptWordRange] = []
+      var anchors: [(id: EditorClip.ID, location: Int)] = []
+      var emitted = Set<EditorClip.ID>()
+      var pendingSeparator = false
+
+      for (index, word) in orderedWords.enumerated() {
+        if let clipID = placement.wordToClip[word.id] {
+          // A clip word: emit the card placeholder once (at the clip's first word), skip its text.
+          if placement.firstWordIndex[clipID] == index, !emitted.contains(clipID) {
+            if attr.length > 0 { attr.append(NSAttributedString(string: "\n")) }
+            let cell = ClipPlaceholderCell()
+            cell.reservedSize = NSSize(
+              width: width, height: (cardHeights[clipID] ?? 0) + Self.cardMarginV * 2)
+            let attachment = NSTextAttachment()
+            attachment.attachmentCell = cell
+            anchors.append((clipID, attr.length))
+            attr.append(NSAttributedString(attachment: attachment))
+            attr.append(NSAttributedString(string: "\n"))
+            emitted.insert(clipID)
+            pendingSeparator = false
+          }
+          continue
+        }
+        if pendingSeparator { attr.append(NSAttributedString(string: " ")) }
+        let start = attr.length
+        let piece = NSAttributedString(string: word.text)
+        attr.append(piece)
+        ranges.append(
+          TranscriptWordRange(
+            wordID: word.id, range: NSRange(location: start, length: piece.length))
+        )
+        pendingSeparator = true
+      }
+
+      let full = NSRange(location: 0, length: attr.length)
+      attr.addAttribute(.font, value: NSFont.systemFont(ofSize: fontSize), range: full)
+      attr.addAttribute(.foregroundColor, value: baseFG, range: full)
+      attr.addAttribute(.paragraphStyle, value: paragraph, range: full)
+      storage.setAttributedString(attr)
+      wordRanges = ranges
+      cardAnchors = anchors
+
+      placeCards(cards: cards, heights: cardHeights, width: width)
+    }
+
+    private static let cardMarginV: CGFloat = 13
+
+    /// The ordered non-attachment words (id + text), reconstructed from the model's document map
+    /// (the source of truth for order + ids) against the plain text.
+    private func orderedWords(in text: String) -> [(id: Word.ID, text: String)] {
+      let ns = text as NSString
+      return model.document.wordRanges.compactMap { entry in
+        guard entry.range.location + entry.range.length <= ns.length else { return nil }
+        return (entry.wordID, ns.substring(with: entry.range))
+      }
+    }
+
+    private struct ClipPlacement {
+      var wordToClip: [Word.ID: EditorClip.ID]
+      var firstWordIndex: [EditorClip.ID: Int]
+    }
+
+    /// Maps each visible clip's words to that clip, and records the transcript-order index of each
+    /// clip's FIRST word (where the card lifts out). First visible clip wins any word overlap.
+    private func clipPlacement(
+      cards: [ClipCardVM], orderedWords: [(id: Word.ID, text: String)]
+    ) -> ClipPlacement {
+      var wordToClip: [Word.ID: EditorClip.ID] = [:]
+      for card in cards {
+        for wordID in card.wordIDs where wordToClip[wordID] == nil {
+          wordToClip[wordID] = card.id
+        }
+      }
+      var firstWordIndex: [EditorClip.ID: Int] = [:]
+      for (index, word) in orderedWords.enumerated() {
+        if let clipID = wordToClip[word.id], firstWordIndex[clipID] == nil {
+          firstWordIndex[clipID] = index
+        }
+      }
+      return ClipPlacement(wordToClip: wordToClip, firstWordIndex: firstWordIndex)
+    }
+
+    /// Width-constrained height for each card, measured with a throwaway hosting view so the
+    /// placeholder reserves exactly the card's laid-out height.
+    private func measuredCardHeights(cards: [ClipCardVM], width: CGFloat) -> [EditorClip.ID:
+      CGFloat]
+    {
+      guard width > 0, let actions = clipActions else { return [:] }
+      var heights: [EditorClip.ID: CGFloat] = [:]
+      for card in cards {
+        let host = NSHostingView(rootView: ClipCardView(card: card, actions: actions))
+        host.translatesAutoresizingMaskIntoConstraints = false
+        let constraint = host.widthAnchor.constraint(equalToConstant: width)
+        constraint.isActive = true
+        host.layoutSubtreeIfNeeded()
+        heights[card.id] = host.fittingSize.height
+        constraint.isActive = false
+      }
+      return heights
+    }
+
+    /// Positions (creating/reusing) an `NSHostingView` card over each placeholder's line rect, and
+    /// removes hosts for clips no longer shown.
+    private func placeCards(
+      cards: [ClipCardVM], heights: [EditorClip.ID: CGFloat], width: CGFloat
+    ) {
+      guard let textView, let layoutManager = textView.layoutManager,
+        let container = textView.textContainer, let actions = clipActions
+      else { return }
+      layoutManager.ensureLayout(for: container)
+      let cardsByID = Dictionary(cards.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+      let shown = Set(cardAnchors.map(\.id))
+      for (id, host) in cardHosts where !shown.contains(id) {
+        host.removeFromSuperview()
+        cardHosts[id] = nil
+      }
+      let inset = textView.textContainerInset
+      for anchor in cardAnchors {
+        guard let card = cardsByID[anchor.id] else { continue }
+        let glyphRange = layoutManager.glyphRange(
+          forCharacterRange: NSRange(location: anchor.location, length: 1),
+          actualCharacterRange: nil)
+        let rect = layoutManager.boundingRect(forGlyphRange: glyphRange, in: container)
+        let host: NSHostingView<ClipCardView>
+        if let existing = cardHosts[anchor.id] {
+          existing.rootView = ClipCardView(card: card, actions: actions)
+          host = existing
+        } else {
+          host = NSHostingView(rootView: ClipCardView(card: card, actions: actions))
+          host.translatesAutoresizingMaskIntoConstraints = true
+          textView.addSubview(host)
+          cardHosts[anchor.id] = host
+        }
+        let height = heights[anchor.id] ?? rect.height
+        host.frame = NSRect(
+          x: rect.minX + inset.width,
+          y: rect.minY + inset.height + Self.cardMarginV,
+          width: width, height: height)
+      }
+    }
+
+    // MARK: - Selection
+    private func range(for id: Word.ID) -> NSRange? {
+      wordRanges.first { $0.wordID == id }?.range
+    }
+
+    private func applySelection(added: Set<Word.ID>, removed: Set<Word.ID>, clipsOnly: Bool) {
+      guard let storage = textView?.textStorage else { return }
+      let baseFG = clipsOnly ? Self.dimmedFG : Self.normalFG
       for id in removed {
         guard let wordRange = range(for: id) else { continue }
         storage.removeAttribute(.backgroundColor, range: wordRange)
-        storage.addAttribute(.foregroundColor, value: Self.normalFG, range: wordRange)
+        storage.addAttribute(.foregroundColor, value: baseFG, range: wordRange)
       }
       for id in added {
         guard let wordRange = range(for: id) else { continue }
@@ -176,11 +348,7 @@ struct TranscriptTextView: NSViewRepresentable {
       }
     }
 
-    // MARK: Scroll observation
-    // User scroll is detected from actual user input, not bounds changes: `scrollWheel`
-    // (trackpad/mouse-wheel) is forwarded from the text view, and live-scroll (trackpad
-    // gesture / scroller drag) is observed here. TextKit's deferred layout can post bounds
-    // changes after a programmatic auto-scroll, so bounds are NOT a reliable user signal.
+    // MARK: - Scroll observation
     func observeScroll() {
       guard let scrollView else { return }
       NotificationCenter.default.addObserver(
@@ -192,31 +360,57 @@ struct TranscriptTextView: NSViewRepresentable {
       model.transcriptUserScrolled()
     }
 
-    // MARK: Hit testing (point → UTF-16 offset → model)
+    // MARK: - Hit testing (point → word)
     func utf16Offset(at point: NSPoint) -> Int? {
       guard let textView, let lm = textView.layoutManager, let container = textView.textContainer
       else { return nil }
       lm.ensureLayout(for: container)
-      // Empty/failed-load document: no glyphs means `glyphIndex(for:)` returns 0 and
-      // `characterIndexForGlyph(at: 0)` would trap. Returning nil no-ops the handlers.
       guard lm.numberOfGlyphs > 0 else { return nil }
       let local = NSPoint(
         x: point.x - textView.textContainerInset.width,
         y: point.y - textView.textContainerInset.height)
       let glyph = lm.glyphIndex(for: local, in: container)
-      // TextKit clamps out-of-bounds points to the nearest glyph, so a click on blank
-      // space (below the last line, above the first, or in the left inset / right of a
-      // ragged line's end) would toggle a stray word. Require the point to fall inside the
-      // resolved line fragment's drawn text so only genuine word clicks resolve.
       let lineRect = lm.lineFragmentUsedRect(forGlyphAt: glyph, effectiveRange: nil)
       guard lineRect.contains(local) else { return nil }
       return lm.characterIndexForGlyph(at: glyph)
     }
+
+    /// The non-clip word an offset lands in (rightmost word starting at/before it), or nil.
+    func wordID(atUTF16Offset offset: Int) -> Word.ID? {
+      var candidate: Word.ID?
+      for entry in wordRanges {
+        if entry.range.location <= offset { candidate = entry.wordID } else { break }
+      }
+      return candidate
+    }
+
+    /// A click resolved to a UTF-16 offset. While a point-and-add side is armed, a word click sets
+    /// that boundary (via the clip actions) instead of changing the selection; otherwise it's a
+    /// normal transcript selection.
+    func clicked(atUTF16Offset offset: Int, extending: Bool) {
+      guard let wordID = wordID(atUTF16Offset: offset) else { return }
+      if armedAddSide != nil {
+        clipActions?.wordPicked(wordID)
+      } else {
+        model.wordClicked(wordID, extending: extending)
+      }
+    }
+
+    func dragBegan(atUTF16Offset offset: Int) {
+      guard armedAddSide == nil, let wordID = wordID(atUTF16Offset: offset) else { return }
+      model.selectionAnchorID = wordID
+      model.selectionFocusID = wordID
+    }
+
+    func dragged(toUTF16Offset offset: Int) {
+      guard armedAddSide == nil, let wordID = wordID(atUTF16Offset: offset) else { return }
+      model.selectionFocusID = wordID
+    }
   }
 }
 
-/// Forwards mouse events to the coordinator as UTF-16 offsets and classifies click vs
-/// drag from the raw event stream. No selection decisions here — those live in the model.
+/// Forwards mouse events to the coordinator as UTF-16 offsets and classifies click vs drag from
+/// the raw event stream. No selection decisions here — those live in the model/coordinator.
 final class HitTestingTextView: NSTextView {
   weak var coordinator: TranscriptTextView.Coordinator?
   private var anchorOffset: Int?
@@ -234,18 +428,16 @@ final class HitTestingTextView: NSTextView {
     guard let offset = coordinator.utf16Offset(at: point) else { return }
     if !didDrag {
       didDrag = true
-      coordinator.model.transcriptDragBegan(atUTF16Offset: anchor)
+      coordinator.dragBegan(atUTF16Offset: anchor)
     }
-    coordinator.model.transcriptDragged(toUTF16Offset: offset)
+    coordinator.dragged(toUTF16Offset: offset)
   }
 
   override func mouseUp(with event: NSEvent) {
     guard let coordinator else { return }
     if !didDrag, let anchor = anchorOffset {
-      coordinator.model.transcriptClicked(
-        atUTF16Offset: anchor, extending: event.modifierFlags.contains(.shift))
+      coordinator.clicked(atUTF16Offset: anchor, extending: event.modifierFlags.contains(.shift))
     }
-    coordinator.model.transcriptDragEnded()
     anchorOffset = nil
     didDrag = false
   }

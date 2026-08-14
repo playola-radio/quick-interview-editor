@@ -43,6 +43,12 @@ struct ClipKeyMonitor: NSViewRepresentable {
       // `Sendable`) and hop to the main actor carrying only those — the event never crosses.
       monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
         let flags = event.modifierFlags
+        // Esc cancels an armed point-and-add (only consumed while something is armed, so Esc keeps
+        // its normal meaning otherwise).
+        if event.keyCode == 53, flags.isDisjoint(with: [.command, .control, .option, .shift]) {
+          let consumed = MainActor.assumeIsolated { self?.handleEscape() ?? false }
+          return consumed ? nil : event
+        }
         // ⌥-arrows (and ⇧⌥-arrows) move the current clip's boundary a whole word. Auto-repeat is
         // allowed here so holding the key steps continuously, like Logic's nudge. ⌘/⌃ are excluded
         // so this never shadows a system/menu shortcut.
@@ -111,6 +117,16 @@ struct ClipKeyMonitor: NSViewRepresentable {
       if let responder = window.firstResponder as? NSText, responder.isEditable { return false }
       if window.firstResponder is NSControl { return false }
       return model?.clipBoundaryKeyDown(edit) ?? false
+    }
+
+    /// Esc: cancel an armed point-and-add. Only consumes the key when something is actually armed,
+    /// so Esc keeps its normal behavior everywhere else.
+    private func handleEscape() -> Bool {
+      guard let window = host?.window, window.isKeyWindow, let model,
+        model.transcript.isArmedAdd
+      else { return false }
+      model.cancelPointAndAdd()
+      return true
     }
   }
 }
