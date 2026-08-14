@@ -100,8 +100,8 @@ struct TranscriptTextView: NSViewRepresentable {
     weak var blockLayoutManager: ClipBlockLayoutManager?
     var blockActions = TranscriptBlockActions(
       railTapped: { _ in }, select: { _ in }, interiorClicked: { _, _ in },
-      boundaryDragBegan: { _, _ in false }, boundaryDragged: { _ in },
-      boundaryDragEnded: {}, boundaryDragCancelled: {})
+      canBeginBoundaryEdit: { _ in false }, boundaryDragBegan: {}, boundaryDragEnded: {},
+      boundaryCommit: { _, _, _ in })
     var paragraphSpacing: Double = 0
     var lineHeightMultiple: Double = 1
     private var lastText = ""
@@ -127,6 +127,10 @@ struct TranscriptTextView: NSViewRepresentable {
     /// wordID → its role in a clip block, rebuilt each `applyBlocks`. Drives both hit-testing
     /// (which gesture a mousedown starts) and the hover cursor.
     private(set) var wordRoles: [Word.ID: ClipWordRole] = [:]
+    /// The UTF-16 run currently forced to the clip foreground by a live boundary-drag preview, so
+    /// the next preview step (or the release) can reset it before re-tinting. Nil when no drag is
+    /// previewing. View-local — a preview never mutates the model, so it repaints from here.
+    private var previewForegroundRange: NSRange?
 
     init(model: TranscriptPageModel) { self.model = model }
 
@@ -362,6 +366,124 @@ struct TranscriptTextView: NSViewRepresentable {
         span: NSRange(location: start, length: end - start), first: firstByLoc.0, last: lastByLoc.0)
     }
 
+    // MARK: - Boundary-drag preview (view-only; never mutates the model)
+    /// The clip's FIXED endpoint word for a drag on `side`: dragging the START keeps the clip's
+    /// last word fixed; dragging the END keeps its first word fixed. Nil when the clip isn't laid
+    /// out. Resolved from the block's word ranges so it's the true first/last by transcript
+    /// position, not by array order.
+    func fixedWord(forClip id: EditorClip.ID, draggingSide side: SliceEdge) -> Word.ID? {
+      guard let block = currentBlocks.first(where: { $0.id == id }),
+        let run = span(for: block.wordIDs, ranges: wordRangeLookup())
+      else { return nil }
+      return side == .start ? run.last : run.first
+    }
+
+    /// Start a preview: remember the dragged clip's committed run as the region to reset before the
+    /// first re-tint (its words are already at clip foreground), so a drag that shrinks the clip
+    /// dims the trimmed tail correctly.
+    func beginBoundaryPreview(clip id: EditorClip.ID) {
+      previewForegroundRange = currentBlocks.first { $0.id == id }
+        .flatMap { span(for: $0.wordIDs, ranges: wordRangeLookup())?.span }
+    }
+
+    /// One preview step: repaint the dragged clip's band to span the fixed word through the dragged
+    /// word (the pointer's nearest word), reusing the clip's colors, with the previewed run at clip
+    /// foreground. Drives `ClipBlockLayoutManager.blocks` directly + a scoped foreground attribute —
+    /// no model call, no `applyBlocks`, so the waveform/insets/cards don't move until release.
+    func previewBoundary(
+      clip id: EditorClip.ID, side: SliceEdge, fixedWordID: Word.ID, draggedWordID: Word.ID
+    ) {
+      guard let storage = textView?.textStorage else { return }
+      let ranges = wordRangeLookup()
+      guard let fixedRange = ranges[fixedWordID], let draggedRange = ranges[draggedWordID] else {
+        return
+      }
+      // Clamp so the dragged edge can't cross the fixed one (an END never before the START word,
+      // and vice versa) — the band would otherwise flip; the model applies the same clamp on commit.
+      let draggedLocation =
+        side == .end
+        ? max(draggedRange.location, fixedRange.location)
+        : min(draggedRange.location, fixedRange.location)
+      let low = min(fixedRange.location, draggedLocation)
+      let high = max(fixedRange.location, draggedLocation)
+      let previewWordIDs = model.document.wordRanges
+        .filter { $0.range.location >= low && $0.range.location <= high }
+        .map(\.wordID)
+
+      blockLayoutManager?.blocks = previewDraws(
+        overriding: id, withWordIDs: previewWordIDs, ranges: ranges, maxLength: storage.length)
+      setPreviewForeground(previewWordIDs, ranges: ranges, storage: storage)
+    }
+
+    /// End a preview (mouse-up commit or Esc): drop the preview foreground bookkeeping and repaint
+    /// authoritatively from the (still current) model with a full recolor, wiping any run the
+    /// preview forced white. On commit the following model mutation re-runs `applyBlocks` with the
+    /// new blocks; on Esc this restore is the final state.
+    func endBoundaryPreview() {
+      previewForegroundRange = nil
+      needsFullRecolor = true
+      applyBlocks(blocks: currentBlocks, selected: currentSelected, clipsOnly: currentClipsOnly)
+    }
+
+    /// The full block-draw set with one clip's word run overridden by the preview's, ordered so the
+    /// current clip draws last (it wins the tint + ring where clips overlap), mirroring `applyBlocks`.
+    /// Every range is intersected with `maxLength` (the live storage extent) before it goes into a
+    /// `ClipBlockDraw`, so the layout manager's `glyphRange(forCharacterRange:)` can never be handed
+    /// an out-of-bounds range even from a stale cache.
+    private func previewDraws(
+      overriding clipID: EditorClip.ID, withWordIDs previewWordIDs: [Word.ID],
+      ranges: [Word.ID: NSRange], maxLength: Int
+    ) -> [ClipBlockDraw] {
+      let full = NSRange(location: 0, length: maxLength)
+      let ordered = currentBlocks.filter { !$0.isCurrent } + currentBlocks.filter { $0.isCurrent }
+      var draws: [ClipBlockDraw] = []
+      for block in ordered {
+        let wordIDs = block.id == clipID ? previewWordIDs : block.wordIDs
+        guard let run = span(for: wordIDs, ranges: ranges) else { continue }
+        let charRange = NSIntersectionRange(run.span, full)
+        guard charRange.length > 0 else { continue }
+        let style = Self.tint(state: block.state, isCurrent: block.isCurrent)
+        let wordRanges = wordIDs.compactMap { ranges[$0] }
+          .map { NSIntersectionRange($0, full) }
+          .filter { $0.length > 0 }
+          .sorted { $0.location < $1.location }
+        draws.append(
+          ClipBlockDraw(
+            charRange: charRange, wordRanges: wordRanges, fillColor: style.fill,
+            ringColor: style.ring, hoverCharRange: nil, hoverColor: style.hoverFill))
+      }
+      return draws
+    }
+
+    /// Forces the previewed run to clip foreground: reset the previous preview run to base first so
+    /// a shrinking drag re-dims the words it dropped, then whiten the new run. Bounded to the drag's
+    /// own words; `endBoundaryPreview` does the authoritative full reset on release. Every range is
+    /// intersected with the live storage extent before it's applied, so a stale cached range can
+    /// never index out of bounds even if the text were to change under a preview.
+    private func setPreviewForeground(
+      _ previewWordIDs: [Word.ID], ranges: [Word.ID: NSRange], storage: NSTextStorage
+    ) {
+      let base = currentClipsOnly ? Self.dimFG : Self.normalFG
+      let previewRanges = previewWordIDs.compactMap { ranges[$0] }
+      guard let low = previewRanges.map(\.location).min(),
+        let high = previewRanges.map({ $0.location + $0.length }).max()
+      else { return }
+      let full = NSRange(location: 0, length: storage.length)
+      storage.beginEditing()
+      if let previous = previewForegroundRange {
+        let clamped = NSIntersectionRange(previous, full)
+        if clamped.length > 0 {
+          storage.addAttribute(.foregroundColor, value: base, range: clamped)
+        }
+      }
+      let run = NSIntersectionRange(NSRange(location: low, length: high - low), full)
+      if run.length > 0 {
+        storage.addAttribute(.foregroundColor, value: Self.clipFG, range: run)
+      }
+      storage.endEditing()
+      previewForegroundRange = run.length > 0 ? run : nil
+    }
+
     // MARK: - Hover
     /// The pointer moved over the transcript: set the boundary-drag cursor over a clip's end word
     /// and brighten that end, an arrow otherwise. Re-tints only when the hovered end changes.
@@ -460,24 +582,33 @@ final class HitTestingTextView: NSTextView {
 
   private enum Gesture {
     case none
-    case boundary(EditorClip.ID, side: SliceEdge, began: Bool)
+    case boundary(EditorClip.ID, side: SliceEdge, fixedWordID: Word.ID?, previewing: Bool)
     case interior(EditorClip.ID, Word.ID)
     case free(anchor: Int, began: Bool)
   }
   private var gesture: Gesture = .none
   private var escMonitor: Any?
   private var hoverTrackingArea: NSTrackingArea?
-  /// The word the boundary drag last snapped to, so an intra-word mouse move (many per word) fires
-  /// no model update — the drag only touches the model when it crosses into a different word.
+  /// The word the boundary preview last snapped to, so an intra-word mouse move (many per word)
+  /// fires no repaint — the preview only re-tints when it crosses into a different word. Also the
+  /// word the edge commits to on mouse-up.
   private var lastDraggedWordID: Word.ID?
 
   override func mouseDown(with event: NSEvent) {
     guard let coordinator else { return }
+    // Clear any word snapped by a prior boundary preview so a fresh gesture can never commit to it.
+    lastDraggedWordID = nil
     let point = convert(event.locationInWindow, from: nil)
     if let (wordID, role) = coordinator.clipWord(at: point) {
       switch role {
-      case .start(let id): gesture = .boundary(id, side: .start, began: false)
-      case .end(let id): gesture = .boundary(id, side: .end, began: false)
+      case .start(let id):
+        gesture = .boundary(
+          id, side: .start,
+          fixedWordID: coordinator.fixedWord(forClip: id, draggingSide: .start), previewing: false)
+      case .end(let id):
+        gesture = .boundary(
+          id, side: .end,
+          fixedWordID: coordinator.fixedWord(forClip: id, draggingSide: .end), previewing: false)
       case .interior(let id): gesture = .interior(id, wordID)
       case nil:
         gesture =
@@ -492,22 +623,29 @@ final class HitTestingTextView: NSTextView {
     guard let coordinator else { return }
     let point = convert(event.locationInWindow, from: nil)
     switch gesture {
-    case .boundary(let id, let side, let began):
-      if !began {
-        // Only arm the drag (and its Esc-cancel monitor) if the model accepted it — a refused
-        // begin (no range / unsaved edit elsewhere) drops the gesture so Esc isn't swallowed for
-        // a drag that never started.
-        guard coordinator.blockActions.boundaryDragBegan(id, side) else {
+    case .boundary(let id, let side, let fixedWordID, let previewing):
+      // Without a resolvable fixed word there's nothing to anchor the band to — drop the gesture.
+      guard let fixed = fixedWordID else {
+        gesture = .none
+        return
+      }
+      if !previewing {
+        // The drag is a pure view-only preview; only arm it (and the Esc monitor) if the eventual
+        // mouse-up commit would be accepted, so a refused edit never shows a band that snaps back.
+        guard coordinator.blockActions.canBeginBoundaryEdit(id) else {
           gesture = .none
           return
         }
+        coordinator.blockActions.boundaryDragBegan()
+        coordinator.beginBoundaryPreview(clip: id)
         installEscMonitor()
         lastDraggedWordID = nil
-        gesture = .boundary(id, side: side, began: true)
+        gesture = .boundary(id, side: side, fixedWordID: fixed, previewing: true)
       }
       if let wordID = coordinator.nearestWordID(at: point), wordID != lastDraggedWordID {
         lastDraggedWordID = wordID
-        coordinator.blockActions.boundaryDragged(wordID)
+        coordinator.previewBoundary(
+          clip: id, side: side, fixedWordID: fixed, draggedWordID: wordID)
       }
     case .free(let anchor, let began):
       if !began { coordinator.model.transcriptDragBegan(atUTF16Offset: anchor) }
@@ -523,10 +661,18 @@ final class HitTestingTextView: NSTextView {
   override func mouseUp(with event: NSEvent) {
     guard let coordinator else { return }
     switch gesture {
-    case .boundary(let id, _, let began):
-      if began {
-        coordinator.blockActions.boundaryDragEnded()
+    case .boundary(let id, let side, _, let previewing):
+      if previewing {
+        // Drop the preview first (repaints the pre-commit state), then commit ONCE — the model
+        // mutation re-runs `applyBlocks` with the committed blocks for a seamless handoff. A drag
+        // that never crossed a word has nothing to commit. Clear the drag flag before committing so
+        // the commit's funnel isn't itself refused as a "mid-drag" edit.
         removeEscMonitor()
+        coordinator.blockActions.boundaryDragEnded()
+        coordinator.endBoundaryPreview()
+        if let wordID = lastDraggedWordID {
+          coordinator.blockActions.boundaryCommit(id, side, wordID)
+        }
       } else {
         coordinator.blockActions.select(id)
       }
@@ -568,14 +714,16 @@ final class HitTestingTextView: NSTextView {
     hoverTrackingArea = area
   }
 
-  /// A local key monitor active only during a boundary drag: Esc cancels the drag (restoring the
-  /// pre-drag boundary) and swallows the key. Fires on the main thread; carries no `NSEvent`.
+  /// A local key monitor active only during a boundary-drag preview: Esc drops the preview
+  /// (repainting the pre-drag state) WITHOUT committing, and swallows the key. Fires on the main
+  /// thread; carries no `NSEvent`.
   private func installEscMonitor() {
     escMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
       guard event.keyCode == 53 else { return event }  // Escape
       let handled = MainActor.assumeIsolated { () -> Bool in
-        guard let self, case .boundary(_, _, true) = self.gesture else { return false }
-        self.coordinator?.blockActions.boundaryDragCancelled()
+        guard let self, case .boundary(_, _, _, true) = self.gesture else { return false }
+        self.coordinator?.blockActions.boundaryDragEnded()
+        self.coordinator?.endBoundaryPreview()
         self.gesture = .none
         self.removeEscMonitor()
         return true
@@ -590,11 +738,13 @@ final class HitTestingTextView: NSTextView {
   }
 
   /// Called from `dismantleNSView` when the view goes away mid-gesture: drop the Esc monitor and
-  /// cancel a live boundary drag so the model's coalescing flag doesn't stay set.
+  /// the live preview (no commit). The drag never touched the model, so there's nothing to unwind
+  /// there.
   func tearDown() {
     removeEscMonitor()
-    if case .boundary(_, _, true) = gesture {
-      coordinator?.blockActions.boundaryDragCancelled()
+    if case .boundary(_, _, _, true) = gesture {
+      coordinator?.blockActions.boundaryDragEnded()
+      coordinator?.endBoundaryPreview()
     }
     gesture = .none
   }

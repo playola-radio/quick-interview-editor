@@ -1115,6 +1115,18 @@ final class EditorModel: ViewModel {
   /// (begin → dragged… → ended).
   @ObservationIgnored private var isGripDragging = false
 
+  /// True while a block edge-drag preview is in flight in the transcript view. The drag itself is
+  /// view-only (no model mutation), but this flag lets the keyboard/nav paths refuse edits pressed
+  /// mid-drag — otherwise a ⌥-arrow could mutate `fineTune` and commit a slice while the mouse still
+  /// owns the boundary, splitting the one undo entry the release commits. Not observed → no re-render.
+  @ObservationIgnored private var isBlockEdgeDragging = false
+
+  /// The transcript view entered / left a block edge-drag preview. A begin/end pair only (never
+  /// per-move), so it reintroduces none of the per-mouseDragged model churn the view-only preview
+  /// exists to avoid.
+  func blockEdgeDragBegan() { isBlockEdgeDragging = true }
+  func blockEdgeDragEnded() { isBlockEdgeDragging = false }
+
   /// A discrete whole-word boundary step (⌥←/⌥→, ⇧⌥←/⇧⌥→): open a fine-tune draft on the current
   /// clip if needed, move the boundary to the adjacent word edge, and — for a slice-backed clip —
   /// commit it as ONE undo entry. A suggestion-backed clip keeps the edit live in its draft
@@ -1124,7 +1136,7 @@ final class EditorModel: ViewModel {
     // A mouse edge-drag owns the boundary while it's in progress: ignore keyboard nudges until it
     // releases, so the drag stays exactly ONE undo entry (a mid-drag commit would split it) and an
     // Esc-cancel has only the dragged side to restore.
-    guard !isGripDragging else { return }
+    guard !isGripDragging, !isBlockEdgeDragging else { return }
     guard beginBoundaryEditIfNeeded() else { return }
     applyBoundaryEdit(edit)
     commitBoundaryEditIfSliceBacked()
@@ -1152,77 +1164,33 @@ final class EditorModel: ViewModel {
   }
 
   // MARK: - Block boundary editing (absolute word: edge drag + click-inside)
-  /// The edge a block edge-drag is moving, captured at begin (the drag started on that clip's
-  /// first word → `.start`, last word → `.end`). Nil when no block edge-drag is in progress.
-  @ObservationIgnored private var boundaryDragSide: SliceEdge?
-  /// The draft range at drag begin, so Esc restores the exact pre-drag boundary of the dragged
-  /// side (only one side moves per drag, so restoring that side alone is correct).
-  @ObservationIgnored private var boundaryDragStartRange: Range<Int>?
-
-  /// Block edge-drag start: make the dragged clip current, open its draft, and enter coalescing
-  /// mode (reusing `isGripDragging`) so the word steps that follow record no undo entry until the
-  /// drag ends. Returns whether the model accepted the drag — `false` (and no drag state) if the
-  /// clip has no range or an unsaved edit on another target blocks it, so the view can drop the
-  /// gesture instead of arming an Esc-cancel for a drag that never started.
-  @discardableResult
-  func clipBoundaryDragBegan(_ id: EditorClip.ID, side: SliceEdge) -> Bool {
-    // Refuse BEFORE touching selection if the begin can't succeed — otherwise `selectClip` below
-    // would move focus to `id` and clear the draft link while a stale unsaved draft stays open on
-    // the old clip (the pane would then commit the wrong clip).
-    guard canBeginBoundaryEdit(on: id) else { return false }
-    isGripDragging = true
-    boundaryDragSide = side
-    if currentClipID != id { selectClip(id) }
-    guard beginBoundaryEditIfNeeded() else {
-      isGripDragging = false
-      boundaryDragSide = nil
-      return false
-    }
-    boundaryDragStartRange = fineTune.draftRange
-    return true
+  /// Commits a whole block edge-drag as exactly ONE undo entry. The drag itself is a pure
+  /// view-only band preview (the renderer follows the pointer without touching the model), so the
+  /// model is mutated only here, on mouse-up: make the dragged clip current, open its draft, move
+  /// the dragged `side` to the word the edge landed on, and commit (slice-backed clips only; a
+  /// suggestion keeps the edit live in its draft until approved). A no-op — leaving selection and
+  /// any other draft untouched — when the clip has no range or an unsaved edit on another target
+  /// blocks it (see `canBeginBoundaryEdit`).
+  func commitClipBoundary(_ clipID: EditorClip.ID, side: SliceEdge, toWordID wordID: Word.ID) {
+    // Refuse BEFORE touching selection if the edit can't open — otherwise `selectClip` would move
+    // focus to `clipID` and clear the draft link while a stale unsaved draft stays open on the old
+    // clip (the pane would then commit the wrong clip).
+    guard canBeginBoundaryEdit(on: clipID) else { return }
+    if currentClipID != clipID { selectClip(clipID) }
+    guard beginBoundaryEditIfNeeded() else { return }
+    setClipBoundary(side, toWordID: wordID)
+    commitBoundaryEditIfSliceBacked()
   }
 
   /// Whether a boundary edit could open on `id` right now: a clip with a range, and either it's
   /// already the linked live draft or nothing unsaved blocks retargeting. Mirrors
   /// `beginBoundaryEditIfNeeded`'s gate so the drag/click entry points can refuse WITHOUT first
-  /// moving selection into an inconsistent half-open state.
-  private func canBeginBoundaryEdit(on id: EditorClip.ID) -> Bool {
+  /// moving selection into an inconsistent half-open state. Pure query — the renderer calls it to
+  /// decide whether to arm a preview drag, so it must not mutate.
+  func canBeginBoundaryEdit(on id: EditorClip.ID) -> Bool {
     guard let clip = clips.first(where: { $0.id == id }), clip.range != nil else { return false }
     if boundaryDraftClipID == id, fineTune.draftRange != nil { return true }
     return !fineTune.hasUnsavedChange
-  }
-
-  /// One block edge-drag step (no undo record): move the dragged edge to `wordID`'s edge — the
-  /// word nearest the pointer, resolved by the renderer. The block re-tint, waveform region, and
-  /// fine-tune insets all follow the one live draft.
-  func clipBoundaryDragged(toWordID wordID: Word.ID) {
-    guard isGripDragging, let side = boundaryDragSide else { return }
-    setClipBoundary(side, toWordID: wordID)
-  }
-
-  /// Block edge-drag end: commit the whole drag as ONE undo entry (slice-backed clips only); a
-  /// suggestion keeps the edit live in its draft.
-  func clipBoundaryDragEnded() {
-    guard isGripDragging else { return }
-    isGripDragging = false
-    boundaryDragSide = nil
-    boundaryDragStartRange = nil
-    commitBoundaryEditIfSliceBacked()
-  }
-
-  /// Esc during a block edge-drag: restore the dragged edge to its pre-drag sample and end the
-  /// drag without committing. Only the dragged side moved, so restoring it alone is exact.
-  func clipBoundaryDragCancelled() {
-    guard isGripDragging, let side = boundaryDragSide else { return }
-    if let start = boundaryDragStartRange {
-      switch side {
-      case .start: fineTune.setStart(toSample: start.lowerBound, snap: .exact)
-      case .end: fineTune.setEnd(toSample: start.upperBound, snap: .exact)
-      }
-    }
-    isGripDragging = false
-    boundaryDragSide = nil
-    boundaryDragStartRange = nil
   }
 
   /// A plain click on a word inside a clip: make the clip current if it isn't (a non-destructive
@@ -1336,10 +1304,11 @@ final class EditorModel: ViewModel {
   /// Returns whether the key was consumed (only when there was something to act on), so an
   /// out-of-context ⏎/⌫ isn't silently swallowed.
   func clipKeyDown(_ key: ClipKey) -> Bool {
-    // While a mouse edge-drag is in progress, a nav/approve/reject/focus key would change the
-    // current clip (or mutate slices) out from under the drag, which then commits the wrong clip
-    // on release. Refuse them (and any key with nothing to act on) until the drag ends.
-    guard !isGripDragging, clipKeyCanAct(key) else { return false }
+    // While a mouse edge-drag is in progress (grip or block preview), a nav/approve/reject/focus
+    // key would change the current clip (or mutate slices) out from under the drag, which then
+    // commits the wrong clip on release. Refuse them (and any key with nothing to act on) until it
+    // ends.
+    guard !isGripDragging, !isBlockEdgeDragging, clipKeyCanAct(key) else { return false }
     switch key {
     case .next: nextClip()
     case .previous: previousClip()

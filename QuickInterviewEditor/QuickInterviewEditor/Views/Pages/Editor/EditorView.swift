@@ -61,10 +61,10 @@ struct EditorView: View {
       railTapped: { model.clipCardTapped($0) },
       select: { model.selectClip($0) },
       interiorClicked: { model.clipInteriorClicked($0, wordID: $1) },
-      boundaryDragBegan: { model.clipBoundaryDragBegan($0, side: $1) },
-      boundaryDragged: { model.clipBoundaryDragged(toWordID: $0) },
-      boundaryDragEnded: { model.clipBoundaryDragEnded() },
-      boundaryDragCancelled: { model.clipBoundaryDragCancelled() }
+      canBeginBoundaryEdit: { model.canBeginBoundaryEdit(on: $0) },
+      boundaryDragBegan: { model.blockEdgeDragBegan() },
+      boundaryDragEnded: { model.blockEdgeDragEnded() },
+      boundaryCommit: { model.commitClipBoundary($0, side: $1, toWordID: $2) }
     )
   }
 

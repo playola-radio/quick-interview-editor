@@ -31,13 +31,16 @@ struct TranscriptBlockActions {
   var select: (EditorClip.ID) -> Void
   /// A plain click on a word inside a clip (focus it, or pull the nearer boundary if current).
   var interiorClicked: (EditorClip.ID, Word.ID) -> Void
-  /// The block edge-drag: grab a clip's first/last word, drag to the nearest word, release.
-  /// `boundaryDragBegan` returns whether the model accepted the drag, so the view only arms its
-  /// Esc-cancel monitor for a drag that actually started.
-  var boundaryDragBegan: (EditorClip.ID, SliceEdge) -> Bool
-  var boundaryDragged: (Word.ID) -> Void
+  /// Whether the renderer should arm a preview drag on this clip (pure query — the drag never
+  /// touches the model, so the view checks up front whether the eventual commit would be accepted).
+  var canBeginBoundaryEdit: (EditorClip.ID) -> Bool
+  /// The band preview began / ended (a begin/end pair, never per-move). Lets the model refuse
+  /// keyboard/nav edits pressed mid-drag so the release stays exactly one undo entry.
+  var boundaryDragBegan: () -> Void
   var boundaryDragEnded: () -> Void
-  var boundaryDragCancelled: () -> Void
+  /// The block edge-drag committed on mouse-up: the dragged clip, which edge moved, and the word
+  /// the edge landed on. The drag itself is a view-only band preview; this is the ONE model call.
+  var boundaryCommit: (EditorClip.ID, SliceEdge, Word.ID) -> Void
 }
 
 /// The full-width clip-map rail above the transcript: one clickable band per clip in its state
