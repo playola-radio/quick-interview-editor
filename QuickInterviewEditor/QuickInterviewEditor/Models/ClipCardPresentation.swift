@@ -27,6 +27,10 @@ enum ClipFilter: String, CaseIterable, Identifiable, Sendable {
   }
 }
 
+/// Which boundary of a clip point-and-add is arming: `start` (＋ Add to beginning) or `end`
+/// (Add to end ＋). While armed, the transcript on that side becomes word-addressable.
+enum ArmedAddSide: Equatable { case start, end }
+
 /// One clip card rendered in the transcript flow. Every string and flag is precomputed so the
 /// view stays pixel-only (CLAUDE.md's "zero logic in views"). Colors are the view's job: the
 /// model hands it clip STATE plus currentness, and the view maps those to the spec's hex
@@ -50,6 +54,29 @@ struct ClipCardVM: Identifiable, Equatable, Sendable {
   var body: String
   var wordIDs: [Word.ID]
   var range: Range<Int>?
+  /// The start side is armed for point-and-add on THIS card (the footer button reads "Pick first
+  /// word…" and the transcript's earlier side becomes word-addressable).
+  var isArmedStart: Bool = false
+  /// The end side is armed for point-and-add on THIS card.
+  var isArmedEnd: Bool = false
+
+  /// The footer button label for the start side, reflecting the armed state.
+  var addStartLabel: String { isArmedStart ? "Pick first word… (esc)" : "＋ Add to beginning" }
+  /// The footer button label for the end side, reflecting the armed state.
+  var addEndLabel: String { isArmedEnd ? "Pick last word… (esc)" : "Add to end ＋" }
+  /// The footer hint, green while armed.
+  var footerHint: String {
+    if isArmedStart { return "click the first word you want in the clip" }
+    if isArmedEnd { return "click the last word you want in the clip" }
+    return "⌥←/→ start · ⇧⌥←/→ end · drag a grip"
+  }
+  /// The header line: `N · Title · duration · STATE`. The view styles it in the state color.
+  var headerLine: String {
+    var parts = ["\(number)", title]
+    if !durationLabel.isEmpty { parts.append(durationLabel) }
+    parts.append(stateLabel.uppercased())
+    return parts.joined(separator: " · ")
+  }
 }
 
 /// One segment of the clip-map rail: a clickable band, positioned by the clip's audio range as

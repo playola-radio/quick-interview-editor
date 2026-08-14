@@ -73,6 +73,11 @@ class TranscriptPageModel: ViewModel {
   var clipFilter: ClipFilter = .all
   /// When true, non-clip transcript text dims so the clips read as a standalone list.
   var clipsOnly = false
+  /// The armed side of point-and-add (adornment data — which transcript side is word-addressable),
+  /// or nil when nothing is armed. Paired with `armedAddClipID`; only one end is ever armed.
+  var armedAddSide: ArmedAddSide?
+  /// The clip whose boundary an armed point-and-add will set.
+  var armedAddClipID: EditorClip.ID?
   var scrollTargetWordID: Word.ID?
   /// The latest explicit reveal request (from clicking a suggestion or clip). The view scrolls
   /// to it regardless of `followMode`; nil until the first reveal.
@@ -138,6 +143,25 @@ class TranscriptPageModel: ViewModel {
 
   func clipFilterChanged(_ filter: ClipFilter) { clipFilter = filter }
   func clipsOnlyToggled() { clipsOnly.toggle() }
+
+  var isArmedAdd: Bool { armedAddSide != nil }
+
+  /// Arms (or, if already armed on the same side/clip, disarms) point-and-add for a clip's side.
+  /// Only one end is ever armed, so arming a side replaces any other armed side.
+  func armAdd(side: ArmedAddSide, clipID: EditorClip.ID) {
+    if armedAddSide == side, armedAddClipID == clipID {
+      disarmAdd()
+    } else {
+      armedAddSide = side
+      armedAddClipID = clipID
+    }
+  }
+
+  /// Cancels an armed point-and-add (the Esc key, a completed pick, or a clip change).
+  func disarmAdd() {
+    armedAddSide = nil
+    armedAddClipID = nil
+  }
 
   /// Selects exactly one word (anchor == focus). Used by the waveform→transcript sync
   /// when the user clicks a point in the audio.

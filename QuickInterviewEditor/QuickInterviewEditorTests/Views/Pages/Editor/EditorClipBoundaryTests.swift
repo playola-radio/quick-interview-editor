@@ -146,6 +146,50 @@ struct EditorClipBoundaryTests {
     }
   }
 
+  // MARK: - Point-and-add
+
+  @Test func pointAndAddPickingAnEarlierWordExtendsTheStartAndDisarms() {
+    let fingerprint = "fp-pna-extend"
+    let plan = Fixtures.editPlan()
+
+    withDependencies {
+      $0.defaultFileStorage = inMemory
+    } operation: {
+      @Shared(.projectState(fingerprint: fingerprint)) var state = ProjectState()
+      let model = editor(plan, fingerprint: fingerprint)
+      let slice = wordSlice(id: Fixtures.uuid(9))  // words 11–14, start 195_098
+      model.mutateSlices { $0.append(slice) }
+
+      model.armAddTapped(slice.id, side: .start)
+      #expect(model.transcript.armedAddSide == .start)
+      model.pointAndAddPicked(10)  // Wiley, start_sample 179_222
+
+      expectNoDifference(model.slices[id: slice.id]?.startSample, 179_222)
+      #expect(model.slices[id: slice.id]?.wordIDs.contains(10) == true)
+      #expect(model.transcript.armedAddSide == nil)
+    }
+  }
+
+  @Test func pointAndAddPickingAWordInsideTheClipShrinksTheStart() {
+    let fingerprint = "fp-pna-shrink"
+    let plan = Fixtures.editPlan()
+
+    withDependencies {
+      $0.defaultFileStorage = inMemory
+    } operation: {
+      @Shared(.projectState(fingerprint: fingerprint)) var state = ProjectState()
+      let model = editor(plan, fingerprint: fingerprint)
+      let slice = wordSlice(id: Fixtures.uuid(9))  // words 11–14, start 195_098
+      model.mutateSlices { $0.append(slice) }
+
+      model.armAddTapped(slice.id, side: .start)
+      model.pointAndAddPicked(13)  // "and", start_sample 232_186 — inside the clip
+
+      expectNoDifference(model.slices[id: slice.id]?.startSample, 232_186)
+      #expect(model.slices[id: slice.id]?.wordIDs.contains(11) == false)
+    }
+  }
+
   @Test func fineTuneCutLineDragMovesTheCurrentCardsWordRange() {
     let fingerprint = "fp-reverse-sync"
     let plan = Fixtures.editPlan()

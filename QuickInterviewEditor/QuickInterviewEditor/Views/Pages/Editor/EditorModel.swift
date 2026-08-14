@@ -446,6 +446,13 @@ final class EditorModel: ViewModel {
       cards[index].durationLabel = sampleDurationLabel(
         draft.count, sampleRate: editPlan.source.sampleRate)
     }
+    // Point-and-add arming (adornment state on the transcript) flags the armed card's footer.
+    if let armedID = transcript.armedAddClipID, let side = transcript.armedAddSide,
+      let index = cards.firstIndex(where: { $0.id == armedID })
+    {
+      cards[index].isArmedStart = side == .start
+      cards[index].isArmedEnd = side == .end
+    }
     return cards
   }
 
@@ -973,6 +980,39 @@ final class EditorModel: ViewModel {
   /// A card (or rail segment) was clicked: make it the current clip. `selectClip` selects its
   /// words and reveals it, so the rail's "select + scroll into view" comes for free.
   func clipCardTapped(_ id: EditorClip.ID) { selectClip(id) }
+
+  /// Arms / disarms point-and-add for a clip's start or end. Arming makes the transcript on that
+  /// side word-addressable; picking a word (`pointAndAddPicked`) sets the boundary and disarms.
+  func armAddTapped(_ id: EditorClip.ID, side: ArmedAddSide) {
+    selectClip(id)
+    transcript.armAdd(side: side, clipID: id)
+  }
+
+  /// Cancels an armed point-and-add without changing anything (Esc, or clicking the lit button).
+  func cancelPointAndAdd() { transcript.disarmAdd() }
+
+  /// The commit end of point-and-add: a word was clicked while a side was armed. Sets that
+  /// boundary to the picked word's edge (start → its start sample, end → its end sample), commits
+  /// a slice-backed clip as one undo entry, then disarms. Clicking a word inside the clip moves the
+  /// boundary inward (the clamp keeps start < end), so the same gesture shrinks as well as grows.
+  func pointAndAddPicked(_ wordID: Word.ID) {
+    guard let side = transcript.armedAddSide, let clipID = transcript.armedAddClipID else { return }
+    if currentClipID != clipID { selectClip(clipID) }
+    guard beginBoundaryEditIfNeeded(),
+      let word = editPlan.words.first(where: { $0.id == wordID })
+    else {
+      transcript.disarmAdd()
+      return
+    }
+    switch side {
+    case .start:
+      if let edge = word.startSample { fineTune.setStart(toSample: edge, snap: .word) }
+    case .end:
+      if let edge = word.endSample { fineTune.setEnd(toSample: edge, snap: .word) }
+    }
+    commitBoundaryEditIfSliceBacked()
+    transcript.disarmAdd()
+  }
 
   /// A card's Approve button: make it current, then run the validated approve/toggle.
   func approveClipTapped(_ id: EditorClip.ID) async {
