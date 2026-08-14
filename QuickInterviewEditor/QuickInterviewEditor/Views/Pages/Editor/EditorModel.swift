@@ -428,6 +428,14 @@ final class EditorModel: ViewModel {
     return nil
   }
 
+  /// The live fine-tune draft range for `id`, but only when it's the clip being edited (so an
+  /// unrelated open draft can't leak). Used when approving a suggestion to carry the user's
+  /// boundary edit into the minted slice.
+  private func liveDraftRange(for id: EditorClip.ID) -> Range<Int>? {
+    guard boundaryDraftClipID == id else { return nil }
+    return fineTune.draftRange
+  }
+
   /// Every clip as a render-ready card, in ranked order. The transcript renderer places these in
   /// flow; the view filters them with `visibleClipCards`. While a boundary is being edited, the
   /// current clip's card reflects the LIVE fine-tune draft (word range + duration + body), so the
@@ -913,7 +921,16 @@ final class EditorModel: ViewModel {
     case .suggestion(let id):
       switch clip.state {
       case .suggested, .rejected:
+        // Capture any live boundary edit BEFORE accepting: `acceptTapped` mints the slice from the
+        // suggestion's ORIGINAL word IDs, so without this the user's adjusted boundaries would be
+        // silently discarded on approval (the card showed them, the export wouldn't have them).
+        let editedRange = liveDraftRange(for: id)
         cutSuggestions.acceptTapped(id)
+        if let editedRange, let slice = slices[id: id],
+          slice.startSample..<slice.endSample != editedRange
+        {
+          mutateSlices { $0[id: id] = updatedSlice(slice, to: editedRange) }
+        }
       case .approved:
         cutSuggestions.resetTapped(id)
         // Dropping the minted slice is a slice removal like any other: reconcile so a stale
@@ -1048,9 +1065,11 @@ final class EditorModel: ViewModel {
     commitBoundaryEditIfSliceBacked()
   }
 
-  /// Grip drag start: open the draft and enter coalescing mode so the steps that follow don't each
-  /// record an undo entry.
-  func clipGripDragBegan() {
+  /// Grip drag start: make the dragged card the current clip (so the drag edits ITS boundary, not
+  /// whatever was current), open the draft, and enter coalescing mode so the steps that follow
+  /// don't each record an undo entry.
+  func clipGripDragBegan(_ id: EditorClip.ID) {
+    if currentClipID != id { selectClip(id) }
     guard beginBoundaryEditIfNeeded() else { return }
     isGripDragging = true
   }

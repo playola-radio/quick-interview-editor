@@ -32,7 +32,7 @@ struct TranscriptClipActions {
   var armAddStart: (EditorClip.ID) -> Void
   var armAddEnd: (EditorClip.ID) -> Void
   var wordPicked: (Word.ID) -> Void
-  var gripBegan: () -> Void
+  var gripBegan: (EditorClip.ID) -> Void
   var gripStep: (ClipBoundaryEdit) -> Void
   var gripEnded: () -> Void
 }
@@ -82,7 +82,7 @@ struct ClipCardView: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
       ClipGripHandle(
-        isTop: true, actions: actions,
+        isTop: true, clipID: card.id, actions: actions,
         help: "Drag up to pull in earlier words")
       header
       Text(card.body)
@@ -92,7 +92,7 @@ struct ClipCardView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
       footer
       ClipGripHandle(
-        isTop: false, actions: actions,
+        isTop: false, clipID: card.id, actions: actions,
         help: "Drag down to pull in later words")
     }
     .padding(EdgeInsets(top: 12, leading: 14, bottom: 13, trailing: 14))
@@ -152,6 +152,7 @@ struct ClipCardView: View {
 /// words in, up gives back.
 private struct ClipGripHandle: View {
   let isTop: Bool
+  let clipID: EditorClip.ID
   let actions: TranscriptClipActions
   let help: String
   @State private var hovering = false
@@ -194,7 +195,7 @@ private struct ClipGripHandle: View {
         if !dragging {
           dragging = true
           appliedSteps = 0
-          actions.gripBegan()
+          actions.gripBegan(clipID)
         }
         let steps = Int((value.translation.height / Self.pixelsPerWord).rounded(.towardZero))
         while appliedSteps < steps {

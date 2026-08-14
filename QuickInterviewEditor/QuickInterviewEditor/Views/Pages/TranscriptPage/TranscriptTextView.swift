@@ -104,6 +104,11 @@ struct TranscriptTextView: NSViewRepresentable {
     private var wordRanges: [TranscriptWordRange] = []
     /// Emitted clip → the placeholder attachment's character index (for card placement).
     private var cardAnchors: [(id: EditorClip.ID, location: Int)] = []
+    /// A lifted clip word → the clip that owns it, so `range(for:)` can reveal the CARD when a
+    /// scroll/reveal targets a word that's inside a card (it has no text range of its own).
+    private var wordToShownClip: [Word.ID: EditorClip.ID] = [:]
+    /// Emitted clip → its placeholder character location, for the reveal fallback above.
+    private var anchorLocation: [EditorClip.ID: Int] = [:]
     /// Live hosting views for the placed cards, keyed by clip id (reused across updates).
     private var cardHosts: [EditorClip.ID: NSHostingView<ClipCardView>] = [:]
 
@@ -189,27 +194,28 @@ struct TranscriptTextView: NSViewRepresentable {
       let attr = NSMutableAttributedString()
       var ranges: [TranscriptWordRange] = []
       var anchors: [(id: EditorClip.ID, location: Int)] = []
+      var anchorByClip: [EditorClip.ID: Int] = [:]
       var emitted = Set<EditorClip.ID>()
       var pendingSeparator = false
 
       for (index, word) in orderedWords.enumerated() {
-        if let clipID = placement.wordToClip[word.id] {
-          // A clip word: emit the card placeholder once (at the clip's first word), skip its text.
-          if placement.firstWordIndex[clipID] == index, !emitted.contains(clipID) {
-            if attr.length > 0 { attr.append(NSAttributedString(string: "\n")) }
-            let cell = ClipPlaceholderCell()
-            cell.reservedSize = NSSize(
-              width: width, height: (cardHeights[clipID] ?? 0) + Self.cardMarginV * 2)
-            let attachment = NSTextAttachment()
-            attachment.attachmentCell = cell
-            anchors.append((clipID, attr.length))
-            attr.append(NSAttributedString(attachment: attachment))
-            attr.append(NSAttributedString(string: "\n"))
-            emitted.insert(clipID)
-            pendingSeparator = false
-          }
-          continue
+        // Emit every card anchored at this index BEFORE the word — driven by index, not by which
+        // clip claims the word, so a clip fully contained in another still gets its own placeholder.
+        for clipID in placement.clipsByIndex[index] ?? [] where !emitted.contains(clipID) {
+          if attr.length > 0 { attr.append(NSAttributedString(string: "\n")) }
+          let cell = ClipPlaceholderCell()
+          cell.reservedSize = NSSize(
+            width: width, height: (cardHeights[clipID] ?? 0) + Self.cardMarginV * 2)
+          let attachment = NSTextAttachment()
+          attachment.attachmentCell = cell
+          anchors.append((clipID, attr.length))
+          anchorByClip[clipID] = attr.length
+          attr.append(NSAttributedString(attachment: attachment))
+          attr.append(NSAttributedString(string: "\n"))
+          emitted.insert(clipID)
+          pendingSeparator = false
         }
+        if placement.wordToClip[word.id] != nil { continue }  // lifted into a card; skip its text
         if pendingSeparator { attr.append(NSAttributedString(string: " ")) }
         let start = attr.length
         let piece = NSAttributedString(string: word.text)
@@ -228,6 +234,8 @@ struct TranscriptTextView: NSViewRepresentable {
       storage.setAttributedString(attr)
       wordRanges = ranges
       cardAnchors = anchors
+      wordToShownClip = placement.wordToClip
+      anchorLocation = anchorByClip
 
       placeCards(cards: cards, heights: cardHeights, width: width)
     }
@@ -245,12 +253,14 @@ struct TranscriptTextView: NSViewRepresentable {
     }
 
     private struct ClipPlacement {
+      /// Any word lifted into a card → the (first, for text-skipping) clip that owns it.
       var wordToClip: [Word.ID: EditorClip.ID]
-      var firstWordIndex: [EditorClip.ID: Int]
+      /// Transcript-order index → the clips whose card anchors there, in card order. A clip's
+      /// anchor index is its earliest word's position, computed INDEPENDENTLY so a clip fully
+      /// contained in another still gets a placeholder (both anchor, possibly at the same index).
+      var clipsByIndex: [Int: [EditorClip.ID]]
     }
 
-    /// Maps each visible clip's words to that clip, and records the transcript-order index of each
-    /// clip's FIRST word (where the card lifts out). First visible clip wins any word overlap.
     private func clipPlacement(
       cards: [ClipCardVM], orderedWords: [(id: Word.ID, text: String)]
     ) -> ClipPlacement {
@@ -260,13 +270,16 @@ struct TranscriptTextView: NSViewRepresentable {
           wordToClip[wordID] = card.id
         }
       }
-      var firstWordIndex: [EditorClip.ID: Int] = [:]
-      for (index, word) in orderedWords.enumerated() {
-        if let clipID = wordToClip[word.id], firstWordIndex[clipID] == nil {
-          firstWordIndex[clipID] = index
-        }
+      var docIndex: [Word.ID: Int] = [:]
+      for (index, word) in orderedWords.enumerated() where docIndex[word.id] == nil {
+        docIndex[word.id] = index
       }
-      return ClipPlacement(wordToClip: wordToClip, firstWordIndex: firstWordIndex)
+      var clipsByIndex: [Int: [EditorClip.ID]] = [:]
+      for card in cards {
+        guard let anchor = card.wordIDs.compactMap({ docIndex[$0] }).min() else { continue }
+        clipsByIndex[anchor, default: []].append(card.id)
+      }
+      return ClipPlacement(wordToClip: wordToClip, clipsByIndex: clipsByIndex)
     }
 
     /// Width-constrained height for each card, measured with a throwaway hosting view so the
@@ -329,8 +342,15 @@ struct TranscriptTextView: NSViewRepresentable {
     }
 
     // MARK: - Selection
+    /// The text range for a word, or — when the word has been lifted into a card and has no text of
+    /// its own — the card's placeholder location, so a reveal/scroll that targets an in-clip word
+    /// scrolls to the card instead of failing silently.
     private func range(for id: Word.ID) -> NSRange? {
-      wordRanges.first { $0.wordID == id }?.range
+      if let range = wordRanges.first(where: { $0.wordID == id })?.range { return range }
+      if let clipID = wordToShownClip[id], let location = anchorLocation[clipID] {
+        return NSRange(location: location, length: 1)
+      }
+      return nil
     }
 
     private func applySelection(added: Set<Word.ID>, removed: Set<Word.ID>, clipsOnly: Bool) {

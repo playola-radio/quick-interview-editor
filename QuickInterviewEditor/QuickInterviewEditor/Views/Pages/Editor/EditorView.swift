@@ -61,7 +61,7 @@ struct EditorView: View {
       armAddStart: { model.armAddTapped($0, side: .start) },
       armAddEnd: { model.armAddTapped($0, side: .end) },
       wordPicked: { model.pointAndAddPicked($0) },
-      gripBegan: { model.clipGripDragBegan() },
+      gripBegan: { model.clipGripDragBegan($0) },
       gripStep: { model.clipGripDragged($0) },
       gripEnded: { model.clipGripDragEnded() }
     )

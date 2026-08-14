@@ -214,6 +214,63 @@ struct EditorClipBoundaryTests {
     }
   }
 
+  @Test func approvingAnEditedSuggestionKeepsTheAdjustedBoundaries() async {
+    let fingerprint = "fp-approve-edited"
+    let plan = Fixtures.editPlan()
+    var suggestion = Fixtures.cutSuggestion(id: Fixtures.uuid(1), wordIDs: [11, 12, 13, 14])
+    suggestion.startSample = 195_098
+    suggestion.endSample = 243_653
+    suggestion.provenance = CutSuggestion.Provenance(
+      model: "m", promptVersion: "v", productSpecVersion: "v",
+      transcriptHash: plan.transcriptHash, sourceFingerprint: fingerprint, diarizationHash: nil)
+
+    await withDependencies {
+      $0.defaultFileStorage = inMemory
+    } operation: {
+      @Shared(.projectState(fingerprint: fingerprint)) var state = ProjectState(
+        cutSuggestions: [suggestion])
+      let model = editor(plan, fingerprint: fingerprint)
+      model.selectClip(suggestion.id)
+      model.moveCurrentClipBoundary(.startLater)  // draft start → 208_328, no slice yet
+
+      await model.approveCurrentClip()
+
+      // The minted slice carries the edited boundary, not the suggestion's original start.
+      expectNoDifference(state.cutSuggestions[id: suggestion.id]?.status, .accepted)
+      expectNoDifference(model.slices[id: suggestion.id]?.startSample, 208_328)
+    }
+  }
+
+  @Test func gripDragOnANonCurrentCardSelectsItBeforeEditing() {
+    let fingerprint = "fp-grip-select"
+    let plan = Fixtures.editPlan()
+
+    withDependencies {
+      $0.defaultFileStorage = inMemory
+    } operation: {
+      @Shared(.projectState(fingerprint: fingerprint)) var state = ProjectState()
+      let target = wordSlice(id: Fixtures.uuid(9))
+      let other = Slice(
+        id: Fixtures.uuid(8), name: "Other", startSample: 500_000, endSample: 600_000,
+        wordIDs: [30], snippet: "x", warnings: [])
+      let model = editor(plan, fingerprint: fingerprint)
+      model.mutateSlices {
+        $0.append(other)
+        $0.append(target)
+      }
+      model.selectClip(other.id)  // a different clip is current
+
+      // Dragging the target card's grip must edit the TARGET, not the current `other`.
+      model.clipGripDragBegan(target.id)
+      model.clipGripDragged(.endLater)
+      model.clipGripDragEnded()
+
+      expectNoDifference(model.currentClipID, target.id)
+      expectNoDifference(model.slices[id: other.id]?.endSample, 600_000)
+      #expect(model.slices[id: target.id]?.endSample != 243_653)
+    }
+  }
+
   @Test func gripDragCoalescesManyStepsIntoOneUndoEntry() async {
     let fingerprint = "fp-bound-grip"
     let plan = Fixtures.editPlan()
@@ -227,7 +284,7 @@ struct EditorClipBoundaryTests {
       model.mutateSlices { $0.append(slice) }
       model.selectClip(slice.id)
 
-      model.clipGripDragBegan()
+      model.clipGripDragBegan(slice.id)
       model.clipGripDragged(.endLater)
       model.clipGripDragged(.endLater)
       // Mid-drag nothing is committed to the slice yet.
