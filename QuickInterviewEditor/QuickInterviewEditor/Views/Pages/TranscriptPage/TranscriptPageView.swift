@@ -20,6 +20,7 @@ struct TranscriptPageView: View {
         text: model.plainTranscriptText,
         fontSize: model.fontSize,
         paragraphSpacing: model.paragraphSpacing,
+        lineHeightMultiple: model.lineHeightMultiple,
         selected: model.selectedWordIDSet,
         scrollTarget: model.scrollTargetWordID,
         followMode: model.followMode,

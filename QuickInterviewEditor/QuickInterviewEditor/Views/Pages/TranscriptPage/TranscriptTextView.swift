@@ -19,6 +19,7 @@ struct TranscriptTextView: NSViewRepresentable {
   let text: String
   let fontSize: Double
   let paragraphSpacing: Double
+  let lineHeightMultiple: Double
   let selected: Set<Word.ID>
   let scrollTarget: Word.ID?
   let followMode: TranscriptFollowMode
@@ -66,6 +67,7 @@ struct TranscriptTextView: NSViewRepresentable {
     context.coordinator.scrollView = scroll
     context.coordinator.blockActions = blockActions
     context.coordinator.paragraphSpacing = paragraphSpacing
+    context.coordinator.lineHeightMultiple = lineHeightMultiple
     context.coordinator.observeScroll()
     context.coordinator.rebuildText(text: text, fontSize: fontSize)
     context.coordinator.applyBlocks(blocks: blocks, selected: selected, clipsOnly: clipsOnly)
@@ -76,6 +78,7 @@ struct TranscriptTextView: NSViewRepresentable {
     context.coordinator.model = model
     context.coordinator.blockActions = blockActions
     context.coordinator.paragraphSpacing = paragraphSpacing
+    context.coordinator.lineHeightMultiple = lineHeightMultiple
     context.coordinator.apply(
       text: text, fontSize: fontSize,
       scrollTarget: scrollTarget, followMode: followMode, reveal: reveal)
@@ -100,6 +103,7 @@ struct TranscriptTextView: NSViewRepresentable {
       boundaryDragBegan: { _, _ in false }, boundaryDragged: { _ in },
       boundaryDragEnded: {}, boundaryDragCancelled: {})
     var paragraphSpacing: Double = 0
+    var lineHeightMultiple: Double = 1
     private var lastText = ""
     private var lastFontSize: Double = 0
     private var lastScrollTarget: Word.ID?
@@ -174,6 +178,7 @@ struct TranscriptTextView: NSViewRepresentable {
       attr.addAttribute(.foregroundColor, value: Self.normalFG, range: full)
       let paragraphStyle = NSMutableParagraphStyle()
       paragraphStyle.paragraphSpacing = paragraphSpacing
+      paragraphStyle.lineHeightMultiple = lineHeightMultiple
       attr.addAttribute(.paragraphStyle, value: paragraphStyle, range: full)
       storage.setAttributedString(attr)
       lastText = text
@@ -257,10 +262,14 @@ struct TranscriptTextView: NSViewRepresentable {
         let hoverRange = hoveredWordID.flatMap { hovered in
           (hovered == run.first || hovered == run.last) ? ranges[hovered] : nil
         }
+        // Per-word ranges (in transcript order) let the layout manager band each line to its own
+        // words' extent, so the fill/ring hug the text and never bleed a wrap-boundary space out.
+        let wordRanges = block.wordIDs.compactMap { ranges[$0] }
+          .sorted { $0.location < $1.location }
         draws.append(
           ClipBlockDraw(
-            charRange: run.span, fillColor: style.fill, ringColor: style.ring,
-            hoverCharRange: hoverRange, hoverColor: style.hoverFill))
+            charRange: run.span, wordRanges: wordRanges, fillColor: style.fill,
+            ringColor: style.ring, hoverCharRange: hoverRange, hoverColor: style.hoverFill))
         affected.append(run.span)
       }
 

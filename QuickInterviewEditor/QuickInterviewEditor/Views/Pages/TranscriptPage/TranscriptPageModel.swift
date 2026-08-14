@@ -95,6 +95,10 @@ class TranscriptPageModel: ViewModel {
   /// Vertical gap (points) the renderer leaves after each pause-paragraph. A display
   /// decision, so it lives on the model rather than being hardcoded in the view.
   let paragraphSpacing = 12.0
+  /// Line height as a multiple of the font's natural leading (spec §3: 2.15). The airy spacing
+  /// is what lets each clip's band read as a separate pill with a clear vertical gap between
+  /// lines rather than a solid slab. A display decision, so it lives on the model.
+  let lineHeightMultiple = 2.15
 
   // MARK: - View Helpers
   var hasSelection: Bool { !selectedWords.isEmpty }
