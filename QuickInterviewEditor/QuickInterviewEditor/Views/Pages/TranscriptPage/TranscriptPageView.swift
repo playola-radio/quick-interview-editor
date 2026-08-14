@@ -2,10 +2,19 @@ import SwiftUI
 
 struct TranscriptPageView: View {
   @Bindable var model: TranscriptPageModel
+  /// EditorModel-derived clip render data + actions (decision B: passed in, not a back-reference).
+  let blocks: [ClipBlockVM]
+  let rail: [ClipMapSegment]
+  let counts: String
+  let footer: CurrentClipFooterVM?
+  let clipActions: TranscriptBlockActions
 
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
       header
+      if !rail.isEmpty {
+        ClipMapRailView(segments: rail, counts: counts, onSegmentTapped: clipActions.railTapped)
+      }
       TranscriptTextView(
         model: model,
         text: model.plainTranscriptText,
@@ -14,9 +23,15 @@ struct TranscriptPageView: View {
         selected: model.selectedWordIDSet,
         scrollTarget: model.scrollTargetWordID,
         followMode: model.followMode,
-        reveal: model.reveal
+        reveal: model.reveal,
+        blocks: blocks,
+        clipsOnly: model.clipsOnly,
+        blockActions: clipActions
       )
       .frame(maxWidth: .infinity, maxHeight: .infinity)
+      if let footer {
+        CurrentClipFooterView(footer: footer)
+      }
       controls
     }
     .padding(20)
@@ -40,10 +55,18 @@ struct TranscriptPageView: View {
   }
 
   private var header: some View {
-    HStack {
+    HStack(spacing: 12) {
       Text(model.transcriptCaption)
         .font(.system(size: 11, weight: .semibold)).tracking(1.5)
         .foregroundStyle(Color(white: 0.44))
+      Picker(model.clipFilterPickerLabel, selection: $model.clipFilter) {
+        ForEach(model.clipFilters) { filter in
+          Text(filter.label).tag(filter)
+        }
+      }
+      .pickerStyle(.segmented).labelsHidden().fixedSize()
+      Toggle(model.clipsOnlyLabel, isOn: $model.clipsOnly)
+        .toggleStyle(.checkbox).font(.system(size: 11))
       Spacer()
       zoomControls
     }

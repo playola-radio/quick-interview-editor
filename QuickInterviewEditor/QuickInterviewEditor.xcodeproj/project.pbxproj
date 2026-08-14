@@ -62,6 +62,7 @@
 		5E083790FB009D2C1B1F005F /* KeychainClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA08AD54DC59B6F59481D196 /* KeychainClient.swift */; };
 		5F634B357789FFEFA223ACF1 /* Dependencies in Frameworks */ = {isa = PBXBuildFile; productRef = A1E5EE198133D28AA4F8C697 /* Dependencies */; };
 		5FBCD19C134DF84BD4EAE04C /* project-state.json in Resources */ = {isa = PBXBuildFile; fileRef = E1E9662606BA96652926960E /* project-state.json */; };
+		603D7F85640222824A6C2EB7 /* ClipBlockLayoutManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2BD23E44D8498E7732808B8 /* ClipBlockLayoutManager.swift */; };
 		60CEC876724046AFF78F0E12 /* ProjectState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C045DA0DE38B61FBF812635 /* ProjectState.swift */; };
 		612400EB7125669478AA6BED /* ExportNaming.swift in Sources */ = {isa = PBXBuildFile; fileRef = 327A6CD4A25A47E502C44C60 /* ExportNaming.swift */; };
 		63126F987A7D5C174D4E919C /* CutSuggestionAccept.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDB75E8909EA443A5FB175E2 /* CutSuggestionAccept.swift */; };
@@ -78,6 +79,7 @@
 		756FEC229B9F824352BE4D57 /* edit-plan-v2.json in Resources */ = {isa = PBXBuildFile; fileRef = 4881DD551D6727B533A2C3A7 /* edit-plan-v2.json */; };
 		7742FDC7D65B2788C36D6522 /* ViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 340DF12DDCE384A3A7FAFF4F /* ViewModel.swift */; };
 		77A1EBC6D7DC5BC93877A64F /* EditorClipPersistenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABF0F60A435BA7F0A8421D4A /* EditorClipPersistenceTests.swift */; };
+		7BF785EE3C95C7720F388FCE /* ClipBlockUI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9EFFC4E3DEC5539BB3878D60 /* ClipBlockUI.swift */; };
 		7D02F2C8C654CDC50EAE7BC9 /* EditorAuditionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54D37A7FBE9F9B56D63ABE13 /* EditorAuditionTests.swift */; };
 		7E56FEC9DE02981429DAF9DE /* CanonicalAudioStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0BD0C997619379A57E176AC /* CanonicalAudioStoreTests.swift */; };
 		7F8B8F60094F2834318EAA99 /* ProductSpec.swift in Sources */ = {isa = PBXBuildFile; fileRef = 142F15B1C9E1242FE0DDA443 /* ProductSpec.swift */; };
@@ -259,6 +261,7 @@
 		98AF849A99658DB929493E32 /* EditPlanV2DecodeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditPlanV2DecodeTests.swift; sourceTree = "<group>"; };
 		990E56AF2E3DE415036CB683 /* ImportPageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportPageView.swift; sourceTree = "<group>"; };
 		9D98567D61BC7012DE5B96D6 /* CutSuggestion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CutSuggestion.swift; sourceTree = "<group>"; };
+		9EFFC4E3DEC5539BB3878D60 /* ClipBlockUI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipBlockUI.swift; sourceTree = "<group>"; };
 		A07879F92F7BB45A4D1BE448 /* SliceWarnings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SliceWarnings.swift; sourceTree = "<group>"; };
 		A0BD0C997619379A57E176AC /* CanonicalAudioStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanonicalAudioStoreTests.swift; sourceTree = "<group>"; };
 		A0CD6F173A8779985CCABC01 /* RunTogetherTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunTogetherTests.swift; sourceTree = "<group>"; };
@@ -312,6 +315,7 @@
 		EDAA4727D876BA9740484179 /* CutSuggestionsPageModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CutSuggestionsPageModel.swift; sourceTree = "<group>"; };
 		F120260251DEBF3A9BC28ED2 /* RenderTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RenderTypes.swift; sourceTree = "<group>"; };
 		F1E29A237821D79F1F395D04 /* WaveformModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WaveformModel.swift; sourceTree = "<group>"; };
+		F2BD23E44D8498E7732808B8 /* ClipBlockLayoutManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipBlockLayoutManager.swift; sourceTree = "<group>"; };
 		F892E381E98FE9A9A7A9369E /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		F8BDD55E22A85C18219A2A42 /* AuditionKeyMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuditionKeyMonitor.swift; sourceTree = "<group>"; };
 		FA08AD54DC59B6F59481D196 /* KeychainClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainClient.swift; sourceTree = "<group>"; };
@@ -520,6 +524,8 @@
 		90703CF8F17806E2573F3803 /* TranscriptPage */ = {
 			isa = PBXGroup;
 			children = (
+				F2BD23E44D8498E7732808B8 /* ClipBlockLayoutManager.swift */,
+				9EFFC4E3DEC5539BB3878D60 /* ClipBlockUI.swift */,
 				238BBB22C13D9B5453A89ECD /* TranscriptPageModel.swift */,
 				89BCD2B81DFD4899212F05EB /* TranscriptPageView.swift */,
 				C7A511F2FE1806A3BA6DF28F /* TranscriptTextView.swift */,
@@ -965,7 +971,9 @@
 				C595884140FF8A84B4E144C8 /* AudioPlayerClient.swift in Sources */,
 				040207BF50636ADA05DDBF32 /* AuditionKeyMonitor.swift in Sources */,
 				07132AD42696C596F39D4EAB /* CanonicalAudioStore.swift in Sources */,
+				603D7F85640222824A6C2EB7 /* ClipBlockLayoutManager.swift in Sources */,
 				66220CB6729D5005BBF84BF7 /* ClipBlockPresentation.swift in Sources */,
+				7BF785EE3C95C7720F388FCE /* ClipBlockUI.swift in Sources */,
 				1257C8DE53ABC354E2FDFB59 /* ClipCardPresentation.swift in Sources */,
 				DD99E6411A86BBC89EBA9304 /* ClipKeyMonitor.swift in Sources */,
 				054524450980F5589AA19E9A /* CutSuggestClient.swift in Sources */,

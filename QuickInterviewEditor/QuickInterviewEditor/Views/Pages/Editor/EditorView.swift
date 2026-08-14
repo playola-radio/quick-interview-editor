@@ -6,8 +6,15 @@ struct EditorView: View {
   var body: some View {
     HStack(spacing: 0) {
       VStack(spacing: 0) {
-        TranscriptPageView(model: model.transcript)
-          .frame(maxWidth: .infinity, maxHeight: .infinity)
+        TranscriptPageView(
+          model: model.transcript,
+          blocks: model.visibleClipBlocks,
+          rail: model.clipMapSegments,
+          counts: model.clipCountsSummary,
+          footer: model.currentClipFooter,
+          clipActions: transcriptClipActions
+        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         Divider()
         WaveformView(model: model)
         if model.showsFineTunePane {
@@ -45,6 +52,20 @@ struct EditorView: View {
       let cursorToken = model.cursorMoveToken
       Task { await model.transportSelectionChanged(newRange, cursorToken: cursorToken) }
     }
+  }
+
+  /// The clip gestures the transcript surface routes to the model (decision B: an
+  /// EditorModel-derived actions object passed in, not a back-reference into the model).
+  private var transcriptClipActions: TranscriptBlockActions {
+    TranscriptBlockActions(
+      railTapped: { model.clipCardTapped($0) },
+      select: { model.selectClip($0) },
+      interiorClicked: { model.clipInteriorClicked($0, wordID: $1) },
+      boundaryDragBegan: { model.clipBoundaryDragBegan($0, side: $1) },
+      boundaryDragged: { model.clipBoundaryDragged(toWordID: $0) },
+      boundaryDragEnded: { model.clipBoundaryDragEnded() },
+      boundaryDragCancelled: { model.clipBoundaryDragCancelled() }
+    )
   }
 
   @ViewBuilder private var rightPanel: some View {
