@@ -82,6 +82,13 @@ struct TranscriptTextView: NSViewRepresentable {
     context.coordinator.applyBlocks(blocks: blocks, selected: selected, clipsOnly: clipsOnly)
   }
 
+  /// If SwiftUI tears the view down mid-drag (tab switch / editor close), remove the Esc monitor
+  /// and cancel any in-flight boundary drag so neither the global monitor nor the model's
+  /// coalescing flag is left dangling.
+  static func dismantleNSView(_ nsView: NSScrollView, coordinator: Coordinator) {
+    (nsView.documentView as? HitTestingTextView)?.tearDown()
+  }
+
   @MainActor
   final class Coordinator: NSObject {
     var model: TranscriptPageModel
@@ -176,6 +183,7 @@ struct TranscriptTextView: NSViewRepresentable {
       // glyphs before the next `applyBlocks` runs.
       needsFullRecolor = true
       lastAffectedRanges = []
+      cachedWordRanges = nil
       blockLayoutManager?.blocks = []
     }
 
@@ -244,9 +252,15 @@ struct TranscriptTextView: NSViewRepresentable {
       for block in ordered {
         guard let run = span(for: block.wordIDs, ranges: ranges) else { continue }
         let style = Self.tint(state: block.state, isCurrent: block.isCurrent)
-        tintBlock(storage: storage, run: run, style: style, ranges: ranges)
+        tintBlock(storage: storage, run: run, style: style)
         recordRoles(&roles, block: block, first: run.first, last: run.last)
-        draws.append(ClipBlockDraw(charRange: run.span, ringColor: style.ring))
+        let hoverRange = hoveredWordID.flatMap { hovered in
+          (hovered == run.first || hovered == run.last) ? ranges[hovered] : nil
+        }
+        draws.append(
+          ClipBlockDraw(
+            charRange: run.span, fillColor: style.fill, ringColor: style.ring,
+            hoverCharRange: hoverRange, hoverColor: style.hoverFill))
         affected.append(run.span)
       }
 
@@ -282,21 +296,17 @@ struct TranscriptTextView: NSViewRepresentable {
       lastClipsOnly = clipsOnly
     }
 
-    /// Tints one clip's contiguous run: the continuous state fill + foreground (+ strikethrough
-    /// when rejected), then brightens the run's hovered end word.
-    private func tintBlock(
-      storage: NSTextStorage, run: ClipRun, style: BlockStyle, ranges: [Word.ID: NSRange]
-    ) {
-      storage.addAttribute(.backgroundColor, value: style.fill, range: run.span)
+    /// Applies the run's text attributes only: foreground color and, for a rejected clip,
+    /// strikethrough (cleared otherwise so a later non-rejected overlap wins). The fill, ring, and
+    /// hovered-end brightening are DRAWN by `ClipBlockLayoutManager` from the glyphs' enclosing
+    /// rects, so they hug the words exactly instead of bleeding a wrap-boundary space to the edge.
+    private func tintBlock(storage: NSTextStorage, run: ClipRun, style: BlockStyle) {
       storage.addAttribute(.foregroundColor, value: style.fg, range: run.span)
       if style.strike {
         storage.addAttribute(
           .strikethroughStyle, value: NSUnderlineStyle.single.rawValue, range: run.span)
-      }
-      if let hovered = hoveredWordID, hovered == run.first || hovered == run.last,
-        let hoverRange = ranges[hovered]
-      {
-        storage.addAttribute(.backgroundColor, value: style.hoverFill, range: hoverRange)
+      } else {
+        storage.removeAttribute(.strikethroughStyle, range: run.span)
       }
     }
 
@@ -310,10 +320,16 @@ struct TranscriptTextView: NSViewRepresentable {
       }
     }
 
+    /// wordID → UTF-16 range, cached across re-tints (rebuilt only when the text changes) so a
+    /// live drag's per-step re-tint doesn't re-hash every word each mouse move.
+    private var cachedWordRanges: [Word.ID: NSRange]?
     private func wordRangeLookup() -> [Word.ID: NSRange] {
-      Dictionary(
+      if let cachedWordRanges { return cachedWordRanges }
+      let map = Dictionary(
         model.document.wordRanges.map { ($0.wordID, $0.range) },
         uniquingKeysWith: { first, _ in first })
+      cachedWordRanges = map
+      return map
     }
 
     /// A clip's contiguous UTF-16 span (first word's start to last word's end, so the in-between
@@ -341,16 +357,18 @@ struct TranscriptTextView: NSViewRepresentable {
     /// The pointer moved over the transcript: set the boundary-drag cursor over a clip's end word
     /// and brighten that end, an arrow otherwise. Re-tints only when the hovered end changes.
     func hoverMoved(to point: NSPoint) {
-      let role = clipWord(at: point)?.role
+      let hit = clipWord(at: point)
       let end: Word.ID?
-      switch role {
+      switch hit?.role {
       case .start, .end:
         NSCursor.resizeLeftRight.set()
-        end = clipWord(at: point)?.wordID
+        end = hit?.wordID
       default:
         NSCursor.arrow.set()
         end = nil
       }
+      // Only re-tint when the hovered end actually changes (cursor is set every move regardless),
+      // so plain hover motion doesn't repaint the whole transcript.
       guard end != hoveredWordID else { return }
       hoveredWordID = end
       applyBlocks(blocks: currentBlocks, selected: currentSelected, clipsOnly: currentClipsOnly)
@@ -440,6 +458,9 @@ final class HitTestingTextView: NSTextView {
   private var gesture: Gesture = .none
   private var escMonitor: Any?
   private var hoverTrackingArea: NSTrackingArea?
+  /// The word the boundary drag last snapped to, so an intra-word mouse move (many per word) fires
+  /// no model update — the drag only touches the model when it crosses into a different word.
+  private var lastDraggedWordID: Word.ID?
 
   override func mouseDown(with event: NSEvent) {
     guard let coordinator else { return }
@@ -472,9 +493,11 @@ final class HitTestingTextView: NSTextView {
           return
         }
         installEscMonitor()
+        lastDraggedWordID = nil
         gesture = .boundary(id, side: side, began: true)
       }
-      if let wordID = coordinator.nearestWordID(at: point) {
+      if let wordID = coordinator.nearestWordID(at: point), wordID != lastDraggedWordID {
+        lastDraggedWordID = wordID
         coordinator.blockActions.boundaryDragged(wordID)
       }
     case .free(let anchor, let began):
@@ -555,5 +578,15 @@ final class HitTestingTextView: NSTextView {
   private func removeEscMonitor() {
     if let escMonitor { NSEvent.removeMonitor(escMonitor) }
     escMonitor = nil
+  }
+
+  /// Called from `dismantleNSView` when the view goes away mid-gesture: drop the Esc monitor and
+  /// cancel a live boundary drag so the model's coalescing flag doesn't stay set.
+  func tearDown() {
+    removeEscMonitor()
+    if case .boundary(_, _, true) = gesture {
+      coordinator?.blockActions.boundaryDragCancelled()
+    }
+    gesture = .none
   }
 }

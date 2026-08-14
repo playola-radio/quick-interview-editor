@@ -1121,6 +1121,10 @@ final class EditorModel: ViewModel {
   /// (the card + waveform follow) until the user approves it. A no-op with no current clip, no
   /// adjacent word, or an unsaved edit held on another target.
   func moveCurrentClipBoundary(_ edit: ClipBoundaryEdit) {
+    // A mouse edge-drag owns the boundary while it's in progress: ignore keyboard nudges until it
+    // releases, so the drag stays exactly ONE undo entry (a mid-drag commit would split it) and an
+    // Esc-cancel has only the dragged side to restore.
+    guard !isGripDragging else { return }
     guard beginBoundaryEditIfNeeded() else { return }
     applyBoundaryEdit(edit)
     commitBoundaryEditIfSliceBacked()
@@ -1162,6 +1166,10 @@ final class EditorModel: ViewModel {
   /// gesture instead of arming an Esc-cancel for a drag that never started.
   @discardableResult
   func clipBoundaryDragBegan(_ id: EditorClip.ID, side: SliceEdge) -> Bool {
+    // Refuse BEFORE touching selection if the begin can't succeed — otherwise `selectClip` below
+    // would move focus to `id` and clear the draft link while a stale unsaved draft stays open on
+    // the old clip (the pane would then commit the wrong clip).
+    guard canBeginBoundaryEdit(on: id) else { return false }
     isGripDragging = true
     boundaryDragSide = side
     if currentClipID != id { selectClip(id) }
@@ -1172,6 +1180,16 @@ final class EditorModel: ViewModel {
     }
     boundaryDragStartRange = fineTune.draftRange
     return true
+  }
+
+  /// Whether a boundary edit could open on `id` right now: a clip with a range, and either it's
+  /// already the linked live draft or nothing unsaved blocks retargeting. Mirrors
+  /// `beginBoundaryEditIfNeeded`'s gate so the drag/click entry points can refuse WITHOUT first
+  /// moving selection into an inconsistent half-open state.
+  private func canBeginBoundaryEdit(on id: EditorClip.ID) -> Bool {
+    guard let clip = clips.first(where: { $0.id == id }), clip.range != nil else { return false }
+    if boundaryDraftClipID == id, fineTune.draftRange != nil { return true }
+    return !fineTune.hasUnsavedChange
   }
 
   /// One block edge-drag step (no undo record): move the dragged edge to `wordID`'s edge — the
@@ -1223,6 +1241,7 @@ final class EditorModel: ViewModel {
   /// as one undo entry. Clicking a word inside the clip trims to it; a word outside extends. The
   /// `setStart`/`setEnd` clamp keeps `start < end`.
   func pullClipBoundary(_ id: EditorClip.ID, toWordID wordID: Word.ID) {
+    guard canBeginBoundaryEdit(on: id) else { return }
     if currentClipID != id { selectClip(id) }
     guard beginBoundaryEditIfNeeded(), let draft = fineTune.draftRange,
       let word = editPlan.words.first(where: { $0.id == wordID }), let mid = wordMidpoint(word)
@@ -1317,26 +1336,29 @@ final class EditorModel: ViewModel {
   /// Returns whether the key was consumed (only when there was something to act on), so an
   /// out-of-context ⏎/⌫ isn't silently swallowed.
   func clipKeyDown(_ key: ClipKey) -> Bool {
+    // While a mouse edge-drag is in progress, a nav/approve/reject/focus key would change the
+    // current clip (or mutate slices) out from under the drag, which then commits the wrong clip
+    // on release. Refuse them (and any key with nothing to act on) until the drag ends.
+    guard !isGripDragging, clipKeyCanAct(key) else { return false }
     switch key {
-    case .next:
-      guard !clips.isEmpty else { return false }
-      nextClip()
-    case .previous:
-      guard !clips.isEmpty else { return false }
-      previousClip()
-    case .approve:
-      guard currentClip != nil else { return false }
-      // Approve/reject reconcile playback, so they're async now; dispatch on the main actor like
-      // the audition monitor does while keeping the consumed decision synchronous.
-      Task { await approveCurrentClip() }
-    case .reject:
-      guard currentClip != nil else { return false }
-      Task { await rejectCurrentClip() }
-    case .focus:
-      guard currentClip != nil else { return false }
-      focusCurrentClip()
+    case .next: nextClip()
+    case .previous: previousClip()
+    // Approve/reject reconcile playback, so they're async; dispatch on the main actor like the
+    // audition monitor does while keeping the consumed decision synchronous.
+    case .approve: Task { await approveCurrentClip() }
+    case .reject: Task { await rejectCurrentClip() }
+    case .focus: focusCurrentClip()
     }
     return true
+  }
+
+  /// Whether a clip key has anything to act on: navigation needs at least one clip; the
+  /// current-clip actions need a current clip.
+  private func clipKeyCanAct(_ key: ClipKey) -> Bool {
+    switch key {
+    case .next, .previous: return !clips.isEmpty
+    case .approve, .reject, .focus: return currentClip != nil
+    }
   }
 
   func addSliceTapped() {
