@@ -90,7 +90,7 @@ struct TranscriptTextView: NSViewRepresentable {
     weak var blockLayoutManager: ClipBlockLayoutManager?
     var blockActions = TranscriptBlockActions(
       railTapped: { _ in }, select: { _ in }, interiorClicked: { _, _ in },
-      boundaryDragBegan: { _, _ in }, boundaryDragged: { _ in },
+      boundaryDragBegan: { _, _ in false }, boundaryDragged: { _ in },
       boundaryDragEnded: {}, boundaryDragCancelled: {})
     var paragraphSpacing: Double = 0
     private var lastText = ""
@@ -172,8 +172,11 @@ struct TranscriptTextView: NSViewRepresentable {
       lastText = text
       lastFontSize = fontSize
       // The colors were reset with the text; force `applyBlocks` to recolor the whole document.
+      // Also drop the old rings so a rebuild can't briefly draw them over the fresh (untinted)
+      // glyphs before the next `applyBlocks` runs.
       needsFullRecolor = true
       lastAffectedRanges = []
+      blockLayoutManager?.blocks = []
     }
 
     func apply(
@@ -233,8 +236,12 @@ struct TranscriptTextView: NSViewRepresentable {
       var draws: [ClipBlockDraw] = []
       var affected: [NSRange] = []
       let blockWordIDs = Set(blocks.flatMap(\.wordIDs))
+      // Render (and assign hit roles for) the current clip LAST so that where clips overlap it
+      // wins the tint, the ring, and the boundary/interior gestures — the edit target should
+      // never be usurped by a lower-ranked clip that happens to share a word.
+      let ordered = blocks.filter { !$0.isCurrent } + blocks.filter { $0.isCurrent }
 
-      for block in blocks {
+      for block in ordered {
         guard let run = span(for: block.wordIDs, ranges: ranges) else { continue }
         let style = Self.tint(state: block.state, isCurrent: block.isCurrent)
         tintBlock(storage: storage, run: run, style: style, ranges: ranges)
@@ -382,9 +389,13 @@ struct TranscriptTextView: NSViewRepresentable {
       return (id, wordRoles[id])
     }
 
-    /// The word nearest a point, clamping to the closest glyph rather than gating on a hit — so a
-    /// boundary drag past the text still resolves the nearest word (spec §4's "word whose box
-    /// center is nearest the pointer").
+    /// The word under a point, clamping to the closest glyph rather than gating on a hit — so a
+    /// boundary drag past the text still resolves a word. This approximates spec §4's "word whose
+    /// box center is nearest the pointer" with the word the pointer is over (nearest glyph): a true
+    /// per-word center scan would be O(words) on every drag step, the exact per-move cost the block
+    /// design exists to avoid, and the two agree except within a sub-word sliver at word edges. A
+    /// separator glyph maps to its preceding word (see `TranscriptDocument.wordID(atUTF16Offset:)`),
+    /// so dragging through the space between words is deterministic, never punctuation-only.
     func nearestWordID(at point: NSPoint) -> Word.ID? {
       guard let textView, let lm = textView.layoutManager, let container = textView.textContainer
       else { return nil }
@@ -453,7 +464,13 @@ final class HitTestingTextView: NSTextView {
     switch gesture {
     case .boundary(let id, let side, let began):
       if !began {
-        coordinator.blockActions.boundaryDragBegan(id, side)
+        // Only arm the drag (and its Esc-cancel monitor) if the model accepted it — a refused
+        // begin (no range / unsaved edit elsewhere) drops the gesture so Esc isn't swallowed for
+        // a drag that never started.
+        guard coordinator.blockActions.boundaryDragBegan(id, side) else {
+          gesture = .none
+          return
+        }
         installEscMonitor()
         gesture = .boundary(id, side: side, began: true)
       }

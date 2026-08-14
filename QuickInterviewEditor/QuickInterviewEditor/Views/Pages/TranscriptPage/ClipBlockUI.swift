@@ -32,7 +32,9 @@ struct TranscriptBlockActions {
   /// A plain click on a word inside a clip (focus it, or pull the nearer boundary if current).
   var interiorClicked: (EditorClip.ID, Word.ID) -> Void
   /// The block edge-drag: grab a clip's first/last word, drag to the nearest word, release.
-  var boundaryDragBegan: (EditorClip.ID, SliceEdge) -> Void
+  /// `boundaryDragBegan` returns whether the model accepted the drag, so the view only arms its
+  /// Esc-cancel monitor for a drag that actually started.
+  var boundaryDragBegan: (EditorClip.ID, SliceEdge) -> Bool
   var boundaryDragged: (Word.ID) -> Void
   var boundaryDragEnded: () -> Void
   var boundaryDragCancelled: () -> Void

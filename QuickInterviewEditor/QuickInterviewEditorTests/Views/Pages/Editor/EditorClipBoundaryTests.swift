@@ -276,6 +276,35 @@ struct EditorClipBoundaryTests {
     }
   }
 
+  @Test func blockEdgeDragBeganReportsWhetherTheModelAcceptedTheDrag() {
+    let fingerprint = "fp-block-accept"
+    let plan = Fixtures.editPlan()
+
+    withDependencies {
+      $0.defaultFileStorage = inMemory
+    } operation: {
+      @Shared(.projectState(fingerprint: fingerprint)) var state = ProjectState()
+      let model = editor(plan, fingerprint: fingerprint)
+      let slice = wordSlice(id: Fixtures.uuid(9))
+      model.mutateSlices { $0.append(slice) }
+
+      // A clip with a range accepts the drag.
+      #expect(model.clipBoundaryDragBegan(slice.id, side: .end))
+      model.clipBoundaryDragEnded()
+
+      // With an unsaved edit held on a DIFFERENT target, the begin is refused (no drag state).
+      let other = Slice(
+        id: Fixtures.uuid(8), name: "Other", startSample: 300_000, endSample: 340_000,
+        wordIDs: [16, 17], snippet: "x", warnings: [])
+      model.mutateSlices { $0.append(other) }
+      model.selectClip(other.id)
+      model.focusCurrentClip()
+      model.cutOutNudged(byMs: 10)  // dirties the other clip's draft
+      #expect(model.fineTune.hasUnsavedChange)
+      #expect(model.clipBoundaryDragBegan(slice.id, side: .end) == false)
+    }
+  }
+
   @Test func blockEdgeDragCancelledRestoresThePreDragBoundary() {
     let fingerprint = "fp-block-cancel"
     let plan = Fixtures.editPlan()

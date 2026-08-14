@@ -1157,18 +1157,21 @@ final class EditorModel: ViewModel {
 
   /// Block edge-drag start: make the dragged clip current, open its draft, and enter coalescing
   /// mode (reusing `isGripDragging`) so the word steps that follow record no undo entry until the
-  /// drag ends. A no-op that clears the drag if the clip has no range or an unsaved edit on
-  /// another target blocks it.
-  func clipBoundaryDragBegan(_ id: EditorClip.ID, side: SliceEdge) {
+  /// drag ends. Returns whether the model accepted the drag — `false` (and no drag state) if the
+  /// clip has no range or an unsaved edit on another target blocks it, so the view can drop the
+  /// gesture instead of arming an Esc-cancel for a drag that never started.
+  @discardableResult
+  func clipBoundaryDragBegan(_ id: EditorClip.ID, side: SliceEdge) -> Bool {
     isGripDragging = true
     boundaryDragSide = side
     if currentClipID != id { selectClip(id) }
     guard beginBoundaryEditIfNeeded() else {
       isGripDragging = false
       boundaryDragSide = nil
-      return
+      return false
     }
     boundaryDragStartRange = fineTune.draftRange
+    return true
   }
 
   /// One block edge-drag step (no undo record): move the dragged edge to `wordID`'s edge — the
