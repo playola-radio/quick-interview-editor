@@ -92,6 +92,34 @@ func wordIDs(overlapping range: Range<Int>, words: [Word]) -> [Word.ID] {
   }
 }
 
+/// Which way a whole-word boundary edit steps along the transcript.
+enum WordStep: Equatable {
+  case earlier
+  case later
+}
+
+/// The word START edge (`word.startSample`) immediately `earlier` than / `later` than `sample`,
+/// or nil when no word lies on that side. Whole-word start-boundary edits (⌥←/⌥→, the top grip,
+/// point-and-add on the start side) step to this edge. Words missing a start sample are ignored.
+func adjacentWordStartEdge(from sample: Int, step: WordStep, words: [Word]) -> Int? {
+  let edges = words.compactMap(\.startSample).sorted()
+  switch step {
+  case .earlier: return edges.last { $0 < sample }
+  case .later: return edges.first { $0 > sample }
+  }
+}
+
+/// The word END edge (`word.endSample`) immediately `earlier` than / `later` than `sample`, or
+/// nil when no word lies on that side. Whole-word end-boundary edits (⇧⌥←/⇧⌥→, the bottom grip,
+/// point-and-add on the end side) step to this edge. Words missing an end sample are ignored.
+func adjacentWordEndEdge(from sample: Int, step: WordStep, words: [Word]) -> Int? {
+  let edges = words.compactMap(\.endSample).sorted()
+  switch step {
+  case .earlier: return edges.last { $0 < sample }
+  case .later: return edges.first { $0 > sample }
+  }
+}
+
 /// Re-derives the plain (unquoted, untruncated) transcript snippet for a set of word IDs,
 /// in transcript order. `EditorModel` wraps the result in quotes and middle-truncates it
 /// for display, exactly as it does for a selection.

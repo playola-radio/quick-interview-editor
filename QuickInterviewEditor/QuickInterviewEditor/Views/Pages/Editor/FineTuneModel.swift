@@ -169,6 +169,49 @@ final class FineTuneModel: ViewModel {
     draftRange = nil
   }
 
+  /// Which grid a sample-based boundary edit snaps to. `.word` and `.none` never re-snap to
+  /// silence — the caller already resolved a word edge (`.word`) or wants the raw sample
+  /// (`.none`); only `.silence` applies the magnet the cut-line drags use. Authority is
+  /// per-gesture: a word edit tagged `.word` is never silently pulled onto a silence edge.
+  enum BoundarySnap: Equatable { case word, silence, none }
+
+  /// Sets the draft's START to an explicit plan `sample`, clamped to the file and the minimum
+  /// slice duration but **not** to the fixed inset window (a whole-word edge can lie far outside
+  /// the ±0.5 s window). Used by the boundary edits (⌥-keys, grips, point-and-add), which pass an
+  /// already word-snapped sample with `snap: .word`. A no-op when no session is open.
+  func setStart(toSample sample: Int, snap: BoundarySnap) {
+    setBoundary(.start, toSample: sample, snap: snap)
+  }
+
+  /// Sets the draft's END the same way `setStart` sets the start.
+  func setEnd(toSample sample: Int, snap: BoundarySnap) {
+    setBoundary(.end, toSample: sample, snap: snap)
+  }
+
+  /// Shared core for the sample-based setters: constrains `proposed` to the whole file (not the
+  /// inset window) and the min-slice duration off the fixed opposite edge, then applies the snap
+  /// policy. `.silence` uses the silence magnet within the legal range; `.word`/`.none` take the
+  /// clamped sample as-is so a word edit is never re-snapped to silence.
+  private func setBoundary(_ edge: SliceEdge, toSample proposed: Int, snap: BoundarySnap) {
+    guard let draftRange else { return }
+    let limits = BoundaryConstraints(
+      window: 0...durationSamples, durationSamples: durationSamples,
+      minDurationSamples: minDurationSamples)
+    let opposite = edge == .start ? draftRange.upperBound : draftRange.lowerBound
+    let clamped = clampedBoundary(proposed, moving: edge, opposite: opposite, constraints: limits)
+    let resolved: Int
+    switch snap {
+    case .silence:
+      resolved = snappedOrClamped(clamped, moving: edge, opposite: opposite, limits: limits)
+    case .word, .none:
+      resolved = clamped
+    }
+    switch edge {
+    case .start: self.draftRange = resolved..<draftRange.upperBound
+    case .end: self.draftRange = draftRange.lowerBound..<resolved
+    }
+  }
+
   func dragCutIn(toInsetX positionX: CGFloat) {
     guard let window = cutInWindow else { return }
     moveStart(to: sample(forInsetX: positionX, in: window), snap: true)

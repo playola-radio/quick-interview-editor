@@ -42,10 +42,20 @@ struct ClipKeyMonitor: NSViewRepresentable {
       // `@Sendable` closure and `NSEvent` is not `Sendable`. Read every value we need here (all
       // `Sendable`) and hop to the main actor carrying only those — the event never crosses.
       monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-        // Ignore auto-repeat: holding ⏎ would otherwise approve then immediately toggle back off
-        // (and holding ⌫/F would fire repeatedly). One physical press = one clip action.
+        let flags = event.modifierFlags
+        // ⌥-arrows (and ⇧⌥-arrows) move the current clip's boundary a whole word. Auto-repeat is
+        // allowed here so holding the key steps continuously, like Logic's nudge. ⌘/⌃ are excluded
+        // so this never shadows a system/menu shortcut.
+        if flags.contains(.option), flags.isDisjoint(with: [.command, .control]),
+          let edit = Self.boundaryEdit(forKeyCode: event.keyCode, shift: flags.contains(.shift))
+        {
+          let consumed = MainActor.assumeIsolated { self?.handleBoundary(edit) ?? false }
+          return consumed ? nil : event
+        }
+        // Ignore auto-repeat for the bare navigation keys: holding ⏎ would otherwise approve then
+        // immediately toggle back off (and holding ⌫/F would fire repeatedly). One press = one action.
         guard !event.isARepeat,
-          event.modifierFlags.isDisjoint(with: [.command, .control, .option]),
+          flags.isDisjoint(with: [.command, .control, .option]),
           let key = Self.clipKey(forKeyCode: event.keyCode)
         else { return event }
         let consumed = MainActor.assumeIsolated { self?.handle(key) ?? false }
@@ -71,6 +81,16 @@ struct ClipKeyMonitor: NSViewRepresentable {
       }
     }
 
+    /// Maps an arrow key (with ⌥ already confirmed by the caller) to a boundary edit: ⌥←/⌥→ move
+    /// the start, ⇧⌥←/⇧⌥→ move the end. `nil` for non-arrow keys. Pure and `Sendable`.
+    static func boundaryEdit(forKeyCode keyCode: UInt16, shift: Bool) -> ClipBoundaryEdit? {
+      switch keyCode {
+      case 123: return shift ? .endEarlier : .startEarlier  // Left arrow
+      case 124: return shift ? .endLater : .startLater  // Right arrow
+      default: return nil
+      }
+    }
+
     /// Performs `key` if focus allows it. Returns whether the key was consumed (so the caller
     /// swallows it instead of letting it beep). Main-actor: touches AppKit window/first-responder
     /// state and the model.
@@ -82,6 +102,15 @@ struct ClipKeyMonitor: NSViewRepresentable {
       // Stand down when a control has focus so ⏎/⌫ still activate the focused button, not a clip.
       if window.firstResponder is NSControl { return false }
       return model?.clipKeyDown(key) ?? false
+    }
+
+    /// A boundary edit key, gated exactly like the navigation keys (key window, not a text field
+    /// or focused control), routed to the current clip's boundary funnel.
+    private func handleBoundary(_ edit: ClipBoundaryEdit) -> Bool {
+      guard let window = host?.window, window.isKeyWindow else { return false }
+      if let responder = window.firstResponder as? NSText, responder.isEditable { return false }
+      if window.firstResponder is NSControl { return false }
+      return model?.clipBoundaryKeyDown(edit) ?? false
     }
   }
 }

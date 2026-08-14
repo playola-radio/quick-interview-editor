@@ -19,6 +19,23 @@ struct FineTuneGeometryTests {
       window: window, durationSamples: durationSamples, minDurationSamples: minDurationSamples)
   }
 
+  // MARK: - adjacent word edges
+
+  @Test func adjacentWordStartEdgeStepsToNeighborOrNilAtEnds() {
+    let words = [word(1, 100, 200), word(2, 300, 400), word(3, 500, 600)]
+    expectNoDifference(adjacentWordStartEdge(from: 300, step: .earlier, words: words), 100)
+    expectNoDifference(adjacentWordStartEdge(from: 300, step: .later, words: words), 500)
+    // Strictly on one side: exactly on an edge never returns itself.
+    expectNoDifference(adjacentWordStartEdge(from: 100, step: .earlier, words: words), nil)
+    expectNoDifference(adjacentWordStartEdge(from: 500, step: .later, words: words), nil)
+  }
+
+  @Test func adjacentWordEndEdgeUsesEndSamplesAndSkipsUnbounded() {
+    let words = [word(1, 100, 200), word(2, 300, nil), word(3, 500, 600)]
+    expectNoDifference(adjacentWordEndEdge(from: 400, step: .earlier, words: words), 200)
+    expectNoDifference(adjacentWordEndEdge(from: 400, step: .later, words: words), 600)
+  }
+
   // MARK: - legalBoundaryRange
 
   @Test func legalStartRangeHonorsFileOppositeAndWindow() {
