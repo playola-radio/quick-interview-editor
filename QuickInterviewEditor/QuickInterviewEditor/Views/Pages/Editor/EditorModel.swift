@@ -399,6 +399,32 @@ final class EditorModel: ViewModel {
   /// resolves — e.g. its suggestion was regenerated away).
   var currentClip: EditorClip? { currentClipID.flatMap { id in clips.first { $0.id == id } } }
 
+  // MARK: - Clip cards (transcript render model)
+  /// Every clip as a render-ready card, in ranked order. The transcript renderer places these
+  /// in flow; the view filters them with `visibleClipCards`.
+  var clipCards: [ClipCardVM] {
+    makeClipCards(
+      from: clips, currentClipID: currentClipID, words: editPlan.words,
+      sampleRate: editPlan.source.sampleRate)
+  }
+
+  /// The cards the renderer actually shows, after the transcript's clip-state filter. The `all`
+  /// filter passes everything; `number` stays 1-based over the full list so it doesn't renumber.
+  var visibleClipCards: [ClipCardVM] {
+    let filter = transcript.clipFilter
+    return clipCards.filter { filter.matches($0.state) }
+  }
+
+  /// The clickable clip-map rail segments above the transcript, positioned by audio range.
+  var clipMapSegments: [ClipMapSegment] {
+    makeClipMapSegments(
+      from: clips, currentClipID: currentClipID,
+      durationSamples: editPlan.source.durationSamples)
+  }
+
+  /// The `N approved · N suggested · N rejected` summary beside the rail.
+  var clipCountsSummary: String { makeClipCountsSummary(clips) }
+
   /// The slices export actually renders. A suggestion-backed slice exports only while its
   /// suggestion is still accepted (so a reject-then-undo can't resurrect a rejected clip into the
   /// export); a manual slice exports unless the user rejected it.
@@ -895,6 +921,29 @@ final class EditorModel: ViewModel {
     // a suggestion-only clip has no slice, so it plays as plain `.free` scrubbing.
     let context: TransportContext = slices[id: clip.id] != nil ? .slice(clip.id) : .free
     await beginTransportPlayback(range: range, context: context)
+  }
+
+  // MARK: - Clip card interactions (id-addressed)
+  /// A card (or rail segment) was clicked: make it the current clip. `selectClip` selects its
+  /// words and reveals it, so the rail's "select + scroll into view" comes for free.
+  func clipCardTapped(_ id: EditorClip.ID) { selectClip(id) }
+
+  /// A card's Approve button: make it current, then run the validated approve/toggle.
+  func approveClipTapped(_ id: EditorClip.ID) async {
+    selectClip(id)
+    await approveCurrentClip()
+  }
+
+  /// A card's Reject button: make it current, then reject.
+  func rejectClipTapped(_ id: EditorClip.ID) async {
+    selectClip(id)
+    await rejectCurrentClip()
+  }
+
+  /// A card's "Play clip" button: make it current, then play its range through the transport.
+  func playClipTapped(_ id: EditorClip.ID) async {
+    selectClip(id)
+    await playCurrentClip()
   }
 
   /// Routes a captured clip-navigation key to its action so the key-monitor view stays logic-free.

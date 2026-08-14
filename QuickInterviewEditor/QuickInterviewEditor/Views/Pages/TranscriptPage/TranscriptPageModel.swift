@@ -68,6 +68,11 @@ class TranscriptPageModel: ViewModel {
   let fontStep = 2.0
   let defaultFontSize = defaultTranscriptFontSize
   var followMode: TranscriptFollowMode = .following
+  /// The clip-state filter for the cards in flow. Layout-local (never persisted): it decides
+  /// which cards the renderer shows, not any clip's accept decision.
+  var clipFilter: ClipFilter = .all
+  /// When true, non-clip transcript text dims so the clips read as a standalone list.
+  var clipsOnly = false
   var scrollTargetWordID: Word.ID?
   /// The latest explicit reveal request (from clicking a suggestion or clip). The view scrolls
   /// to it regardless of `followMode`; nil until the first reveal.
@@ -79,6 +84,9 @@ class TranscriptPageModel: ViewModel {
   let transcriptCaption = "TRANSCRIPT"
   let emptyStateMessage = "No transcript loaded."
   let clearButtonLabel = "Clear"
+  let clipFilters = ClipFilter.allCases
+  let clipFilterPickerLabel = "Filter clips"
+  let clipsOnlyLabel = "Clips only"
   /// Vertical gap (points) the renderer leaves after each pause-paragraph. A display
   /// decision, so it lives on the model rather than being hardcoded in the view.
   let paragraphSpacing = 12.0
@@ -127,6 +135,9 @@ class TranscriptPageModel: ViewModel {
     selectionAnchorID = nil
     selectionFocusID = nil
   }
+
+  func clipFilterChanged(_ filter: ClipFilter) { clipFilter = filter }
+  func clipsOnlyToggled() { clipsOnly.toggle() }
 
   /// Selects exactly one word (anchor == focus). Used by the waveform→transcript sync
   /// when the user clicks a point in the audio.
