@@ -3,6 +3,7 @@ import Foundation
 import IdentifiedCollections
 import IssueReporting
 import Observation
+import Sharing
 
 /// The editor-global shortcuts the key monitor can deliver. PR 2 adds transport cases here.
 enum EditorKey {
@@ -31,6 +32,11 @@ final class EditorModel: ViewModel {
   @ObservationIgnored @Dependency(\.engine) var engine
   @ObservationIgnored @Dependency(\.workspace) var workspace
   @ObservationIgnored @Dependency(\.continuousClock) var clock
+
+  // MARK: - Shared State
+  /// The per-file project sidecar (same key/store the cut-suggester writes to). Saved clips and
+  /// manual-reject decisions are mirrored here so they survive a relaunch.
+  @ObservationIgnored @Shared var projectState: ProjectState
 
   // MARK: - Initialization
   /// The user's original file — used **only** to name exported clips (its stem).
@@ -64,7 +70,14 @@ final class EditorModel: ViewModel {
     // `EditorModel(...)` in `withDependencies(from:)`), so the child inherits the same deps.
     self.cutSuggestions = CutSuggestionsPageModel(
       editPlan: editPlan, sourceFingerprint: fingerprint)
+    _projectState = Shared(.projectState(fingerprint: fingerprint))
     super.init()
+    // Rehydrate the saved clips + manual-reject decisions from the sidecar (trust the fingerprint:
+    // same source file → same plan → the persisted sample ranges are valid). Seed the auto-name
+    // counter past the restored clips so a fresh "Slice N" can't collide with a hydrated name.
+    slices = projectState.slices
+    rejectedManualSliceIDs = projectState.rejectedManualSliceIDs
+    nextSliceNumber = slices.count + 1
     // Accepting a suggestion adds its slice here (idempotently), through the shared
     // mutation funnel so it's exportable and undoable like any other slice.
     cutSuggestions.onAcceptSlice = { [weak self] slice in
@@ -94,12 +107,22 @@ final class EditorModel: ViewModel {
   /// keyboard/selection focus, not an accept decision. Written only through `selectClip`.
   var currentClipID: EditorClip.ID?
   /// Manual slices the user rejected. Kept in `slices` (so undo/rename still work) but rendered
-  /// struck-through and excluded from export. In-memory only — a reject decision on a manual
-  /// clip doesn't survive relaunch (the suggestion sidecar is the only persisted decision store).
+  /// struck-through and excluded from export. Persisted to the sidecar, so a manual reject
+  /// survives relaunch.
   var rejectedManualSliceIDs: Set<Slice.ID> = []
-  /// Undo/redo history over `slices` only — never selection, zoom, playback, or export
-  /// phase. Every slice mutation routes through `mutateSlices`, which records here.
-  var sliceUndo = UndoStack<IdentifiedArrayOf<Slice>>()
+  /// The undoable clip-editing bundle: the saved slices plus the manual-reject decisions, moved
+  /// together so undo/redo and persistence never see one without the other.
+  struct SliceEditState: Equatable {
+    var slices: IdentifiedArrayOf<Slice>
+    var rejectedManualSliceIDs: Set<Slice.ID>
+  }
+  /// Undo/redo history over the clip-edit bundle only — never selection, zoom, playback, or export
+  /// phase. Every clip mutation routes through `mutateSlices`/`rejectManualSlice`, which record here.
+  var sliceUndo = UndoStack<SliceEditState>()
+  /// The current clip-edit bundle, snapshotted before/after each mutation for the undo stack.
+  private var sliceEditState: SliceEditState {
+    SliceEditState(slices: slices, rejectedManualSliceIDs: rejectedManualSliceIDs)
+  }
   /// The slice currently open in the fine-tune pane. Edit-target state, NOT playback state — a
   /// slice can be active (being edited) without playing, and vice versa.
   var activeSliceID: Slice.ID?
@@ -249,8 +272,8 @@ final class EditorModel: ViewModel {
   /// fine-tune draft is unsaved — a tuned pending selection (whose adjustments it would discard)
   /// or a dirty existing-slice edit with a held selection (which requires Save/Cancel first).
   var canAddSlice: Bool { transcript.selectedSampleRange != nil && !fineTune.hasUnsavedChange }
-  // Undo/redo restore `slices` wholesale; doing that under an open cut edit would leave the
-  // draft anchored to a stale committed range, so gate on Save/Cancel first.
+  // Undo/redo restore the clip-edit bundle wholesale; doing that under an open cut edit would
+  // leave the draft anchored to a stale committed range, so gate on Save/Cancel first.
   var canUndo: Bool { sliceUndo.canUndo && !hasUncommittedSliceEdit }
   var canRedo: Bool { sliceUndo.canRedo && !hasUncommittedSliceEdit }
 
@@ -376,9 +399,21 @@ final class EditorModel: ViewModel {
   /// resolves — e.g. its suggestion was regenerated away).
   var currentClip: EditorClip? { currentClipID.flatMap { id in clips.first { $0.id == id } } }
 
-  /// The slices export actually renders: every slice minus the manual ones the user rejected
-  /// (suggestion-rejected slices are already removed from `slices` on reject).
-  var exportableSlices: [Slice] { slices.filter { !rejectedManualSliceIDs.contains($0.id) } }
+  /// The slices export actually renders. A suggestion-backed slice exports only while its
+  /// suggestion is still accepted (so a reject-then-undo can't resurrect a rejected clip into the
+  /// export); a manual slice exports unless the user rejected it.
+  var exportableSlices: [Slice] { slices.filter(isExportable) }
+
+  /// Whether a slice may be exported — the single gate for both bulk and single-row export. A
+  /// suggestion-backed slice exports only while its suggestion is still accepted (so a
+  /// reject-then-undo can't resurrect a rejected clip into the export); a manual slice exports
+  /// unless the user rejected it.
+  private func isExportable(_ slice: Slice) -> Bool {
+    if let suggestion = projectState.cutSuggestions[id: slice.id] {
+      return suggestion.status == .accepted
+    }
+    return !rejectedManualSliceIDs.contains(slice.id)
+  }
 
   // MARK: - User Actions
   /// Builds the waveform peak pyramid for the canonical audio, in plan-sample
@@ -659,14 +694,32 @@ final class EditorModel: ViewModel {
     return true
   }
 
-  /// The single funnel for every `slices` mutation: snapshots before/after and records
-  /// the change on the undo stack (a no-op when nothing changed). Restoring history via
-  /// `undoTapped`/`redoTapped` deliberately bypasses this — it assigns `slices` directly
-  /// so replaying the stack never records a new entry.
+  /// The single funnel for every `slices` mutation: snapshots the bundle before/after and records
+  /// the change on the undo stack (a no-op when nothing changed), then persists it. Restoring
+  /// history via `undoTapped`/`redoTapped` deliberately bypasses this — it assigns the restored
+  /// bundle directly so replaying the stack never records a new entry.
   func mutateSlices(_ body: (inout IdentifiedArrayOf<Slice>) -> Void) {
-    let old = slices
+    let before = sliceEditState
     body(&slices)
-    sliceUndo.record(before: old, after: slices)
+    sliceUndo.record(before: before, after: sliceEditState)
+    persistSliceEditState()
+  }
+
+  /// Marks a manual clip rejected through the same funnel as slice mutations, so the undo history
+  /// and the persisted mirror can never drift from `slices`.
+  private func rejectManualSlice(_ id: Slice.ID) {
+    let before = sliceEditState
+    rejectedManualSliceIDs.insert(id)
+    sliceUndo.record(before: before, after: sliceEditState)
+    persistSliceEditState()
+  }
+
+  /// Writes the current clip-edit bundle to the sidecar in one lock so both fields land together.
+  private func persistSliceEditState() {
+    $projectState.withLock {
+      $0.slices = slices
+      $0.rejectedManualSliceIDs = rejectedManualSliceIDs
+    }
   }
 
   /// Adds an accepted suggestion's slice to the editor. Idempotent by `Slice.id` (a
@@ -811,7 +864,7 @@ final class EditorModel: ViewModel {
         await reconcilePlayback()
       }
     case .manualSlice(let id):
-      rejectedManualSliceIDs.insert(id)
+      rejectManualSlice(id)
     }
   }
 
@@ -913,21 +966,27 @@ final class EditorModel: ViewModel {
   }
 
   // MARK: - Undo / Redo
-  /// Restores the previous `slices` snapshot, then reconciles playback. History stores
-  /// only `slices`, so anything derived (selection, zoom, export phase, playback) is left
-  /// as-is except where reconciliation demands otherwise.
+  /// Restores the previous clip-edit bundle (slices + manual rejects), persists it, then reconciles
+  /// playback. History stores only that bundle, so anything derived (selection, zoom, export phase,
+  /// playback) is left as-is except where reconciliation demands otherwise.
   func undoTapped() async {
     // Guard here too, not just on `canUndo`: a menu item or keyboard shortcut could fire this
     // while an existing-slice edit is open, which would rewind `slices` under a live draft.
-    guard !hasUncommittedSliceEdit, let restored = sliceUndo.undo(current: slices) else { return }
-    slices = restored
+    guard !hasUncommittedSliceEdit, let restored = sliceUndo.undo(current: sliceEditState)
+    else { return }
+    slices = restored.slices
+    rejectedManualSliceIDs = restored.rejectedManualSliceIDs
+    persistSliceEditState()
     await reconcilePlayback()
   }
 
-  /// Reapplies the next `slices` snapshot on the redo branch, then reconciles playback.
+  /// Reapplies the next clip-edit bundle on the redo branch, persists it, then reconciles playback.
   func redoTapped() async {
-    guard !hasUncommittedSliceEdit, let restored = sliceUndo.redo(current: slices) else { return }
-    slices = restored
+    guard !hasUncommittedSliceEdit, let restored = sliceUndo.redo(current: sliceEditState)
+    else { return }
+    slices = restored.slices
+    rejectedManualSliceIDs = restored.rejectedManualSliceIDs
+    persistSliceEditState()
     await reconcilePlayback()
   }
 
@@ -1452,8 +1511,7 @@ final class EditorModel: ViewModel {
 
   // MARK: - Export Actions
   func exportSliceTapped(_ id: Slice.ID) {
-    guard !isExporting, !hasUncommittedSliceEdit, !rejectedManualSliceIDs.contains(id),
-      let slice = slices[id: id]
+    guard !isExporting, !hasUncommittedSliceEdit, let slice = slices[id: id], isExportable(slice)
     else { return }
     startExport([slice])
   }

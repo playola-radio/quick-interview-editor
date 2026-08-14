@@ -12,6 +12,13 @@ struct ProjectState: Codable, Equatable, Sendable {
   /// Ranked LLM cut candidates a human accepts/edits.
   var cutSuggestions: IdentifiedArrayOf<CutSuggestion>
 
+  /// The editor's saved clips (manual + accepted-suggestion slices) with their boundary edits,
+  /// persisted so approved clips survive a relaunch.
+  var slices: IdentifiedArrayOf<Slice>
+
+  /// Manual clips the user rejected — kept in `slices` but excluded from export.
+  var rejectedManualSliceIDs: Set<Slice.ID>
+
   /// Paragraph/speaker spec: per-file `override ?? auto_speaker_count`. Reserved.
   var speakerCountOverride: Int?
 
@@ -20,16 +27,20 @@ struct ProjectState: Codable, Equatable, Sendable {
 
   init(
     cutSuggestions: IdentifiedArrayOf<CutSuggestion> = [],
+    slices: IdentifiedArrayOf<Slice> = [],
+    rejectedManualSliceIDs: Set<Slice.ID> = [],
     speakerCountOverride: Int? = nil,
     speakerDisplayNames: [String: String] = [:]
   ) {
     self.cutSuggestions = cutSuggestions
+    self.slices = slices
+    self.rejectedManualSliceIDs = rejectedManualSliceIDs
     self.speakerCountOverride = speakerCountOverride
     self.speakerDisplayNames = speakerDisplayNames
   }
 
   enum CodingKeys: String, CodingKey {
-    case cutSuggestions, speakerCountOverride, speakerDisplayNames
+    case cutSuggestions, slices, rejectedManualSliceIDs, speakerCountOverride, speakerDisplayNames
   }
 
   /// Lenient decode: every section is optional and defaults to empty. This store is
@@ -43,6 +54,13 @@ struct ProjectState: Codable, Equatable, Sendable {
     self.init(
       cutSuggestions: try container.decodeIfPresent(
         IdentifiedArrayOf<CutSuggestion>.self, forKey: .cutSuggestions) ?? [],
+      // The clip sections degrade instead of failing loudly like `cutSuggestions`: a malformed
+      // `slices`/`rejectedManualSliceIDs` must NOT throw the whole decode, or `@Shared` would fall
+      // back to an empty default and the next write would clobber the real `cutSuggestions`.
+      slices: (try? container.decodeIfPresent(
+        IdentifiedArrayOf<Slice>.self, forKey: .slices)) ?? [],
+      rejectedManualSliceIDs: (try? container.decodeIfPresent(
+        Set<Slice.ID>.self, forKey: .rejectedManualSliceIDs)) ?? [],
       speakerCountOverride: try container.decodeIfPresent(
         Int.self, forKey: .speakerCountOverride),
       speakerDisplayNames: try container.decodeIfPresent(
