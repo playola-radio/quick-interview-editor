@@ -238,6 +238,38 @@ struct EditorClipBoundaryTests {
       // The minted slice carries the edited boundary, not the suggestion's original start.
       expectNoDifference(state.cutSuggestions[id: suggestion.id]?.status, .accepted)
       expectNoDifference(model.slices[id: suggestion.id]?.startSample, 208_328)
+      // The transient pending draft is closed, so the pane isn't left blocking later edits.
+      #expect(!model.fineTune.hasUnsavedChange)
+      #expect(model.boundaryDraftClipID == nil)
+    }
+  }
+
+  @Test func navigatingToAnotherClipDisarmsPointAndAdd() {
+    let fingerprint = "fp-pna-disarm"
+    let plan = Fixtures.editPlan()
+
+    withDependencies {
+      $0.defaultFileStorage = inMemory
+    } operation: {
+      @Shared(.projectState(fingerprint: fingerprint)) var state = ProjectState()
+      let clipA = wordSlice(id: Fixtures.uuid(9))
+      let clipB = Slice(
+        id: Fixtures.uuid(8), name: "B", startSample: 500_000, endSample: 600_000,
+        wordIDs: [30], snippet: "x", warnings: [])
+      let model = editor(plan, fingerprint: fingerprint)
+      model.mutateSlices {
+        $0.append(clipA)
+        $0.append(clipB)
+      }
+      model.armAddTapped(clipA.id, side: .start)
+      #expect(model.transcript.armedAddSide == .start)
+
+      model.selectClip(clipB.id)  // navigate away
+
+      #expect(model.transcript.armedAddSide == nil)
+      // A pick after navigating away edits nothing (nothing armed).
+      model.pointAndAddPicked(10)
+      expectNoDifference(model.slices[id: clipA.id]?.startSample, 195_098)
     }
   }
 

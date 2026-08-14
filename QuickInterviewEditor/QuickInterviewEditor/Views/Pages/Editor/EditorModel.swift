@@ -870,9 +870,13 @@ final class EditorModel: ViewModel {
   /// no-op for an id that doesn't resolve to a clip.
   func selectClip(_ id: EditorClip.ID) {
     guard let clip = clips.first(where: { $0.id == id }) else { return }
-    // Moving to a different clip drops the live-draft link, so a stale boundary draft can't
-    // override the wrong card. Re-established by `beginBoundaryEditIfNeeded` on the new clip.
-    if currentClipID != id { boundaryDraftClipID = nil }
+    // Moving to a different clip drops the live-draft link (so a stale boundary draft can't
+    // override the wrong card) and cancels any armed point-and-add (documented as a clip-change
+    // cancel), so a pick after navigating away can't edit the old clip.
+    if currentClipID != id {
+      boundaryDraftClipID = nil
+      transcript.disarmAdd()
+    }
     currentClipID = id
     // Endpoints are the earliest/latest words by transcript position (not the array's first/last),
     // mirroring `cutSuggestionSelected`/`revealWords`, so an unsorted `wordIDs` still frames right.
@@ -931,6 +935,9 @@ final class EditorModel: ViewModel {
         {
           mutateSlices { $0[id: id] = updatedSlice(slice, to: editedRange) }
         }
+        // The suggestion is now an approved slice; close the transient pending draft so the pane
+        // isn't left "dirty" (which would block the next `sliceSelected`/boundary retarget).
+        endBoundaryDraft(for: id)
       case .approved:
         cutSuggestions.resetTapped(id)
         // Dropping the minted slice is a slice removal like any other: reconcile so a stale
@@ -957,9 +964,20 @@ final class EditorModel: ViewModel {
         mutateSlices { $0.remove(id: id) }
         await reconcilePlayback()
       }
+      // A rejected clip must not keep driving the waveform/card from an unsaved draft (nor let a
+      // later approve reuse that stale edited range), so close any pending draft tied to it.
+      endBoundaryDraft(for: id)
     case .manualSlice(let id):
       rejectManualSlice(id)
     }
+  }
+
+  /// Closes a transient pending-selection draft tied to `id` (approve/reject end the edit). Only
+  /// touches a `.pendingSelection` session — a slice-backed edit is reconciled elsewhere.
+  private func endBoundaryDraft(for id: EditorClip.ID) {
+    guard boundaryDraftClipID == id else { return }
+    boundaryDraftClipID = nil
+    if case .pendingSelection = fineTune.target { fineTune.clear() }
   }
 
   /// Frames the current clip on the waveform and opens the fine-tune pane on it: a slice-backed
