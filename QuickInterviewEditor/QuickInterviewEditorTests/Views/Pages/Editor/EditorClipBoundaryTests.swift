@@ -243,4 +243,208 @@ struct EditorClipBoundaryTests {
       expectNoDifference(model.slices[id: slice.id]?.endSample, 243_653)
     }
   }
+
+  // MARK: - Block edge drag (absolute word)
+
+  @Test func blockEdgeDragToWordExtendsAndCoalescesIntoOneUndoEntry() async {
+    let fingerprint = "fp-block-drag"
+    let plan = Fixtures.editPlan()
+
+    await withDependencies {
+      $0.defaultFileStorage = inMemory
+    } operation: {
+      @Shared(.projectState(fingerprint: fingerprint)) var state = ProjectState()
+      let model = editor(plan, fingerprint: fingerprint)
+      let slice = wordSlice(id: Fixtures.uuid(9))  // words 11–14, end 243_653
+      model.mutateSlices { $0.append(slice) }
+      model.selectClip(slice.id)
+
+      model.clipBoundaryDragBegan(slice.id, side: .end)
+      model.clipBoundaryDragged(toWordID: 15)  // Wiley, end 258_646
+      model.clipBoundaryDragged(toWordID: 16)  // "is," end 263_938 — nearest word tracks either way
+      // Mid-drag nothing is committed to the slice yet.
+      expectNoDifference(model.slices[id: slice.id]?.endSample, 243_653)
+      model.clipBoundaryDragEnded()
+
+      expectNoDifference(model.slices[id: slice.id]?.endSample, 263_938)
+      expectNoDifference(model.slices[id: slice.id]?.wordIDs, [11, 12, 13, 14, 15, 16])
+
+      // The whole drag is ONE undo entry.
+      await model.undoTapped()
+      expectNoDifference(model.slices[id: slice.id]?.endSample, 243_653)
+      expectNoDifference(model.slices[id: slice.id]?.wordIDs, [11, 12, 13, 14])
+    }
+  }
+
+  @Test func blockEdgeDragCancelledRestoresThePreDragBoundary() {
+    let fingerprint = "fp-block-cancel"
+    let plan = Fixtures.editPlan()
+
+    withDependencies {
+      $0.defaultFileStorage = inMemory
+    } operation: {
+      @Shared(.projectState(fingerprint: fingerprint)) var state = ProjectState()
+      let model = editor(plan, fingerprint: fingerprint)
+      let slice = wordSlice(id: Fixtures.uuid(9))
+      model.mutateSlices { $0.append(slice) }
+      model.selectClip(slice.id)
+
+      model.clipBoundaryDragBegan(slice.id, side: .end)
+      model.clipBoundaryDragged(toWordID: 16)
+      model.clipBoundaryDragCancelled()
+
+      // The draft is restored to the pre-drag range and nothing was committed to the slice.
+      expectNoDifference(model.fineTune.draftRange, 195_098..<243_653)
+      expectNoDifference(model.slices[id: slice.id]?.endSample, 243_653)
+    }
+  }
+
+  // MARK: - Click inside a clip
+
+  @Test func interiorClickFocusesAClipThenPullsTheNearerBoundary() {
+    let fingerprint = "fp-inside"
+    let plan = Fixtures.editPlan()
+
+    withDependencies {
+      $0.defaultFileStorage = inMemory
+    } operation: {
+      @Shared(.projectState(fingerprint: fingerprint)) var state = ProjectState()
+      let model = editor(plan, fingerprint: fingerprint)
+      let slice = wordSlice(id: Fixtures.uuid(9))  // words 11–14
+      model.mutateSlices { $0.append(slice) }
+
+      // First click on a non-current clip only focuses it — no trim.
+      model.clipInteriorClicked(slice.id, wordID: 12)
+      expectNoDifference(model.currentClipID, slice.id)
+      expectNoDifference(model.slices[id: slice.id]?.startSample, 195_098)
+      expectNoDifference(model.slices[id: slice.id]?.wordIDs, [11, 12, 13, 14])
+
+      // A second click, now that it's current, pulls the nearer boundary (word 12 is closer to
+      // the start) to word 12's start edge, trimming word 11.
+      model.clipInteriorClicked(slice.id, wordID: 12)
+      expectNoDifference(model.slices[id: slice.id]?.startSample, 208_328)
+      expectNoDifference(model.slices[id: slice.id]?.wordIDs, [12, 13, 14])
+    }
+  }
+
+  @Test func pullClipBoundaryTrimsTheNearerEndToTheClickedWord() {
+    let fingerprint = "fp-pull"
+    let plan = Fixtures.editPlan()
+
+    withDependencies {
+      $0.defaultFileStorage = inMemory
+    } operation: {
+      @Shared(.projectState(fingerprint: fingerprint)) var state = ProjectState()
+      let model = editor(plan, fingerprint: fingerprint)
+      let slice = wordSlice(id: Fixtures.uuid(9))  // words 11–14
+      model.mutateSlices { $0.append(slice) }
+      model.selectClip(slice.id)
+
+      // Word 13 is nearer the end boundary, so the end pulls to word 13's end edge.
+      model.pullClipBoundary(slice.id, toWordID: 13)
+      expectNoDifference(model.slices[id: slice.id]?.endSample, 235_714)
+      expectNoDifference(model.slices[id: slice.id]?.wordIDs, [11, 12, 13])
+    }
+  }
+
+  // MARK: - §7 model fixes
+
+  @Test func approvingAnEditedSuggestionCarriesTheDraftIntoTheMintedSlice() async {
+    let fingerprint = "fp-approve-edited"
+    let plan = Fixtures.editPlan()
+    var suggestion = Fixtures.cutSuggestion(id: Fixtures.uuid(1), wordIDs: [11, 12, 13, 14])
+    suggestion.startSample = 195_098
+    suggestion.endSample = 243_653
+    suggestion.provenance = CutSuggestion.Provenance(
+      model: "m", promptVersion: "v", productSpecVersion: "v",
+      transcriptHash: plan.transcriptHash, sourceFingerprint: fingerprint, diarizationHash: nil)
+
+    await withDependencies {
+      $0.defaultFileStorage = inMemory
+    } operation: {
+      @Shared(.projectState(fingerprint: fingerprint)) var state = ProjectState(
+        cutSuggestions: [suggestion])
+      let model = editor(plan, fingerprint: fingerprint)
+      model.selectClip(suggestion.id)
+
+      // Move the start one word later (live draft only — no slice yet), then approve.
+      model.moveCurrentClipBoundary(.startLater)
+      await model.approveCurrentClip()
+
+      // The minted slice carries the edited start (208_328), not the suggestion's original.
+      expectNoDifference(state.cutSuggestions[id: suggestion.id]?.status, .accepted)
+      expectNoDifference(model.slices[id: suggestion.id]?.startSample, 208_328)
+      expectNoDifference(model.slices[id: suggestion.id]?.wordIDs, [12, 13, 14])
+    }
+  }
+
+  @Test func approvingARejectedManualClipUnRejectsIt() async {
+    let fingerprint = "fp-unreject"
+    let plan = Fixtures.editPlan()
+
+    await withDependencies {
+      $0.defaultFileStorage = inMemory
+    } operation: {
+      @Shared(.projectState(fingerprint: fingerprint)) var state = ProjectState()
+      let model = editor(plan, fingerprint: fingerprint)
+      let slice = wordSlice(id: Fixtures.uuid(9))
+      model.mutateSlices { $0.append(slice) }
+      model.selectClip(slice.id)
+
+      await model.rejectCurrentClip()
+      expectNoDifference(model.currentClip?.state, .rejected)
+      #expect(state.rejectedManualSliceIDs.contains(slice.id))
+
+      await model.approveCurrentClip()
+      expectNoDifference(model.currentClip?.state, .approved)
+      #expect(state.rejectedManualSliceIDs.isEmpty)
+    }
+  }
+
+  @Test func nextSliceNumberSeedsPastTheHighestExistingSliceName() {
+    let fingerprint = "fp-seed"
+    let plan = Fixtures.editPlan()
+    let hydrated = Slice(
+      id: Fixtures.uuid(5), name: "Slice 5", startSample: 195_098, endSample: 243_653,
+      wordIDs: [11, 12, 13, 14], snippet: "hi", warnings: [])
+
+    withDependencies {
+      $0.defaultFileStorage = inMemory
+    } operation: {
+      @Shared(.projectState(fingerprint: fingerprint)) var state = ProjectState(slices: [hydrated])
+      let model = editor(plan, fingerprint: fingerprint)
+
+      // A fresh slice is named past the highest existing "Slice N", not `count + 1`.
+      model.transcript.selectWords(anchorID: 16, focusID: 18)
+      model.addSliceTapped()
+
+      expectNoDifference(model.slices.map(\.name), ["Slice 5", "Slice 6"])
+    }
+  }
+
+  // MARK: - Block render data
+
+  @Test func visibleBlocksAndFooterTrackTheCurrentClip() {
+    let fingerprint = "fp-blocks"
+    let plan = Fixtures.editPlan()
+
+    withDependencies {
+      $0.defaultFileStorage = inMemory
+    } operation: {
+      @Shared(.projectState(fingerprint: fingerprint)) var state = ProjectState()
+      let model = editor(plan, fingerprint: fingerprint)
+      let slice = wordSlice(id: Fixtures.uuid(9))  // words 11–14
+      model.mutateSlices { $0.append(slice) }
+      model.selectClip(slice.id)
+
+      expectNoDifference(model.visibleClipBlocks.map(\.id), [slice.id])
+      expectNoDifference(model.visibleClipBlocks.map(\.isCurrent), [true])
+      expectNoDifference(model.visibleClipBlocks.map(\.wordIDs), [[11, 12, 13, 14]])
+
+      let footer = model.currentClipFooter
+      expectNoDifference(footer?.state, .approved)
+      expectNoDifference(footer?.wordCountLabel, "4 words")
+      expectNoDifference(footer?.title, "Manual")
+    }
+  }
 }

@@ -169,11 +169,12 @@ final class FineTuneModel: ViewModel {
     draftRange = nil
   }
 
-  /// Which grid a sample-based boundary edit snaps to. `.word` and `.none` never re-snap to
+  /// Which grid a sample-based boundary edit snaps to. `.word` and `.exact` never re-snap to
   /// silence — the caller already resolved a word edge (`.word`) or wants the raw sample
-  /// (`.none`); only `.silence` applies the magnet the cut-line drags use. Authority is
+  /// (`.exact`); only `.silence` applies the magnet the cut-line drags use. Authority is
   /// per-gesture: a word edit tagged `.word` is never silently pulled onto a silence edge.
-  enum BoundarySnap: Equatable { case word, silence, none }
+  /// (`.exact` rather than `.none`, which would shadow `Optional.none`.)
+  enum BoundarySnap: Equatable { case word, silence, exact }
 
   /// Sets the draft's START to an explicit plan `sample`, clamped to the file and the minimum
   /// slice duration but **not** to the fixed inset window (a whole-word edge can lie far outside
@@ -190,7 +191,7 @@ final class FineTuneModel: ViewModel {
 
   /// Shared core for the sample-based setters: constrains `proposed` to the whole file (not the
   /// inset window) and the min-slice duration off the fixed opposite edge, then applies the snap
-  /// policy. `.silence` uses the silence magnet within the legal range; `.word`/`.none` take the
+  /// policy. `.silence` uses the silence magnet within the legal range; `.word`/`.exact` take the
   /// clamped sample as-is so a word edit is never re-snapped to silence.
   private func setBoundary(_ edge: SliceEdge, toSample proposed: Int, snap: BoundarySnap) {
     guard let draftRange else { return }
@@ -203,7 +204,7 @@ final class FineTuneModel: ViewModel {
     switch snap {
     case .silence:
       resolved = snappedOrClamped(clamped, moving: edge, opposite: opposite, limits: limits)
-    case .word, .none:
+    case .word, .exact:
       resolved = clamped
     }
     switch edge {

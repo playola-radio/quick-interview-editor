@@ -67,6 +67,7 @@
 		63126F987A7D5C174D4E919C /* CutSuggestionAccept.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDB75E8909EA443A5FB175E2 /* CutSuggestionAccept.swift */; };
 		63FBB7BDA190D163F5D8BC1C /* EditorModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7BD517DB17FCCECB191BA3EE /* EditorModel.swift */; };
 		65EC560AB7667057B2014847 /* edit-plan.json in Resources */ = {isa = PBXBuildFile; fileRef = 4816E2A0C0EC0B46A9168AC0 /* edit-plan.json */; };
+		66220CB6729D5005BBF84BF7 /* ClipBlockPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15892243A3A2399EC0BA9A08 /* ClipBlockPresentation.swift */; };
 		665BD88AC06C4C0F216BC9EC /* Sharing in Frameworks */ = {isa = PBXBuildFile; productRef = D91085D54040B96C224E2ABC /* Sharing */; };
 		6C10EC4CB47E76CF577D3664 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A511ABB1DCF300B770180B1C /* RootView.swift */; };
 		6CAA6C3EC42CA51ED8B17DC0 /* SliceWarningsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6133EE6AF1867B8B9120A027 /* SliceWarningsTests.swift */; };
@@ -182,6 +183,7 @@
 		0E4298597706EF85A4B605D9 /* ModelSetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelSetupView.swift; sourceTree = "<group>"; };
 		1422158D8ABF80DBD66E618C /* EngineResolverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EngineResolverTests.swift; sourceTree = "<group>"; };
 		142F15B1C9E1242FE0DDA443 /* ProductSpec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductSpec.swift; sourceTree = "<group>"; };
+		15892243A3A2399EC0BA9A08 /* ClipBlockPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipBlockPresentation.swift; sourceTree = "<group>"; };
 		1B5F265398B71392F9665945 /* TranscriptionCacheKeyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionCacheKeyTests.swift; sourceTree = "<group>"; };
 		1BFE1C87741EF986F5FE931E /* TranscriptHashTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptHashTests.swift; sourceTree = "<group>"; };
 		236D2749DC9DB9849D53A026 /* CutSuggestionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CutSuggestionTests.swift; sourceTree = "<group>"; };
@@ -739,6 +741,7 @@
 			isa = PBXGroup;
 			children = (
 				8B71E3CC3BC27BB1A5BEC5FA /* AnthropicAPIKeyResolution.swift */,
+				15892243A3A2399EC0BA9A08 /* ClipBlockPresentation.swift */,
 				AD41C07B3E500E52CB3E1D97 /* ClipCardPresentation.swift */,
 				9D98567D61BC7012DE5B96D6 /* CutSuggestion.swift */,
 				CDB75E8909EA443A5FB175E2 /* CutSuggestionAccept.swift */,
@@ -962,6 +965,7 @@
 				C595884140FF8A84B4E144C8 /* AudioPlayerClient.swift in Sources */,
 				040207BF50636ADA05DDBF32 /* AuditionKeyMonitor.swift in Sources */,
 				07132AD42696C596F39D4EAB /* CanonicalAudioStore.swift in Sources */,
+				66220CB6729D5005BBF84BF7 /* ClipBlockPresentation.swift in Sources */,
 				1257C8DE53ABC354E2FDFB59 /* ClipCardPresentation.swift in Sources */,
 				DD99E6411A86BBC89EBA9304 /* ClipKeyMonitor.swift in Sources */,
 				054524450980F5589AA19E9A /* CutSuggestClient.swift in Sources */,

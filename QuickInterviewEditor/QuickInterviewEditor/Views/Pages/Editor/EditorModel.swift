@@ -87,7 +87,10 @@ final class EditorModel: ViewModel {
     // counter past the restored clips so a fresh "Slice N" can't collide with a hydrated name.
     slices = projectState.slices
     rejectedManualSliceIDs = projectState.rejectedManualSliceIDs
-    nextSliceNumber = slices.count + 1
+    // Seed the auto-name counter past the HIGHEST existing "Slice N" (not `count + 1`): a hydrated
+    // set with a gap (e.g. only "Slice 3" survived a delete) would otherwise re-mint "Slice 1"/
+    // "Slice 2" and could collide with a renamed-back clip.
+    nextSliceNumber = Self.nextSliceNumber(after: slices)
     // Accepting a suggestion adds its slice here (idempotently), through the shared
     // mutation funnel so it's exportable and undoable like any other slice.
     cutSuggestions.onAcceptSlice = { [weak self] slice in
@@ -428,6 +431,14 @@ final class EditorModel: ViewModel {
     return nil
   }
 
+  /// The live fine-tune draft range for `id`, but only when it's the clip being edited (so an
+  /// unrelated open draft can't leak). Used when approving a suggestion to carry the user's
+  /// boundary edit into the minted slice.
+  private func liveDraftRange(for id: EditorClip.ID) -> Range<Int>? {
+    guard boundaryDraftClipID == id else { return nil }
+    return fineTune.draftRange
+  }
+
   /// Every clip as a render-ready card, in ranked order. The transcript renderer places these in
   /// flow; the view filters them with `visibleClipCards`. While a boundary is being edited, the
   /// current clip's card reflects the LIVE fine-tune draft (word range + duration + body), so the
@@ -461,6 +472,31 @@ final class EditorModel: ViewModel {
   var visibleClipCards: [ClipCardVM] {
     let filter = transcript.clipFilter
     return clipCards.filter { filter.matches($0.state) }
+  }
+
+  // MARK: - Clip blocks (transcript render model)
+  /// The clips the block renderer tints, in ranked order, after the transcript's state filter.
+  /// Derived from the same card render data (live-draft + filter already applied), trimmed to
+  /// exactly what the inline block draw + hit-test needs.
+  var visibleClipBlocks: [ClipBlockVM] {
+    visibleClipCards.map {
+      ClipBlockVM(id: $0.id, state: $0.state, isCurrent: $0.isCurrent, wordIDs: $0.wordIDs)
+    }
+  }
+
+  /// The footer's current-clip summary (live-draft aware: duration + word count track a boundary
+  /// edit in progress), or nil when nothing is current. Reads from the current clip's card so it
+  /// reflects the same live range the block draws.
+  var currentClipFooter: CurrentClipFooterVM? {
+    guard let id = currentClipID, let card = clipCards.first(where: { $0.id == id }) else {
+      return nil
+    }
+    let count = card.wordIDs.count
+    return CurrentClipFooterVM(
+      number: card.number, state: card.state, title: card.title,
+      durationLabel: card.durationLabel,
+      wordCountLabel: "\(count) word\(count == 1 ? "" : "s")",
+      hint: "drag either edge of the block")
   }
 
   /// The clickable clip-map rail segments above the transcript, positioned by audio range.
@@ -862,9 +898,13 @@ final class EditorModel: ViewModel {
   /// no-op for an id that doesn't resolve to a clip.
   func selectClip(_ id: EditorClip.ID) {
     guard let clip = clips.first(where: { $0.id == id }) else { return }
-    // Moving to a different clip drops the live-draft link, so a stale boundary draft can't
-    // override the wrong card. Re-established by `beginBoundaryEditIfNeeded` on the new clip.
-    if currentClipID != id { boundaryDraftClipID = nil }
+    // Moving to a different clip drops the live-draft link (so a stale boundary draft can't
+    // override the wrong clip) and cancels any armed point-and-add, so a pick after navigating
+    // away can't edit the old clip. Re-established by `beginBoundaryEditIfNeeded` on the new clip.
+    if currentClipID != id {
+      boundaryDraftClipID = nil
+      transcript.disarmAdd()
+    }
     currentClipID = id
     // Endpoints are the earliest/latest words by transcript position (not the array's first/last),
     // mirroring `cutSuggestionSelected`/`revealWords`, so an unsorted `wordIDs` still frames right.
@@ -913,7 +953,21 @@ final class EditorModel: ViewModel {
     case .suggestion(let id):
       switch clip.state {
       case .suggested, .rejected:
+        // Capture any live boundary edit BEFORE accepting: `acceptTapped` mints the slice from the
+        // suggestion's ORIGINAL word IDs, so without this the user's adjusted boundaries would be
+        // silently discarded on approval (the block showed them, the export wouldn't have them).
+        let editedRange = liveDraftRange(for: id)
         cutSuggestions.acceptTapped(id)
+        // Guard `slices[id:]`: a stale/invalid accept mints no slice, so leave the draft intact
+        // rather than force an edit onto a clip that didn't approve.
+        if let editedRange, let slice = slices[id: id],
+          slice.startSample..<slice.endSample != editedRange
+        {
+          mutateSlices { $0[id: id] = updatedSlice(slice, to: editedRange) }
+        }
+        // The suggestion is now an approved slice; close the transient pending draft so the pane
+        // isn't left "dirty" (which would block the next `sliceSelected`/boundary retarget).
+        endBoundaryDraft(for: id)
       case .approved:
         cutSuggestions.resetTapped(id)
         // Dropping the minted slice is a slice removal like any other: reconcile so a stale
@@ -921,9 +975,22 @@ final class EditorModel: ViewModel {
         mutateSlices { $0.remove(id: id) }
         await reconcilePlayback()
       }
-    case .manualSlice:
-      return
+    case .manualSlice(let id):
+      // A manual clip has no suggested state, so ⏎ can only toggle its rejection: un-reject a
+      // rejected clip (restoring it to export), a no-op otherwise. Routed through the same funnel
+      // as `rejectManualSlice` so undo/redo and the persisted mirror never drift from `slices`.
+      unrejectManualSlice(id)
     }
+  }
+
+  /// Un-rejects a rejected manual clip through the slice-edit funnel (one undo entry). A no-op if
+  /// the clip wasn't rejected. Mirrors `rejectManualSlice` so the two are exact inverses.
+  private func unrejectManualSlice(_ id: Slice.ID) {
+    guard rejectedManualSliceIDs.contains(id) else { return }
+    let before = sliceEditState
+    rejectedManualSliceIDs.remove(id)
+    sliceUndo.record(before: before, after: sliceEditState)
+    persistSliceEditState()
   }
 
   /// Rejects the current clip. A suggestion is marked rejected in the sidecar and any slice it
@@ -940,9 +1007,20 @@ final class EditorModel: ViewModel {
         mutateSlices { $0.remove(id: id) }
         await reconcilePlayback()
       }
+      // A rejected clip must not keep driving the waveform/block from an unsaved draft (nor let a
+      // later approve reuse that stale edited range), so close any pending draft tied to it.
+      endBoundaryDraft(for: id)
     case .manualSlice(let id):
       rejectManualSlice(id)
     }
+  }
+
+  /// Closes a transient pending-selection draft tied to `id` (approve/reject end the edit). Only
+  /// touches a `.pendingSelection` session — a slice-backed edit is reconciled elsewhere.
+  private func endBoundaryDraft(for id: EditorClip.ID) {
+    guard boundaryDraftClipID == id else { return }
+    boundaryDraftClipID = nil
+    if case .pendingSelection = fineTune.target { fineTune.clear() }
   }
 
   /// Frames the current clip on the waveform and opens the fine-tune pane on it: a slice-backed
@@ -1067,6 +1145,107 @@ final class EditorModel: ViewModel {
     guard isGripDragging else { return }
     isGripDragging = false
     commitBoundaryEditIfSliceBacked()
+  }
+
+  // MARK: - Block boundary editing (absolute word: edge drag + click-inside)
+  /// The edge a block edge-drag is moving, captured at begin (the drag started on that clip's
+  /// first word → `.start`, last word → `.end`). Nil when no block edge-drag is in progress.
+  @ObservationIgnored private var boundaryDragSide: SliceEdge?
+  /// The draft range at drag begin, so Esc restores the exact pre-drag boundary of the dragged
+  /// side (only one side moves per drag, so restoring that side alone is correct).
+  @ObservationIgnored private var boundaryDragStartRange: Range<Int>?
+
+  /// Block edge-drag start: make the dragged clip current, open its draft, and enter coalescing
+  /// mode (reusing `isGripDragging`) so the word steps that follow record no undo entry until the
+  /// drag ends. A no-op that clears the drag if the clip has no range or an unsaved edit on
+  /// another target blocks it.
+  func clipBoundaryDragBegan(_ id: EditorClip.ID, side: SliceEdge) {
+    isGripDragging = true
+    boundaryDragSide = side
+    if currentClipID != id { selectClip(id) }
+    guard beginBoundaryEditIfNeeded() else {
+      isGripDragging = false
+      boundaryDragSide = nil
+      return
+    }
+    boundaryDragStartRange = fineTune.draftRange
+  }
+
+  /// One block edge-drag step (no undo record): move the dragged edge to `wordID`'s edge — the
+  /// word nearest the pointer, resolved by the renderer. The block re-tint, waveform region, and
+  /// fine-tune insets all follow the one live draft.
+  func clipBoundaryDragged(toWordID wordID: Word.ID) {
+    guard isGripDragging, let side = boundaryDragSide else { return }
+    setClipBoundary(side, toWordID: wordID)
+  }
+
+  /// Block edge-drag end: commit the whole drag as ONE undo entry (slice-backed clips only); a
+  /// suggestion keeps the edit live in its draft.
+  func clipBoundaryDragEnded() {
+    guard isGripDragging else { return }
+    isGripDragging = false
+    boundaryDragSide = nil
+    boundaryDragStartRange = nil
+    commitBoundaryEditIfSliceBacked()
+  }
+
+  /// Esc during a block edge-drag: restore the dragged edge to its pre-drag sample and end the
+  /// drag without committing. Only the dragged side moved, so restoring it alone is exact.
+  func clipBoundaryDragCancelled() {
+    guard isGripDragging, let side = boundaryDragSide else { return }
+    if let start = boundaryDragStartRange {
+      switch side {
+      case .start: fineTune.setStart(toSample: start.lowerBound, snap: .exact)
+      case .end: fineTune.setEnd(toSample: start.upperBound, snap: .exact)
+      }
+    }
+    isGripDragging = false
+    boundaryDragSide = nil
+    boundaryDragStartRange = nil
+  }
+
+  /// A plain click on a word inside a clip: make the clip current if it isn't (a non-destructive
+  /// focus), otherwise pull the nearer boundary to that word. Splitting focus from trim keeps a
+  /// click that only means "switch to this clip" from silently trimming it — a deliberate
+  /// divergence from the single-clip reference, which trims on the first click.
+  func clipInteriorClicked(_ id: EditorClip.ID, wordID: Word.ID) {
+    if currentClipID != id {
+      selectClip(id)
+    } else {
+      pullClipBoundary(id, toWordID: wordID)
+    }
+  }
+
+  /// Pulls the clip's NEARER boundary (by sample distance from the word's midpoint) to `wordID`,
+  /// as one undo entry. Clicking a word inside the clip trims to it; a word outside extends. The
+  /// `setStart`/`setEnd` clamp keeps `start < end`.
+  func pullClipBoundary(_ id: EditorClip.ID, toWordID wordID: Word.ID) {
+    if currentClipID != id { selectClip(id) }
+    guard beginBoundaryEditIfNeeded(), let draft = fineTune.draftRange,
+      let word = editPlan.words.first(where: { $0.id == wordID }), let mid = wordMidpoint(word)
+    else { return }
+    let side: SliceEdge =
+      abs(mid - draft.lowerBound) <= abs(mid - draft.upperBound) ? .start : .end
+    setClipBoundary(side, toWordID: wordID)
+    commitBoundaryEditIfSliceBacked()
+  }
+
+  /// Moves the live draft's `side` boundary to `wordID`'s edge (start → its start sample, end →
+  /// its end sample), word-snapped so it's never re-pulled to silence. A no-op with no session.
+  private func setClipBoundary(_ side: SliceEdge, toWordID wordID: Word.ID) {
+    guard let word = editPlan.words.first(where: { $0.id == wordID }) else { return }
+    switch side {
+    case .start:
+      if let edge = word.startSample { fineTune.setStart(toSample: edge, snap: .word) }
+    case .end:
+      if let edge = word.endSample { fineTune.setEnd(toSample: edge, snap: .word) }
+    }
+  }
+
+  /// The overflow-safe midpoint sample of a word, or nil when it has no positive-span bounds.
+  private func wordMidpoint(_ word: Word) -> Int? {
+    guard let start = word.startSample, let end = word.endSample, start < end else { return nil }
+    return start + (end - start) / 2
   }
 
   /// Opens (or reuses) the fine-tune draft on the current clip so a boundary edit has something to
@@ -1801,6 +1980,17 @@ final class EditorModel: ViewModel {
   /// midpoint (not the raw transcript selection) so a dragged cut owns the right words.
   private func makeSlice(range: Range<Int>) -> Slice {
     buildSlice(id: UUID(), name: "Slice \(nextSliceNumber)", range: range, plan: editPlan)
+  }
+
+  /// The next free "Slice N" number: one past the highest N already used by an auto-named slice.
+  /// Seeds the counter at load so a hydrated set with a gap can't re-mint an existing number.
+  private static func nextSliceNumber(after slices: IdentifiedArrayOf<Slice>) -> Int {
+    let highest =
+      slices.compactMap { slice -> Int? in
+        guard slice.name.hasPrefix("Slice ") else { return nil }
+        return Int(slice.name.dropFirst("Slice ".count))
+      }.max() ?? 0
+    return highest + 1
   }
 
   /// Marks the export as running synchronously (so the buttons disable immediately
