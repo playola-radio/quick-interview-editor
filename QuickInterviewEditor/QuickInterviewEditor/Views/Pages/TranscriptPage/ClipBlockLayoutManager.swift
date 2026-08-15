@@ -29,8 +29,10 @@ final class ClipBlockLayoutManager: NSLayoutManager {
   private let cornerRadius: CGFloat = 6
   /// Horizontal padding added only at the run's outer ends ("just before/after" the words).
   private let endPadding: CGFloat = 4
-  /// Vertical padding above + below the text (spec §3: `4px 0`), making the pill a touch taller.
-  private let verticalPadding: CGFloat = 4
+  /// Vertical padding above + below the text, making the pill a touch taller. The spec's CSS
+  /// `4px 0` is in the browser's inline box model; matching the reference render's pill-to-line
+  /// rhythm (pill ≈ 0.75 of the line pitch) needs a bit more here.
+  private let verticalPadding: CGFloat = 6
 
   private func invalidateBlockDisplay() {
     guard let textView = textContainers.first?.textView else { return }
