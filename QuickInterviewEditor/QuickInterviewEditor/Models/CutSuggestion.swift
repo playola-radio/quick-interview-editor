@@ -53,6 +53,15 @@ extension CutSuggestion {
   mutating func accept() { status = .accepted }
   mutating func reject() { status = .rejected }
   mutating func resetToPending() { status = .pending }
+
+  /// Moves a still-unaccepted suggestion's boundaries in place (leaving its status untouched), so a
+  /// transcript edge-drag can resize a pending/rejected clip without minting a slice or approving
+  /// it. `wordIDs` is the re-derived membership for the new range.
+  mutating func resize(startSample: Int, endSample: Int, wordIDs: [Word.ID]) {
+    self.startSample = startSample
+    self.endSample = endSample
+    self.wordIDs = wordIDs
+  }
 }
 
 // MARK: - Display values (zero-logic-in-views)

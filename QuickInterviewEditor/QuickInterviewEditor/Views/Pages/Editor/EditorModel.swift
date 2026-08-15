@@ -1164,22 +1164,59 @@ final class EditorModel: ViewModel {
   }
 
   // MARK: - Block boundary editing (absolute word: edge drag + click-inside)
-  /// Commits a whole block edge-drag as exactly ONE undo entry. The drag itself is a pure
-  /// view-only band preview (the renderer follows the pointer without touching the model), so the
-  /// model is mutated only here, on mouse-up: make the dragged clip current, open its draft, move
-  /// the dragged `side` to the word the edge landed on, and commit (slice-backed clips only; a
-  /// suggestion keeps the edit live in its draft until approved). A no-op — leaving selection and
-  /// any other draft untouched — when the clip has no range or an unsaved edit on another target
-  /// blocks it (see `canBeginBoundaryEdit`).
+  /// Commits a whole block edge-drag on mouse-up as a SILENT in-place resize: the dragged `side`
+  /// moves to the word the edge landed on and the clip is rewritten in its own store, leaving the
+  /// screen exactly as the drag preview left it. It deliberately does NOT select the clip, open the
+  /// fine-tune pane, or scroll — selecting mid-edit opened windows that made the user lose their
+  /// place. Whatever state the clip was in (approved slice, pending/rejected suggestion) it keeps.
+  /// A no-op when the clip has no range, the edge doesn't move, or an unsaved edit elsewhere blocks
+  /// it (see `canBeginBoundaryEdit` — the view also gates the drag on it, so a refused edit never
+  /// shows a band that snaps back).
   func commitClipBoundary(_ clipID: EditorClip.ID, side: SliceEdge, toWordID wordID: Word.ID) {
-    // Refuse BEFORE touching selection if the edit can't open — otherwise `selectClip` would move
-    // focus to `clipID` and clear the draft link while a stale unsaved draft stays open on the old
-    // clip (the pane would then commit the wrong clip).
-    guard canBeginBoundaryEdit(on: clipID) else { return }
-    if currentClipID != clipID { selectClip(clipID) }
-    guard beginBoundaryEditIfNeeded() else { return }
-    setClipBoundary(side, toWordID: wordID)
-    commitBoundaryEditIfSliceBacked()
+    guard canBeginBoundaryEdit(on: clipID),
+      let clip = clips.first(where: { $0.id == clipID }), let current = clip.range,
+      let word = editPlan.words.first(where: { $0.id == wordID }),
+      let resized = resizedRange(current, movingSide: side, toWord: word), resized != current
+    else { return }
+    applyClipResize(clip, to: resized)
+  }
+
+  /// The clip's range with one edge moved to `word`'s matching edge (start → its start sample, end
+  /// → its end sample). Nil when the word has no edge on that side or the move would collapse the
+  /// range (kept strictly `start < end`), so a degenerate drag is a no-op rather than an inversion.
+  private func resizedRange(_ range: Range<Int>, movingSide side: SliceEdge, toWord word: Word)
+    -> Range<Int>?
+  {
+    switch side {
+    case .start:
+      guard let edge = word.startSample, edge < range.upperBound else { return nil }
+      return edge..<range.upperBound
+    case .end:
+      guard let edge = word.endSample, edge > range.lowerBound else { return nil }
+      return range.lowerBound..<edge
+    }
+  }
+
+  /// Writes a resized clip back to whichever store owns it, without touching selection or the
+  /// fine-tune session. A slice-backed clip (manual, or an accepted suggestion's minted slice) goes
+  /// through `mutateSlices` so it stays one undo entry; a pending/rejected suggestion (no slice) is
+  /// resized in place in the sidecar, keeping its status.
+  private func applyClipResize(_ clip: EditorClip, to range: Range<Int>) {
+    if slices[id: clip.id] != nil {
+      mutateSlices { slices in
+        if let slice = slices[id: clip.id] { slices[id: clip.id] = updatedSlice(slice, to: range) }
+      }
+      // If the fine-tune pane happens to be open on this very clip, re-anchor it to the new range
+      // so the two surfaces can't drift. `canBeginBoundaryEdit` guarantees the session is clean
+      // here, so this re-begins (never abandons an unsaved edit) and neither selects nor scrolls.
+      if activeSliceID == clip.id { syncEditSession() }
+    } else {
+      let ids = wordIDs(overlapping: range, words: editPlan.words)
+      $projectState.withLock {
+        $0.resizeSuggestion(
+          clip.id, startSample: range.lowerBound, endSample: range.upperBound, wordIDs: ids)
+      }
+    }
   }
 
   /// Whether a boundary edit could open on `id` right now: a clip with a range, and either it's

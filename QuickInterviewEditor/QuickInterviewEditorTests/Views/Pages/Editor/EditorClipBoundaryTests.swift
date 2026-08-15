@@ -336,7 +336,7 @@ struct EditorClipBoundaryTests {
     }
   }
 
-  @Test func commitClipBoundaryTargetsTheExplicitClipEvenIfSelectionMovedDuringTheDrag() async {
+  @Test func commitClipBoundaryResizesTheExplicitClipWithoutMovingSelection() async {
     let fingerprint = "fp-block-explicit"
     let plan = Fixtures.editPlan()
 
@@ -353,21 +353,104 @@ struct EditorClipBoundaryTests {
         $0.append(sliceA)
         $0.append(sliceB)
       }
-      model.selectClip(sliceA.id)
-
-      // The drag is view-only and captures sliceA's id at drag-begin. If a nav key moves the
-      // current clip to sliceB mid-drag, the mouse-up commit still targets (and re-selects) sliceA
-      // — so the drag can never trim the wrong clip.
       model.selectClip(sliceB.id)
+
+      // The drag captures sliceA's id at drag-begin and commits it explicitly, so it resizes sliceA
+      // even though sliceB is the current clip. The commit is SILENT: it never selects the dragged
+      // clip, so the current clip stays sliceB — the screen keeps its place.
       model.commitClipBoundary(sliceA.id, side: .end, toWordID: 15)  // Wiley, end 258_646
 
-      expectNoDifference(model.currentClipID, sliceA.id)
+      expectNoDifference(model.currentClipID, sliceB.id)
       expectNoDifference(model.slices[id: sliceA.id]?.endSample, 258_646)
       expectNoDifference(model.slices[id: sliceA.id]?.wordIDs, [11, 12, 13, 14, 15])
       // sliceB is untouched, and the whole drag is ONE undo entry.
       expectNoDifference(model.slices[id: sliceB.id]?.endSample, 280_696)
       await model.undoTapped()
       expectNoDifference(model.slices[id: sliceA.id]?.endSample, 243_653)
+    }
+  }
+
+  @Test func commitClipBoundaryResizesSilentlyWithoutSelectingOrOpeningTheFineTunePane() async {
+    let fingerprint = "fp-block-silent"
+    let plan = Fixtures.editPlan()
+
+    await withDependencies {
+      $0.defaultFileStorage = inMemory
+    } operation: {
+      @Shared(.projectState(fingerprint: fingerprint)) var state = ProjectState()
+      let model = editor(plan, fingerprint: fingerprint)
+      let slice = wordSlice(id: Fixtures.uuid(9))  // words 11–14, end 243_653
+      model.mutateSlices { $0.append(slice) }
+
+      // Drag-commit an unselected clip: it resizes in place and leaves the screen exactly as the
+      // drag preview left it — nothing selected, no words highlighted, no fine-tune pane.
+      #expect(model.currentClipID == nil)
+      model.commitClipBoundary(slice.id, side: .end, toWordID: 16)  // "is," end 263_938
+
+      expectNoDifference(model.slices[id: slice.id]?.endSample, 263_938)
+      expectNoDifference(model.slices[id: slice.id]?.wordIDs, [11, 12, 13, 14, 15, 16])
+      #expect(model.currentClipID == nil)
+      #expect(model.activeSliceID == nil)
+      #expect(!model.fineTune.hasUnsavedChange)
+      #expect(model.transcript.selectedSampleRange == nil)
+
+      // Still exactly one undo entry for the whole drag.
+      await model.undoTapped()
+      expectNoDifference(model.slices[id: slice.id]?.endSample, 243_653)
+    }
+  }
+
+  @Test func commitClipBoundaryReanchorsAnOpenFineTunePaneOnTheSameClip() {
+    let fingerprint = "fp-block-pane-sync"
+    let plan = Fixtures.editPlan()
+
+    withDependencies {
+      $0.defaultFileStorage = inMemory
+    } operation: {
+      @Shared(.projectState(fingerprint: fingerprint)) var state = ProjectState()
+      let model = editor(plan, fingerprint: fingerprint)
+      let slice = wordSlice(id: Fixtures.uuid(9))  // words 11–14, end 243_653
+      model.mutateSlices { $0.append(slice) }
+      model.selectClip(slice.id)
+      model.focusCurrentClip()  // opens the fine-tune pane on this slice (clean)
+      expectNoDifference(model.activeSliceID, slice.id)
+      expectNoDifference(model.fineTune.committedRange?.upperBound, 243_653)
+
+      model.commitClipBoundary(slice.id, side: .end, toWordID: 16)  // "is," end 263_938
+
+      // The slice resized, and the still-clean pane re-anchored to the new range so the two
+      // surfaces can't drift (no stale cut lines) — without dirtying the session, moving the
+      // current clip, or closing/retargeting the pane.
+      expectNoDifference(model.slices[id: slice.id]?.endSample, 263_938)
+      expectNoDifference(model.fineTune.committedRange?.upperBound, 263_938)
+      #expect(!model.fineTune.hasUnsavedChange)
+      expectNoDifference(model.currentClipID, slice.id)
+      expectNoDifference(model.activeSliceID, slice.id)
+    }
+  }
+
+  @Test func commitClipBoundaryDroppedOnTheClipsOwnBoundaryWordIsANoOp() async {
+    let fingerprint = "fp-block-noop"
+    let plan = Fixtures.editPlan()
+
+    await withDependencies {
+      $0.defaultFileStorage = inMemory
+    } operation: {
+      @Shared(.projectState(fingerprint: fingerprint)) var state = ProjectState()
+      let model = editor(plan, fingerprint: fingerprint)
+      let slice = wordSlice(id: Fixtures.uuid(9))  // words 11–14, start 195_098 (word 11's start)
+      model.mutateSlices { $0.append(slice) }  // the slice's creation is the sole undo entry
+
+      // Releasing the start edge back on word 11 (already the clip's start word) doesn't move the
+      // boundary, so nothing is written and no undo entry is added.
+      model.commitClipBoundary(slice.id, side: .start, toWordID: 11)
+      expectNoDifference(model.slices[id: slice.id]?.startSample, 195_098)
+      expectNoDifference(model.slices[id: slice.id]?.wordIDs, [11, 12, 13, 14])
+
+      // The only entry on the stack is the creation, so one undo removes the slice entirely.
+      #expect(model.canUndo)
+      await model.undoTapped()
+      #expect(model.slices[id: slice.id] == nil)
     }
   }
 
@@ -407,7 +490,7 @@ struct EditorClipBoundaryTests {
     }
   }
 
-  @Test func commitClipBoundaryOnASuggestionKeepsItLiveAndMintsNoSlice() {
+  @Test func commitClipBoundaryResizesASuggestionInPlaceKeepingItPending() {
     let fingerprint = "fp-block-suggestion"
     let plan = Fixtures.editPlan()
     var suggestion = Fixtures.cutSuggestion(id: Fixtures.uuid(1), wordIDs: [11, 12, 13, 14])
@@ -423,16 +506,19 @@ struct EditorClipBoundaryTests {
       @Shared(.projectState(fingerprint: fingerprint)) var state = ProjectState(
         cutSuggestions: [suggestion])
       let model = editor(plan, fingerprint: fingerprint)
-      model.selectClip(suggestion.id)
 
-      model.commitClipBoundary(suggestion.id, side: .end, toWordID: 15)  // extend to "Wiley"
+      model.commitClipBoundary(suggestion.id, side: .end, toWordID: 15)  // "Wiley," end 258_646
 
-      // A suggestion mints no slice on a boundary edit; the edit stays live in its draft and the
-      // card follows it (the two-way sync spine) until the user approves.
+      // A suggestion resizes in place in the sidecar: it keeps its pending status, mints no slice,
+      // and opens no fine-tune draft — the card follows the suggestion's new range, not a draft.
       #expect(model.slices.isEmpty)
-      expectNoDifference(model.boundaryDraftClipID, suggestion.id)
-      let card = model.clipCards.first { $0.id == suggestion.id }
-      expectNoDifference(card?.range, model.fineTune.draftRange)
+      expectNoDifference(state.cutSuggestions[id: suggestion.id]?.status, .pending)
+      expectNoDifference(state.cutSuggestions[id: suggestion.id]?.endSample, 258_646)
+      expectNoDifference(state.cutSuggestions[id: suggestion.id]?.wordIDs, [11, 12, 13, 14, 15])
+      #expect(model.boundaryDraftClipID == nil)
+      #expect(!model.fineTune.hasUnsavedChange)
+      let clip = model.clips.first { $0.id == suggestion.id }
+      expectNoDifference(clip?.range, 195_098..<258_646)
     }
   }
 

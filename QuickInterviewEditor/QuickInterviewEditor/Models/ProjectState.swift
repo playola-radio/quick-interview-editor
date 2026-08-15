@@ -84,6 +84,17 @@ extension ProjectState {
     cutSuggestions[id: id]?.resetToPending()
   }
 
+  /// Resizes a still-unaccepted suggestion's boundaries in place, keeping its status. A no-op for
+  /// an unknown id or an accepted one — an accepted suggestion is edited through its minted slice,
+  /// so this must never rewrite the accepted sidecar range out from under it.
+  mutating func resizeSuggestion(
+    _ id: CutSuggestion.ID, startSample: Int, endSample: Int, wordIDs: [Word.ID]
+  ) {
+    guard cutSuggestions[id: id]?.status != .accepted else { return }
+    cutSuggestions[id: id]?.resize(
+      startSample: startSample, endSample: endSample, wordIDs: wordIDs)
+  }
+
   /// Suggestions ordered for display: pending first, then by ascending `rank`, with
   /// higher `score` breaking ties. `id` is the final tie-break for a stable order.
   var rankedSuggestions: [CutSuggestion] {
