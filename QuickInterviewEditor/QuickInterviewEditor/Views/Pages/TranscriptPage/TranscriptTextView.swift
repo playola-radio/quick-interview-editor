@@ -240,8 +240,10 @@ struct TranscriptTextView: NSViewRepresentable {
       }
       let affected = lastClipContainers + new
       lastClipContainers = new
-      layoutManager.containerRuns = new.map { container in
-        let style = TranscriptClipStyle.style(for: container.kind)
+      // Each clip's position is its palette `variant`, so adjacent clips of the same state
+      // cycle to a different tint and read as distinct runs.
+      layoutManager.containerRuns = new.enumerated().map { index, container in
+        let style = TranscriptClipStyle.style(for: container.kind, variant: index)
         return ClipContainerRun(
           range: container.range, fill: Self.nsColor(style.fill), ring: Self.nsColor(style.ring))
       }

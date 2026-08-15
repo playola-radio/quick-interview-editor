@@ -56,4 +56,41 @@ struct TranscriptClipStyleTests {
       expectNoDifference(TranscriptClipStyle.style(for: kind).strikethrough, kind == .rejected)
     }
   }
+
+  /// Adjacent clips of the same state cycle to a different tint so they read as distinct runs.
+  @Test func variantCyclesTheTintWithinAState() {
+    #expect(
+      TranscriptClipStyle.style(for: .approved, variant: 0)
+        != TranscriptClipStyle.style(for: .approved, variant: 1))
+    #expect(
+      TranscriptClipStyle.style(for: .suggested, variant: 0)
+        != TranscriptClipStyle.style(for: .suggested, variant: 1))
+    // Every approved variant stays white-text, no-strike (still reads as a live clip).
+    for variant in 0..<5 {
+      let style = TranscriptClipStyle.style(for: .approved, variant: variant)
+      expectNoDifference(
+        style.text, ClipStyleColor(red255: 255, green255: 255, blue255: 255, alpha: 1))
+      expectNoDifference(style.strikethrough, false)
+    }
+  }
+
+  /// The variant wraps (so an out-of-range or negative position is safe) and variant 0 is the
+  /// documented base colour.
+  @Test func variantWrapsAndZeroIsTheBaseColour() {
+    let base = TranscriptClipStyle.style(for: .approved, variant: 0)
+    expectNoDifference(
+      base.swatch, ClipStyleColor(red255: 95, green255: 185, blue255: 143, alpha: 1))
+    expectNoDifference(TranscriptClipStyle.style(for: .approved, variant: 3), base)
+    expectNoDifference(TranscriptClipStyle.style(for: .approved, variant: -3), base)
+  }
+
+  /// Selected and rejected are single colours — they ignore the variant.
+  @Test func selectedAndRejectedIgnoreVariant() {
+    expectNoDifference(
+      TranscriptClipStyle.style(for: .selected, variant: 0),
+      TranscriptClipStyle.style(for: .selected, variant: 2))
+    expectNoDifference(
+      TranscriptClipStyle.style(for: .rejected, variant: 0),
+      TranscriptClipStyle.style(for: .rejected, variant: 2))
+  }
 }

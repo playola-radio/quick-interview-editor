@@ -56,31 +56,23 @@ struct TranscriptClipStyle: Equatable {
   var swatch: ClipStyleColor
   var strikethrough: Bool
 
-  /// The mockup's clip palette (`transcript-clip-blocks.md` §2). Clip text is white for
-  /// every live state; a rejected clip dims its words and strikes them through.
-  static func style(for kind: TranscriptClipKind) -> TranscriptClipStyle {
+  /// The clip palette (based on `transcript-clip-blocks.md` §2). Clip text is white for every
+  /// live state; a rejected clip dims its words and strikes them through.
+  ///
+  /// `variant` cycles the tint WITHIN a state's hue family so adjacent clips of the same state
+  /// are distinguishable (the renderer passes each clip's position). Approved cycles through
+  /// cool green/teal tints, suggested through warm amber/gold tints, so the state (cool vs warm)
+  /// still reads while neighbours differ. Selected and rejected are single colours (one current
+  /// clip; rejected reads by its dim+strike), so they ignore `variant`. Variant 0 is the base
+  /// colour of each state.
+  static func style(for kind: TranscriptClipKind, variant: Int = 0) -> TranscriptClipStyle {
     switch kind {
     case .approved:
-      return TranscriptClipStyle(
-        fill: ClipStyleColor(red255: 95, green255: 185, blue255: 143, alpha: 0.17),
-        ring: ClipStyleColor(red255: 95, green255: 185, blue255: 143, alpha: 0.45),
-        text: ClipStyleColor(red255: 255, green255: 255, blue255: 255, alpha: 1),
-        swatch: ClipStyleColor(red255: 95, green255: 185, blue255: 143, alpha: 1),
-        strikethrough: false)
+      return approvedVariants[cyclicIndex(variant, count: approvedVariants.count)]
     case .suggested:
-      return TranscriptClipStyle(
-        fill: ClipStyleColor(red255: 208, green255: 164, blue255: 95, alpha: 0.17),
-        ring: ClipStyleColor(red255: 208, green255: 164, blue255: 95, alpha: 0.45),
-        text: ClipStyleColor(red255: 255, green255: 255, blue255: 255, alpha: 1),
-        swatch: ClipStyleColor(red255: 208, green255: 164, blue255: 95, alpha: 1),
-        strikethrough: false)
+      return suggestedVariants[cyclicIndex(variant, count: suggestedVariants.count)]
     case .selected:
-      return TranscriptClipStyle(
-        fill: ClipStyleColor(red255: 204, green255: 102, blue255: 102, alpha: 0.17),
-        ring: ClipStyleColor(red255: 204, green255: 102, blue255: 102, alpha: 0.45),
-        text: ClipStyleColor(red255: 255, green255: 255, blue255: 255, alpha: 1),
-        swatch: ClipStyleColor(red255: 204, green255: 102, blue255: 102, alpha: 1),
-        strikethrough: false)
+      return solidClip(red255: 204, green255: 102, blue255: 102)
     case .rejected:
       return TranscriptClipStyle(
         fill: ClipStyleColor(red255: 90, green255: 90, blue255: 90, alpha: 0.10),
@@ -89,6 +81,38 @@ struct TranscriptClipStyle: Equatable {
         swatch: ClipStyleColor(red255: 74, green255: 74, blue255: 74, alpha: 1),
         strikethrough: true)
     }
+  }
+
+  /// Cool green/teal tints for approved clips (variant 0 is the base green `#5fb98f`).
+  private static let approvedVariants = [
+    solidClip(red255: 95, green255: 185, blue255: 143),
+    solidClip(red255: 94, green255: 178, blue255: 196),
+    solidClip(red255: 128, green255: 190, blue255: 132),
+  ]
+
+  /// Warm amber/gold tints for suggested clips (variant 0 is the base amber `#d0a45f`).
+  private static let suggestedVariants = [
+    solidClip(red255: 208, green255: 164, blue255: 95),
+    solidClip(red255: 211, green255: 142, blue255: 90),
+    solidClip(red255: 198, green255: 180, blue255: 104),
+  ]
+
+  /// A live clip style from one base colour: translucent fill, 1px ring, white text, opaque
+  /// swatch, no strikethrough. The whole per-state palette is built from this.
+  private static func solidClip(red255: Double, green255: Double, blue255: Double)
+    -> TranscriptClipStyle
+  {
+    TranscriptClipStyle(
+      fill: ClipStyleColor(red255: red255, green255: green255, blue255: blue255, alpha: 0.17),
+      ring: ClipStyleColor(red255: red255, green255: green255, blue255: blue255, alpha: 0.45),
+      text: ClipStyleColor(red255: 255, green255: 255, blue255: 255, alpha: 1),
+      swatch: ClipStyleColor(red255: red255, green255: green255, blue255: blue255, alpha: 1),
+      strikethrough: false)
+  }
+
+  /// A non-negative index into a variant array for any (even negative) `variant`.
+  private static func cyclicIndex(_ variant: Int, count: Int) -> Int {
+    ((variant % count) + count) % count
   }
 }
 
