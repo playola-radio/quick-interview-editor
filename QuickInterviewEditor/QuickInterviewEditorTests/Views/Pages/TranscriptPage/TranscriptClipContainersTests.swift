@@ -11,6 +11,12 @@ struct TranscriptClipContainersTests {
     Word(id: id, text: text, start: 0, end: nil, startSample: nil, endSample: nil)
   }
 
+  private func paragraph(_ wordIDs: [Int]) -> TranscriptParagraph {
+    TranscriptParagraph(
+      id: "pause-\(wordIDs.first ?? 0)", kind: .pauseParagraph, speakerID: nil, title: nil,
+      wordIDs: wordIDs)
+  }
+
   /// A model whose document is "Hello world Foo bar baz" (ids 1…5) with no plan, so the
   /// container derivation can be exercised in isolation from slices/suggestions.
   private func model(clipBands: [TranscriptClipBand]) -> TranscriptPageModel {
@@ -75,6 +81,27 @@ struct TranscriptClipContainersTests {
     ]
     expectNoDifference(
       model(clipBands: bands).clipContainers,
+      [
+        TranscriptClipContainer(range: NSRange(location: 0, length: 11), kind: .approved),  // Hello world
+        TranscriptClipContainer(range: NSRange(location: 12, length: 7), kind: .approved),  // Foo bar
+      ])
+  }
+
+  /// A clip that spans a paragraph break splits into one capped container per paragraph — a
+  /// single container can't bridge the vertical gap between paragraphs.
+  @Test func aClipSpanningAParagraphBreakSplits() {
+    let model = TranscriptPageModel(planURL: nil)
+    // "Hello world\nFoo bar baz" — the break falls after word 2.
+    model.document = TranscriptDocument(
+      words: [
+        word(1, "Hello"), word(2, "world"), word(3, "Foo"), word(4, "bar"), word(5, "baz"),
+      ],
+      paragraphs: [paragraph([1, 2]), paragraph([3, 4, 5])])
+    model.clipBands = [
+      TranscriptClipBand(id: Fixtures.uuid(1), wordIDs: [1, 2, 3, 4], kind: .approved)
+    ]
+    expectNoDifference(
+      model.clipContainers,
       [
         TranscriptClipContainer(range: NSRange(location: 0, length: 11), kind: .approved),  // Hello world
         TranscriptClipContainer(range: NSRange(location: 12, length: 7), kind: .approved),  // Foo bar

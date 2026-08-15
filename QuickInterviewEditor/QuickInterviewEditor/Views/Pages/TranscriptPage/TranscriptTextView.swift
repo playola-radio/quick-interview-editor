@@ -253,20 +253,11 @@ struct TranscriptTextView: NSViewRepresentable {
         }
       }
       storage.endEditing()
-      if let union = Self.unionRange(affected) {
-        layoutManager.invalidateDisplay(forCharacterRange: union)
-      }
-    }
-
-    private static func unionRange(_ containers: [TranscriptClipContainer]) -> NSRange? {
-      guard let first = containers.first else { return nil }
-      var lower = first.range.location
-      var upper = NSMaxRange(first.range)
-      for container in containers.dropFirst() {
-        lower = min(lower, container.range.location)
-        upper = max(upper, NSMaxRange(container.range))
-      }
-      return NSRange(location: lower, length: upper - lower)
+      // The container fill/ring paints beyond the glyph bounds (vertical padding, line-edge
+      // fills), so a character-range invalidation would leave stale ring pixels after a band
+      // add/remove. Band changes are infrequent (a clip is created/accepted/rejected), so a
+      // full redraw is cheap and correct.
+      textView?.needsDisplay = true
     }
 
     private func applySelection(added: Set<Word.ID>, removed: Set<Word.ID>) {

@@ -149,10 +149,15 @@ class TranscriptPageModel: ViewModel {
   /// and merges each maximal stretch of consecutive words belonging to the SAME band into ONE
   /// range that spans their interior separators — that's the continuous tinted container the
   /// renderer strokes. Splitting by band identity (not just kind) keeps two back-to-back clips
-  /// of the same state as separate containers, each with its own caps; a non-clip word or a
-  /// green-over-amber precedence hole also breaks the run. The range ends at the last word (its
-  /// trailing space is left untinted, so the fill caps at the words, not the gap after them). A
-  /// duplicate word ID resolves to its first band, matching the model's dedup-first-occurrence.
+  /// of the same state as separate containers, each with its own caps; a non-clip word, a
+  /// green-over-amber precedence hole, or a paragraph break (the separator is a newline, and a
+  /// container can't span the vertical gap between paragraphs) also breaks the run. The range
+  /// ends at the last word (its trailing space is left untinted, so the fill caps at the words,
+  /// not the gap after them).
+  ///
+  /// A word ID maps to whichever band lists it first; a *duplicate* ID (the document allows
+  /// non-unique IDs) tints every occurrence, matching the transcript's existing tolerance for
+  /// duplicates elsewhere. Real aligner output uses unique IDs, so this is a theoretical edge.
   var clipContainers: [TranscriptClipContainer] {
     guard !clipBands.isEmpty else { return [] }
     var bandByWord: [Word.ID: (band: UUID, kind: TranscriptClipKind)] = [:]
@@ -161,6 +166,7 @@ class TranscriptPageModel: ViewModel {
         bandByWord[id] = (band.id, band.kind)
       }
     }
+    let text = document.text as NSString
     var containers: [TranscriptClipContainer] = []
     var runStart: Int?
     var runEnd = 0
@@ -179,7 +185,12 @@ class TranscriptPageModel: ViewModel {
     }
     for wordRange in document.wordRanges {
       let entry = bandByWord[wordRange.wordID]
-      if let entry, entry.band == runBand {
+      // The separator between the run's last word and this one is the char at `runEnd`; a
+      // newline there is a paragraph break, which always ends the run.
+      let paragraphBreak =
+        runStart != nil && runEnd < text.length
+        && text.character(at: runEnd) == 0x0A
+      if let entry, entry.band == runBand, !paragraphBreak {
         runEnd = NSMaxRange(wordRange.range)
       } else {
         closeRun()
