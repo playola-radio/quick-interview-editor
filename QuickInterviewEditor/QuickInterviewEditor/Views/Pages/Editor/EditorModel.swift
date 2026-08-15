@@ -217,17 +217,15 @@ final class EditorModel: ViewModel {
   /// The selected audio range, mirrored from the transcript selection.
   var highlightedSampleRange: Range<Int>? { transcript.selectedSampleRange }
 
-  /// Sample ranges of the run-together (tight-join) words to paint red. Reads the
-  /// transcript's already-computed `runTogetherSampleRanges` (same gap function + live
-  /// sensitivity), so the waveform's red always matches the transcript's without
-  /// recomputing it. Words missing sample bounds are excluded.
+  /// Sample ranges of the run-together words, reading the transcript's already-computed
+  /// `runTogetherSampleRanges`. Retained analysis — no longer painted on the waveform — kept
+  /// so a future feature (e.g. revealing tight joins while dragging) can surface it again.
+  /// Words missing sample bounds are excluded.
   var redRanges: [Range<Int>] { transcript.runTogetherSampleRanges }
 
-  /// Waveform render data, geometry delegated to the child and combined with the
-  /// transcript-derived ranges here (the view reads these; it decides nothing). The highlight
-  /// tracks `activeEditingRange`, so it follows a fine-tune drag live.
+  /// Waveform render data, geometry delegated to the child (the view reads these; it decides
+  /// nothing). The highlight tracks `activeEditingRange`, so it follows a fine-tune drag live.
   var waveformHighlightSpan: WaveformSpan? { activeEditingRange.flatMap(waveform.span(for:)) }
-  var waveformRedSpans: [WaveformSpan] { redRanges.compactMap(waveform.span(for:)) }
 
   /// View-x of the persistent cursor, or nil when it's scrolled out of the viewport. The model
   /// owns the cursor sample; the waveform supplies the geometry, so the view stays logic-free.

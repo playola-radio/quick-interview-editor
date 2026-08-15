@@ -795,13 +795,12 @@ struct EditorTests {
     #expect(model.waveformHighlightSpan != nil)
   }
 
-  @Test func redRangesTrackRunTogetherWordsAndSensitivity() {
+  @Test func redRangesMirrorTranscriptRunTogetherAnalysis() {
     let model = editor()
-    model.transcript.sensitivityChanged(10)
-    let tight = model.redRanges.count
-    model.transcript.sensitivityChanged(80)
-    let loose = model.redRanges.count
-    #expect(tight < loose)
+    // The run-together analysis is retained (no longer painted); the editor still exposes
+    // it as `redRanges`, mirroring the transcript's stored ranges at the fixed threshold.
+    expectNoDifference(model.redRanges, model.transcript.runTogetherSampleRanges)
+    #expect(!model.redRanges.isEmpty)
     for range in model.redRanges { #expect(range.lowerBound < range.upperBound) }
   }
 

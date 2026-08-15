@@ -33,7 +33,6 @@ class TranscriptPageModel: ViewModel {
 
   // MARK: - Dependencies
   @ObservationIgnored @Dependency(\.engine) var engine
-  @ObservationIgnored @Dependency(\.continuousClock) var clock
 
   // MARK: - Shared State
   @ObservationIgnored @Shared(.transcriptFontSize) var fontSize: Double
@@ -59,12 +58,13 @@ class TranscriptPageModel: ViewModel {
   /// Pause-grouped paragraphs (solo interviews) the renderer can lay out. Derived
   /// purely from the decoded plan's words + `transcript_segments`; no Python re-run.
   var paragraphs: [TranscriptParagraph] = []
-  /// Public run-together set for the renderer to diff.
+  /// Words with almost no gap before/after them ("run-together"), computed at load and
+  /// retained for future features (e.g. revealing them while dragging a clip boundary).
+  /// No longer rendered — the transcript/waveform stopped drawing the red marking — but
+  /// kept as stored analysis so it can be surfaced again without re-deriving.
   var runTogetherWordIDSet: Set<Word.ID> = []
-  var runTogetherMaxGapMs: Double = 30
-  var draftGapMs: Double = 30
+  let runTogetherMaxGapMs: Double = 30
   @ObservationIgnored private var gaps: [WordGap] = []
-  @ObservationIgnored private var sensitivityCommitTask: Task<Void, Never>?
   var isLoading = false
   var selectionAnchorID: Word.ID?
   var selectionFocusID: Word.ID?
@@ -84,11 +84,7 @@ class TranscriptPageModel: ViewModel {
 
   // MARK: - Display Text
   let transcriptCaption = "TRANSCRIPT"
-  let runTogetherLegend = "red = words that run together (hard to cut between)"
   let emptyStateMessage = "No transcript loaded."
-  let sensitivityLabel = "Run-together sensitivity"
-  let sensitivityMinMs = 10.0
-  let sensitivityMaxMs = 80.0
   let clearButtonLabel = "Clear"
   /// Vertical gap (points) the renderer leaves after each pause-paragraph. A display
   /// decision, so it lives on the model rather than being hardcoded in the view.
@@ -111,8 +107,6 @@ class TranscriptPageModel: ViewModel {
     guard lower < upper else { return nil }
     return lower..<upper
   }
-  var runTogetherCount: Int { runTogetherWordIDSet.count }
-  var runTogetherCountLabel: String { "\(runTogetherCount) run-together" }
   /// Sample ranges of the run-together words, ordered by transcript position. Words
   /// missing sample bounds (or with inverted/zero-width bounds) are excluded. A duplicate
   /// word ID emits only its first occurrence's range, matching the dedup semantics of the
@@ -138,7 +132,6 @@ class TranscriptPageModel: ViewModel {
   var selectedWordIDSet: Set<Word.ID> { selectedWordIDs }
   var canZoomIn: Bool { fontSize < maxFontSize }
   var canZoomOut: Bool { fontSize > minFontSize }
-  var sensitivityValueLabel: String { "\(Int(draftGapMs)) ms" }
 
   // MARK: - User Actions
   func viewAppeared() async {
@@ -185,24 +178,6 @@ class TranscriptPageModel: ViewModel {
     guard let first = selectedWords.first else { return }
     revealToken += 1
     reveal = TranscriptReveal(wordID: first.id, token: revealToken)
-  }
-
-  func sensitivityChanged(_ ms: Double) {
-    sensitivityCommitTask?.cancel()
-    runTogetherMaxGapMs = ms
-    recomputeRunTogether()
-  }
-
-  /// Live slider drag: update the label immediately, debounce the expensive recompute.
-  func sensitivityDragChanged(_ ms: Double) {
-    draftGapMs = ms
-    sensitivityCommitTask?.cancel()
-    sensitivityCommitTask = Task { [weak self] in
-      guard let self else { return }
-      try? await self.clock.sleep(for: .milliseconds(150))
-      guard !Task.isCancelled else { return }
-      self.commitSensitivity(ms)
-    }
   }
 
   func transcriptClicked(atUTF16Offset offset: Int, extending: Bool = false) {
@@ -268,10 +243,6 @@ class TranscriptPageModel: ViewModel {
   private func setFontSize(_ size: Double) {
     $fontSize.withLock { $0 = min(max(size, minFontSize), maxFontSize) }
   }
-  private func commitSensitivity(_ ms: Double) {
-    runTogetherMaxGapMs = ms
-    recomputeRunTogether()
-  }
   /// Rebuilds everything derived from the plan's words: the document (space-joined
   /// text + UTF-16 range map), the adjacent-gap cache, and the run-together set. This
   /// is the single place the plan is materialized, so it runs only when the plan is
@@ -284,8 +255,8 @@ class TranscriptPageModel: ViewModel {
     gaps = wordGaps(plan.words)
     recomputeRunTogether()
   }
-  /// Recomputes only the run-together set from the cached gaps. Cheap relative to
-  /// rebuilding the document; runs at plan load and on sensitivity commit.
+  /// Recomputes the run-together set from the cached gaps at the fixed default threshold.
+  /// Runs once at plan load; the result is stored analysis, not currently rendered.
   private func recomputeRunTogether() {
     runTogetherWordIDSet = runTogetherWordIDs(gaps: gaps, maxGapMs: runTogetherMaxGapMs)
   }

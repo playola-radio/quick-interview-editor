@@ -97,16 +97,12 @@ struct TranscriptPageTests {
     expectNoDifference(model.selectedWordIDSet, [])
   }
 
-  @Test func sensitivityChangesRunTogetherCount() async {
+  @Test func runTogetherSetPopulatedAtDefaultThreshold() async {
     let model = await loadedModel()
-    model.sensitivityChanged(10)
-    let tight = model.runTogetherCount
-    model.sensitivityChanged(80)
-    let loose = model.runTogetherCount
-    #expect(tight < loose)
-    // default 30 flags the known 25-pair set → 40 unique words on this fixture
-    model.sensitivityChanged(30)
-    #expect(model.runTogetherCount > 0)
+    // Detection still runs at the fixed default threshold and is stored, even though
+    // nothing renders it — the "want" → "to" fused pair is flagged.
+    #expect(!model.runTogetherWordIDSet.isEmpty)
+    #expect(model.runTogetherWordIDSet.contains(runTogetherID(model, text: "want")))
   }
 
   // MARK: - Synthetic-plan regression tests

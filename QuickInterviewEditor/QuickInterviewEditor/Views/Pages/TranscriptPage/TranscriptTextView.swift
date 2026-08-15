@@ -11,7 +11,6 @@ struct TranscriptTextView: NSViewRepresentable {
   let fontSize: Double
   let paragraphSpacing: Double
   let selected: Set<Word.ID>
-  let runTogether: Set<Word.ID>
   let scrollTarget: Word.ID?
   let followMode: TranscriptFollowMode
   let reveal: TranscriptReveal?
@@ -52,8 +51,7 @@ struct TranscriptTextView: NSViewRepresentable {
     context.coordinator.scrollView = scroll
     context.coordinator.paragraphSpacing = paragraphSpacing
     context.coordinator.observeScroll()
-    context.coordinator.rebuildText(
-      text: text, fontSize: fontSize, selected: selected, runTogether: runTogether)
+    context.coordinator.rebuildText(text: text, fontSize: fontSize, selected: selected)
     return scroll
   }
 
@@ -61,7 +59,7 @@ struct TranscriptTextView: NSViewRepresentable {
     context.coordinator.model = model
     context.coordinator.paragraphSpacing = paragraphSpacing
     context.coordinator.apply(
-      text: text, fontSize: fontSize, selected: selected, runTogether: runTogether,
+      text: text, fontSize: fontSize, selected: selected,
       scrollTarget: scrollTarget, followMode: followMode, reveal: reveal)
   }
 
@@ -73,7 +71,6 @@ struct TranscriptTextView: NSViewRepresentable {
     var paragraphSpacing: Double = 0
     private var lastText = ""
     private var lastSelected: Set<Word.ID> = []
-    private var lastRunTogether: Set<Word.ID> = []
     private var lastFontSize: Double = 0
     private var lastScrollTarget: Word.ID?
     private var lastFollowMode: TranscriptFollowMode = .following
@@ -86,13 +83,9 @@ struct TranscriptTextView: NSViewRepresentable {
     private static let selectedBG = NSColor(
       calibratedRed: 0.80, green: 0.40, blue: 0.40, alpha: 0.30)
     private static let selectedFG = NSColor.white
-    private static let runTogetherFG = NSColor(
-      calibratedRed: 0.89, green: 0.58, blue: 0.58, alpha: 1)
     private static let normalFG = NSColor(calibratedWhite: 0.56, alpha: 1)
 
-    func rebuildText(
-      text: String, fontSize: Double, selected: Set<Word.ID>, runTogether: Set<Word.ID>
-    ) {
+    func rebuildText(text: String, fontSize: Double, selected: Set<Word.ID>) {
       guard let storage = textView?.textStorage else { return }
       let attr = NSMutableAttributedString(string: text)
       let full = NSRange(location: 0, length: attr.length)
@@ -108,22 +101,19 @@ struct TranscriptTextView: NSViewRepresentable {
       lastText = text
       lastFontSize = fontSize
       lastSelected = []
-      lastRunTogether = []
-      applyWordColors(added: runTogether, role: .runTogether, currentSelected: selected)
-      applySelection(added: selected, removed: [], currentRunTogether: runTogether)
-      lastRunTogether = runTogether
+      applySelection(added: selected, removed: [])
       lastSelected = selected
     }
 
     // swiftlint:disable:next function_parameter_count
     func apply(
-      text: String, fontSize: Double, selected: Set<Word.ID>, runTogether: Set<Word.ID>,
+      text: String, fontSize: Double, selected: Set<Word.ID>,
       scrollTarget: Word.ID?, followMode: TranscriptFollowMode, reveal: TranscriptReveal?
     ) {
       guard let storage = textView?.textStorage, let textView else { return }
 
       if text != lastText {
-        rebuildText(text: text, fontSize: fontSize, selected: selected, runTogether: runTogether)
+        rebuildText(text: text, fontSize: fontSize, selected: selected)
         return
       }
 
@@ -134,16 +124,9 @@ struct TranscriptTextView: NSViewRepresentable {
         lastFontSize = fontSize
       }
 
-      let rtAdded = runTogether.subtracting(lastRunTogether)
-      let rtRemoved = lastRunTogether.subtracting(runTogether)
-      applyWordColors(added: rtAdded, role: .runTogether, currentSelected: selected)
-      applyWordColors(
-        added: rtRemoved.subtracting(selected), role: .normal, currentSelected: selected)
-      lastRunTogether = runTogether
-
       let selAdded = selected.subtracting(lastSelected)
       let selRemoved = lastSelected.subtracting(selected)
-      applySelection(added: selAdded, removed: selRemoved, currentRunTogether: runTogether)
+      applySelection(added: selAdded, removed: selRemoved)
       lastSelected = selected
 
       // Resuming follow (userPaused → following) must re-scroll to the current target
@@ -175,33 +158,16 @@ struct TranscriptTextView: NSViewRepresentable {
       }
     }
 
-    private enum Role { case selected, runTogether, normal }
-
     private func range(for id: Word.ID) -> NSRange? {
       model.document.wordRanges.first { $0.wordID == id }?.range
     }
 
-    private func applyWordColors(
-      added: Set<Word.ID>, role: Role, currentSelected: Set<Word.ID>
-    ) {
-      guard let storage = textView?.textStorage else { return }
-      let color = role == .runTogether ? Self.runTogetherFG : Self.normalFG
-      for id in added where !currentSelected.contains(id) {
-        if let wordRange = range(for: id) {
-          storage.addAttribute(.foregroundColor, value: color, range: wordRange)
-        }
-      }
-    }
-
-    private func applySelection(
-      added: Set<Word.ID>, removed: Set<Word.ID>, currentRunTogether: Set<Word.ID>
-    ) {
+    private func applySelection(added: Set<Word.ID>, removed: Set<Word.ID>) {
       guard let storage = textView?.textStorage else { return }
       for id in removed {
         guard let wordRange = range(for: id) else { continue }
         storage.removeAttribute(.backgroundColor, range: wordRange)
-        let fg = currentRunTogether.contains(id) ? Self.runTogetherFG : Self.normalFG
-        storage.addAttribute(.foregroundColor, value: fg, range: wordRange)
+        storage.addAttribute(.foregroundColor, value: Self.normalFG, range: wordRange)
       }
       for id in added {
         guard let wordRange = range(for: id) else { continue }
