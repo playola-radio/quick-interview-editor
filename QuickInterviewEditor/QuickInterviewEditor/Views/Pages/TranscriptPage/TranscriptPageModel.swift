@@ -102,10 +102,10 @@ class TranscriptPageModel: ViewModel {
   let clearButtonLabel = "Clear"
   /// Vertical spacing (points) between lines. The same value is used within a paragraph
   /// (`lineSpacing`) and after each pause-paragraph (`paragraphSpacing`) so the gap is uniform
-  /// everywhere — and airy enough that a clip container never vertically overlaps the next
-  /// line. A display decision, so it lives on the model rather than being hardcoded in the view.
-  let lineSpacing = 12.0
-  let paragraphSpacing = 12.0
+  /// everywhere — just enough that a clip container clears the next line without touching it. A
+  /// display decision, so it lives on the model rather than being hardcoded in the view.
+  let lineSpacing = 8.0
+  let paragraphSpacing = 8.0
 
   // MARK: - View Helpers
   var hasSelection: Bool { !selectedWords.isEmpty }

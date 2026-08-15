@@ -55,13 +55,13 @@ final class ClipContainerLayoutManager: NSLayoutManager {
         let roundedLeft = segment.location == fullGlyphRange.location
         let roundedRight = NSMaxRange(segment) == NSMaxRange(fullGlyphRange)
 
-        // The rounded caps are the ONLY closed ends, so they must be the only thing that stops
-        // at a word: a real clip end (`roundedLeft`/`roundedRight`) clamps to its word, while a
-        // wrap-cut edge runs OPEN all the way to the line box margin (`lineRect`) so it reads as
-        // "the clip continues past the line", not "the clip ends here".
+        // Every edge stops at the TEXT (`usedRect`), never the line box margin. A real clip end
+        // (`roundedLeft`/`roundedRight`) gets a rounded cap at its word; a wrap-cut edge stays
+        // OPEN — squared, no vertical rule — at the line's last word, so it reads as "the clip
+        // continues past the line", not "the clip ends here".
         let horizontal = boundingRect(forGlyphRange: segment, in: textContainer)
-        let leftX = roundedLeft ? horizontal.minX : lineRect.minX
-        let rightX = roundedRight ? min(horizontal.maxX, usedRect.maxX) : lineRect.maxX
+        let leftX = roundedLeft ? horizontal.minX : usedRect.minX
+        let rightX = roundedRight ? min(horizontal.maxX, usedRect.maxX) : usedRect.maxX
 
         // Vertical box hugs the glyphs, centered on the text BASELINE with symmetric padding —
         // NOT `usedRect`, whose line leading sits below the text and would push the fill down
