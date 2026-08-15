@@ -12,7 +12,6 @@ struct TranscriptPageView: View {
         fontSize: model.fontSize,
         paragraphSpacing: model.paragraphSpacing,
         selected: model.selectedWordIDSet,
-        runTogether: model.runTogetherWordIDSet,
         scrollTarget: model.scrollTargetWordID,
         followMode: model.followMode,
         reveal: model.reveal
@@ -47,8 +46,6 @@ struct TranscriptPageView: View {
         .foregroundStyle(Color(white: 0.44))
       Spacer()
       zoomControls
-      Text(model.runTogetherLegend)
-        .font(.system(size: 11)).foregroundStyle(Color(white: 0.48))
     }
   }
 
@@ -81,13 +78,6 @@ struct TranscriptPageView: View {
         .disabled(!model.hasSelection)
       Text(model.selectionSummary).foregroundStyle(Color(white: 0.6))
       Spacer()
-      Text(model.runTogetherCountLabel).foregroundStyle(Color(white: 0.6))
-      Text(model.sensitivityLabel).foregroundStyle(Color(white: 0.6))
-      Slider(
-        value: Binding(get: { model.draftGapMs }, set: { model.sensitivityDragChanged($0) }),
-        in: model.sensitivityMinMs...model.sensitivityMaxMs
-      )
-      .frame(width: 180)
     }
     .font(.system(size: 12))
   }

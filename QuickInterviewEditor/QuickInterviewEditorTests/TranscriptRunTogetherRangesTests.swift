@@ -22,7 +22,6 @@ struct TranscriptRunTogetherRangesTests {
     let model = TranscriptPageModel(editPlan: plan)  // default 30ms → words 1,2 run together
     expectNoDifference(model.runTogetherWordIDSet, [1, 2])
     expectNoDifference(model.runTogetherSampleRanges, [0..<100, 120..<300])
-    expectNoDifference(model.runTogetherCount, 2)
   }
 
   @Test func editorRedRangesTrackTranscript() {
