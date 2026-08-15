@@ -33,4 +33,15 @@ struct TranscriptSensitivityTests {
     expectNoDifference(runTogetherWordIDs(gaps: gaps, maxGapMs: 30), [1, 2])
     expectNoDifference(runTogetherWordIDs(gaps: gaps, maxGapMs: 10), [])
   }
+
+  /// Locks the strict `gapMs < maxGapMs` boundary: a gap exactly at the threshold (and
+  /// above) must NOT flag; only a gap strictly below it does.
+  @Test func exactThresholdGapIsNotRunTogether() {
+    let gaps = [
+      WordGap(leftID: 1, rightID: 2, gapMs: 29),  // below 30 → both flagged
+      WordGap(leftID: 3, rightID: 4, gapMs: 30),  // exactly 30 → not flagged
+      WordGap(leftID: 5, rightID: 6, gapMs: 31),  // above 30 → not flagged
+    ]
+    expectNoDifference(runTogetherWordIDs(gaps: gaps, maxGapMs: 30), [1, 2])
+  }
 }
