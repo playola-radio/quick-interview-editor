@@ -79,7 +79,11 @@ class TranscriptPageModel: ViewModel {
   /// The clip containers to draw, derived by `EditorModel` from slices + pending suggestions
   /// and pushed in by the view. Kept here (not recomputed from slices) so the transcript stays
   /// layout-local — it knows nothing about slices or the sidecar, only which words are clips.
-  var clipBands: [TranscriptClipBand] = []
+  /// Assigning it recomputes the cached `clipContainers` so the O(n) derivation runs only on a
+  /// real change, not on every body evaluation (the view reads `clipContainers` each playback tick).
+  var clipBands: [TranscriptClipBand] = [] {
+    didSet { recomputeClipContainers() }
+  }
   /// The latest explicit reveal request (from clicking a suggestion or clip). The view scrolls
   /// to it regardless of `followMode`; nil until the first reveal.
   var reveal: TranscriptReveal?
@@ -158,10 +162,21 @@ class TranscriptPageModel: ViewModel {
   /// A word ID maps to whichever band lists it first; a *duplicate* ID (the document allows
   /// non-unique IDs) tints every occurrence, matching the transcript's existing tolerance for
   /// duplicates elsewhere. Real aligner output uses unique IDs, so this is a theoretical edge.
-  var clipContainers: [TranscriptClipContainer] {
-    guard !clipBands.isEmpty else { return [] }
+  ///
+  /// Cached: recomputed only when `clipBands` or `document` changes (see `recomputeClipContainers`),
+  /// never on the getter, so a playback tick that re-evaluates the view doesn't re-derive it.
+  private(set) var clipContainers: [TranscriptClipContainer] = []
+
+  private func recomputeClipContainers() {
+    clipContainers = Self.clipContainers(bands: clipBands, document: document)
+  }
+
+  private static func clipContainers(
+    bands: [TranscriptClipBand], document: TranscriptDocument
+  ) -> [TranscriptClipContainer] {
+    guard !bands.isEmpty else { return [] }
     var bandByWord: [Word.ID: (band: UUID, kind: TranscriptClipKind)] = [:]
-    for band in clipBands {
+    for band in bands {
       for id in band.wordIDs where bandByWord[id] == nil {
         bandByWord[id] = (band.id, band.kind)
       }
@@ -329,6 +344,9 @@ class TranscriptPageModel: ViewModel {
     document = TranscriptDocument(words: plan.words, paragraphs: paragraphs)
     gaps = wordGaps(plan.words)
     recomputeRunTogether()
+    // The word→range map just changed, so re-derive the cached containers against it (bands may
+    // already be set — e.g. a reload — so this keeps them from pointing at stale ranges).
+    recomputeClipContainers()
   }
   /// Recomputes the run-together set from the cached gaps at the fixed default threshold.
   /// Runs once at plan load; the result is stored analysis, not currently rendered.

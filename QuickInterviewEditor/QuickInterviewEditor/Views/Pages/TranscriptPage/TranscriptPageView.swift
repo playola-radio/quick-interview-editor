@@ -101,14 +101,6 @@ struct TranscriptPageView: View {
   }
 }
 
-extension Color {
-  /// Renders a model-side `ClipStyleColor` token as a SwiftUI colour. A pure rendering
-  /// adapter — the palette itself stays in the (portable) model.
-  init(_ token: ClipStyleColor) {
-    self.init(red: token.red, green: token.green, blue: token.blue, opacity: token.alpha)
-  }
-}
-
 #Preview("Clip containers") {
   let sentence =
     "When we tour on the bus they have a playlist compiled over the years but it is "

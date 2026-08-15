@@ -82,8 +82,10 @@ struct TranscriptClipContainersTests {
     expectNoDifference(
       model(clipBands: bands).clipContainers,
       [
-        TranscriptClipContainer(range: NSRange(location: 0, length: 11), kind: .approved),  // Hello world
-        TranscriptClipContainer(range: NSRange(location: 12, length: 7), kind: .approved),  // Foo bar
+        // Hello world
+        TranscriptClipContainer(range: NSRange(location: 0, length: 11), kind: .approved),
+        // Foo bar
+        TranscriptClipContainer(range: NSRange(location: 12, length: 7), kind: .approved),
       ])
   }
 
@@ -103,8 +105,10 @@ struct TranscriptClipContainersTests {
     expectNoDifference(
       model.clipContainers,
       [
-        TranscriptClipContainer(range: NSRange(location: 0, length: 11), kind: .approved),  // Hello world
-        TranscriptClipContainer(range: NSRange(location: 12, length: 7), kind: .approved),  // Foo bar
+        // Hello world
+        TranscriptClipContainer(range: NSRange(location: 0, length: 11), kind: .approved),
+        // Foo bar
+        TranscriptClipContainer(range: NSRange(location: 12, length: 7), kind: .approved),
       ])
   }
 
