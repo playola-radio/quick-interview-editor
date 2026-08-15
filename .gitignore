@@ -61,3 +61,4 @@ QuickInterviewEditor/vendor/
 packaging/build/
 packaging/dist/
 packaging/*.app/
+.gstack/
