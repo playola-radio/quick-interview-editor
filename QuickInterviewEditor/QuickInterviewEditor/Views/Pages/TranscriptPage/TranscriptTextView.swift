@@ -2,8 +2,8 @@ import AppKit
 import SwiftUI
 
 /// Dumb TextKit-1 renderer. Owns the AppKit objects and converts points to UTF-16
-/// offsets; every decision (which word, selection, follow) lives in the model. The
-/// model-derived values it repaints from are passed in as explicit inputs so SwiftUI
+/// offsets; every decision (which word, selection, follow, clip state) lives in the model.
+/// The model-derived values it repaints from are passed in as explicit inputs so SwiftUI
 /// registers them as dependencies and calls `updateNSView` when they change.
 struct TranscriptTextView: NSViewRepresentable {
   let model: TranscriptPageModel
@@ -11,6 +11,7 @@ struct TranscriptTextView: NSViewRepresentable {
   let fontSize: Double
   let paragraphSpacing: Double
   let selected: Set<Word.ID>
+  let clipContainers: [TranscriptClipContainer]
   let scrollTarget: Word.ID?
   let followMode: TranscriptFollowMode
   let reveal: TranscriptReveal?
@@ -22,11 +23,21 @@ struct TranscriptTextView: NSViewRepresentable {
     scroll.hasVerticalScroller = true
     scroll.drawsBackground = false
 
-    // Canonical TextKit-1 "text view in a scroll view" configuration: the text view grows
-    // vertically with its content while its width tracks the clip view, so a long transcript
-    // wraps to the viewport width and scrolls instead of being clipped.
+    // Canonical TextKit-1 "text view in a scroll view" configuration, built by hand so a
+    // custom layout manager (the clip-container renderer) can be installed on the stack: the
+    // text view grows vertically with its content while its width tracks the clip view, so a
+    // long transcript wraps to the viewport width and scrolls instead of being clipped.
     let contentSize = scroll.contentSize
-    let textView = HitTestingTextView()
+    let textStorage = NSTextStorage()
+    let layoutManager = ClipContainerLayoutManager()
+    textStorage.addLayoutManager(layoutManager)
+    let textContainer = NSTextContainer(
+      containerSize: NSSize(width: contentSize.width, height: CGFloat.greatestFiniteMagnitude))
+    textContainer.widthTracksTextView = true
+    layoutManager.addTextContainer(textContainer)
+
+    let textView = HitTestingTextView(
+      frame: NSRect(origin: .zero, size: contentSize), textContainer: textContainer)
     textView.coordinator = context.coordinator
     textView.isEditable = false
     textView.isSelectable = false
@@ -39,10 +50,6 @@ struct TranscriptTextView: NSViewRepresentable {
     textView.minSize = NSSize(width: 0, height: 0)
     textView.maxSize = NSSize(
       width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
-    textView.frame = NSRect(origin: .zero, size: contentSize)
-    textView.textContainer?.widthTracksTextView = true
-    textView.textContainer?.containerSize = NSSize(
-      width: contentSize.width, height: CGFloat.greatestFiniteMagnitude)
 
     scroll.documentView = textView
 
@@ -51,7 +58,8 @@ struct TranscriptTextView: NSViewRepresentable {
     context.coordinator.scrollView = scroll
     context.coordinator.paragraphSpacing = paragraphSpacing
     context.coordinator.observeScroll()
-    context.coordinator.rebuildText(text: text, fontSize: fontSize, selected: selected)
+    context.coordinator.rebuildText(
+      text: text, fontSize: fontSize, selected: selected, clipContainers: clipContainers)
     return scroll
   }
 
@@ -59,7 +67,7 @@ struct TranscriptTextView: NSViewRepresentable {
     context.coordinator.model = model
     context.coordinator.paragraphSpacing = paragraphSpacing
     context.coordinator.apply(
-      text: text, fontSize: fontSize, selected: selected,
+      text: text, fontSize: fontSize, selected: selected, clipContainers: clipContainers,
       scrollTarget: scrollTarget, followMode: followMode, reveal: reveal)
   }
 
@@ -71,6 +79,7 @@ struct TranscriptTextView: NSViewRepresentable {
     var paragraphSpacing: Double = 0
     private var lastText = ""
     private var lastSelected: Set<Word.ID> = []
+    private var lastClipContainers: [TranscriptClipContainer] = []
     private var lastFontSize: Double = 0
     private var lastScrollTarget: Word.ID?
     private var lastFollowMode: TranscriptFollowMode = .following
@@ -85,7 +94,19 @@ struct TranscriptTextView: NSViewRepresentable {
     private static let selectedFG = NSColor.white
     private static let normalFG = NSColor(calibratedWhite: 0.56, alpha: 1)
 
-    func rebuildText(text: String, fontSize: Double, selected: Set<Word.ID>) {
+    private static func nsColor(_ color: ClipStyleColor) -> NSColor {
+      NSColor(
+        calibratedRed: color.red, green: color.green, blue: color.blue, alpha: color.alpha)
+    }
+
+    private var clipLayoutManager: ClipContainerLayoutManager? {
+      textView?.layoutManager as? ClipContainerLayoutManager
+    }
+
+    func rebuildText(
+      text: String, fontSize: Double, selected: Set<Word.ID>,
+      clipContainers: [TranscriptClipContainer]
+    ) {
       guard let storage = textView?.textStorage else { return }
       let attr = NSMutableAttributedString(string: text)
       let full = NSRange(location: 0, length: attr.length)
@@ -101,19 +122,26 @@ struct TranscriptTextView: NSViewRepresentable {
       lastText = text
       lastFontSize = fontSize
       lastSelected = []
-      applySelection(added: selected, removed: [])
+      lastClipContainers = []
+      // Clips first (they colour their words white/dim), then selection paints the red
+      // highlight + white text on top of whichever words are selected.
+      applyClipContainers(clipContainers)
+      lastClipContainers = clipContainers
       lastSelected = selected
+      applySelection(added: selected, removed: [])
     }
 
     // swiftlint:disable:next function_parameter_count
     func apply(
       text: String, fontSize: Double, selected: Set<Word.ID>,
-      scrollTarget: Word.ID?, followMode: TranscriptFollowMode, reveal: TranscriptReveal?
+      clipContainers: [TranscriptClipContainer], scrollTarget: Word.ID?,
+      followMode: TranscriptFollowMode, reveal: TranscriptReveal?
     ) {
       guard let storage = textView?.textStorage, let textView else { return }
 
       if text != lastText {
-        rebuildText(text: text, fontSize: fontSize, selected: selected)
+        rebuildText(
+          text: text, fontSize: fontSize, selected: selected, clipContainers: clipContainers)
         return
       }
 
@@ -124,10 +152,15 @@ struct TranscriptTextView: NSViewRepresentable {
         lastFontSize = fontSize
       }
 
+      if clipContainers != lastClipContainers {
+        applyClipContainers(clipContainers)
+        lastClipContainers = clipContainers
+      }
+
       let selAdded = selected.subtracting(lastSelected)
       let selRemoved = lastSelected.subtracting(selected)
-      applySelection(added: selAdded, removed: selRemoved)
       lastSelected = selected
+      applySelection(added: selAdded, removed: selRemoved)
 
       // Resuming follow (userPaused → following) must re-scroll to the current target
       // even if its ID is unchanged: playback can stop and restart while the playhead
@@ -162,18 +195,91 @@ struct TranscriptTextView: NSViewRepresentable {
       model.document.wordRanges.first { $0.wordID == id }?.range
     }
 
+    /// The single source of truth for a word's text colour: selected wins (white), then a
+    /// clip's own colour (white for live clips, dim grey for rejected), else the body grey.
+    /// Both the selection diff and the clip diff route foreground through here so neither
+    /// stomps the other when a word is both selected and inside a clip.
+    private func foregroundColor(selected: Bool, kind: TranscriptClipKind?) -> NSColor {
+      if selected { return Self.selectedFG }
+      guard let kind else { return Self.normalFG }
+      return Self.nsColor(TranscriptClipStyle.style(for: kind).text)
+    }
+
+    private func clipKind(atLocation location: Int) -> TranscriptClipKind? {
+      lastClipContainers.first { NSLocationInRange(location, $0.range) }?.kind
+    }
+
+    private func setForeground(storage: NSTextStorage, wordRange: NSRange, wordID: Word.ID) {
+      let kind = clipKind(atLocation: wordRange.location)
+      storage.addAttribute(
+        .foregroundColor,
+        value: foregroundColor(selected: lastSelected.contains(wordID), kind: kind),
+        range: wordRange)
+      if kind == .rejected {
+        storage.addAttribute(
+          .strikethroughStyle, value: NSUnderlineStyle.single.rawValue, range: wordRange)
+      } else {
+        storage.removeAttribute(.strikethroughStyle, range: wordRange)
+      }
+    }
+
+    /// Repaints the clip layer: hands the resolved fill/ring runs to the layout manager and
+    /// refreshes text colour/strikethrough for every word an added OR removed container
+    /// touched. `lastClipContainers` is updated first so `clipKind` reflects the new state
+    /// (a removed container's words fall back to selection/body colour).
+    private func applyClipContainers(_ new: [TranscriptClipContainer]) {
+      guard let storage = textView?.textStorage, let layoutManager = clipLayoutManager else {
+        return
+      }
+      let affected = lastClipContainers + new
+      lastClipContainers = new
+      layoutManager.containerRuns = new.map { container in
+        let style = TranscriptClipStyle.style(for: container.kind)
+        return ClipContainerRun(
+          range: container.range, fill: Self.nsColor(style.fill), ring: Self.nsColor(style.ring))
+      }
+      storage.beginEditing()
+      for container in affected {
+        for wordRange in model.document.wordRanges
+        where NSLocationInRange(wordRange.range.location, container.range) {
+          setForeground(storage: storage, wordRange: wordRange.range, wordID: wordRange.wordID)
+        }
+      }
+      storage.endEditing()
+      if let union = Self.unionRange(affected) {
+        layoutManager.invalidateDisplay(forCharacterRange: union)
+      }
+    }
+
+    private static func unionRange(_ containers: [TranscriptClipContainer]) -> NSRange? {
+      guard let first = containers.first else { return nil }
+      var lower = first.range.location
+      var upper = NSMaxRange(first.range)
+      for container in containers.dropFirst() {
+        lower = min(lower, container.range.location)
+        upper = max(upper, NSMaxRange(container.range))
+      }
+      return NSRange(location: lower, length: upper - lower)
+    }
+
     private func applySelection(added: Set<Word.ID>, removed: Set<Word.ID>) {
       guard let storage = textView?.textStorage else { return }
+      storage.beginEditing()
       for id in removed {
         guard let wordRange = range(for: id) else { continue }
         storage.removeAttribute(.backgroundColor, range: wordRange)
-        storage.addAttribute(.foregroundColor, value: Self.normalFG, range: wordRange)
       }
       for id in added {
         guard let wordRange = range(for: id) else { continue }
         storage.addAttribute(.backgroundColor, value: Self.selectedBG, range: wordRange)
-        storage.addAttribute(.foregroundColor, value: Self.selectedFG, range: wordRange)
       }
+      // Foreground respects both selection and clip state, so recompute it (not just reset to
+      // grey) for every word whose selection changed — a deselected clip word stays white/dim.
+      for id in removed.union(added) {
+        guard let wordRange = range(for: id) else { continue }
+        setForeground(storage: storage, wordRange: wordRange, wordID: id)
+      }
+      storage.endEditing()
     }
 
     // MARK: Scroll observation

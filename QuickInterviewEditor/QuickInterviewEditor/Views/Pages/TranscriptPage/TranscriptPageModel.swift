@@ -76,6 +76,10 @@ class TranscriptPageModel: ViewModel {
   let defaultFontSize = defaultTranscriptFontSize
   var followMode: TranscriptFollowMode = .following
   var scrollTargetWordID: Word.ID?
+  /// The clip containers to draw, derived by `EditorModel` from slices + pending suggestions
+  /// and pushed in by the view. Kept here (not recomputed from slices) so the transcript stays
+  /// layout-local — it knows nothing about slices or the sidecar, only which words are clips.
+  var clipBands: [TranscriptClipBand] = []
   /// The latest explicit reveal request (from clicking a suggestion or clip). The view scrolls
   /// to it regardless of `followMode`; nil until the first reveal.
   var reveal: TranscriptReveal?
@@ -84,6 +88,12 @@ class TranscriptPageModel: ViewModel {
 
   // MARK: - Display Text
   let transcriptCaption = "TRANSCRIPT"
+  /// The static header legend for the two data-driven container colours. Kinds only — the
+  /// view maps each to its swatch colour via `TranscriptClipStyle`, holding no palette itself.
+  let clipLegend: [ClipLegendItem] = [
+    ClipLegendItem(kind: .approved, label: "Clip"),
+    ClipLegendItem(kind: .suggested, label: "Suggested"),
+  ]
   let emptyStateMessage = "No transcript loaded."
   let clearButtonLabel = "Clear"
   /// Vertical gap (points) the renderer leaves after each pause-paragraph. A display
@@ -130,6 +140,49 @@ class TranscriptPageModel: ViewModel {
   }
   /// Public selection set for the renderer to diff (the private `selectedWordIDs` stays internal).
   var selectedWordIDSet: Set<Word.ID> { selectedWordIDs }
+
+  /// The clip bands mapped to drawable UTF-16 runs, in transcript order. Walks
+  /// `document.wordRanges` (position order, so it's correct even for non-monotonic word IDs)
+  /// and merges each maximal stretch of consecutive same-kind words into ONE range that spans
+  /// their interior separators — that's the continuous tinted container the renderer strokes.
+  /// A non-clip word (or a state change) breaks the run, so a green-over-amber precedence hole
+  /// splits into separate containers. A duplicate word ID resolves to its first band, matching
+  /// the dedup-first-occurrence semantics the rest of the model uses.
+  var clipContainers: [TranscriptClipContainer] {
+    guard !clipBands.isEmpty else { return [] }
+    var kindByWord: [Word.ID: TranscriptClipKind] = [:]
+    for band in clipBands {
+      for id in band.wordIDs where kindByWord[id] == nil { kindByWord[id] = band.kind }
+    }
+    var containers: [TranscriptClipContainer] = []
+    var runStart: Int?
+    var runEnd = 0
+    var runKind: TranscriptClipKind?
+    func closeRun() {
+      if let start = runStart, let kind = runKind {
+        containers.append(
+          TranscriptClipContainer(
+            range: NSRange(location: start, length: runEnd - start), kind: kind))
+      }
+      runStart = nil
+      runKind = nil
+    }
+    for wordRange in document.wordRanges {
+      let kind = kindByWord[wordRange.wordID]
+      if let kind, kind == runKind {
+        runEnd = NSMaxRange(wordRange.range)
+      } else {
+        closeRun()
+        if let kind {
+          runStart = wordRange.range.location
+          runEnd = NSMaxRange(wordRange.range)
+          runKind = kind
+        }
+      }
+    }
+    closeRun()
+    return containers
+  }
   var canZoomIn: Bool { fontSize < maxFontSize }
   var canZoomOut: Bool { fontSize > minFontSize }
 

@@ -12,6 +12,7 @@ struct TranscriptPageView: View {
         fontSize: model.fontSize,
         paragraphSpacing: model.paragraphSpacing,
         selected: model.selectedWordIDSet,
+        clipContainers: model.clipContainers,
         scrollTarget: model.scrollTargetWordID,
         followMode: model.followMode,
         reveal: model.reveal
@@ -40,12 +41,28 @@ struct TranscriptPageView: View {
   }
 
   private var header: some View {
-    HStack {
+    HStack(spacing: 14) {
       Text(model.transcriptCaption)
         .font(.system(size: 11, weight: .semibold)).tracking(1.5)
         .foregroundStyle(Color(white: 0.44))
+      legend
       Spacer()
       zoomControls
+    }
+  }
+
+  private var legend: some View {
+    HStack(spacing: 10) {
+      ForEach(model.clipLegend) { item in
+        HStack(spacing: 5) {
+          RoundedRectangle(cornerRadius: 2)
+            .fill(Color(TranscriptClipStyle.style(for: item.kind).swatch))
+            .frame(width: 8, height: 8)
+          Text(item.label)
+            .font(.system(size: 11))
+            .foregroundStyle(Color(white: 0.44))
+        }
+      }
     }
   }
 
@@ -81,4 +98,43 @@ struct TranscriptPageView: View {
     }
     .font(.system(size: 12))
   }
+}
+
+extension Color {
+  /// Renders a model-side `ClipStyleColor` token as a SwiftUI colour. A pure rendering
+  /// adapter — the palette itself stays in the (portable) model.
+  init(_ token: ClipStyleColor) {
+    self.init(red: token.red, green: token.green, blue: token.blue, opacity: token.alpha)
+  }
+}
+
+#Preview("Clip containers") {
+  let sentence =
+    "When we tour on the bus they have a playlist compiled over the years but it is "
+    + "always so fun because it is all cool whatever they play a big one for me when I "
+    + "was young was Jimmy Buffett and he sang about a romantic life of sailing"
+  let words = sentence.split(separator: " ").enumerated().map { index, text in
+    Word(id: index + 1, text: String(text), start: 0, end: nil, startSample: nil, endSample: nil)
+  }
+  let model = TranscriptPageModel(planURL: nil)
+  model.document = TranscriptDocument(words: words)
+  model.clipBands = [
+    // A green clip that wraps across a line, and an amber suggestion further down.
+    TranscriptClipBand(id: UUID(), wordIDs: Array(1...14), kind: .approved),
+    TranscriptClipBand(id: UUID(), wordIDs: Array(41...49), kind: .suggested),
+  ]
+  return TranscriptTextView(
+    model: model,
+    text: model.plainTranscriptText,
+    fontSize: 17,
+    paragraphSpacing: 12,
+    // A red selection overlapping the green clip, to eyeball that it draws ON TOP of the fill.
+    selected: Set([10, 11, 12]),
+    clipContainers: model.clipContainers,
+    scrollTarget: nil,
+    followMode: .following,
+    reveal: nil
+  )
+  .frame(width: 480, height: 340)
+  .background(Color.black)
 }
