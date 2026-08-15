@@ -66,6 +66,21 @@ struct TranscriptClipContainersTests {
       ])
   }
 
+  /// Two distinct bands of the SAME kind that sit back-to-back stay separate containers, each
+  /// with its own caps — merging them would erase the per-clip boundary.
+  @Test func adjacentSameKindBandsStaySeparate() {
+    let bands = [
+      TranscriptClipBand(id: Fixtures.uuid(1), wordIDs: [1, 2], kind: .approved),
+      TranscriptClipBand(id: Fixtures.uuid(2), wordIDs: [3, 4], kind: .approved),
+    ]
+    expectNoDifference(
+      model(clipBands: bands).clipContainers,
+      [
+        TranscriptClipContainer(range: NSRange(location: 0, length: 11), kind: .approved),  // Hello world
+        TranscriptClipContainer(range: NSRange(location: 12, length: 7), kind: .approved),  // Foo bar
+      ])
+  }
+
   /// Bands handed in out of transcript order still yield position-ordered containers.
   @Test func containersFollowTranscriptOrderNotBandOrder() {
     let bands = [

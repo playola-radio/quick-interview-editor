@@ -11,6 +11,7 @@ struct TranscriptPageView: View {
         text: model.plainTranscriptText,
         fontSize: model.fontSize,
         paragraphSpacing: model.paragraphSpacing,
+        lineSpacing: model.lineSpacing,
         selected: model.selectedWordIDSet,
         clipContainers: model.clipContainers,
         scrollTarget: model.scrollTargetWordID,
@@ -128,6 +129,7 @@ extension Color {
     text: model.plainTranscriptText,
     fontSize: 17,
     paragraphSpacing: 12,
+    lineSpacing: 12,
     // A red selection overlapping the green clip, to eyeball that it draws ON TOP of the fill.
     selected: Set([10, 11, 12]),
     clipContainers: model.clipContainers,

@@ -55,11 +55,17 @@ final class ClipContainerLayoutManager: NSLayoutManager {
         let roundedLeft = segment.location == fullGlyphRange.location
         let roundedRight = NSMaxRange(segment) == NSMaxRange(fullGlyphRange)
 
+        // Horizontal extent stops at the TEXT, never the line's right margin: a segment whose
+        // clip continues to the next line fills to the line's text end (`usedRect.maxX`, the
+        // wrap point); the clip's final segment stops at its last word (`boundingRect` clamped
+        // to the used text). Continuation segments start at the line's left text edge.
         let horizontal = boundingRect(forGlyphRange: segment, in: textContainer)
+        let leftX = roundedLeft ? horizontal.minX : usedRect.minX
+        let rightX = roundedRight ? min(horizontal.maxX, usedRect.maxX) : usedRect.maxX
         let rect = CGRect(
-          x: horizontal.minX + origin.x,
+          x: leftX + origin.x,
           y: usedRect.minY + origin.y - verticalPadding,
-          width: horizontal.width,
+          width: max(0, rightX - leftX),
           height: usedRect.height + verticalPadding * 2)
 
         drawContainerSegment(in: rect, roundedLeft: roundedLeft, roundedRight: roundedRight)

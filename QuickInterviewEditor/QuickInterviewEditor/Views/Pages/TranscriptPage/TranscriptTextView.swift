@@ -10,6 +10,7 @@ struct TranscriptTextView: NSViewRepresentable {
   let text: String
   let fontSize: Double
   let paragraphSpacing: Double
+  let lineSpacing: Double
   let selected: Set<Word.ID>
   let clipContainers: [TranscriptClipContainer]
   let scrollTarget: Word.ID?
@@ -57,6 +58,7 @@ struct TranscriptTextView: NSViewRepresentable {
     context.coordinator.textView = textView
     context.coordinator.scrollView = scroll
     context.coordinator.paragraphSpacing = paragraphSpacing
+    context.coordinator.lineSpacing = lineSpacing
     context.coordinator.observeScroll()
     context.coordinator.rebuildText(
       text: text, fontSize: fontSize, selected: selected, clipContainers: clipContainers)
@@ -66,6 +68,7 @@ struct TranscriptTextView: NSViewRepresentable {
   func updateNSView(_ nsView: NSScrollView, context: Context) {
     context.coordinator.model = model
     context.coordinator.paragraphSpacing = paragraphSpacing
+    context.coordinator.lineSpacing = lineSpacing
     context.coordinator.apply(
       text: text, fontSize: fontSize, selected: selected, clipContainers: clipContainers,
       scrollTarget: scrollTarget, followMode: followMode, reveal: reveal)
@@ -77,6 +80,7 @@ struct TranscriptTextView: NSViewRepresentable {
     weak var textView: NSTextView?
     weak var scrollView: NSScrollView?
     var paragraphSpacing: Double = 0
+    var lineSpacing: Double = 0
     private var lastText = ""
     private var lastSelected: Set<Word.ID> = []
     private var lastClipContainers: [TranscriptClipContainer] = []
@@ -117,6 +121,9 @@ struct TranscriptTextView: NSViewRepresentable {
       // over the full range so it survives the incremental color/selection updates.
       let paragraphStyle = NSMutableParagraphStyle()
       paragraphStyle.paragraphSpacing = paragraphSpacing
+      // Same gap within a paragraph as between paragraphs, so line spacing reads uniform and a
+      // clip container has vertical room and never overlaps the next line's container.
+      paragraphStyle.lineSpacing = lineSpacing
       attr.addAttribute(.paragraphStyle, value: paragraphStyle, range: full)
       storage.setAttributedString(attr)
       lastText = text

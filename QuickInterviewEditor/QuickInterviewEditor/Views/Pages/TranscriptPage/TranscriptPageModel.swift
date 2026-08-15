@@ -96,8 +96,11 @@ class TranscriptPageModel: ViewModel {
   ]
   let emptyStateMessage = "No transcript loaded."
   let clearButtonLabel = "Clear"
-  /// Vertical gap (points) the renderer leaves after each pause-paragraph. A display
-  /// decision, so it lives on the model rather than being hardcoded in the view.
+  /// Vertical spacing (points) between lines. The same value is used within a paragraph
+  /// (`lineSpacing`) and after each pause-paragraph (`paragraphSpacing`) so the gap is uniform
+  /// everywhere — and airy enough that a clip container never vertically overlaps the next
+  /// line. A display decision, so it lives on the model rather than being hardcoded in the view.
+  let lineSpacing = 12.0
   let paragraphSpacing = 12.0
 
   // MARK: - View Helpers
@@ -143,40 +146,48 @@ class TranscriptPageModel: ViewModel {
 
   /// The clip bands mapped to drawable UTF-16 runs, in transcript order. Walks
   /// `document.wordRanges` (position order, so it's correct even for non-monotonic word IDs)
-  /// and merges each maximal stretch of consecutive same-kind words into ONE range that spans
-  /// their interior separators — that's the continuous tinted container the renderer strokes.
-  /// A non-clip word (or a state change) breaks the run, so a green-over-amber precedence hole
-  /// splits into separate containers. A duplicate word ID resolves to its first band, matching
-  /// the dedup-first-occurrence semantics the rest of the model uses.
+  /// and merges each maximal stretch of consecutive words belonging to the SAME band into ONE
+  /// range that spans their interior separators — that's the continuous tinted container the
+  /// renderer strokes. Splitting by band identity (not just kind) keeps two back-to-back clips
+  /// of the same state as separate containers, each with its own caps; a non-clip word or a
+  /// green-over-amber precedence hole also breaks the run. The range ends at the last word (its
+  /// trailing space is left untinted, so the fill caps at the words, not the gap after them). A
+  /// duplicate word ID resolves to its first band, matching the model's dedup-first-occurrence.
   var clipContainers: [TranscriptClipContainer] {
     guard !clipBands.isEmpty else { return [] }
-    var kindByWord: [Word.ID: TranscriptClipKind] = [:]
+    var bandByWord: [Word.ID: (band: UUID, kind: TranscriptClipKind)] = [:]
     for band in clipBands {
-      for id in band.wordIDs where kindByWord[id] == nil { kindByWord[id] = band.kind }
+      for id in band.wordIDs where bandByWord[id] == nil {
+        bandByWord[id] = (band.id, band.kind)
+      }
     }
     var containers: [TranscriptClipContainer] = []
     var runStart: Int?
     var runEnd = 0
+    var runBand: UUID?
     var runKind: TranscriptClipKind?
     func closeRun() {
-      if let start = runStart, let kind = runKind {
-        containers.append(
-          TranscriptClipContainer(
-            range: NSRange(location: start, length: runEnd - start), kind: kind))
+      defer {
+        runStart = nil
+        runBand = nil
+        runKind = nil
       }
-      runStart = nil
-      runKind = nil
+      guard let start = runStart, let kind = runKind else { return }
+      containers.append(
+        TranscriptClipContainer(
+          range: NSRange(location: start, length: runEnd - start), kind: kind))
     }
     for wordRange in document.wordRanges {
-      let kind = kindByWord[wordRange.wordID]
-      if let kind, kind == runKind {
+      let entry = bandByWord[wordRange.wordID]
+      if let entry, entry.band == runBand {
         runEnd = NSMaxRange(wordRange.range)
       } else {
         closeRun()
-        if let kind {
+        if let entry {
           runStart = wordRange.range.location
           runEnd = NSMaxRange(wordRange.range)
-          runKind = kind
+          runBand = entry.band
+          runKind = entry.kind
         }
       }
     }
