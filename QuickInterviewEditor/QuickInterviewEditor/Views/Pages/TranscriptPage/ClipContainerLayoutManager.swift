@@ -24,9 +24,9 @@ final class ClipContainerLayoutManager: NSLayoutManager {
 
   private let cornerRadius: CGFloat = 6
   private let ringWidth: CGFloat = 1
-  /// Extra height above/below the glyphs' used rect so the fill hugs the text with a little
-  /// breathing room (the mockup's `padding: 4px 0`) without touching line spacing.
-  private let verticalPadding: CGFloat = 4
+  /// Symmetric breathing room above/below the glyph box (the mockup's `padding: 4px 0`); kept
+  /// small because the font's ascender/descender box already includes some leading.
+  private let verticalPadding: CGFloat = 3
 
   override func drawBackground(forGlyphRange glyphsToShow: NSRange, at origin: NSPoint) {
     drawClipContainers(forGlyphRange: glyphsToShow, at: origin)
@@ -46,7 +46,7 @@ final class ClipContainerLayoutManager: NSLayoutManager {
       run.ring.setStroke()
 
       enumerateLineFragments(forGlyphRange: visible) {
-        [self] _, usedRect, _, lineGlyphRange, _ in
+        [self] lineRect, usedRect, _, lineGlyphRange, _ in
         let segment = NSIntersectionRange(fullGlyphRange, lineGlyphRange)
         guard segment.length > 0 else { return }
 
@@ -62,15 +62,34 @@ final class ClipContainerLayoutManager: NSLayoutManager {
         let horizontal = boundingRect(forGlyphRange: segment, in: textContainer)
         let leftX = roundedLeft ? horizontal.minX : usedRect.minX
         let rightX = roundedRight ? min(horizontal.maxX, usedRect.maxX) : usedRect.maxX
+
+        // Vertical box hugs the glyphs, centered on the text BASELINE with symmetric padding —
+        // NOT `usedRect`, whose line leading sits below the text and would push the fill down
+        // into the next line (asymmetric bottom overhang, overlapping the next container).
+        let font = glyphFont(atGlyph: segment.location)
+        let baselineY = lineRect.minY + location(forGlyphAt: segment.location).y
+        let top = baselineY - font.ascender
+        let textHeight = font.ascender - font.descender  // descender is negative
         let rect = CGRect(
           x: leftX + origin.x,
-          y: usedRect.minY + origin.y - verticalPadding,
+          y: top + origin.y - verticalPadding,
           width: max(0, rightX - leftX),
-          height: usedRect.height + verticalPadding * 2)
+          height: textHeight + verticalPadding * 2)
 
         drawContainerSegment(in: rect, roundedLeft: roundedLeft, roundedRight: roundedRight)
       }
     }
+  }
+
+  /// The font backing a glyph, so the container box can be sized from real ascender/descender
+  /// metrics. Falls back to the system font if the storage has no font attribute there.
+  private func glyphFont(atGlyph glyphIndex: Int) -> NSFont {
+    guard let storage = textStorage, storage.length > 0 else {
+      return .systemFont(ofSize: NSFont.systemFontSize)
+    }
+    let charIndex = min(characterIndexForGlyph(at: glyphIndex), storage.length - 1)
+    return storage.attribute(.font, at: charIndex, effectiveRange: nil) as? NSFont
+      ?? .systemFont(ofSize: NSFont.systemFontSize)
   }
 
   private func drawContainerSegment(in rect: CGRect, roundedLeft: Bool, roundedRight: Bool) {
