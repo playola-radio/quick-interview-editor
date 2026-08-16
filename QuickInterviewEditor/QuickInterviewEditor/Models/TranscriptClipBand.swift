@@ -109,10 +109,13 @@ struct TranscriptClipStyle: Equatable {
   }
 }
 
-/// A drawable clip run: one contiguous UTF-16 range (words plus their interior separators)
-/// and the state that colours it. The transcript model derives these from the bands +
-/// document; the renderer strokes one rounded container per run.
+/// A drawable clip run: one contiguous UTF-16 range (words plus their interior separators),
+/// the state that colours it, and the `colorIndex` of the CLIP it belongs to. The transcript
+/// model derives these from the bands + document; the renderer strokes one rounded container
+/// per run. `colorIndex` is per clip (not per run), so every run of the same clip — even one
+/// split across a paragraph break — draws the same colour, while adjacent clips differ.
 struct TranscriptClipContainer: Equatable {
   let range: NSRange
   let kind: TranscriptClipKind
+  let colorIndex: Int
 }

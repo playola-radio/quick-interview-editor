@@ -181,16 +181,22 @@ class TranscriptPageModel: ViewModel {
     var runEnd = 0
     var runBand: UUID?
     var runKind: TranscriptClipKind?
+    // A stable colour index per clip (band), assigned in first-appearance order, so every run of
+    // one clip shares a colour and clips that appear next to each other get different colours.
+    var colorIndexByBand: [UUID: Int] = [:]
     func closeRun() {
       defer {
         runStart = nil
         runBand = nil
         runKind = nil
       }
-      guard let start = runStart, let kind = runKind else { return }
+      guard let start = runStart, let kind = runKind, let band = runBand else { return }
+      let colorIndex = colorIndexByBand[band] ?? colorIndexByBand.count
+      colorIndexByBand[band] = colorIndex
       containers.append(
         TranscriptClipContainer(
-          range: NSRange(location: start, length: runEnd - start), kind: kind))
+          range: NSRange(location: start, length: runEnd - start), kind: kind,
+          colorIndex: colorIndex))
     }
     for wordRange in document.wordRanges {
       let entry = bandByWord[wordRange.wordID]

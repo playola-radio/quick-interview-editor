@@ -38,7 +38,10 @@ struct TranscriptClipContainersTests {
     let bands = [TranscriptClipBand(id: Fixtures.uuid(1), wordIDs: [1, 2], kind: .approved)]
     expectNoDifference(
       model(clipBands: bands).clipContainers,
-      [TranscriptClipContainer(range: NSRange(location: 0, length: 11), kind: .approved)])
+      [
+        TranscriptClipContainer(
+          range: NSRange(location: 0, length: 11), kind: .approved, colorIndex: 0)
+      ])
   }
 
   /// Two disjoint bands become two containers, in transcript order, each carrying its kind.
@@ -50,9 +53,11 @@ struct TranscriptClipContainersTests {
     expectNoDifference(
       model(clipBands: bands).clipContainers,
       [
-        TranscriptClipContainer(range: NSRange(location: 0, length: 11), kind: .approved),
+        TranscriptClipContainer(
+          range: NSRange(location: 0, length: 11), kind: .approved, colorIndex: 0),
         // "bar baz" starts at "Hello world Foo " = 16, ends at 23.
-        TranscriptClipContainer(range: NSRange(location: 16, length: 7), kind: .suggested),
+        TranscriptClipContainer(
+          range: NSRange(location: 16, length: 7), kind: .suggested, colorIndex: 1),
       ])
   }
 
@@ -66,9 +71,13 @@ struct TranscriptClipContainersTests {
     expectNoDifference(
       model(clipBands: bands).clipContainers,
       [
-        TranscriptClipContainer(range: NSRange(location: 0, length: 5), kind: .suggested),  // Hello
-        TranscriptClipContainer(range: NSRange(location: 6, length: 5), kind: .approved),  // world
-        TranscriptClipContainer(range: NSRange(location: 12, length: 3), kind: .suggested),  // Foo
+        // Hello and Foo are the same band, so they share colorIndex 0; world is a different clip.
+        TranscriptClipContainer(
+          range: NSRange(location: 0, length: 5), kind: .suggested, colorIndex: 0),  // Hello
+        TranscriptClipContainer(
+          range: NSRange(location: 6, length: 5), kind: .approved, colorIndex: 1),  // world
+        TranscriptClipContainer(
+          range: NSRange(location: 12, length: 3), kind: .suggested, colorIndex: 0),  // Foo
       ])
   }
 
@@ -83,14 +92,17 @@ struct TranscriptClipContainersTests {
       model(clipBands: bands).clipContainers,
       [
         // Hello world
-        TranscriptClipContainer(range: NSRange(location: 0, length: 11), kind: .approved),
-        // Foo bar
-        TranscriptClipContainer(range: NSRange(location: 12, length: 7), kind: .approved),
+        TranscriptClipContainer(
+          range: NSRange(location: 0, length: 11), kind: .approved, colorIndex: 0),
+        // Foo bar — a different clip, so a different colour.
+        TranscriptClipContainer(
+          range: NSRange(location: 12, length: 7), kind: .approved, colorIndex: 1),
       ])
   }
 
   /// A clip that spans a paragraph break splits into one capped container per paragraph — a
-  /// single container can't bridge the vertical gap between paragraphs.
+  /// single container can't bridge the vertical gap between paragraphs — but BOTH pieces keep
+  /// the same `colorIndex`, so the one clip draws in a single colour.
   @Test func aClipSpanningAParagraphBreakSplits() {
     let model = TranscriptPageModel(planURL: nil)
     // "Hello world\nFoo bar baz" — the break falls after word 2.
@@ -106,9 +118,11 @@ struct TranscriptClipContainersTests {
       model.clipContainers,
       [
         // Hello world
-        TranscriptClipContainer(range: NSRange(location: 0, length: 11), kind: .approved),
-        // Foo bar
-        TranscriptClipContainer(range: NSRange(location: 12, length: 7), kind: .approved),
+        TranscriptClipContainer(
+          range: NSRange(location: 0, length: 11), kind: .approved, colorIndex: 0),
+        // Foo bar — same clip, so the SAME colorIndex.
+        TranscriptClipContainer(
+          range: NSRange(location: 12, length: 7), kind: .approved, colorIndex: 0),
       ])
   }
 
