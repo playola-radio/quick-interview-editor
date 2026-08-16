@@ -9,8 +9,8 @@ struct TranscriptClipStyleTests {
     expectNoDifference(
       TranscriptClipStyle.style(for: .approved),
       TranscriptClipStyle(
-        fill: ClipStyleColor(red255: 95, green255: 185, blue255: 143, alpha: 0.17),
-        ring: ClipStyleColor(red255: 95, green255: 185, blue255: 143, alpha: 0.45),
+        fill: ClipStyleColor(red255: 95, green255: 185, blue255: 143, alpha: 0.28),
+        ring: ClipStyleColor(red255: 95, green255: 185, blue255: 143, alpha: 0.60),
         text: ClipStyleColor(red255: 255, green255: 255, blue255: 255, alpha: 1),
         swatch: ClipStyleColor(red255: 95, green255: 185, blue255: 143, alpha: 1),
         strikethrough: false))
@@ -20,8 +20,8 @@ struct TranscriptClipStyleTests {
     expectNoDifference(
       TranscriptClipStyle.style(for: .suggested),
       TranscriptClipStyle(
-        fill: ClipStyleColor(red255: 208, green255: 164, blue255: 95, alpha: 0.17),
-        ring: ClipStyleColor(red255: 208, green255: 164, blue255: 95, alpha: 0.45),
+        fill: ClipStyleColor(red255: 208, green255: 164, blue255: 95, alpha: 0.28),
+        ring: ClipStyleColor(red255: 208, green255: 164, blue255: 95, alpha: 0.60),
         text: ClipStyleColor(red255: 255, green255: 255, blue255: 255, alpha: 1),
         swatch: ClipStyleColor(red255: 208, green255: 164, blue255: 95, alpha: 1),
         strikethrough: false))
@@ -31,8 +31,8 @@ struct TranscriptClipStyleTests {
     expectNoDifference(
       TranscriptClipStyle.style(for: .selected),
       TranscriptClipStyle(
-        fill: ClipStyleColor(red255: 204, green255: 102, blue255: 102, alpha: 0.17),
-        ring: ClipStyleColor(red255: 204, green255: 102, blue255: 102, alpha: 0.45),
+        fill: ClipStyleColor(red255: 204, green255: 102, blue255: 102, alpha: 0.28),
+        ring: ClipStyleColor(red255: 204, green255: 102, blue255: 102, alpha: 0.60),
         text: ClipStyleColor(red255: 255, green255: 255, blue255: 255, alpha: 1),
         swatch: ClipStyleColor(red255: 204, green255: 102, blue255: 102, alpha: 1),
         strikethrough: false))

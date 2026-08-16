@@ -83,28 +83,31 @@ struct TranscriptClipStyle: Equatable {
     }
   }
 
-  /// Cool green/teal tints for approved clips (variant 0 is the base green `#5fb98f`).
+  /// Cool tints for approved clips — green, blue, cyan — spread far enough apart in hue that
+  /// adjacent approved clips are obviously different (variant 0 is the base green `#5fb98f`).
   private static let approvedVariants = [
     solidClip(red255: 95, green255: 185, blue255: 143),
-    solidClip(red255: 94, green255: 178, blue255: 196),
-    solidClip(red255: 128, green255: 190, blue255: 132),
+    solidClip(red255: 95, green255: 160, blue255: 222),
+    solidClip(red255: 70, green255: 200, blue255: 190),
   ]
 
-  /// Warm amber/gold tints for suggested clips (variant 0 is the base amber `#d0a45f`).
+  /// Warm tints for suggested clips — amber, orange, yellow (variant 0 is the base amber
+  /// `#d0a45f`). Orange stays clear of the selected red so the two never read the same.
   private static let suggestedVariants = [
     solidClip(red255: 208, green255: 164, blue255: 95),
-    solidClip(red255: 211, green255: 142, blue255: 90),
-    solidClip(red255: 198, green255: 180, blue255: 104),
+    solidClip(red255: 228, green255: 134, blue255: 66),
+    solidClip(red255: 220, green255: 205, blue255: 96),
   ]
 
   /// A live clip style from one base colour: translucent fill, 1px ring, white text, opaque
-  /// swatch, no strikethrough. The whole per-state palette is built from this.
+  /// swatch, no strikethrough. The fill/ring are opaque enough that the tint reads clearly on
+  /// the dark transcript. The whole per-state palette is built from this.
   private static func solidClip(red255: Double, green255: Double, blue255: Double)
     -> TranscriptClipStyle
   {
     TranscriptClipStyle(
-      fill: ClipStyleColor(red255: red255, green255: green255, blue255: blue255, alpha: 0.17),
-      ring: ClipStyleColor(red255: red255, green255: green255, blue255: blue255, alpha: 0.45),
+      fill: ClipStyleColor(red255: red255, green255: green255, blue255: blue255, alpha: 0.28),
+      ring: ClipStyleColor(red255: red255, green255: green255, blue255: blue255, alpha: 0.60),
       text: ClipStyleColor(red255: 255, green255: 255, blue255: 255, alpha: 1),
       swatch: ClipStyleColor(red255: red255, green255: green255, blue255: blue255, alpha: 1),
       strikethrough: false)
