@@ -92,12 +92,6 @@ class TranscriptPageModel: ViewModel {
 
   // MARK: - Display Text
   let transcriptCaption = "TRANSCRIPT"
-  /// The static header legend for the two data-driven container colours. Kinds only — the
-  /// view maps each to its swatch colour via `TranscriptClipStyle`, holding no palette itself.
-  let clipLegend: [ClipLegendItem] = [
-    ClipLegendItem(kind: .approved, label: "Clip"),
-    ClipLegendItem(kind: .suggested, label: "Suggested"),
-  ]
   let emptyStateMessage = "No transcript loaded."
   let clearButtonLabel = "Clear"
   /// Vertical spacing (points) between lines. The same value is used within a paragraph

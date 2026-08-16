@@ -46,24 +46,8 @@ struct TranscriptPageView: View {
       Text(model.transcriptCaption)
         .font(.system(size: 11, weight: .semibold)).tracking(1.5)
         .foregroundStyle(Color(white: 0.44))
-      legend
       Spacer()
       zoomControls
-    }
-  }
-
-  private var legend: some View {
-    HStack(spacing: 10) {
-      ForEach(model.clipLegend) { item in
-        HStack(spacing: 5) {
-          RoundedRectangle(cornerRadius: 2)
-            .fill(Color(TranscriptClipStyle.style(for: item.kind).swatch))
-            .frame(width: 8, height: 8)
-          Text(item.label)
-            .font(.system(size: 11))
-            .foregroundStyle(Color(white: 0.44))
-        }
-      }
     }
   }
 
