@@ -73,4 +73,93 @@ platform :mac do
   lane :format_check do
     sh("cd .. && make format-check")
   end
+
+  # Bump the version single-source (project.yml), regenerate the Xcode project, and
+  # commit — so `release` starts from a clean tree with a fresh, never-reused
+  # CFBundleVersion. Usage:
+  #   bundle exec fastlane mac bump                 # increment the build integer only
+  #   bundle exec fastlane mac bump version:1.1.0   # + set the marketing version
+  desc "Bump MARKETING_VERSION / integer CURRENT_PROJECT_VERSION, regenerate, commit"
+  lane :bump do |options|
+    project_yml = File.expand_path("../project.yml", __dir__)
+    text = File.read(project_yml)
+    current_build = text[/CURRENT_PROJECT_VERSION:\s*"(\d+)"/, 1]
+    UI.user_error!("CURRENT_PROJECT_VERSION (integer) not found in project.yml") unless current_build
+    new_build = (current_build.to_i + 1).to_s
+    text = text.sub(/CURRENT_PROJECT_VERSION:\s*"\d+"/, %(CURRENT_PROJECT_VERSION: "#{new_build}"))
+
+    if (new_marketing = options[:version])
+      UI.user_error!("version must be semver X.Y.Z") unless new_marketing =~ /\A\d+\.\d+\.\d+\z/
+      text = text.sub(/MARKETING_VERSION:\s*"[^"]*"/, %(MARKETING_VERSION: "#{new_marketing}"))
+    end
+    File.write(project_yml, text)
+    marketing = text[/MARKETING_VERSION:\s*"([^"]*)"/, 1]
+
+    sh("cd .. && xcodegen generate")
+    sh("cd .. && git add project.yml QuickInterviewEditor.xcodeproj")
+    sh(%(cd .. && git commit -m "build: bump to #{marketing} (#{new_build})"))
+    UI.success("Bumped to #{marketing} (#{new_build}). Next: bundle exec fastlane mac release")
+  end
+
+  # LOCAL release (Decision 3): the multi-GB Apple-Silicon engine freeze makes this
+  # impractical on hosted CI. Requires NOTARY_PROFILE + AWS write access. `packaging/`
+  # lives at the REPO ROOT — two levels up from the fastlane dir (`sh` runs from
+  # QuickInterviewEditor/fastlane), hence `cd ../..`.
+  desc "Build, sign, notarize, DMG, sign appcast, upload to S3 (LOCAL release)"
+  lane :release do
+    ensure_git_status_clean
+    UI.user_error!("set NOTARY_PROFILE (notarytool keychain profile)") if ENV["NOTARY_PROFILE"].to_s.empty?
+    bucket  = ENV.fetch("RELEASE_S3_BUCKET", "playola-static")
+    prefix  = ENV.fetch("RELEASE_S3_PREFIX", "downloads/QuickInterviewEditor")
+    host    = ENV.fetch("RELEASE_DOWNLOAD_HOST", "https://playola-static.s3.amazonaws.com")
+    profile = ENV.fetch("AWS_PROFILE", "default")
+
+    sh("cd ../.. && packaging/package-engine.sh")
+    sh("cd ../.. && packaging/package-cut-suggester.sh")
+    sh("cd ../.. && packaging/build-app.sh")
+    sh("cd ../.. && packaging/sign-app.sh packaging/dist/QuickInterviewEditor.app")
+    sh("cd ../.. && packaging/notarize-app.sh packaging/dist/QuickInterviewEditor.app")
+    sh("cd ../.. && packaging/make-dmg.sh")
+
+    plist = "packaging/dist/QuickInterviewEditor.app/Contents/Info.plist"
+    short = sh("cd ../.. && /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' #{plist}").strip
+    build = sh("cd ../.. && /usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' #{plist}").strip
+    name = "QuickInterviewEditor-#{short}-#{build}.dmg"     # matches make-dmg.sh
+    dmg  = "packaging/dist/#{name}"
+    url  = "#{host}/#{prefix}/#{name}"
+
+    # sign_update is extracted by xcodebuild into the release build's SourcePackages
+    # (build-app.sh pins -derivedDataPath to packaging/build/app), so the path is
+    # deterministic — no fragile ~/Library DerivedData search that could match a
+    # stale/zero copy.
+    sign_update = "packaging/build/app/SourcePackages/artifacts/sparkle/Sparkle/bin/sign_update"
+    sh("cd ../.. && test -x '#{sign_update}' || { echo 'sign_update missing at #{sign_update} (build-app.sh must run first)' >&2; exit 1; }")
+
+    # Pull the LIVE appcast down first so every prior <item> is preserved (rollback
+    # depends on old entries staying in the feed). Fail CLOSED: use head-object so a
+    # confirmed 404 (missing object) is the ONLY path that starts a fresh one-item
+    # feed. Auth/network/other errors must abort — otherwise a transient S3 error on
+    # a real release would regenerate a one-item feed and overwrite live history.
+    sh(<<~SH)
+      cd ../.. && set -euo pipefail
+      key="#{prefix}/appcast.xml"
+      if err="$(aws --profile #{profile} s3api head-object --bucket '#{bucket}' --key "$key" 2>&1 >/dev/null)"; then
+        aws --profile #{profile} s3 cp "s3://#{bucket}/$key" packaging/dist/appcast.xml   # exists → must succeed
+        echo "fetched existing appcast"
+      elif printf '%s' "$err" | grep -qiE 'Not Found|404'; then
+        echo "no existing appcast — first release"
+      else
+        echo "error: cannot read existing appcast (not a confirmed 404), aborting:" >&2
+        printf '%s\\n' "$err" >&2; exit 1
+      fi
+    SH
+
+    sh("cd ../.. && ruby packaging/appcast.rb '#{dmg}' '#{url}' '#{sign_update}'")
+
+    # Keep old DMGs (no --delete). Upload the DMG, then the appended appcast last.
+    sh("cd ../.. && aws --profile #{profile} s3 cp '#{dmg}' 's3://#{bucket}/#{prefix}/'")
+    sh("cd ../.. && aws --profile #{profile} s3 cp packaging/dist/appcast.xml 's3://#{bucket}/#{prefix}/appcast.xml' --content-type application/xml --cache-control no-cache")
+
+    UI.success("Released #{short} (#{build}). Run the manual verification checklist (packaging/README.md) before announcing.")
+  end
 end
