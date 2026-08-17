@@ -113,7 +113,8 @@ struct EngineResolverTests {
   @Test func bundledHelperUnderTranslocatedPathStillResolves() {
     let translocatedHelper = URL(
       fileURLWithPath:
-        "/private/var/folders/xy/AppTranslocation/ABC/d/QuickInterviewEditor.app/Contents/Resources/engine/logic-markers-engine"
+        "/private/var/folders/xy/AppTranslocation/ABC/d/QuickInterviewEditor.app"
+        + "/Contents/Resources/engine/logic-markers-engine"
     )
     let launch = EngineResolver.resolve(
       bundledHelper: translocatedHelper,

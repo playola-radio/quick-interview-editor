@@ -22,15 +22,15 @@ enum InstallLocation {
   @MainActor
   static func offerMoveToApplicationsIfNeeded() {
     #if DEBUG
-    return
+      return
     #else
-    let bundleURL = Bundle.main.bundleURL
-    guard
-      shouldOfferMoveToApplications(
-        bundlePath: bundleURL.path,
-        isTranslocated: isTranslocated(bundleURL))
-    else { return }
-    presentMoveOffer(from: bundleURL)
+      let bundleURL = Bundle.main.bundleURL
+      guard
+        shouldOfferMoveToApplications(
+          bundlePath: bundleURL.path,
+          isTranslocated: isTranslocated(bundleURL))
+      else { return }
+      presentMoveOffer(from: bundleURL)
     #endif
   }
 

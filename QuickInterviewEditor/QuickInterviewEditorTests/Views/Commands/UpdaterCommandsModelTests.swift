@@ -22,7 +22,9 @@ struct UpdaterCommandsModelTests {
   }
 
   @Test func labelIsUserFacing() {
-    let model = withDependencies { $0.updater = .testValue } operation: {
+    let model = withDependencies {
+      $0.updater = .testValue
+    } operation: {
       UpdaterCommandsModel()
     }
     expectNoDifference(model.checkForUpdatesLabel, "Check for Updates…")
