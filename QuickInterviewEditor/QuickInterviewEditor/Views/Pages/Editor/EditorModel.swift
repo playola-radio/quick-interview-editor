@@ -369,11 +369,13 @@ final class EditorModel: ViewModel {
       if isTransportPaused { continue }
       if position.isPlaying {
         playheadSample = position.sample
-        // Any transport playback — the free listen pass included — drives the transcript's
-        // current-word highlight and (while following) auto-scroll, so reading along works
-        // during a plain Play, not only slice playback.
-        transcript.playheadChanged(sample: position.sample, isPlaying: true)
-      } else {
+        // The listen contexts (a plain Play and slice playback) drive transcript auto-scroll
+        // follow, so reading along works during a plain Play, not only slice playback. Preview/
+        // audition update the cursor (and thus the highlight) but must not yank the transcript
+        // from where the user scrolled.
+        transcript.playheadChanged(
+          sample: position.sample, isPlaying: transportContext.followsTranscript)
+      } else if transportContext.followsTranscript {
         // A false tick ends transcript follow (so the next playback reads as a rising edge) but
         // leaves the cursor and the current-word highlight where the audio stopped.
         endTranscriptFollow()
@@ -1515,11 +1517,20 @@ enum TransportContext: Equatable {
   case draftPreview
   case audition(EditorModel.AuditionMode)
 
-  /// True while a saved slice is the playing context — the only context that drives transcript
-  /// auto-scroll follow and the slice-row "playing" highlight.
+  /// True while a saved slice is the playing context — drives the slice-row "playing" highlight.
   var isSlice: Bool {
     if case .slice = self { return true }
     return false
+  }
+
+  /// The listen contexts — a straight Play (`free`) or slice playback — that drive the
+  /// transcript's current-word follow (auto-scroll). A boundary preview or audition must NOT
+  /// yank the transcript from where the user scrolled, so it does not follow.
+  var followsTranscript: Bool {
+    switch self {
+    case .free, .slice: return true
+    case .draftPreview, .audition: return false
+    }
   }
   /// The playing slice's id, or nil when a slice isn't the current context.
   var sliceID: Slice.ID? {
