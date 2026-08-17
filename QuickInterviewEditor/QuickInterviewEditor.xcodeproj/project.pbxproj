@@ -28,6 +28,7 @@
 		1EF5B6842385C9F208906247 /* ProjectStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9D1FF7731379F40B7D9A8C8 /* ProjectStore.swift */; };
 		1FDCD5A562E7D5D71D0520EC /* UndoStackTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E8C670A36FEE48ECE336F3D /* UndoStackTests.swift */; };
 		2238F1BAA3FE18846A8B3937 /* SourceFingerprint.swift in Sources */ = {isa = PBXBuildFile; fileRef = C940BB5A197C986FAF096F93 /* SourceFingerprint.swift */; };
+		2244CD22356A63732AFC9F83 /* InstallLocation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 755FC4B915A3C8060A9C0179 /* InstallLocation.swift */; };
 		227D6F7F6905446643F42287 /* FineTuneTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4290C69F37093A3967E52FF /* FineTuneTests.swift */; };
 		24ACF15D44F1EFD74B256CD7 /* UpdaterClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86671EE11BBD7C6DF72125DF /* UpdaterClient.swift */; };
 		25DEA2BAAF1CC4653213304E /* UpdaterClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BFC99B42726B59F0E3B953B /* UpdaterClientTests.swift */; };
@@ -126,6 +127,7 @@
 		BD819D0C7EE31C3D3281E649 /* ProductType.swift in Sources */ = {isa = PBXBuildFile; fileRef = E24082A0A2CF87A247CA74F6 /* ProductType.swift */; };
 		BE63FD4DA49B3E5A97250C1E /* LiveCutSuggesterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD589A8C977E5632F59741A9 /* LiveCutSuggesterTests.swift */; };
 		BFE9FE9F85A6643E145AAF4D /* MarkClipBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88569A7C5C4EBCDDCF35368A /* MarkClipBarView.swift */; };
+		C1ED5415FDB3E8F627191AD7 /* InstallLocationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 585569A1C2EC0BD7561633EB /* InstallLocationTests.swift */; };
 		C58D5951CA0D6BBBCC70DF52 /* Slice.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48930A836912299557952308 /* Slice.swift */; };
 		C595884140FF8A84B4E144C8 /* AudioPlayerClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6269F8643FFABC51DD9244ED /* AudioPlayerClient.swift */; };
 		C5D94C7E391834D83C51CA66 /* TranscriptUnit.swift in Sources */ = {isa = PBXBuildFile; fileRef = 818B47D917D97EAFA3CF0D53 /* TranscriptUnit.swift */; };
@@ -229,6 +231,7 @@
 		54E9FE45209FBE3C0EB9A0C7 /* TranscriptFollowTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptFollowTests.swift; sourceTree = "<group>"; };
 		557B8204C55CD77EEE5B3192 /* FineTuneModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FineTuneModel.swift; sourceTree = "<group>"; };
 		57AAB9EB6525D16CCE66E4D6 /* EditorRevealTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorRevealTests.swift; sourceTree = "<group>"; };
+		585569A1C2EC0BD7561633EB /* InstallLocationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InstallLocationTests.swift; sourceTree = "<group>"; };
 		5865237D9AEA083F3D2A75A0 /* WaveformView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WaveformView.swift; sourceTree = "<group>"; };
 		5AA2368C3924E0E572A97BB2 /* ProjectStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectStateTests.swift; sourceTree = "<group>"; };
 		5DA4F8300E32DF5EAC5338E4 /* TranscriptClipBand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptClipBand.swift; sourceTree = "<group>"; };
@@ -247,6 +250,7 @@
 		706A1034CD57DF0E1958888D /* TranscriptClipStyleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptClipStyleTests.swift; sourceTree = "<group>"; };
 		72761D21D94A9475B670E0CA /* EditorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorTests.swift; sourceTree = "<group>"; };
 		742BE954CEB841C1A4D87E5F /* ProjectStorePersistenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectStorePersistenceTests.swift; sourceTree = "<group>"; };
+		755FC4B915A3C8060A9C0179 /* InstallLocation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InstallLocation.swift; sourceTree = "<group>"; };
 		75C599ECDAD50A6F0A522C6B /* QuickInterviewEditorApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickInterviewEditorApp.swift; sourceTree = "<group>"; };
 		7BD517DB17FCCECB191BA3EE /* EditorModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorModel.swift; sourceTree = "<group>"; };
 		7E00300C6BF670052197FC5B /* EditorClipBandsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorClipBandsTests.swift; sourceTree = "<group>"; };
@@ -434,6 +438,7 @@
 				470CF49FC658B4E9FDD4AD51 /* EngineEventTests.swift */,
 				6DD5C8C964D5F67EDE57C896 /* EngineFingerprintTests.swift */,
 				1422158D8ABF80DBD66E618C /* EngineResolverTests.swift */,
+				585569A1C2EC0BD7561633EB /* InstallLocationTests.swift */,
 				4BC6DC8A2BCFFA4802444B2F /* KeychainClientTests.swift */,
 				BD589A8C977E5632F59741A9 /* LiveCutSuggesterTests.swift */,
 				6D070569A63CB32AC401C34C /* LiveEngineCancelTests.swift */,
@@ -634,6 +639,7 @@
 				6FBD543BFAB28A7B6F0B6A83 /* EngineFingerprint.swift */,
 				4F3B3549446B80CE6BA09245 /* EngineResolution.swift */,
 				0E1604DA03CAD39389DFEF65 /* EnvironmentClient.swift */,
+				755FC4B915A3C8060A9C0179 /* InstallLocation.swift */,
 				FA08AD54DC59B6F59481D196 /* KeychainClient.swift */,
 				A0DEF39E5B43A75E1E9A1639 /* LiveCutSuggester.swift */,
 				653287A59343E1420B1B9E90 /* LiveEngine.swift */,
@@ -956,6 +962,7 @@
 				C7758C80DB9BBE2699C015A5 /* FineTuneGeometryTests.swift in Sources */,
 				227D6F7F6905446643F42287 /* FineTuneTests.swift in Sources */,
 				E96C33EEFA11E1600464E36B /* Fixtures.swift in Sources */,
+				C1ED5415FDB3E8F627191AD7 /* InstallLocationTests.swift in Sources */,
 				179165015FACAA2C24089547 /* KeychainClientTests.swift in Sources */,
 				BE63FD4DA49B3E5A97250C1E /* LiveCutSuggesterTests.swift in Sources */,
 				2DFA0D8ACC93BD4DA8AA589C /* LiveEngineCancelTests.swift in Sources */,
@@ -1030,6 +1037,7 @@
 				36862DD72E5319C2366AD84E /* FineTuneModel.swift in Sources */,
 				C82BE12B865F30F2C5F6623C /* FineTuneView.swift in Sources */,
 				D9C4768EAE67DC98FCA42E18 /* ImportPageView.swift in Sources */,
+				2244CD22356A63732AFC9F83 /* InstallLocation.swift in Sources */,
 				5E083790FB009D2C1B1F005F /* KeychainClient.swift in Sources */,
 				297DA9AC0ED1908429418F12 /* LiveCutSuggester.swift in Sources */,
 				86C19FC155AEB31428F42B95 /* LiveEngine.swift in Sources */,

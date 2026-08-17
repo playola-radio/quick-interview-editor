@@ -52,4 +52,11 @@ final class AppLaunchModel: ViewModel {
 
   // MARK: - View Helpers
   var showsModelSetup: Bool { phase == .modelSetup }
+
+  // MARK: - User Actions
+  /// On first appearance, offer to relocate the app into /Applications when it is
+  /// running from the DMG or a translocated path (no-op in DEBUG/tests).
+  func viewAppeared() {
+    InstallLocation.offerMoveToApplicationsIfNeeded()
+  }
 }
