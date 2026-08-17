@@ -1,5 +1,4 @@
 import AppKit
-import QuartzCore
 import SwiftUI
 
 /// Dumb TextKit-1 renderer. Owns the AppKit objects and converts points to UTF-16
@@ -92,9 +91,17 @@ struct TranscriptTextView: NSViewRepresentable {
     private var lastScrollTarget: Word.ID?
     private var lastFollowMode: TranscriptFollowMode = .following
     private var lastReveal: TranscriptReveal?
+    private var scrollTimer: Timer?
+    private var scrollFromY: CGFloat = 0
+    private var scrollToY: CGFloat = 0
+    private var scrollStartedAt = Date()
+    private let scrollDuration: TimeInterval = 0.3
 
     init(model: TranscriptPageModel) { self.model = model }
 
+    // The reveal scroll timer isn't invalidated here (a nonisolated deinit can't touch the
+    // non-Sendable Timer): it self-invalidates when the 0.3s animation completes or the scroll
+    // view goes away, retaining this coordinator only for that short window.
     deinit { NotificationCenter.default.removeObserver(self) }
 
     private static let selectedBG = NSColor(
@@ -215,9 +222,10 @@ struct TranscriptTextView: NSViewRepresentable {
       }
     }
 
-    /// Smoothly scrolls the range to the vertical centre of the viewport. Programmatic bounds
-    /// animation goes through neither `scrollWheel` nor live-scroll, so it is never mistaken for a
-    /// user scroll (which pauses follow).
+    /// Smoothly scrolls the range to the vertical centre of the viewport, interpolating from the
+    /// CURRENT scroll position (animating `NSClipView.bounds` via `.animator()` jumps to the top
+    /// first, so it's driven by hand). Programmatic scrolling goes through neither `scrollWheel`
+    /// nor live-scroll, so it is never mistaken for a user scroll (which pauses follow).
     private func animatedScroll(toRange range: NSRange) {
       guard let textView, let scrollView, let layoutManager = textView.layoutManager,
         let container = textView.textContainer
@@ -230,12 +238,39 @@ struct TranscriptTextView: NSViewRepresentable {
       let center = rect.midY + textView.textContainerInset.height - viewportHeight / 2
       let maxY = max(0, textView.frame.height - viewportHeight)
       let targetY = min(max(0, center), maxY)
-      guard abs(targetY - clip.bounds.origin.y) > 0.5 else { return }
-      NSAnimationContext.runAnimationGroup { context in
-        context.duration = 0.3
-        context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-        clip.animator().setBoundsOrigin(NSPoint(x: clip.bounds.origin.x, y: targetY))
-        scrollView.reflectScrolledClipView(clip)
+      let startY = clip.bounds.origin.y
+      guard abs(targetY - startY) > 0.5 else { return }
+
+      scrollTimer?.invalidate()
+      scrollFromY = startY
+      scrollToY = targetY
+      scrollStartedAt = Date()
+      // Target-action (not a `@Sendable` closure) so the per-frame main-actor scroll work is
+      // concurrency-clean; the timer runs on the main run loop.
+      scrollTimer = Timer.scheduledTimer(
+        timeInterval: 1 / 60, target: self, selector: #selector(stepScrollAnimation),
+        userInfo: nil, repeats: true)
+    }
+
+    @objc private func stepScrollAnimation() {
+      guard let scrollView else {
+        scrollTimer?.invalidate()
+        scrollTimer = nil
+        return
+      }
+      let fraction = min(1, Date().timeIntervalSince(scrollStartedAt) / scrollDuration)
+      // ease-in-out cubic
+      let eased =
+        fraction < 0.5
+        ? 4 * fraction * fraction * fraction
+        : 1 - pow(-2 * fraction + 2, 3) / 2
+      let content = scrollView.contentView
+      content.setBoundsOrigin(
+        NSPoint(x: content.bounds.origin.x, y: scrollFromY + (scrollToY - scrollFromY) * eased))
+      scrollView.reflectScrolledClipView(content)
+      if fraction >= 1 {
+        scrollTimer?.invalidate()
+        scrollTimer = nil
       }
     }
 
