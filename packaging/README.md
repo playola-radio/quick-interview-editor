@@ -125,6 +125,125 @@ the `QIE_*`/`HF_*`/`TORCH_HOME`/`PYTHONPATH` env we set are not `DYLD_*`.
 `notarytool submit --wait` + `stapler staple`. Requires credentials (a stored
 keychain profile or an App Store Connect API key) — see the script header.
 
+## Release pipeline (DMG + Sparkle self-update)
+
+Beyond the signed `.app`, a release produces a **notarized, stapled DMG** (the
+website download *and* the Sparkle enclosure) plus a signed `appcast.xml`, and
+uploads both to S3. Sparkle in the app reads that appcast and self-updates in
+place, preserving the user's Keychain-stored API key.
+
+```text
+packaging/make-dmg.sh    # 6. create-dmg -> sign + notarize + staple the DMG
+sparkle sign_update <dmg>  # 7. EdDSA-sign the DMG (private key from login Keychain)
+packaging/appcast.rb …   # 8. append a signed <item> to appcast.xml (idempotent)
+aws s3 cp …              # 9. upload DMG (kept for rollback) + appcast.xml (no-cache)
+```
+
+All nine steps run from **one lane**, locally (Decision 3 — the multi-GB
+Apple-Silicon engine freeze is impractical on hosted CI).
+
+### Prerequisites (one-time)
+
+- **`create-dmg`**: `brew install create-dmg`.
+- **notarytool profile** `qie-notary` in the login Keychain (see
+  `notarize-app.sh` header); export `NOTARY_PROFILE=qie-notary` before releasing.
+- **Sparkle EdDSA keypair**: the **public** key is baked into `project.yml`
+  (`SUPublicEDKey`); the **private** key lives in the login Keychain (item
+  "Private key for signing Sparkle updates", read automatically by `sign_update`).
+  **Back it up offline, encrypted:**
+
+  ```bash
+  GK="$(find ~/Library/Developer/Xcode/DerivedData "$(pwd)" \
+         -path '*/artifacts/sparkle/Sparkle/bin/generate_keys' -type f 2>/dev/null | head -1)"
+  "$GK" -x sparkle_private_key.pem      # export
+  # move sparkle_private_key.pem into 1Password / an encrypted disk image, then:
+  rm -P sparkle_private_key.pem         # shred the plaintext
+  ```
+
+- **AWS**: the `default` profile (override with `AWS_PROFILE`) must have write
+  access to `s3://playola-static/downloads/QuickInterviewEditor/`.
+
+### One-command release
+
+```bash
+export NOTARY_PROFILE=qie-notary
+bundle exec fastlane mac bump version:1.1.0   # or: bump   (build integer only)
+bundle exec fastlane mac release              # build → sign → notarize → DMG → appcast → S3
+```
+
+`bump` edits the version single-source in `project.yml`
+(`MARKETING_VERSION` + the integer `CURRENT_PROJECT_VERSION` = `sparkle:version`),
+regenerates the Xcode project, and commits — so `release` starts from a clean
+tree with a never-reused `CFBundleVersion`. Env overrides (defaults shown):
+`RELEASE_S3_BUCKET=playola-static`,
+`RELEASE_S3_PREFIX=downloads/QuickInterviewEditor`,
+`RELEASE_DOWNLOAD_HOST=https://playola-static.s3.amazonaws.com`,
+`AWS_PROFILE=default`.
+
+To rehearse without touching S3, point the release at a **staging prefix**
+(`RELEASE_S3_PREFIX=downloads/QuickInterviewEditor-staging`, matching
+`RELEASE_DOWNLOAD_HOST`) and run the checklist against that URL.
+
+### Release-verification checklist (run every release, before announcing)
+
+The pipeline is signing/notarization/network logic that unit tests can't prove;
+run this on a real build:
+
+1. **Gatekeeper on a freshly *downloaded* DMG** (not the local build — download
+   from the S3 URL so you test the notarization ticket that actually shipped):
+
+   ```bash
+   spctl --assess --type open --context context:primary-signature -v QuickInterviewEditor-<short>-<build>.dmg
+   xcrun stapler validate QuickInterviewEditor-<short>-<build>.dmg
+   ```
+
+2. **Clean install**: on a clean Mac / user account, mount the DMG, drag to
+   `/Applications`, launch — no Gatekeeper block, no translocation, engine runs.
+
+3. **Keychain round-trip (the core guarantee):**
+   - Install **vN** (Developer ID) from the DMG, save an API key, run a
+     cut-suggestion to confirm it works.
+   - Publish **vN+1** (`bump` + `release`).
+   - In the installed vN, **Check for Updates…** → install → relaunch.
+   - Confirm the API key **still works with no Keychain prompt**.
+
+4. **Designated-requirement match** (proves the silent read is legitimate, not a
+   fluke): the DRs of vN and vN+1 must agree on the invariants below.
+
+   ```bash
+   codesign -d -r- /Applications/QuickInterviewEditor.app 2>&1 | grep '^designated'
+   # compare vN vs vN+1: same identifier + "certificate leaf[subject.OU] = FSRSPV9N9Q"
+   ```
+
+### Invariants that must never change
+
+Silent Keychain reads across updates depend on the code-signing **designated
+requirement**, not the bundle path. Changing any of these makes an update unable
+to read the previously-saved key without a prompt:
+
+- **Team ID** `FSRSPV9N9Q`
+- **bundle id** `fm.playola.QuickInterviewEditor`
+- **Keychain service** `fm.playola.QuickInterviewEditor.anthropicAPIKey`,
+  **account** `anthropic`, with **no** `kSecAttrAccessGroup` / sandbox /
+  synchronizable change (mirrored in a comment on `KeychainStore.service`).
+
+### Losing the EdDSA private key is recoverable
+
+Because the app is Developer ID code-signed, Sparkle accepts a **new** EdDSA key
+as long as the Developer ID identity is unchanged. To recover: ship an update
+signed with the **same Developer ID** and a **new** `SUPublicEDKey`. Do **not**
+rotate the Developer ID cert and the EdDSA key in the same release, and (with
+`SUVerifyUpdateBeforeExtraction`) the rotation update must be a Developer ID
+code-signed DMG — ours is. Only losing **both** the EdDSA key *and* the Developer
+ID identity forces users to manually re-download. Back the key up anyway to avoid
+the forced rotation.
+
+### Rollback
+
+Old DMGs stay in S3 (the release never deletes them). To roll back, point the
+appcast's latest `<item>` enclosure back at a prior DMG's URL (or re-run
+`appcast.rb` against the older DMG) and re-upload `appcast.xml`.
+
 ## How the app finds the engine
 
 `EngineResolver` (Swift) prefers the bundled helper at
