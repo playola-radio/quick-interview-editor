@@ -16,34 +16,7 @@ struct TranscriptCurrentWordTests {
       ], silences: [], segments: [])
   }
 
-  @Test func playheadHighlightsTheWordUnderIt() {
-    let model = TranscriptPageModel(editPlan: plan)
-    model.playheadChanged(sample: 1500, isPlaying: true)
-    expectNoDifference(model.currentWordID, 2)
-  }
-
-  /// The highlight follows the playhead even after the user has paused auto-scroll — it tracks
-  /// what's being SAID, independent of where the transcript is scrolled.
-  @Test func highlightTracksEvenWhenFollowIsPaused() {
-    let model = TranscriptPageModel(editPlan: plan)
-    model.playheadChanged(sample: 500, isPlaying: true)
-    model.transcriptUserScrolled()
-    expectNoDifference(model.followMode, .userPaused)
-    model.playheadChanged(sample: 2500, isPlaying: true)
-    expectNoDifference(model.currentWordID, 3)  // highlight moved
-    expectNoDifference(model.scrollTargetWordID, 1)  // but scroll did not
-  }
-
-  /// A playhead that lands in a gap between words (or past the end) leaves the highlight on the
-  /// last word rather than clearing it.
-  @Test func playheadInAGapKeepsThePreviousWord() {
-    let model = TranscriptPageModel(editPlan: plan)
-    model.playheadChanged(sample: 500, isPlaying: true)
-    model.playheadChanged(sample: 9999, isPlaying: true)  // past the end
-    expectNoDifference(model.currentWordID, 1)
-  }
-
-  @Test func noCurrentWordUntilPlaybackStarts() {
+  @Test func noCurrentWordUntilTheCursorPlacesOne() {
     let model = TranscriptPageModel(editPlan: plan)
     expectNoDifference(model.currentWordID, nil)
     expectNoDifference(model.canScrollToCurrentWord, false)
@@ -53,7 +26,7 @@ struct TranscriptCurrentWordTests {
   /// after the user scrolled away.
   @Test func scrollToCurrentWordRevealsItAndResumesFollow() {
     let model = TranscriptPageModel(editPlan: plan)
-    model.playheadChanged(sample: 1500, isPlaying: true)
+    model.currentWordID = 2
     model.transcriptUserScrolled()
     #expect(model.canScrollToCurrentWord)
     model.scrollToCurrentWordTapped()

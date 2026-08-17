@@ -39,7 +39,9 @@ struct EditorView: View {
     .background(EditorKeyMonitor(model: model))
     .task { await model.loadWaveform() }
     .task { await model.observePlayback() }
-    .onChange(of: model.fineTuneSessionKey, initial: true) { _, _ in model.syncEditSession() }
+    // The fine-tune session is not opened on selection in this flow — the pane that would show
+    // it is hidden and boundary editing is deferred, so selecting words no longer spins up a
+    // hidden session (which also keeps the waveform's audition buttons from appearing).
     // The editor derives the clip bands (slices + pending suggestions, green over amber) and
     // pushes them into the transcript, which stays layout-local and only renders what it's
     // handed. `initial: true` seeds the containers on first appearance.

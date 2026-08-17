@@ -314,17 +314,17 @@ class TranscriptPageModel: ViewModel {
   func zoomResetTapped() { setFontSize(defaultFontSize) }
   func zoomChanged(_ size: Double) { setFontSize(size) }
 
-  /// Updates the current-word highlight and the auto-scroll target from the playhead. A playback
-  /// rising edge (false→true) always resumes following, even if the user had scrolled away. The
-  /// highlight (`currentWordID`) tracks the word being said whenever the transport is playing,
-  /// regardless of follow; the scroll target only moves while following. Both keep their last
-  /// value when the playhead sits in a gap between words, so the highlight never flickers off.
+  /// Derives the auto-scroll target from the playhead. A playback rising edge (false→true)
+  /// always resumes following, even if the user had scrolled away. While following and playing,
+  /// the target becomes the word containing `sample` (kept unchanged in a gap). The current-word
+  /// HIGHLIGHT is separate — `EditorModel` drives `currentWordID` from the persistent cursor so
+  /// it tracks where you are whether playing, paused, or scrubbed.
   func playheadChanged(sample: Int?, isPlaying: Bool) {
     if isPlaying, !wasPlaying { followMode = .following }
     wasPlaying = isPlaying
-    guard isPlaying, let sample, let word = wordID(atSample: sample) else { return }
-    currentWordID = word
-    if followMode == .following { scrollTargetWordID = word }
+    guard isPlaying, followMode == .following, let sample, let word = wordID(atSample: sample)
+    else { return }
+    if word != scrollTargetWordID { scrollTargetWordID = word }
   }
 
   /// The word whose audio contains `sample`, or nil when it lands in a gap / past the end.

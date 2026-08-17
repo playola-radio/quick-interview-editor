@@ -99,7 +99,20 @@ final class EditorModel: ViewModel {
   /// playback and stays put when stopped/paused (never hidden). Kept a SEPARATE observed property
   /// (not folded into a transport struct) so its ~30 Hz updates don't invalidate views that read
   /// `transportPhase`/`transportContext` (the panel, the slice list).
-  var playheadSample = 0
+  var playheadSample = 0 {
+    didSet { syncCurrentWordToCursor() }
+  }
+
+  /// Keeps the transcript's current-word highlight on the word under the cursor, so it tracks
+  /// where you ARE — playing, paused, scrubbed, ruler-moved, or stopped — never a stale
+  /// last-heard word. Keeps the last word in a gap (never lose your place) and only writes on a
+  /// real change so a 30 Hz cursor doesn't churn the transcript view.
+  private func syncCurrentWordToCursor() {
+    guard let word = wordID(atSample: playheadSample), word != transcript.currentWordID else {
+      return
+    }
+    transcript.currentWordID = word
+  }
   /// Where the transport last started playing; Stop returns the cursor here.
   var transportOriginSample: Int?
   /// What the transport is currently playing, captured at Play. Non-observed — internal bookkeeping.
