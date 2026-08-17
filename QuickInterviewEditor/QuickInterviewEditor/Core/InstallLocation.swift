@@ -30,8 +30,18 @@ enum InstallLocation {
           bundlePath: bundleURL.path,
           isTranslocated: isTranslocated(bundleURL))
       else { return }
+      // If a copy already lives in /Applications, don't nag or clobber it: it may
+      // be a newer, older, or currently-running install, and silently swapping it
+      // risks discarding the very build the user just launched. Leave it to them.
+      guard !FileManager.default.fileExists(atPath: destination(for: bundleURL).path)
+      else { return }
       presentMoveOffer(from: bundleURL)
     #endif
+  }
+
+  private static func destination(for bundleURL: URL) -> URL {
+    URL(fileURLWithPath: "/Applications")
+      .appendingPathComponent(bundleURL.lastPathComponent)
   }
 
   /// True when macOS has translocated (path-randomized) the app — Gatekeeper does
@@ -60,25 +70,40 @@ enum InstallLocation {
   @MainActor
   private static func moveToApplicationsAndRelaunch(from bundleURL: URL) {
     let fileManager = FileManager.default
-    let destination = URL(fileURLWithPath: "/Applications")
-      .appendingPathComponent(bundleURL.lastPathComponent)
+    let destination = destination(for: bundleURL)
 
-    // Never clobber an existing install: if a copy is already in /Applications the
-    // user has it installed, so just launch that one and quit this stray instance.
-    if !fileManager.fileExists(atPath: destination.path) {
-      do {
-        try fileManager.copyItem(at: bundleURL, to: destination)
-      } catch {
-        NSLog("InstallLocation: move to /Applications failed: \(error)")
-        return  // Stay running from the current location rather than risk anything.
-      }
+    // Never clobber an existing install (already filtered in the offer, but keep
+    // the invariant local): only move into an empty /Applications slot.
+    guard !fileManager.fileExists(atPath: destination.path) else { return }
+
+    // Copy to a hidden staging path on the same volume, then atomically rename it
+    // into place. A crash mid-copy can then never leave a half-written bundle at
+    // the destination — the rename either fully succeeds or never happens.
+    let staging = URL(fileURLWithPath: "/Applications").appendingPathComponent(
+      ".\(bundleURL.deletingPathExtension().lastPathComponent)"
+        + ".\(ProcessInfo.processInfo.processIdentifier).staging.app")
+    do {
+      try? fileManager.removeItem(at: staging)
+      try fileManager.copyItem(at: bundleURL, to: staging)
+      try fileManager.moveItem(at: staging, to: destination)
+    } catch {
+      NSLog("InstallLocation: move to /Applications failed: \(error)")
+      try? fileManager.removeItem(at: staging)
+      return  // Stay running from the current location; nothing destructive done.
     }
 
     let configuration = NSWorkspace.OpenConfiguration()
     configuration.createsNewApplicationInstance = true
     NSWorkspace.shared.openApplication(at: destination, configuration: configuration) {
-      _, _ in
+      _, error in
+      // Only quit this instance once the relocated copy has actually launched —
+      // otherwise a failed relaunch would leave the user with no running app.
+      guard error == nil else {
+        NSLog(
+          "InstallLocation: relaunch from /Applications failed: \(String(describing: error))")
+        return
+      }
+      Task { @MainActor in NSApp.terminate(nil) }
     }
-    NSApp.terminate(nil)
   }
 }

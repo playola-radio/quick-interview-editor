@@ -11,6 +11,7 @@ struct UpdaterClientTests {
 
   @Test func testValueIsSafeNoOp() {
     let client = UpdaterClient.testValue
+    client.start()  // must not crash
     client.checkForUpdates()  // must not crash
     expectNoDifference(client.canCheckForUpdates(), true)
   }

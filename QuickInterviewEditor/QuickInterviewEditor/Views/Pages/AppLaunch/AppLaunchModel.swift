@@ -10,6 +10,9 @@ import Observation
 @Observable
 final class AppLaunchModel: ViewModel {
 
+  // MARK: - Dependencies
+  @ObservationIgnored @Dependency(\.updater) var updater
+
   // MARK: - Phase
   enum Phase: Equatable {
     case modelSetup
@@ -55,8 +58,11 @@ final class AppLaunchModel: ViewModel {
 
   // MARK: - User Actions
   /// On first appearance, offer to relocate the app into /Applications when it is
-  /// running from the DMG or a translocated path (no-op in DEBUG/tests).
+  /// running from the DMG or a translocated path (no-op in DEBUG/tests), then
+  /// start the Sparkle updater. Relocation runs first so background update checks
+  /// never begin from a soon-to-be-relaunched location.
   func viewAppeared() {
     InstallLocation.offerMoveToApplicationsIfNeeded()
+    updater.start()
   }
 }

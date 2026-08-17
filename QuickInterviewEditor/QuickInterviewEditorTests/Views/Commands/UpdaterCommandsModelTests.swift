@@ -11,6 +11,7 @@ struct UpdaterCommandsModelTests {
     let called = LockIsolated(false)
     let model = withDependencies {
       $0.updater = UpdaterClient(
+        start: {},
         checkForUpdates: { called.setValue(true) },
         canCheckForUpdates: { true })
     } operation: {
@@ -32,7 +33,8 @@ struct UpdaterCommandsModelTests {
 
   @Test func canCheckReflectsClient() {
     let model = withDependencies {
-      $0.updater = UpdaterClient(checkForUpdates: {}, canCheckForUpdates: { false })
+      $0.updater = UpdaterClient(
+        start: {}, checkForUpdates: {}, canCheckForUpdates: { false })
     } operation: {
       UpdaterCommandsModel()
     }
