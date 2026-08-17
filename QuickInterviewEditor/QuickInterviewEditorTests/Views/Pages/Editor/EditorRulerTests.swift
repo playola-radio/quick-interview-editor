@@ -37,9 +37,9 @@ struct EditorRulerTests {
   }
 
   private func gatedPlay(_ gate: RulerPlayGate)
-    -> @Sendable (URL, Range<Int>, Int, PlaybackSessionID) async throws -> PlaybackEnd
+    -> @Sendable (URL, Range<Int>, Int, Double, PlaybackSessionID) async throws -> PlaybackEnd
   {
-    { _, _, _, _ in await gate.play() }
+    { _, _, _, _, _ in await gate.play() }
   }
 
   // MARK: - Mapping + clamping

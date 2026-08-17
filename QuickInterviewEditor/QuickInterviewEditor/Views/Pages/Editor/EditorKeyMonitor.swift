@@ -70,6 +70,11 @@ struct EditorKeyMonitor: NSViewRepresentable {
       switch keyCode {
       case 123 where modifiers == .command: return .zoomOut  // ⌘←
       case 124 where modifiers == .command: return .zoomIn  // ⌘→
+      // `<` / `>` (Shift-comma / Shift-period) step the playback speed down / up. Matched by
+      // physical key + Shift rather than `charactersIgnoringModifiers`, whose Shift handling is
+      // ambiguous across layouts — the comma/period keys are 43/47, mirroring the arrow keyCodes.
+      case 43 where modifiers == .shift: return .speedDown  // <
+      case 47 where modifiers == .shift: return .speedUp  // >
       default: break
       }
       if modifiers.isEmpty, characters?.lowercased() == "z" { return .zoomFit }
@@ -84,9 +89,10 @@ struct EditorKeyMonitor: NSViewRepresentable {
       guard let window = host?.window, window.isKeyWindow else { return false }
       // Stand down while a text field is being edited (e.g. renaming a slice).
       if let responder = window.firstResponder as? NSText, responder.isEditable { return false }
-      // Z is a toggle; swallow key auto-repeat so holding it doesn't flicker fit↔restore (and
-      // doesn't fall through to a beep). The arrow zoom keys intentionally keep repeating.
-      if key == .zoomFit, isARepeat { return true }
+      // Z is a toggle and the speed keys step discrete presets; swallow auto-repeat so holding one
+      // doesn't flicker fit↔restore or blow through every speed (and doesn't beep). The arrow zoom
+      // keys intentionally keep repeating.
+      if isARepeat, key == .zoomFit || key == .speedUp || key == .speedDown { return true }
       return model?.editorKeyDown(key) ?? false
     }
   }

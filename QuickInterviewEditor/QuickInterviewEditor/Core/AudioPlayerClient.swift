@@ -22,9 +22,12 @@ enum PlaybackEnd: Sendable, Equatable {
 }
 
 struct AudioPlayerClient: Sendable {
-  /// Plays url from range.lowerBound to range.upperBound (samples) and returns how it ended when
-  /// playback finishes or `stop`/a superseding `play` is called. `session` tags this playback's ticks.
-  var play: @Sendable (URL, Range<Int>, Int, PlaybackSessionID) async throws -> PlaybackEnd
+  /// Plays url from range.lowerBound to range.upperBound (samples) at `rate` (pitch-preserving
+  /// speed, 1.0 = normal) and returns how it ended when playback finishes or `stop`/a superseding
+  /// `play` is called. Passing the rate here (rather than a separate call) keeps it applied
+  /// atomically with the start, so no suspension point sits between it and `session` becoming
+  /// current. `session` tags this playback's ticks.
+  var play: @Sendable (URL, Range<Int>, Int, Double, PlaybackSessionID) async throws -> PlaybackEnd
   /// Pauses `session` if it is the current playback, freezing the node in place; returns the
   /// exact resting plan sample (nil if `session` is not current). Does not end the `play` call.
   var pause: @Sendable (PlaybackSessionID) async -> Int?
@@ -33,6 +36,11 @@ struct AudioPlayerClient: Sendable {
   var resume: @Sendable (PlaybackSessionID) async -> Bool
   /// Stops the current playback if `session` is nil or matches it; otherwise no-op.
   var stop: @Sendable (PlaybackSessionID?) async -> Void
+  /// Sets the pitch-preserving playback speed (e.g. 0.5–3.0). Applies live to any current
+  /// playback and is remembered for the next `play`. Speed is global to the one shared player,
+  /// so it takes no session. Does not disturb the plan-sample position math: the player node's
+  /// `sampleTime` still counts input frames, so the playhead stays aligned at any rate.
+  var setRate: @Sendable (Double) async -> Void
   /// A stream of playback positions in PLAN samples while a slice plays, terminated by an
   /// `isPlaying: false` tick on stop/finish. Additive to `play`/`stop` so the waveform
   /// playhead gets real positions without disturbing the tuned slice-playback path.
@@ -53,7 +61,7 @@ extension AudioPlayerClient: DependencyKey {
 
 extension AudioPlayerClient: TestDependencyKey {
   static let testValue = AudioPlayerClient(
-    play: { _, _, _, _ -> PlaybackEnd in
+    play: { _, _, _, _, _ -> PlaybackEnd in
       reportIssue("AudioPlayerClient.play called without a test override")
       throw EngineClientError.unimplemented("AudioPlayerClient.play")
     },
@@ -66,12 +74,15 @@ extension AudioPlayerClient: TestDependencyKey {
       return false
     },
     stop: { _ in reportIssue("AudioPlayerClient.stop called without a test override") },
+    // Additive and side-effect-free in tests (no audio graph), so it's a benign no-op rather than
+    // a reported issue: the transport primes the rate on every `play`, and most tests don't care.
+    setRate: { _ in },
     positions: { AsyncStream { $0.finish() } }
   )
 
   static let previewValue = AudioPlayerClient(
-    play: { _, _, _, _ in .finished }, pause: { _ in nil }, resume: { _ in true },
-    stop: { _ in }, positions: { AsyncStream { $0.finish() } })
+    play: { _, _, _, _, _ in .finished }, pause: { _ in nil }, resume: { _ in true },
+    stop: { _ in }, setRate: { _ in }, positions: { AsyncStream { $0.finish() } })
 }
 
 extension DependencyValues {
@@ -87,12 +98,14 @@ extension AudioPlayerClient {
   static func live() -> AudioPlayerClient {
     let box = LivePlayerBox()
     return AudioPlayerClient(
-      play: { url, range, sampleRate, session in
-        try await box.play(url: url, range: range, planSampleRate: sampleRate, session: session)
+      play: { url, range, sampleRate, rate, session in
+        try await box.play(
+          url: url, range: range, planSampleRate: sampleRate, rate: rate, session: session)
       },
       pause: { session in await box.pause(session: session) },
       resume: { session in await box.resume(session: session) },
       stop: { session in await box.stop(session: session) },
+      setRate: { rate in await box.setRate(rate) },
       positions: {
         // Only the latest playhead position matters; drop stale ticks rather than let a
         // lagging consumer accumulate a backlog.
@@ -118,6 +131,12 @@ extension AudioPlayerClient {
 private actor LivePlayerBox {
   private let engine = AVAudioEngine()
   private let node = AVAudioPlayerNode()
+  /// Pitch-preserving speed control, spliced between the player node and the mixer
+  /// (`node -> timePitch -> mainMixer`). `rate` 1.0 is normal speed; the app clamps to 0.5–3.0.
+  private let timePitch = AVAudioUnitTimePitch()
+  /// The current speed, remembered across plays so a `play` starts at the last-set rate and a
+  /// paused/resumed session keeps it. Applied to `timePitch.rate` at graph setup and on `setRate`.
+  private var currentRate: Double = 1.0
   private var continuation: CheckedContinuation<PlaybackEnd, Never>?
   private var generation = 0
 
@@ -157,8 +176,9 @@ private actor LivePlayerBox {
   /// Returns when the scheduled segment finishes playing, or when `stop()` or
   /// another `play()` supersedes it.
   func play(
-    url: URL, range: Range<Int>, planSampleRate: Int, session: PlaybackSessionID
+    url: URL, range: Range<Int>, planSampleRate: Int, rate: Double, session: PlaybackSessionID
   ) async throws -> PlaybackEnd {
+    currentRate = Self.clampedRate(rate)
     let file = try AVAudioFile(forReading: url)
     let nativeRate = file.processingFormat.sampleRate
     let ratio = nativeRate / Double(max(1, planSampleRate))
@@ -181,7 +201,13 @@ private actor LivePlayerBox {
     startPlanSample = max(0, range.lowerBound)
     playRatio = ratio
     if node.engine == nil { engine.attach(node) }
-    engine.connect(node, to: engine.mainMixerNode, format: file.processingFormat)
+    if timePitch.engine == nil { engine.attach(timePitch) }
+    // Rebuild the fixed graph node -> timePitch -> mixer with the file's format. Reconnecting here
+    // is safe because `supersede` above stopped the engine; the units aren't reconnected live.
+    engine.connect(node, to: timePitch, format: file.processingFormat)
+    engine.connect(timePitch, to: engine.mainMixerNode, format: file.processingFormat)
+    // Set the speed before starting so the first buffers already play at the intended rate.
+    timePitch.rate = Float(currentRate)
     try engine.start()
 
     let myGeneration = generation
@@ -265,6 +291,19 @@ private actor LivePlayerBox {
     return true
   }
 
+  /// Sets the pitch-preserving speed, live and for the next play. `timePitch.rate` can be changed
+  /// while the node plays; windowed DSP may briefly smear the audio but the position math is
+  /// untouched (the player node's `sampleTime` counts INPUT frames, so the plan-sample mapping in
+  /// `emitPosition`/`pause` stays correct at any rate).
+  func setRate(_ rate: Double) {
+    currentRate = Self.clampedRate(rate)
+    timePitch.rate = Float(currentRate)
+  }
+
+  /// Clamps a requested speed to a hardware-safe range as a defensive backstop; the app's 0.5–3.0
+  /// UI range is the real bound, so this only fires on a corrupt/out-of-range input.
+  private static func clampedRate(_ rate: Double) -> Double { min(max(rate, 0.5), 3.0) }
+
   /// Invalidate the current segment: bump the generation, resume the waiter, and
   /// stop the engine — all on the actor, so it can't race the render thread. Pass
   /// `broadcastStop: false` when a new segment starts immediately after (a slice switch),
@@ -331,6 +370,9 @@ private actor LivePlayerBox {
 
   private func stopNode() {
     node.stop()
+    // Clear the time-pitch unit's internal overlap/latency buffers so a stop, supersede, or slice
+    // switch can't smear the tail of the old segment into the start of the next one.
+    if timePitch.engine != nil { timePitch.reset() }
     if engine.isRunning { engine.stop() }
   }
 }

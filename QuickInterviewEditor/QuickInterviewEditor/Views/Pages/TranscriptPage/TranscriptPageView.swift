@@ -47,8 +47,30 @@ struct TranscriptPageView: View {
         .font(.system(size: 11, weight: .semibold)).tracking(1.5)
         .foregroundStyle(Color(white: 0.44))
       Spacer()
+      speedControl
       zoomControls
     }
+  }
+
+  private var speedControl: some View {
+    Menu {
+      ForEach(model.speedMenuOptions) { option in
+        Button {
+          model.speedSelected(option.rate)
+        } label: {
+          if option.isCurrent {
+            Label(option.label, systemImage: "checkmark")
+          } else {
+            Text(option.label)
+          }
+        }
+      }
+    } label: {
+      Label(model.speedLabel, systemImage: "speedometer")
+        .monospacedDigit()
+    }
+    .menuStyle(.borderlessButton)
+    .fixedSize()
   }
 
   private var zoomControls: some View {

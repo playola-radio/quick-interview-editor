@@ -14,6 +14,16 @@ extension SharedKey where Self == AppStorageKey<Double>.Default {
   }
 }
 
+/// Normal-speed playback rate, shared by the `@Shared(.playbackRate)` key default and the
+/// model's `defaultPlaybackRate`.
+private let defaultPlaybackRate = 1.0
+
+extension SharedKey where Self == AppStorageKey<Double>.Default {
+  static var playbackRate: Self {
+    Self[.appStorage("playbackRate"), default: defaultPlaybackRate]
+  }
+}
+
 enum TranscriptFollowMode: Equatable {
   case following
   case userPaused
@@ -36,12 +46,24 @@ class TranscriptPageModel: ViewModel {
 
   // MARK: - Shared State
   @ObservationIgnored @Shared(.transcriptFontSize) var fontSize: Double
+  /// Pitch-preserving playback speed, persisted and shared across tabs (global appStorage). The
+  /// speed control lives in this panel next to the font size, so this model owns the value and its
+  /// actions; `EditorModel` applies it to the audio via `onPlaybackRateChanged`.
+  @ObservationIgnored @Shared(.playbackRate) var playbackRate: Double
+
+  /// Called with the clamped rate whenever the user changes speed, so `EditorModel` (the transport
+  /// owner) can apply it to the shared player — live if playing, and for the next play otherwise.
+  @ObservationIgnored var onPlaybackRateChanged: ((Double) -> Void)?
 
   // MARK: - Initialization
   let planURL: URL?
   init(planURL: URL? = Bundle.main.url(forResource: "edit-plan", withExtension: "json")) {
     self.planURL = planURL
     super.init()
+    // A persisted speed from a build with a different range would show a bogus label with no preset
+    // checked while the player silently clamps it — snap it back into range once at load.
+    let clampedRate = min(max(playbackRate, minRate), maxRate)
+    if clampedRate != playbackRate { $playbackRate.withLock { $0 = clampedRate } }
   }
 
   convenience init(editPlan: EditPlan) {
@@ -74,6 +96,10 @@ class TranscriptPageModel: ViewModel {
   let maxFontSize = 36.0
   let fontStep = 2.0
   let defaultFontSize = defaultTranscriptFontSize
+  /// Selectable speeds shown in the menu, ascending. `<`/`>` nudge to the neighbouring preset.
+  let speedPresets: [Double] = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 2.5, 3.0]
+  let minRate = 0.5
+  let maxRate = 3.0
   var followMode: TranscriptFollowMode = .following
   var scrollTargetWordID: Word.ID?
   /// The word under the playhead while listening — the renderer gives it a light "current word"
@@ -227,6 +253,34 @@ class TranscriptPageModel: ViewModel {
   var canZoomIn: Bool { fontSize < maxFontSize }
   var canZoomOut: Bool { fontSize > minFontSize }
 
+  /// One row in the speed menu — its rate, the display label, and whether it's the active speed
+  /// (so the view can show a checkmark without deciding anything itself).
+  struct SpeedOption: Identifiable, Equatable {
+    let rate: Double
+    let label: String
+    let isCurrent: Bool
+    var id: Double { rate }
+  }
+  /// The current speed formatted for the button, e.g. `1.0×`, `0.75×`, `1.5×`.
+  var speedLabel: String { Self.speedLabel(playbackRate) }
+  /// The menu rows, one per preset, each flagged if it's the current speed.
+  var speedMenuOptions: [SpeedOption] {
+    speedPresets.map {
+      SpeedOption(rate: $0, label: Self.speedLabel($0), isCurrent: isCurrentSpeed($0))
+    }
+  }
+  func isCurrentSpeed(_ rate: Double) -> Bool { abs(rate - playbackRate) < 1e-6 }
+  var canSpeedUp: Bool { playbackRate < maxRate }
+  var canSpeedDown: Bool { playbackRate > minRate }
+
+  /// Formats a rate as `1.0×` / `0.75×`: two decimals, then one trailing zero trimmed so whole
+  /// and half steps read as `1.0×`/`1.5×` while quarter steps keep both digits (`1.25×`).
+  static func speedLabel(_ rate: Double) -> String {
+    var text = String(format: "%.2f", rate)
+    if text.hasSuffix("0") { text.removeLast() }
+    return text + "×"
+  }
+
   // MARK: - User Actions
   func viewAppeared() async {
     guard editPlan == nil, let planURL else { return }
@@ -314,6 +368,17 @@ class TranscriptPageModel: ViewModel {
   func zoomResetTapped() { setFontSize(defaultFontSize) }
   func zoomChanged(_ size: Double) { setFontSize(size) }
 
+  /// Picks an exact speed (a menu row).
+  func speedSelected(_ rate: Double) { setPlaybackRate(rate) }
+  /// `>` — steps up to the next preset above the current speed, clamped at the fastest.
+  func speedUpTapped() {
+    setPlaybackRate(speedPresets.first { $0 > playbackRate + 1e-6 } ?? maxRate)
+  }
+  /// `<` — steps down to the next preset below the current speed, clamped at the slowest.
+  func speedDownTapped() {
+    setPlaybackRate(speedPresets.last { $0 < playbackRate - 1e-6 } ?? minRate)
+  }
+
   /// Derives the auto-scroll target from the playhead. A playback rising edge (false→true)
   /// always resumes following, even if the user had scrolled away. While following and playing,
   /// the target becomes the word containing `sample` (kept unchanged in a gap). The current-word
@@ -355,6 +420,14 @@ class TranscriptPageModel: ViewModel {
   // MARK: - Private Helpers
   private func setFontSize(_ size: Double) {
     $fontSize.withLock { $0 = min(max(size, minFontSize), maxFontSize) }
+  }
+  /// Clamps to the supported range, persists, and notifies `EditorModel` so the audio speed
+  /// follows. Only fires the callback on a real change, so re-selecting the current speed is inert.
+  private func setPlaybackRate(_ rate: Double) {
+    let clamped = min(max(rate, minRate), maxRate)
+    guard clamped != playbackRate else { return }
+    $playbackRate.withLock { $0 = clamped }
+    onPlaybackRateChanged?(clamped)
   }
   /// Rebuilds everything derived from the plan's words: the document (space-joined
   /// text + UTF-16 range map), the adjacent-gap cache, and the run-together set. This
