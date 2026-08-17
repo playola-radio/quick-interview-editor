@@ -74,3 +74,36 @@ jobs:
 
       - name: Run tests
         run: bundle exec fastlane mac test
+
+  validate:
+    name: Validate release scripts + versions
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      # Cheap release-pipeline guards only — CI never builds/signs/notarizes the
+      # DMG (Decision 3: the multi-GB engine freeze runs locally).
+      - name: Ruby syntax-check the appcast generator
+        run: ruby -c packaging/appcast.rb
+
+      - name: Packaging scripts are executable
+        run: |
+          test -x packaging/make-dmg.sh
+          test -x packaging/sign-app.sh
+          test -x packaging/appcast.rb
+
+      - name: Version fields are well-formed (integer build, semver marketing)
+        run: |
+          grep -Eq 'CURRENT_PROJECT_VERSION: "[0-9]+"' QuickInterviewEditor/project.yml
+          grep -Eq 'MARKETING_VERSION: "[0-9]+\.[0-9]+\.[0-9]+"' QuickInterviewEditor/project.yml
+
+      - name: Appcast (if ever committed) parses as XML
+        run: |
+          if [ -f packaging/dist/appcast.xml ]; then
+            ruby -rrexml/document -e 'abort "bad appcast" unless REXML::Document.new(File.read("packaging/dist/appcast.xml")).root'
+          else
+            echo "no committed appcast (expected — packaging/dist is gitignored)"
+          fi
