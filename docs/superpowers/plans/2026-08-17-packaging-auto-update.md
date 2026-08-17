@@ -792,9 +792,12 @@ find ~/Library/Developer/Xcode/DerivedData "$(pwd)" -name sign_update -type f 2>
 # XML before writing.
 require "rexml/document"
 require "time"
+require "open3"
 
 dmg, url, sign_update, notes_file = ARGV
 abort "usage: appcast.rb <dmg> <download-url> <sign_update> [notes_file]" unless dmg && url && sign_update
+abort "sign_update not executable: #{sign_update}" unless File.executable?(sign_update)
+abort "dmg not found: #{dmg}" unless File.file?(dmg)
 
 app = File.join(File.dirname(dmg), "QuickInterviewEditor.app")
 def plist(app, key) = `/usr/libexec/PlistBuddy -c 'Print :#{key}' "#{app}/Contents/Info.plist"`.strip
@@ -811,7 +814,11 @@ abort "CFBundleShortVersionString empty" if short.empty?
 abort "download url must be https: #{url}" unless url.start_with?("https://")
 abort "download url must end in the dmg name" unless url.end_with?(File.basename(dmg))
 
-sig_line = `#{sign_update} "#{dmg}"`.strip            # sparkle:edSignature="..." length="..."
+# Invoke with separate args (no shell interpolation) and require exit 0 before
+# trusting stdout — a failed signer must abort, never emit an unsigned enclosure.
+sig_line, sig_status = Open3.capture2(sign_update, dmg)
+abort "sign_update failed (exit #{sig_status.exitstatus})" unless sig_status.success?
+sig_line = sig_line.strip                             # sparkle:edSignature="..." length="..."
 abort "sign_update produced no signature" if sig_line.empty?
 ed  = sig_line[/sparkle:edSignature="([^"]+)"/, 1] or abort "no edSignature in: #{sig_line}"
 len = sig_line[/length="(\d+)"/, 1] or abort "no length in: #{sig_line}"
@@ -917,19 +924,29 @@ git add packaging/appcast.rb && git commit -m "feat(packaging): signed appcast i
     name = "QuickInterviewEditor-#{short}-#{build}.dmg"     # matches make-dmg.sh
     dmg  = "packaging/dist/#{name}"
     url  = "#{host}/#{prefix}/#{name}"
-    sign_update = sh("cd .. && find ~/Library/Developer/Xcode/DerivedData -name sign_update -type f 2>/dev/null | head -1").strip
+    # Resolve sign_update from the PINNED Sparkle artifact and require exactly one
+    # match — never a stray DerivedData copy, never zero. Fail the release otherwise.
+    matches = sh("cd .. && find ~/Library/Developer/Xcode/DerivedData -type f " \
+      "-path '*/artifacts/sparkle/Sparkle/bin/sign_update' 2>/dev/null").split("\n").map(&:strip).reject(&:empty?)
+    UI.user_error!("sign_update: expected exactly one match, found #{matches.size}") unless matches.size == 1
+    sign_update = matches.first
 
     # Pull the LIVE appcast down first so every prior <item> is preserved (rollback
-    # depends on old entries staying in the feed). A clean release machine otherwise
-    # regenerates a one-item feed and the upload drops history. Missing object is OK
-    # only for the very first release; any other download error must fail the lane.
+    # depends on old entries staying in the feed). Fail CLOSED: use head-object so a
+    # confirmed 404 (missing object) is the ONLY path that starts a fresh one-item
+    # feed. Auth/network/other errors must abort — otherwise a transient S3 error on
+    # a real release would regenerate a one-item feed and overwrite live history.
     sh(<<~SH)
-      cd .. && if aws --profile #{profile} s3 cp 's3://#{bucket}/#{prefix}/appcast.xml' packaging/dist/appcast.xml 2>/dev/null; then
+      cd .. && set -euo pipefail
+      key="#{prefix}/appcast.xml"
+      if err="$(aws --profile #{profile} s3api head-object --bucket '#{bucket}' --key "$key" 2>&1 >/dev/null)"; then
+        aws --profile #{profile} s3 cp "s3://#{bucket}/$key" packaging/dist/appcast.xml   # exists → must succeed
         echo "fetched existing appcast"
-      elif aws --profile #{profile} s3 ls 's3://#{bucket}/#{prefix}/appcast.xml' 2>/dev/null; then
-        echo "error: appcast exists but could not be downloaded" >&2; exit 1
-      else
+      elif printf '%s' "$err" | grep -qiE 'Not Found|404'; then
         echo "no existing appcast — first release"
+      else
+        echo "error: cannot read existing appcast (not a confirmed 404), aborting:" >&2
+        printf '%s\\n' "$err" >&2; exit 1
       fi
     SH
 
@@ -1002,7 +1019,13 @@ git commit -m "feat(fastlane): mac release lane (build→sign→notarize→dmg�
     API key → publish vN+1 → in vN "Check for Updates…" → confirm the key still
     works with **no** Keychain prompt; and `codesign -d -r-` DR compare.
   - **Invariants** that must never change (Team ID, bundle id, Keychain
-    service/account) and **why losing the EdDSA key is unrecoverable**.
+    service/account), and the **EdDSA key-rotation recovery** contract: losing the
+    key is recoverable because the app is Developer ID code-signed — ship an update
+    signed with the same Developer ID + a new `SUPublicEDKey` (never rotate the
+    Developer ID cert and the EdDSA key in the same release; when
+    `SUVerifyUpdateBeforeExtraction` is enabled the rotation update must be a
+    Developer ID code-signed DMG — ours is). Only losing **both** the EdDSA key and
+    the Developer ID identity forces a manual re-download.
   - Rollback: old DMGs stay in S3; to roll back, point the appcast's latest item
     back at a prior DMG.
 
