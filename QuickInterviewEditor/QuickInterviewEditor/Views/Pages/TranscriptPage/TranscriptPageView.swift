@@ -20,7 +20,6 @@ struct TranscriptPageView: View {
         reveal: model.reveal
       )
       .frame(maxWidth: .infinity, maxHeight: .infinity)
-      controls
     }
     .padding(20)
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -75,15 +74,6 @@ struct TranscriptPageView: View {
     .buttonStyle(.borderless)
   }
 
-  private var controls: some View {
-    HStack(spacing: 16) {
-      Button(model.clearButtonLabel) { model.clearSelectionTapped() }
-        .disabled(!model.hasSelection)
-      Text(model.selectionSummary).foregroundStyle(Color(white: 0.6))
-      Spacer()
-    }
-    .font(.system(size: 12))
-  }
 }
 
 #Preview("Clip containers") {

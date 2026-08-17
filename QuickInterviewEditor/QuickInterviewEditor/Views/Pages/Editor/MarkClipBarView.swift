@@ -1,8 +1,9 @@
 import SwiftUI
 
-/// The persistent controls for the listen/select/mark flow: always on screen (never popping in
-/// and reflowing), the "Mark as Clip" button enabled only when words are selected, plus a
-/// jump-back-to-the-playhead button. It sits where the fine-tune pane used to appear.
+/// The persistent selection controls for the listen/select/mark flow: always on screen (never
+/// popping in and reflowing), sitting right under the transcript. "Mark as Clip" and "Clear" act
+/// on the current selection (both enabled only when there is one); a jump-back-to-the-playhead
+/// button sits on the trailing edge.
 struct MarkClipBarView: View {
   @Bindable var model: EditorModel
 
@@ -10,6 +11,9 @@ struct MarkClipBarView: View {
     HStack(spacing: 12) {
       Button(model.markAsClipLabel) { model.addSliceTapped() }
         .disabled(!model.canAddSlice)
+
+      Button(model.transcript.clearButtonLabel) { model.transcript.clearSelectionTapped() }
+        .disabled(!model.transcript.hasSelection)
 
       Text(model.transcript.selectionSummary)
         .font(.system(size: 12))

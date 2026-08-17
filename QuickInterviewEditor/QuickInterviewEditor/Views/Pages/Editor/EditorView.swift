@@ -8,13 +8,13 @@ struct EditorView: View {
       VStack(spacing: 0) {
         TranscriptPageView(model: model.transcript)
           .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // The selection controls (Mark as Clip / Clear) sit right under the transcript where the
+        // words are selected. The fine-tune pane is intentionally not mounted in this flow — it
+        // popped in on selection and reflowed the layout; FineTuneView + FineTuneModel stay in the
+        // codebase, ready to re-enable when boundary editing returns.
+        MarkClipBarView(model: model)
         Divider()
         WaveformView(model: model)
-        // The fine-tune pane is intentionally not mounted in the listen/select/mark flow — it
-        // popped in on selection and reflowed the layout. FineTuneView + FineTuneModel stay in
-        // the codebase, ready to re-enable when boundary editing returns. The persistent
-        // "Mark as Clip" control row below takes its place.
-        MarkClipBarView(model: model)
       }
       Divider()
       VStack(spacing: 0) {
