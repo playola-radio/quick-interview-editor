@@ -40,14 +40,13 @@ targets:
         # otherwise bake in literal "1.0"/"1" defaults here).
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
-        # Sparkle self-update. SUFeedURL is a permanent, owned playola.fm URL that
-        # Netlify 200-proxies to the appcast on the public `playola-static` S3
-        # bucket (a portable anchor we can repoint even if we leave AWS). The DMG
-        # + appcast files themselves live on S3 under `downloads/QuickInterviewEditor/`
-        # (mirrors the sibling PlayolaAudioProcessor). Feed goes live in PR 2.
+        # Sparkle self-update. appcast.xml + DMG both live on the public
+        # `playola-static` S3 bucket under `downloads/QuickInterviewEditor/`,
+        # served by the raw S3 URL — exactly how the sibling PlayolaAudioProcessor
+        # distributes (no Netlify/CloudFront in the path). Feed goes live in PR 2.
         # SUPublicEDKey is the EdDSA public key from the login-Keychain private key
         # (Setup Task 0 — safe to ship publicly).
-        SUFeedURL: https://playola.fm/apps/quick-interview-editor/appcast.xml
+        SUFeedURL: https://playola-static.s3.amazonaws.com/downloads/QuickInterviewEditor/appcast.xml
         SUPublicEDKey: WyAypjfp2RUEqO+iIb/iYTTYwVq5AaXJWUxT9pwzrog=
         SUEnableAutomaticChecks: true
         SUScheduledCheckInterval: 86400
