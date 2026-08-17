@@ -76,6 +76,14 @@ class TranscriptPageModel: ViewModel {
   let defaultFontSize = defaultTranscriptFontSize
   var followMode: TranscriptFollowMode = .following
   var scrollTargetWordID: Word.ID?
+  /// The clip containers to draw, derived by `EditorModel` from slices + pending suggestions
+  /// and pushed in by the view. Kept here (not recomputed from slices) so the transcript stays
+  /// layout-local — it knows nothing about slices or the sidecar, only which words are clips.
+  /// Assigning it recomputes the cached `clipContainers` so the O(n) derivation runs only on a
+  /// real change, not on every body evaluation (the view reads `clipContainers` each playback tick).
+  var clipBands: [TranscriptClipBand] = [] {
+    didSet { recomputeClipContainers() }
+  }
   /// The latest explicit reveal request (from clicking a suggestion or clip). The view scrolls
   /// to it regardless of `followMode`; nil until the first reveal.
   var reveal: TranscriptReveal?
@@ -86,9 +94,12 @@ class TranscriptPageModel: ViewModel {
   let transcriptCaption = "TRANSCRIPT"
   let emptyStateMessage = "No transcript loaded."
   let clearButtonLabel = "Clear"
-  /// Vertical gap (points) the renderer leaves after each pause-paragraph. A display
-  /// decision, so it lives on the model rather than being hardcoded in the view.
-  let paragraphSpacing = 12.0
+  /// Vertical spacing (points) between lines. The same value is used within a paragraph
+  /// (`lineSpacing`) and after each pause-paragraph (`paragraphSpacing`) so the gap is uniform
+  /// everywhere — just enough that a clip container clears the next line without touching it. A
+  /// display decision, so it lives on the model rather than being hardcoded in the view.
+  let lineSpacing = 8.0
+  let paragraphSpacing = 8.0
 
   // MARK: - View Helpers
   var hasSelection: Bool { !selectedWords.isEmpty }
@@ -130,6 +141,85 @@ class TranscriptPageModel: ViewModel {
   }
   /// Public selection set for the renderer to diff (the private `selectedWordIDs` stays internal).
   var selectedWordIDSet: Set<Word.ID> { selectedWordIDs }
+
+  /// The clip bands mapped to drawable UTF-16 runs, in transcript order. Walks
+  /// `document.wordRanges` (position order, so it's correct even for non-monotonic word IDs)
+  /// and merges each maximal stretch of consecutive words belonging to the SAME band into ONE
+  /// range that spans their interior separators — that's the continuous tinted container the
+  /// renderer strokes. Splitting by band identity (not just kind) keeps two back-to-back clips
+  /// of the same state as separate containers, each with its own caps; a non-clip word, a
+  /// green-over-amber precedence hole, or a paragraph break (the separator is a newline, and a
+  /// container can't span the vertical gap between paragraphs) also breaks the run. The range
+  /// ends at the last word (its trailing space is left untinted, so the fill caps at the words,
+  /// not the gap after them).
+  ///
+  /// A word ID maps to whichever band lists it first; a *duplicate* ID (the document allows
+  /// non-unique IDs) tints every occurrence, matching the transcript's existing tolerance for
+  /// duplicates elsewhere. Real aligner output uses unique IDs, so this is a theoretical edge.
+  ///
+  /// Cached: recomputed only when `clipBands` or `document` changes (see `recomputeClipContainers`),
+  /// never on the getter, so a playback tick that re-evaluates the view doesn't re-derive it.
+  private(set) var clipContainers: [TranscriptClipContainer] = []
+
+  private func recomputeClipContainers() {
+    clipContainers = Self.clipContainers(bands: clipBands, document: document)
+  }
+
+  private static func clipContainers(
+    bands: [TranscriptClipBand], document: TranscriptDocument
+  ) -> [TranscriptClipContainer] {
+    guard !bands.isEmpty else { return [] }
+    var bandByWord: [Word.ID: (band: UUID, kind: TranscriptClipKind)] = [:]
+    for band in bands {
+      for id in band.wordIDs where bandByWord[id] == nil {
+        bandByWord[id] = (band.id, band.kind)
+      }
+    }
+    let text = document.text as NSString
+    var containers: [TranscriptClipContainer] = []
+    var runStart: Int?
+    var runEnd = 0
+    var runBand: UUID?
+    var runKind: TranscriptClipKind?
+    // A stable colour index per clip (band), assigned in first-appearance order, so every run of
+    // one clip shares a colour and clips that appear next to each other get different colours.
+    var colorIndexByBand: [UUID: Int] = [:]
+    func closeRun() {
+      defer {
+        runStart = nil
+        runBand = nil
+        runKind = nil
+      }
+      guard let start = runStart, let kind = runKind, let band = runBand else { return }
+      let colorIndex = colorIndexByBand[band] ?? colorIndexByBand.count
+      colorIndexByBand[band] = colorIndex
+      containers.append(
+        TranscriptClipContainer(
+          range: NSRange(location: start, length: runEnd - start), kind: kind,
+          colorIndex: colorIndex))
+    }
+    for wordRange in document.wordRanges {
+      let entry = bandByWord[wordRange.wordID]
+      // The separator between the run's last word and this one is the char at `runEnd`; a
+      // newline there is a paragraph break, which always ends the run.
+      let paragraphBreak =
+        runStart != nil && runEnd < text.length
+        && text.character(at: runEnd) == 0x0A
+      if let entry, entry.band == runBand, !paragraphBreak {
+        runEnd = NSMaxRange(wordRange.range)
+      } else {
+        closeRun()
+        if let entry {
+          runStart = wordRange.range.location
+          runEnd = NSMaxRange(wordRange.range)
+          runBand = entry.band
+          runKind = entry.kind
+        }
+      }
+    }
+    closeRun()
+    return containers
+  }
   var canZoomIn: Bool { fontSize < maxFontSize }
   var canZoomOut: Bool { fontSize > minFontSize }
 
@@ -254,6 +344,9 @@ class TranscriptPageModel: ViewModel {
     document = TranscriptDocument(words: plan.words, paragraphs: paragraphs)
     gaps = wordGaps(plan.words)
     recomputeRunTogether()
+    // The word→range map just changed, so re-derive the cached containers against it (bands may
+    // already be set — e.g. a reload — so this keeps them from pointing at stale ranges).
+    recomputeClipContainers()
   }
   /// Recomputes the run-together set from the cached gaps at the fixed default threshold.
   /// Runs once at plan load; the result is stored analysis, not currently rendered.

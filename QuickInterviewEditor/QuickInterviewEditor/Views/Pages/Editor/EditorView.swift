@@ -38,6 +38,12 @@ struct EditorView: View {
     .task { await model.loadWaveform() }
     .task { await model.observePlayback() }
     .onChange(of: model.fineTuneSessionKey, initial: true) { _, _ in model.syncEditSession() }
+    // The editor derives the clip bands (slices + pending suggestions, green over amber) and
+    // pushes them into the transcript, which stays layout-local and only renders what it's
+    // handed. `initial: true` seeds the containers on first appearance.
+    .onChange(of: model.clipBands, initial: true) { _, bands in
+      model.transcript.clipBands = bands
+    }
     .onChange(of: model.transcript.selectedSampleRange) { _, newRange in
       // Capture the cursor token synchronously at the moment the selection changes, so a ruler click
       // landing before this snap runs is seen as the newer cursor action and the snap yields to it.

@@ -223,6 +223,29 @@ final class EditorModel: ViewModel {
   /// Words missing sample bounds are excluded.
   var redRanges: [Range<Int>] { transcript.runTogetherSampleRanges }
 
+  // MARK: - Clip containers (transcript)
+  /// The clip bands the transcript draws as tinted containers: real slices are `approved`
+  /// (green); still-pending cut suggestions are `suggested` (amber). Derived read-only from
+  /// the editor's own state and pushed into `transcript` by the view; the transcript stays
+  /// layout-local and only renders what it's handed.
+  ///
+  /// Precedence: an actual slice wins over a suggestion on any shared word, so a pending
+  /// suggestion is drawn only over the words no slice already claims (green over amber). A
+  /// suggestion fully covered by slices contributes no band.
+  var clipBands: [TranscriptClipBand] {
+    let approved = slices.map { slice in
+      TranscriptClipBand(id: slice.id, wordIDs: slice.wordIDs, kind: .approved)
+    }
+    let claimed = Set(approved.flatMap(\.wordIDs))
+    let suggested = cutSuggestions.pendingSuggestions.compactMap {
+      suggestion -> TranscriptClipBand? in
+      let unclaimed = suggestion.wordIDs.filter { !claimed.contains($0) }
+      guard !unclaimed.isEmpty else { return nil }
+      return TranscriptClipBand(id: suggestion.id, wordIDs: unclaimed, kind: .suggested)
+    }
+    return approved + suggested
+  }
+
   /// Waveform render data, geometry delegated to the child (the view reads these; it decides
   /// nothing). The highlight tracks `activeEditingRange`, so it follows a fine-tune drag live.
   var waveformHighlightSpan: WaveformSpan? { activeEditingRange.flatMap(waveform.span(for:)) }

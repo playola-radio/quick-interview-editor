@@ -89,6 +89,11 @@ final class CutSuggestionsPageModel: ViewModel {
   /// The candidates to show, in ranked order, read straight from the sidecar.
   var suggestions: [CutSuggestion] { projectState.rankedSuggestions }
 
+  /// The still-undecided candidates, in ranked order — the source of the amber clip
+  /// containers the transcript draws. Accepted candidates are already slices (drawn green,
+  /// so they aren't double-drawn here); rejected ones aren't drawn at all.
+  var pendingSuggestions: [CutSuggestion] { projectState.pendingSuggestions }
+
   /// Ranked candidates grouped/labeled by product type, with per-row display values and
   /// freshness derived against the current transcript/source.
   var sections: [SuggestionSection] {
