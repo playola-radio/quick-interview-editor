@@ -263,12 +263,21 @@ Decouple the heavy freeze from every release:
   artifact and only builds/signs/packages the app — that part is CI-able.
 - Move the EdDSA key + AWS creds to CI secrets at that point.
 
-## Open questions for review
+## Resolved review questions
 
-1. Exact S3 bucket + path prefix and the public HTTPS host (CloudFront domain?)
-   for `SUFeedURL`. Needed to set `SUFeedURL` and the `aws s3 cp` target.
-2. Confirm `sign-app.sh` already signs inside-out (not via `--deep`); if not,
-   fixing it is in scope.
-3. Confirm the AWS profile/creds the release lane should use for uploads.
-4. Release notes source: inline CDATA in the appcast vs a hosted HTML page.
+1. **S3 bucket + public HTTPS host for `SUFeedURL`.** Brian supplies/configures
+   these manually. The release lane and `Info.plist` read them as config, not
+   hardcoded literals:
+   - `RELEASE_S3_BUCKET` + `RELEASE_S3_PREFIX` (e.g. `qie/`) — the `aws s3 cp`
+     target.
+   - `SUFeedURL` = the public HTTPS URL for `<prefix>/appcast.xml` (raw bucket
+     URL or a CloudFront domain — Brian's choice, set once in `project.yml`).
+2. **`sign-app.sh` inside-out signing.** Fixing it is **in scope** — verify it
+   signs nested engine binaries inside-out and does not rely on `--deep` to sign.
+3. **AWS credentials for upload.** Use `AWS_PROFILE` (default `default` — the
+   single configured profile on the release machine), overridable via env. No new
+   credential machinery in v1; the CI split later moves this to a CI secret.
+   Verify the `default` profile can write to the bucket during implementation.
+4. **Release notes.** **Inline** in the appcast (`<description>` CDATA). No hosted
+   HTML page.
 ```
