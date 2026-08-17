@@ -21,7 +21,7 @@ extension UpdaterClient: DependencyKey {
     // nonisolated `liveValue` accessor stays concurrency-clean and Sparkle's
     // main-thread controller is never created off the main actor.
     UpdaterClient(
-      start: { _ = LiveUpdaterHolder.shared },
+      start: { LiveUpdaterHolder.shared.controller.startUpdater() },
       checkForUpdates: { LiveUpdaterHolder.shared.controller.updater.checkForUpdates() },
       canCheckForUpdates: { LiveUpdaterHolder.shared.controller.updater.canCheckForUpdates }
     )
@@ -43,11 +43,13 @@ extension DependencyValues {
 }
 
 /// Owns the single Sparkle controller for the app's lifetime. `startingUpdater:
-/// true` begins scheduled background checks immediately on first live use.
+/// false` decouples *creating* the controller (which the menu's availability
+/// getter does lazily) from *starting* scheduled checks — the app calls
+/// `UpdaterClient.start` explicitly at launch (after the relocation guard).
 @MainActor
 final class LiveUpdaterHolder {
   static let shared = LiveUpdaterHolder()
   let controller = SPUStandardUpdaterController(
-    startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
+    startingUpdater: false, updaterDelegate: nil, userDriverDelegate: nil)
   private init() {}
 }

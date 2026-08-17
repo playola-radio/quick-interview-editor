@@ -53,16 +53,23 @@ final class AppLaunchModel: ViewModel {
     }
   }
 
+  // MARK: - Properties
+  private var didRunLaunchTasks = false
+
   // MARK: - View Helpers
   var showsModelSetup: Bool { phase == .modelSetup }
 
   // MARK: - User Actions
-  /// On first appearance, offer to relocate the app into /Applications when it is
-  /// running from the DMG or a translocated path (no-op in DEBUG/tests), then
-  /// start the Sparkle updater. Relocation runs first so background update checks
-  /// never begin from a soon-to-be-relaunched location.
+  /// Run once on first appearance. `onAppear` can fire repeatedly (window reopen,
+  /// tab switches), so the one-shot guard keeps the relocation prompt from nagging
+  /// the user again and again within a single process. Relocation runs first; if it
+  /// kicks off a move + relaunch this process is terminating, so we skip starting
+  /// the updater here — the relocated copy starts its own on launch.
   func viewAppeared() {
-    InstallLocation.offerMoveToApplicationsIfNeeded()
+    guard !didRunLaunchTasks else { return }
+    didRunLaunchTasks = true
+    let relocating = InstallLocation.offerMoveToApplicationsIfNeeded()
+    guard !relocating else { return }
     updater.start()
   }
 }

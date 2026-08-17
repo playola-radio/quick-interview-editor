@@ -91,7 +91,7 @@ must **preserve the user's saved API key** (stored in the login Keychain).
 - Add **Sparkle 2.x** as an SPM dependency in `project.yml` (pin an exact
   version tag; commit `Package.resolved`).
 - `Info.plist` (via `project.yml` settings):
-  - `SUFeedURL` = `https://<bucket-host>/qie/appcast.xml` (HTTPS only).
+  - `SUFeedURL` = `https://playola-static.s3.amazonaws.com/downloads/QuickInterviewEditor/appcast.xml` (HTTPS only).
   - `SUPublicEDKey` = the EdDSA **public** key (safe to ship; base64).
   - `SUEnableAutomaticChecks` = `true` (Sparkle shows first-run consent prompt).
   - `SUScheduledCheckInterval` (e.g. daily).
@@ -114,8 +114,12 @@ must **preserve the user's saved API key** (stored in the login Keychain).
 - Single **notarized + stapled DMG** is both the website download and the
   Sparkle enclosure. No separate zip.
 - Add `packaging/make-dmg.sh` wrapping `create-dmg` (Homebrew) to produce
-  `QuickInterviewEditor-<version>.dmg` from the signed/notarized `.app`, then
-  staple the DMG itself.
+  `QuickInterviewEditor-<short>-<build>.dmg` from the signed/notarized `.app`
+  (filename carries both `CFBundleShortVersionString` and the integer
+  `CFBundleVersion` so two builds sharing a marketing version never collide), then
+  **`codesign` the DMG, `xcrun notarytool submit --wait` it, and `xcrun stapler
+  staple` + `validate`** — Gatekeeper checks the outermost container the user
+  opens, so the DMG itself must be signed, notarized, and stapled.
 - Signing is **inside-out**: every nested `.dylib`, framework, helper, and Python
   binary under `Contents/Resources/engine/` is signed before the outer app.
   `--deep` is used **only** as a verification smoke test, never as the signing
@@ -125,7 +129,7 @@ must **preserve the user's saved API key** (stored in the login Keychain).
   ```sh
   codesign --verify --deep --strict --verbose=4 QuickInterviewEditor.app
   spctl --assess --type execute --verbose=4 QuickInterviewEditor.app
-  xcrun stapler validate QuickInterviewEditor-<version>.dmg
+  xcrun stapler validate QuickInterviewEditor-<short>-<build>.dmg
   ```
 
 ### 3. Appcast generation
@@ -135,7 +139,7 @@ must **preserve the user's saved API key** (stored in the login Keychain).
   - `sparkle:version` = `CFBundleVersion` — a **monotonically increasing
     integer**, never a git SHA.
   - `sparkle:shortVersionString` = `CFBundleShortVersionString` (display).
-  - `sparkle:minimumSystemVersion` = `15.0`.
+  - `sparkle:minimumSystemVersion` = `15.0.0` (Sparkle needs a 3-component version).
   - `<enclosure url=… length=… type="application/octet-stream"
     sparkle:edSignature=…>` — length is the DMG byte size; edSignature from
     `sign_update`.
@@ -201,7 +205,7 @@ well-formed integers/semver. CI does **not** build the DMG.
 | Enclosure download fails halfway | Sparkle re-downloads on next check; old version keeps working; old DMGs retained for manual recovery. |
 | App translocation ("app is damaged"/random path) | First-launch check: if running from a read-only volume or outside `/Applications`, offer to move (LetsMove-style). Engine paths resolve from `Bundle.main.resourceURL`, never cwd; never write into `Contents/Resources/engine/`. Sparkle installs into the existing app location, avoiding translocation on updates. |
 | Nested engine binary unsigned → notarization/HR failure | Sign inside-out; verify with `codesign --verify --deep --strict` + `spctl`. |
-| Lost EdDSA private key | **No installed app can verify future updates** → users must re-download manually. Key backed up offline (encrypted); rotation path = ship a version trusting the new public key before signing with the new private key. |
+| Lost EdDSA private key | **Recoverable via key rotation** (the app is Developer ID-signed, so Sparkle accepts a new EdDSA key when the Developer ID stays the same): ship an update signed with the same Developer ID + a new `SUPublicEDKey` — never rotate the Developer ID cert and the EdDSA key in the same release. Still back the key up offline (encrypted) to avoid the forced rotation. Only losing **both** the EdDSA key and the Developer ID identity forces a manual re-download. |
 | Bad appcast metadata | `appcast.rb` validates before upload; CI validates the committed appcast. |
 | Release from dirty/unreviewed tree | `ensure_git_status_clean` + release only from the release branch. |
 
@@ -265,13 +269,16 @@ Decouple the heavy freeze from every release:
 
 ## Resolved review questions
 
-1. **S3 bucket + public HTTPS host for `SUFeedURL`.** Brian supplies/configures
-   these manually. The release lane and `Info.plist` read them as config, not
-   hardcoded literals:
-   - `RELEASE_S3_BUCKET` + `RELEASE_S3_PREFIX` (e.g. `qie/`) — the `aws s3 cp`
-     target.
-   - `SUFeedURL` = the public HTTPS URL for `<prefix>/appcast.xml` (raw bucket
-     URL or a CloudFront domain — Brian's choice, set once in `project.yml`).
+1. **S3 bucket + public HTTPS host for `SUFeedURL` — RESOLVED (one canonical set).**
+   Mirrors the sibling **PlayolaAudioProcessor** app: the public `playola-static`
+   bucket under `downloads/<AppName>/`, served by the **raw S3 URL** (no CloudFront,
+   no `/qie/` prefix). Read as config, not hardcoded literals:
+   - `RELEASE_S3_BUCKET=playola-static`, `RELEASE_S3_PREFIX=downloads/QuickInterviewEditor`
+     — the `aws s3 cp` target (uploaded with `AWS_PROFILE=default`).
+   - `SUFeedURL=https://playola-static.s3.amazonaws.com/downloads/QuickInterviewEditor/appcast.xml`
+     (already baked into `project.yml`; the DMG enclosure URL points at the same
+     prefix). Trade-off: the baked-in feed URL is tied to the bucket name — fine at
+     this user count, and it matches the sibling.
 2. **`sign-app.sh` inside-out signing.** Fixing it is **in scope** — verify it
    signs nested engine binaries inside-out and does not rely on `--deep` to sign.
 3. **AWS credentials for upload.** Use `AWS_PROFILE` (default `default` — the

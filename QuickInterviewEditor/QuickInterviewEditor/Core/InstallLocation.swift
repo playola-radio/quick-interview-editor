@@ -17,25 +17,27 @@ enum InstallLocation {
     return !(inSystemApps || inUserApps)
   }
 
-  /// First-launch entry point. No-op in DEBUG/tests so development builds are
-  /// never relocated out from under the debugger.
+  /// First-launch entry point. Returns `true` when it kicked off a move + relaunch
+  /// (so the caller knows this process is terminating and should not start the
+  /// updater in it). No-op returning `false` in DEBUG/tests so development builds
+  /// are never relocated out from under the debugger.
   @MainActor
-  static func offerMoveToApplicationsIfNeeded() {
+  static func offerMoveToApplicationsIfNeeded() -> Bool {
     #if DEBUG
-      return
+      return false
     #else
       let bundleURL = Bundle.main.bundleURL
       guard
         shouldOfferMoveToApplications(
           bundlePath: bundleURL.path,
           isTranslocated: isTranslocated(bundleURL))
-      else { return }
+      else { return false }
       // If a copy already lives in /Applications, don't nag or clobber it: it may
       // be a newer, older, or currently-running install, and silently swapping it
       // risks discarding the very build the user just launched. Leave it to them.
       guard !FileManager.default.fileExists(atPath: destination(for: bundleURL).path)
-      else { return }
-      presentMoveOffer(from: bundleURL)
+      else { return false }
+      return presentMoveOffer(from: bundleURL)
     #endif
   }
 
@@ -54,8 +56,9 @@ enum InstallLocation {
 
   // MARK: - Side effect (release only)
 
+  /// Returns `true` if a move + relaunch was initiated.
   @MainActor
-  private static func presentMoveOffer(from bundleURL: URL) {
+  private static func presentMoveOffer(from bundleURL: URL) -> Bool {
     let alert = NSAlert()
     alert.messageText = "Move to the Applications folder?"
     alert.informativeText =
@@ -63,18 +66,21 @@ enum InstallLocation {
       + "lives in your Applications folder. Would you like to move it there now?"
     alert.addButton(withTitle: "Move to Applications Folder")
     alert.addButton(withTitle: "Not Now")
-    guard alert.runModal() == .alertFirstButtonReturn else { return }
-    moveToApplicationsAndRelaunch(from: bundleURL)
+    guard alert.runModal() == .alertFirstButtonReturn else { return false }
+    return moveToApplicationsAndRelaunch(from: bundleURL)
   }
 
+  /// Returns `true` if the copy succeeded and a relaunch was requested (this
+  /// process will terminate on success); `false` if the move failed and we stay
+  /// running from the current location.
   @MainActor
-  private static func moveToApplicationsAndRelaunch(from bundleURL: URL) {
+  private static func moveToApplicationsAndRelaunch(from bundleURL: URL) -> Bool {
     let fileManager = FileManager.default
     let destination = destination(for: bundleURL)
 
     // Never clobber an existing install (already filtered in the offer, but keep
     // the invariant local): only move into an empty /Applications slot.
-    guard !fileManager.fileExists(atPath: destination.path) else { return }
+    guard !fileManager.fileExists(atPath: destination.path) else { return false }
 
     // Copy to a hidden staging path on the same volume, then atomically rename it
     // into place. A crash mid-copy can then never leave a half-written bundle at
@@ -89,7 +95,10 @@ enum InstallLocation {
     } catch {
       NSLog("InstallLocation: move to /Applications failed: \(error)")
       try? fileManager.removeItem(at: staging)
-      return  // Stay running from the current location; nothing destructive done.
+      // Tell the user rather than failing silently: /Applications may not be
+      // writable (e.g. a non-admin account). They can still drag it over by hand.
+      presentMoveFailed()
+      return false  // Stay running from the current location; nothing destructive done.
     }
 
     let configuration = NSWorkspace.OpenConfiguration()
@@ -105,5 +114,17 @@ enum InstallLocation {
       }
       Task { @MainActor in NSApp.terminate(nil) }
     }
+    return true
+  }
+
+  @MainActor
+  private static func presentMoveFailed() {
+    let alert = NSAlert()
+    alert.messageText = "Couldn't move to the Applications folder"
+    alert.informativeText =
+      "You can move Quick Interview Editor yourself by dragging it into "
+      + "Applications in Finder. Auto-update works best once it lives there."
+    alert.addButton(withTitle: "OK")
+    alert.runModal()
   }
 }

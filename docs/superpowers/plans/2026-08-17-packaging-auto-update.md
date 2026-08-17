@@ -34,7 +34,9 @@ Copied verbatim from the spec; every task inherits these.
   Team ID `FSRSPV9N9Q`; bundle id `fm.playola.QuickInterviewEditor`; Keychain
   service `fm.playola.QuickInterviewEditor.anthropicAPIKey` / account `anthropic`
   (no `kSecAttrAccessGroup`, no sandbox, no synchronizable).
-- **Deployment / update floor:** macOS **15.0**. `sparkle:minimumSystemVersion` = `15.0`.
+- **Deployment / update floor:** macOS deployment target **15.0**;
+  `sparkle:minimumSystemVersion` = **`15.0.0`** (Sparkle requires a three-component
+  major.minor.patch string for correct system-version filtering).
 - **Distribution:** Developer ID, **not** sandboxed, **not** App Store.
 - **`sparkle:version` == `CFBundleVersion`** — a monotonically increasing
   **integer**, never a git SHA. `CFBundleShortVersionString` is the display version.
@@ -100,27 +102,38 @@ find ~/Library/Developer/Xcode/DerivedData "$(pwd)" \
   returns here. The tool ships in Sparkle's `Sparkle-for-Swift-Package-Manager`
   artifact / the `Sparkle.xcframework` distribution under `bin/`.)
 
-- [ ] **Step 2: Generate the keypair into the login Keychain.**
+- [ ] **Step 2: Generate the keypair into the login Keychain.** Reuse the path
+  captured in Step 1 (`GK`) — `generate_keys` is not on `PATH`, so don't assume
+  the current directory:
 
 ```bash
-./generate_keys
+GK="$(find ~/Library/Developer/Xcode/DerivedData "$(pwd)" \
+       -name generate_keys -type f 2>/dev/null | head -1)"
+[ -x "$GK" ] || { echo "generate_keys not found — resolve Sparkle (Task 1) first" >&2; exit 1; }
+"$GK"                 # generate (idempotent: reuses an existing Keychain key)
+"$GK" -p             # print the existing public key for automation
 ```
 
   This prints a **public** key (base64) and stores the **private** key in the
   login Keychain (item "Private key for signing Sparkle updates"). Copy the
-  printed public key — it goes into Task 2.
+  printed public key — it goes into Task 2. **(DONE in PR 1:** public key
+  `WyAypjfp2RUEqO+iIb/iYTTYwVq5AaXJWUxT9pwzrog=`, already in `project.yml`.)
 
 - [ ] **Step 3: Back up the private key offline (encrypted).**
 
 ```bash
-./generate_keys -x sparkle_private_key.pem   # export
+"$GK" -x sparkle_private_key.pem   # export
 # Move sparkle_private_key.pem into an encrypted store (e.g. an encrypted disk
 # image or 1Password), then shred the plaintext:
 rm -P sparkle_private_key.pem
 ```
 
-  Record in `packaging/README.md` (Task 12) that losing this key breaks the
-  update channel permanently.
+  Record in `packaging/README.md` (Task 12) that if this key is lost, updates are
+  **still recoverable** (not permanently broken): because the app is Developer ID
+  code-signed, Sparkle supports EdDSA key rotation — ship a new update signed with
+  the *same* Developer ID and a *new* `SUPublicEDKey` (do not change the Developer
+  ID cert and the EdDSA key in the same release). Losing the key only forces that
+  one-time rotation, so still back it up to avoid the hassle.
 
 **Deliverable:** the public key string (for Task 2) + a secured private-key backup.
 
@@ -138,13 +151,13 @@ rm -P sparkle_private_key.pem
 - Produces: the `Sparkle` product importable as `import Sparkle` in the app target.
 
 - [ ] **Step 1: Add the package + dependency.** In `project.yml` under `packages:`
-  add (pin an exact tag — check https://github.com/sparkle-project/Sparkle/releases
-  for the latest 2.x, e.g. `2.6.4`):
+  add (pin an exact tag — `2.9.6` is what shipped in PR 1 and is recorded in
+  `Package.resolved`; bump only deliberately):
 
 ```yaml
   Sparkle:
     url: https://github.com/sparkle-project/Sparkle
-    exactVersion: "2.6.4"
+    exactVersion: "2.9.6"
 ```
 
   And under `targets: QuickInterviewEditor: dependencies:` add:
@@ -608,8 +621,17 @@ open the PR, then run the Codex adversarial review (`/codex review`,
 
 **Interfaces:**
 - Consumes: a signed+notarized+stapled `.app` at
-  `packaging/dist/QuickInterviewEditor.app`.
-- Produces: `packaging/dist/QuickInterviewEditor-<version>.dmg` (stapled).
+  `packaging/dist/QuickInterviewEditor.app`, plus `NOTARY_PROFILE` + the Developer
+  ID identity (same as `sign-app.sh`).
+- Produces: `packaging/dist/QuickInterviewEditor-<short>-<build>.dmg`, itself
+  **signed, notarized, and stapled**.
+
+**Why sign+notarize the DMG (not just the app):** Gatekeeper checks the outermost
+container the user opens. A stapled ticket on the DMG lets it validate offline. And
+the filename carries **both** `CFBundleShortVersionString` *and* the integer
+`CFBundleVersion` so two builds that share a marketing version (e.g. two `1.0.0`
+builds) don't collide — otherwise the second upload overwrites the first DMG and
+the earlier appcast signature no longer matches its URL, breaking rollback.
 
 - [ ] **Step 1: Install the tool.**
 
@@ -621,28 +643,38 @@ brew install create-dmg
 
 ```bash
 #!/usr/bin/env bash
-# Build a distributable DMG from the signed+notarized app and staple it.
-#   packaging/make-dmg.sh   (reads version from the app's Info.plist)
+# Build a distributable DMG from the signed+notarized app, then sign + notarize +
+# staple the DMG itself.  packaging/make-dmg.sh  (reads versions from Info.plist)
 set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST="$REPO_ROOT/packaging/dist"
 APP="$DIST/QuickInterviewEditor.app"
 [ -d "$APP" ] || { echo "error: no app at $APP (run build/sign/notarize first)" >&2; exit 1; }
-VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")"
-DMG="$DIST/QuickInterviewEditor-$VERSION.dmg"
+IDENTITY="${SIGN_IDENTITY:-Developer ID Application: Playola Radio, Incorporated (FSRSPV9N9Q)}"
+NOTARY_PROFILE="${NOTARY_PROFILE:?set NOTARY_PROFILE (notarytool keychain profile)}"
+SHORT="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")"
+BUILD="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP/Contents/Info.plist")"
+DMG="$DIST/QuickInterviewEditor-$SHORT-$BUILD.dmg"
 rm -f "$DMG"
 create-dmg \
-  --volname "QuickInterviewEditor $VERSION" \
+  --volname "QuickInterviewEditor $SHORT" \
   --app-drop-link 480 200 \
   --icon "QuickInterviewEditor.app" 160 200 \
   --window-size 640 400 \
   "$DMG" "$APP"
+echo "==> Signing the DMG (Developer ID)"
+codesign --force --sign "$IDENTITY" --timestamp "$DMG"
+echo "==> Notarizing the DMG"
+xcrun notarytool submit "$DMG" --keychain-profile "$NOTARY_PROFILE" --wait
 echo "==> Stapling DMG"
 xcrun stapler staple "$DMG"
 xcrun stapler validate "$DMG"
 echo "==> DMG: $DMG"
 du -sh "$DMG" | awk '{print "    dmg size: " $1}'
 ```
+
+  The release lane (Task 10) and `appcast.rb` (Task 9) must build the enclosure URL
+  from this same `QuickInterviewEditor-<short>-<build>.dmg` filename.
 
 - [ ] **Step 3: `chmod +x packaging/make-dmg.sh`.**
 
@@ -768,13 +800,22 @@ app = File.join(File.dirname(dmg), "QuickInterviewEditor.app")
 def plist(app, key) = `/usr/libexec/PlistBuddy -c 'Print :#{key}' "#{app}/Contents/Info.plist"`.strip
 version    = plist(app, "CFBundleVersion")            # sparkle:version (integer)
 short      = plist(app, "CFBundleShortVersionString") # display
-min_os     = "15.0"
+min_os     = "15.0.0"                                # 3-component, Sparkle requirement
 notes      = notes_file ? File.read(notes_file) : "See the changelog."
+
+# A bad appcast breaks the update channel for everyone, so validate the SEMANTICS
+# before writing — not just that the output is well-formed XML. Empty PlistBuddy
+# reads (missing key / wrong path) must fail loudly rather than emit blank fields.
+abort "CFBundleVersion missing or non-integer: #{version.inspect}" unless version =~ /\A\d+\z/
+abort "CFBundleShortVersionString empty" if short.empty?
+abort "download url must be https: #{url}" unless url.start_with?("https://")
+abort "download url must end in the dmg name" unless url.end_with?(File.basename(dmg))
 
 sig_line = `#{sign_update} "#{dmg}"`.strip            # sparkle:edSignature="..." length="..."
 abort "sign_update produced no signature" if sig_line.empty?
 ed  = sig_line[/sparkle:edSignature="([^"]+)"/, 1] or abort "no edSignature in: #{sig_line}"
 len = sig_line[/length="(\d+)"/, 1] or abort "no length in: #{sig_line}"
+abort "enclosure length must be > 0" unless len.to_i.positive?
 
 path = File.join(File.dirname(dmg), "appcast.xml")
 doc = File.exist?(path) ? REXML::Document.new(File.read(path)) : nil
@@ -807,10 +848,21 @@ enc.add_attribute("length", len)
 enc.add_attribute("type", "application/octet-stream")
 enc.add_attribute("sparkle:edSignature", ed)
 
-# Validate by re-parsing what we're about to write.
+# Validate by re-parsing what we're about to write, then re-assert the freshly
+# built item carries every required field before it goes near S3.
 out = String.new
 doc.write(output: out, indent: 2)
-REXML::Document.new(out) or abort "generated appcast is not well-formed"
+reparsed = REXML::Document.new(out) or abort "generated appcast is not well-formed"
+built = reparsed.elements.to_a("rss/channel/item").find { |i| i.elements["sparkle:version"]&.text == version } \
+  or abort "generated item for version #{version} is missing"
+%w[title sparkle:version sparkle:shortVersionString sparkle:minimumSystemVersion].each do |field|
+  t = built.elements[field]&.text
+  abort "generated item missing #{field}" if t.nil? || t.empty?
+end
+enc_out = built.elements["enclosure"] or abort "generated item missing enclosure"
+%w[url length sparkle:edSignature].each do |attr|
+  abort "enclosure missing #{attr}" if (enc_out.attribute(attr)&.value).to_s.empty?
+end
 File.write(path, out)
 puts "Wrote #{path} (version #{version}, len #{len})"
 ```
@@ -859,26 +911,37 @@ git add packaging/appcast.rb && git commit -m "feat(packaging): signed appcast i
     sh("cd .. && NOTARY_PROFILE=#{ENV['NOTARY_PROFILE']} packaging/notarize-app.sh packaging/dist/QuickInterviewEditor.app")
     sh("cd .. && packaging/make-dmg.sh")
 
-    version = sh("cd .. && /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' packaging/dist/QuickInterviewEditor.app/Contents/Info.plist").strip
-    dmg = "packaging/dist/QuickInterviewEditor-#{version}.dmg"
-    url = "#{host}/#{prefix}/QuickInterviewEditor-#{version}.dmg"
+    plist = "packaging/dist/QuickInterviewEditor.app/Contents/Info.plist"
+    short = sh("cd .. && /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' #{plist}").strip
+    build = sh("cd .. && /usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' #{plist}").strip
+    name = "QuickInterviewEditor-#{short}-#{build}.dmg"     # matches make-dmg.sh
+    dmg  = "packaging/dist/#{name}"
+    url  = "#{host}/#{prefix}/#{name}"
     sign_update = sh("cd .. && find ~/Library/Developer/Xcode/DerivedData -name sign_update -type f 2>/dev/null | head -1").strip
+
+    # Pull the LIVE appcast down first so every prior <item> is preserved (rollback
+    # depends on old entries staying in the feed). A clean release machine otherwise
+    # regenerates a one-item feed and the upload drops history. Missing object is OK
+    # only for the very first release; any other download error must fail the lane.
+    sh(<<~SH)
+      cd .. && if aws --profile #{profile} s3 cp 's3://#{bucket}/#{prefix}/appcast.xml' packaging/dist/appcast.xml 2>/dev/null; then
+        echo "fetched existing appcast"
+      elif aws --profile #{profile} s3 ls 's3://#{bucket}/#{prefix}/appcast.xml' 2>/dev/null; then
+        echo "error: appcast exists but could not be downloaded" >&2; exit 1
+      else
+        echo "no existing appcast — first release"
+      fi
+    SH
 
     sh("cd .. && ruby packaging/appcast.rb '#{dmg}' '#{url}' '#{sign_update}'")
 
-    # Sync existing appcast down first so history is preserved, then re-run? For a
-    # single canonical file we upload the appended local copy. Keep old DMGs (no --delete).
+    # Keep old DMGs (no --delete). Upload the DMG, then the appended appcast last.
     sh("cd .. && aws --profile #{profile} s3 cp '#{dmg}' 's3://#{bucket}/#{prefix}/' ")
     sh("cd .. && aws --profile #{profile} s3 cp packaging/dist/appcast.xml 's3://#{bucket}/#{prefix}/appcast.xml' --content-type application/xml --cache-control no-cache")
 
-    UI.success("Released #{version}. Run the manual verification checklist (packaging/README.md) before announcing.")
+    UI.success("Released #{short} (#{build}). Run the manual verification checklist (packaging/README.md) before announcing.")
   end
 ```
-
-  Note: keep `packaging/dist/appcast.xml` as the canonical local copy (gitignored
-  under `packaging/dist/`), or `aws s3 cp s3://…/appcast.xml` down before
-  `appcast.rb` to append to the live one. Pick the "sync down first" variant if
-  releases ever run from more than one machine.
 
 - [ ] **Step 2: Version bump helper.** Add a `bump` lane (or inline) that edits
   `MARKETING_VERSION` + increments the integer `CURRENT_PROJECT_VERSION` in
