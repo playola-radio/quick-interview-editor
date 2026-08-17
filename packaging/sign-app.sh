@@ -64,8 +64,13 @@ sign_runtime "$ENGINE_ENTITLEMENTS" "$ENGINE_DIR/cut-suggester-engine"
 SPARKLE="$APP/Contents/Frameworks/Sparkle.framework"
 if [ -d "$SPARKLE" ]; then
   echo "==> Signing Sparkle nested helpers (inside-out)"
+  # --preserve-metadata=entitlements keeps whatever entitlements Sparkle ships on its
+  # XPC services (empty in 2.9.6 for a non-sandboxed host, but Sparkle's sandboxed XPC
+  # services carry sandbox entitlements — preserving is Sparkle's documented guidance
+  # and future-proofs a version bump). https://sparkle-project.github.io/documentation/sandboxing/
   for xpc in "$SPARKLE/Versions/B/XPCServices/"*.xpc; do
-    [ -e "$xpc" ] && codesign --force --sign "$IDENTITY" --options runtime --timestamp "$xpc"
+    [ -e "$xpc" ] && codesign --force --sign "$IDENTITY" --options runtime --timestamp \
+      --preserve-metadata=entitlements "$xpc"
   done
   [ -d "$SPARKLE/Versions/B/Updater.app" ] && \
     codesign --force --sign "$IDENTITY" --options runtime --timestamp "$SPARKLE/Versions/B/Updater.app"

@@ -114,6 +114,14 @@ platform :mac do
     host    = ENV.fetch("RELEASE_DOWNLOAD_HOST", "https://playola-static.s3.amazonaws.com")
     profile = ENV.fetch("AWS_PROFILE", "default")
 
+    # These env values are interpolated into shell commands below. Fail closed on
+    # anything outside a safe charset rather than shell-escaping every call site — a
+    # release lane shouldn't run surprising shell from a malformed profile/prefix.
+    { "RELEASE_S3_BUCKET" => bucket, "RELEASE_S3_PREFIX" => prefix, "AWS_PROFILE" => profile }.each do |k, v|
+      UI.user_error!("#{k} has unexpected characters: #{v.inspect}") unless v.match?(%r{\A[A-Za-z0-9._/-]+\z})
+    end
+    UI.user_error!("RELEASE_DOWNLOAD_HOST must be https: #{host.inspect}") unless host.start_with?("https://")
+
     sh("cd ../.. && packaging/package-engine.sh")
     sh("cd ../.. && packaging/package-cut-suggester.sh")
     sh("cd ../.. && packaging/build-app.sh")

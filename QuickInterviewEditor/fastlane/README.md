@@ -39,6 +39,22 @@ Run SwiftLint (strict — fails on warnings)
 
 Check swift-format formatting (fails on issues)
 
+### mac bump
+
+```sh
+[bundle exec] fastlane mac bump
+```
+
+Bump MARKETING_VERSION / integer CURRENT_PROJECT_VERSION, regenerate, commit
+
+### mac release
+
+```sh
+[bundle exec] fastlane mac release
+```
+
+Build, sign, notarize, DMG, sign appcast, upload to S3 (LOCAL release)
+
 ----
 
 This README.md is auto-generated and will be re-generated every time [_fastlane_](https://fastlane.tools) is run.

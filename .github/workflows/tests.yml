@@ -89,6 +89,9 @@ jobs:
       - name: Ruby syntax-check the appcast generator
         run: ruby -c packaging/appcast.rb
 
+      - name: Bash syntax-check the packaging scripts
+        run: bash -n packaging/make-dmg.sh packaging/sign-app.sh
+
       - name: Packaging scripts are executable
         run: |
           test -x packaging/make-dmg.sh

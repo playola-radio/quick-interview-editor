@@ -14,7 +14,13 @@ abort "sign_update not executable: #{sign_update}" unless File.executable?(sign_
 abort "dmg not found: #{dmg}" unless File.file?(dmg)
 
 app = File.join(File.dirname(dmg), "QuickInterviewEditor.app")
-def plist(app, key) = `/usr/libexec/PlistBuddy -c 'Print :#{key}' "#{app}/Contents/Info.plist"`.strip
+# Read plist keys via argv (no shell) so an app path with spaces/quotes/metacharacters
+# can't break or inject — matches the Open3 handling used for sign_update below.
+def plist(app, key)
+  out, _ = Open3.capture2("/usr/libexec/PlistBuddy", "-c", "Print :#{key}",
+                          File.join(app, "Contents", "Info.plist"))
+  out.strip
+end
 version    = plist(app, "CFBundleVersion")            # sparkle:version (integer)
 short      = plist(app, "CFBundleShortVersionString") # display
 min_os     = "15.0.0"                                # 3-component, Sparkle requirement
