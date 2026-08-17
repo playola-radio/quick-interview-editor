@@ -51,8 +51,14 @@ Copied verbatim from the spec; every task inherits these.
   local (see memory `qie-ci-xcode-version-skew`). Prefer `@MainActor`-explicit,
   `@Sendable`-clean code; build must pass on the CI toolchain, not just locally.
 - **Config, not literals:** `SUFeedURL`, `RELEASE_S3_BUCKET`, `RELEASE_S3_PREFIX`
-  are set once (project.yml / env); Brian supplies the bucket + public host.
-  Uploads use `AWS_PROFILE` (default `default`).
+  are set once (project.yml / env). **Resolved (PR 1):** host mirrors the sibling
+  **PlayolaAudioProcessor** app — bucket `playola-static`, prefix
+  `downloads/QuickInterviewEditor`, raw bucket URL (no CloudFront), uploaded with
+  `AWS_PROFILE=default` (already writes to this bucket). So
+  `SUFeedURL=https://playola-static.s3.amazonaws.com/downloads/QuickInterviewEditor/appcast.xml`
+  (already baked into project.yml), `RELEASE_S3_BUCKET=playola-static`,
+  `RELEASE_S3_PREFIX=downloads/QuickInterviewEditor`,
+  `RELEASE_DOWNLOAD_HOST=https://playola-static.s3.amazonaws.com`.
 
 ---
 
@@ -195,7 +201,7 @@ git commit -m "build: add Sparkle 2.x SPM dependency"
     info:
       path: QuickInterviewEditor/Info.plist
       properties:
-        SUFeedURL: https://REPLACE_WITH_PUBLIC_HOST/qie/appcast.xml
+        SUFeedURL: https://playola-static.s3.amazonaws.com/downloads/QuickInterviewEditor/appcast.xml
         SUPublicEDKey: REPLACE_WITH_PUBLIC_KEY_FROM_SETUP_TASK_0
         SUEnableAutomaticChecks: true
         SUScheduledCheckInterval: 86400
@@ -824,8 +830,10 @@ git add packaging/appcast.rb && git commit -m "feat(packaging): signed appcast i
 
 **Interfaces:**
 - Consumes: all `packaging/*.sh`, `packaging/appcast.rb`, Task 0's Keychain key,
-  env: `RELEASE_S3_BUCKET`, `RELEASE_S3_PREFIX` (default `qie`), `AWS_PROFILE`
-  (default `default`), `RELEASE_DOWNLOAD_HOST` (public HTTPS host), `NOTARY_PROFILE`.
+  env: `RELEASE_S3_BUCKET` (default `playola-static`), `RELEASE_S3_PREFIX`
+  (default `downloads/QuickInterviewEditor`), `AWS_PROFILE` (default `default`),
+  `RELEASE_DOWNLOAD_HOST` (default `https://playola-static.s3.amazonaws.com`),
+  `NOTARY_PROFILE`.
 
 - [ ] **Step 1: Add the lane.** In `platform :mac do`:
 
@@ -833,9 +841,9 @@ git add packaging/appcast.rb && git commit -m "feat(packaging): signed appcast i
   desc "Build, sign, notarize, DMG, sign appcast, upload to S3 (LOCAL release)"
   lane :release do
     ensure_git_status_clean
-    bucket = ENV.fetch("RELEASE_S3_BUCKET")
-    prefix = ENV.fetch("RELEASE_S3_PREFIX", "qie")
-    host   = ENV.fetch("RELEASE_DOWNLOAD_HOST")   # e.g. https://downloads.example.com
+    bucket = ENV.fetch("RELEASE_S3_BUCKET", "playola-static")
+    prefix = ENV.fetch("RELEASE_S3_PREFIX", "downloads/QuickInterviewEditor")
+    host   = ENV.fetch("RELEASE_DOWNLOAD_HOST", "https://playola-static.s3.amazonaws.com")
     profile = ENV.fetch("AWS_PROFILE", "default")
 
     sh("cd .. && packaging/package-engine.sh")          # reuse-cached logic lives in the script
