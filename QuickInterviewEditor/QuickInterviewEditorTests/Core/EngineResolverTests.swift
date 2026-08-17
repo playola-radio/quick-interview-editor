@@ -107,6 +107,27 @@ struct EngineResolverTests {
     )
   }
 
+  /// Resolution is bundle-relative, so a Gatekeeper-translocated app (random
+  /// `/private/var/folders/.../AppTranslocation/...` path) still finds its frozen
+  /// engine. Locks in that translocation never breaks the packaged engine launch.
+  @Test func bundledHelperUnderTranslocatedPathStillResolves() {
+    let translocatedHelper = URL(
+      fileURLWithPath:
+        "/private/var/folders/xy/AppTranslocation/ABC/d/QuickInterviewEditor.app/Contents/Resources/engine/logic-markers-engine"
+    )
+    let launch = EngineResolver.resolve(
+      bundledHelper: translocatedHelper,
+      repoRootOverride: nil,
+      filePathRepoRoot: filePathRepo,
+      isExecutable: { $0 == translocatedHelper }
+    )
+
+    expectNoDifference(launch.isBundled, true)
+    expectNoDifference(launch.executable, translocatedHelper)
+    expectNoDifference(
+      launch.workingDirectory, translocatedHelper.deletingLastPathComponent())
+  }
+
   /// The bundled helper takes precedence over a `QIE_ENGINE_REPO` override — a
   /// packaged app should always run its own frozen engine, never a dev checkout.
   @Test func bundledHelperWinsEvenWithEnvOverride() {
