@@ -861,9 +861,9 @@ final class EditorModel: ViewModel {
   /// is active) else end-of-audio, clamped to the file. Nil when the cursor is at/after that end,
   /// so Play is a no-op (Logic: pressing Play with the cursor past the region does nothing).
   private var transportPlayableRange: Range<Int>? {
-    let end = min(
-      transcript.selectedSampleRange?.upperBound ?? editPlan.source.durationSamples,
-      editPlan.source.durationSamples)
+    // Play is a straight listen-through: it runs from the cursor to the END OF THE FILE and never
+    // stops at a selection boundary. A selection is for marking a clip, not for scoping playback.
+    let end = editPlan.source.durationSamples
     let start = playheadSample
     guard start >= 0, start < end else { return nil }
     return start..<end

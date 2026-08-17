@@ -1,4 +1,5 @@
 import AppKit
+import QuartzCore
 import SwiftUI
 
 /// Dumb TextKit-1 renderer. Owns the AppKit objects and converts points to UTF-16
@@ -201,14 +202,40 @@ struct TranscriptTextView: NSViewRepresentable {
         lastScrollTarget = target
       }
 
-      // An explicit reveal (clicking a suggestion or clip) scrolls regardless of `followMode` —
-      // the user asked to jump here, so a prior manual scroll must not suppress it. The token in
-      // `TranscriptReveal` changes on every request, so re-revealing the same word re-scrolls.
+      // An explicit reveal (scroll-to-current-word, clicking a suggestion or clip) scrolls
+      // regardless of `followMode` — the user asked to jump here, so a prior manual scroll must
+      // not suppress it. It animates, centring the focus word, so the jump reads as movement
+      // rather than a teleport. The token in `TranscriptReveal` changes on every request, so
+      // re-revealing the same word re-scrolls.
       if let reveal, reveal != lastReveal {
         if let range = range(for: reveal.wordID) {
-          textView.scrollRangeToVisible(range)
+          animatedScroll(toRange: range)
         }
         lastReveal = reveal
+      }
+    }
+
+    /// Smoothly scrolls the range to the vertical centre of the viewport. Programmatic bounds
+    /// animation goes through neither `scrollWheel` nor live-scroll, so it is never mistaken for a
+    /// user scroll (which pauses follow).
+    private func animatedScroll(toRange range: NSRange) {
+      guard let textView, let scrollView, let layoutManager = textView.layoutManager,
+        let container = textView.textContainer
+      else { return }
+      layoutManager.ensureLayout(for: container)
+      let glyphRange = layoutManager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+      let rect = layoutManager.boundingRect(forGlyphRange: glyphRange, in: container)
+      let clip = scrollView.contentView
+      let viewportHeight = clip.bounds.height
+      let center = rect.midY + textView.textContainerInset.height - viewportHeight / 2
+      let maxY = max(0, textView.frame.height - viewportHeight)
+      let targetY = min(max(0, center), maxY)
+      guard abs(targetY - clip.bounds.origin.y) > 0.5 else { return }
+      NSAnimationContext.runAnimationGroup { context in
+        context.duration = 0.3
+        context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        clip.animator().setBoundsOrigin(NSPoint(x: clip.bounds.origin.x, y: targetY))
+        scrollView.reflectScrolledClipView(clip)
       }
     }
 
