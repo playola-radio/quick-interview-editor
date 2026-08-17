@@ -32,10 +32,30 @@ targets:
         buildPhase: resources
       - path: Resources/Fixtures/project-state.json
         buildPhase: resources
+    info:
+      path: QuickInterviewEditor/Info.plist
+      properties:
+        # Keep the version keys pointing at the build settings so MARKETING_VERSION /
+        # CURRENT_PROJECT_VERSION stay the single source of truth (XcodeGen would
+        # otherwise bake in literal "1.0"/"1" defaults here).
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        # Sparkle self-update. SUFeedURL host is supplied by Brian before the
+        # feed goes live (PR 2); SUPublicEDKey is the EdDSA public key from the
+        # login-Keychain private key (Setup Task 0 — safe to ship publicly).
+        SUFeedURL: https://REPLACE_WITH_PUBLIC_HOST/qie/appcast.xml
+        SUPublicEDKey: WyAypjfp2RUEqO+iIb/iYTTYwVq5AaXJWUxT9pwzrog=
+        SUEnableAutomaticChecks: true
+        SUScheduledCheckInterval: 86400
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: fm.playola.QuickInterviewEditor
         SWIFT_VERSION: "6.0"
+        # Single source of truth for the app version. sparkle:version ==
+        # CFBundleVersion (CURRENT_PROJECT_VERSION) — a monotonically increasing
+        # integer; CFBundleShortVersionString (MARKETING_VERSION) is the display.
+        MARKETING_VERSION: "1.0.0"
+        CURRENT_PROJECT_VERSION: "1"
         GENERATE_INFOPLIST_FILE: YES
         ENABLE_TESTABILITY: YES
         CODE_SIGN_STYLE: Automatic

@@ -177,6 +177,7 @@
 /* Begin PBXFileReference section */
 		001C975432FA7FED833EDFED /* CutSuggesterResolution.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CutSuggesterResolution.swift; sourceTree = "<group>"; };
 		00963F1364155C35EB721702 /* AudioPlayerClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioPlayerClientTests.swift; sourceTree = "<group>"; };
+		0136C208CE209F4D3930BEAB /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		02AF0C9695A8A6B8FFACB044 /* EngineEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EngineEvent.swift; sourceTree = "<group>"; };
 		039F961148DC67198E086F13 /* EditorCurrentWordTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorCurrentWordTests.swift; sourceTree = "<group>"; };
 		04566AE1A3FFC7D6EFAC9D72 /* ModelSetupTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelSetupTests.swift; sourceTree = "<group>"; };
@@ -535,6 +536,7 @@
 		924AC3255BC96C2DD8606789 /* QuickInterviewEditor */ = {
 			isa = PBXGroup;
 			children = (
+				0136C208CE209F4D3930BEAB /* Info.plist */,
 				75C599ECDAD50A6F0A522C6B /* QuickInterviewEditorApp.swift */,
 				B9CCBD592E7C1BE0361FCF70 /* Core */,
 				FB353EBC2E1E502A378CBB5B /* Models */,
@@ -1091,13 +1093,16 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = FSRSPV9N9Q;
 				ENABLE_TESTABILITY = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = QuickInterviewEditor/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
+				MARKETING_VERSION = 1.0.0;
 				PRODUCT_BUNDLE_IDENTIFIER = fm.playola.QuickInterviewEditor;
 				SDKROOT = macosx;
 				SWIFT_VERSION = 6.0;
@@ -1130,13 +1135,16 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = FSRSPV9N9Q;
 				ENABLE_TESTABILITY = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = QuickInterviewEditor/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
+				MARKETING_VERSION = 1.0.0;
 				PRODUCT_BUNDLE_IDENTIFIER = fm.playola.QuickInterviewEditor;
 				SDKROOT = macosx;
 				SWIFT_VERSION = 6.0;
