@@ -72,6 +72,7 @@
 		6CAA6C3EC42CA51ED8B17DC0 /* SliceWarningsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6133EE6AF1867B8B9120A027 /* SliceWarningsTests.swift */; };
 		6CF66ABEF861C819CE8F3741 /* AudioPlayerClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00963F1364155C35EB721702 /* AudioPlayerClientTests.swift */; };
 		6E3B4469214688E3C40BE66A /* SettingsModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D719B98EE9ADE51998792118 /* SettingsModel.swift */; };
+		7160A266E2457AF1C6D163E6 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = D40DF06333D332070FEB351D /* Sparkle */; };
 		727F3057A98E3F0DDA43D6DF /* AnthropicAPIKeyResolutionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C926B28E4F7EE504AEBA9698 /* AnthropicAPIKeyResolutionTests.swift */; };
 		7330F0C05BA43441535889AB /* WaveformInteractionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE15846DE288E94E3D4ACD36 /* WaveformInteractionView.swift */; };
 		756FEC229B9F824352BE4D57 /* edit-plan-v2.json in Resources */ = {isa = PBXBuildFile; fileRef = 4881DD551D6727B533A2C3A7 /* edit-plan-v2.json */; };
@@ -334,6 +335,7 @@
 				665BD88AC06C4C0F216BC9EC /* Sharing in Frameworks */,
 				3E0D23A6109F0336AC4166EB /* IdentifiedCollections in Frameworks */,
 				5CE1AC00C89D05B7E2D7EF0B /* IssueReporting in Frameworks */,
+				7160A266E2457AF1C6D163E6 /* Sparkle in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -797,6 +799,7 @@
 				D91085D54040B96C224E2ABC /* Sharing */,
 				C6F6FFAF4946EF45EF1AE24D /* IdentifiedCollections */,
 				16FA185EFC57ACE1DEE1A570 /* IssueReporting */,
+				D40DF06333D332070FEB351D /* Sparkle */,
 			);
 			productName = QuickInterviewEditor;
 			productReference = AC5D3AC7ECB40323CF5EBBDF /* QuickInterviewEditor.app */;
@@ -856,6 +859,7 @@
 				741CD2296A6611A941C923B1 /* XCRemoteSwiftPackageReference "swift-dependencies" */,
 				DC637FFC2D09E0393109C376 /* XCRemoteSwiftPackageReference "swift-identified-collections" */,
 				9CFFF17010EDB63EB1150631 /* XCRemoteSwiftPackageReference "swift-sharing" */,
+				269EF0E62057117C89FB2B16 /* XCRemoteSwiftPackageReference "Sparkle" */,
 				AC922E53969B3DC0B9251AD5 /* XCRemoteSwiftPackageReference "xctest-dynamic-overlay" */,
 			);
 			preferredProjectObjectVersion = 77;
@@ -1291,6 +1295,14 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		269EF0E62057117C89FB2B16 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle";
+			requirement = {
+				kind = exactVersion;
+				version = 2.9.6;
+			};
+		};
 		391DE594CA1F42F820A9D0CA /* XCRemoteSwiftPackageReference "swift-custom-dump" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/pointfreeco/swift-custom-dump";
@@ -1353,6 +1365,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = DC637FFC2D09E0393109C376 /* XCRemoteSwiftPackageReference "swift-identified-collections" */;
 			productName = IdentifiedCollections;
+		};
+		D40DF06333D332070FEB351D /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 269EF0E62057117C89FB2B16 /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
 		};
 		D91085D54040B96C224E2ABC /* Sharing */ = {
 			isa = XCSwiftPackageProductDependency;

@@ -19,6 +19,9 @@ packages:
   XCTestDynamicOverlay:
     url: https://github.com/pointfreeco/xctest-dynamic-overlay
     from: "1.5.0"
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    exactVersion: "2.9.6"
 targets:
   QuickInterviewEditor:
     type: application
@@ -46,6 +49,8 @@ targets:
         product: IdentifiedCollections
       - package: XCTestDynamicOverlay
         product: IssueReporting
+      - package: Sparkle
+        product: Sparkle
   QuickInterviewEditorTests:
     type: bundle.unit-test
     platform: macOS
