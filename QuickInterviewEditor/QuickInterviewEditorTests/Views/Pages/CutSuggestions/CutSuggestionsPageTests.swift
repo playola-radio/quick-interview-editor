@@ -464,4 +464,130 @@ struct CutSuggestionsPageTests {
       #expect(selected.value == nil)
     }
   }
+
+  // MARK: - Auto-suggest on load
+
+  @Test func autoSuggestRunsAndPersistsWhenEmptyWithAKey() async {
+    let fingerprint = "fp-auto-empty"
+    let plan = Fixtures.editPlan()
+    let raw = Fixtures.cutSuggestion(id: Fixtures.uuid(1), wordIDs: [10, 11, 12])
+
+    await withDependencies {
+      $0.defaultFileStorage = FileStorage.inMemory(fileSystem: LockIsolated([:]))
+      $0.keychain = .inMemory("sk-keychain")
+      $0.cutSuggest = fixtureClient(completed: [raw])
+    } operation: {
+      @Shared(.projectState(fingerprint: fingerprint)) var state = ProjectState()
+      let model = CutSuggestionsPageModel(editPlan: plan, sourceFingerprint: fingerprint)
+      await model.autoSuggestCutsIfNeeded()
+
+      expectNoDifference(state.cutSuggestions[id: raw.id]?.id, raw.id)
+      expectNoDifference(model.phase, .idle)
+    }
+  }
+
+  @Test func autoSuggestSkipsWhenSuggestionsAlreadyExist() async {
+    let fingerprint = "fp-auto-exists"
+    let existing = Fixtures.cutSuggestion(id: Fixtures.uuid(1), wordIDs: [10, 11, 12])
+    let capture = LockIsolated<CutSuggestRequest?>(nil)
+
+    await withDependencies {
+      $0.defaultFileStorage = FileStorage.inMemory(fileSystem: LockIsolated([:]))
+      $0.keychain = .inMemory("sk-keychain")
+      $0.cutSuggest = fixtureClient(completed: [], capture: capture)
+    } operation: {
+      @Shared(.projectState(fingerprint: fingerprint)) var state = ProjectState(
+        cutSuggestions: [existing])
+      let model = CutSuggestionsPageModel(
+        editPlan: Fixtures.editPlan(), sourceFingerprint: fingerprint)
+      await model.autoSuggestCutsIfNeeded()
+
+      // The cutter was never called (guarded off) and the existing suggestions are untouched.
+      #expect(capture.value == nil)
+      expectNoDifference(state.cutSuggestions.elements, [existing])
+      expectNoDifference(model.phase, .idle)
+    }
+  }
+
+  @Test func autoSuggestIsSilentWithNoKeyAndDoesNotPresentKeyEntry() async {
+    let fingerprint = "fp-auto-nokey"
+    let capture = LockIsolated<CutSuggestRequest?>(nil)
+
+    await withDependencies {
+      $0.defaultFileStorage = FileStorage.inMemory(fileSystem: LockIsolated([:]))
+      $0.keychain = .inMemory(nil)
+      $0.environment = .constant([:])
+      $0.cutSuggest = fixtureClient(completed: [], capture: capture)
+    } operation: {
+      @Shared(.projectState(fingerprint: fingerprint)) var state = ProjectState()
+      let model = CutSuggestionsPageModel(
+        editPlan: Fixtures.editPlan(), sourceFingerprint: fingerprint)
+      await model.autoSuggestCutsIfNeeded()
+
+      // No cutter call, no onboarding sheet, nothing written — a background pass never nags.
+      #expect(capture.value == nil)
+      #expect(model.keyEntry == nil)
+      #expect(state.cutSuggestions.isEmpty)
+      expectNoDifference(model.phase, .idle)
+    }
+  }
+
+  @Test func autoSuggestDoesNotClobberSuggestionsThatLandMidFlight() async {
+    let fingerprint = "fp-auto-race"
+    let plan = Fixtures.editPlan()
+    // A suggestion the user has already accepted, landing while the background pass runs.
+    let decided = Fixtures.cutSuggestion(id: Fixtures.uuid(7), wordIDs: [1, 2], status: .accepted)
+    let autoCandidate = Fixtures.cutSuggestion(id: Fixtures.uuid(9), wordIDs: [3, 4])
+
+    await withDependencies {
+      $0.defaultFileStorage = FileStorage.inMemory(fileSystem: LockIsolated([:]))
+      $0.keychain = .inMemory("sk-keychain")
+      $0.cutSuggest = CutSuggestClient { _, _ in
+        AsyncThrowingStream { continuation in
+          // Simulate suggestions (with a user decision) landing in the shared sidecar while the
+          // background pass is in flight, before it completes.
+          @Shared(.projectState(fingerprint: fingerprint)) var midFlight = ProjectState()
+          $midFlight.withLock { $0.cutSuggestions = [decided] }
+          continuation.yield(.completed([autoCandidate]))
+          continuation.finish()
+        }
+      }
+    } operation: {
+      @Shared(.projectState(fingerprint: fingerprint)) var state = ProjectState()
+      let model = CutSuggestionsPageModel(editPlan: plan, sourceFingerprint: fingerprint)
+      await model.autoSuggestCutsIfNeeded()
+
+      // The mid-flight suggestion and its accepted status survive; the auto candidate is dropped.
+      expectNoDifference(state.cutSuggestions.elements, [decided])
+      expectNoDifference(model.phase, .idle)
+    }
+  }
+
+  // MARK: - Show/hide suggestions toggle
+
+  @Test func showsSuggestionBandsDefaultsOnAndTheToggleTracksPendingSuggestions() {
+    let fingerprint = "fp-toggle"
+    let pending = Fixtures.cutSuggestion(id: Fixtures.uuid(1), wordIDs: [10, 11, 12])
+
+    withDependencies {
+      $0.defaultFileStorage = FileStorage.inMemory(fileSystem: LockIsolated([:]))
+    } operation: {
+      @Shared(.projectState(fingerprint: fingerprint)) var empty = ProjectState()
+      let emptyModel = CutSuggestionsPageModel(
+        editPlan: Fixtures.editPlan(), sourceFingerprint: fingerprint)
+      expectNoDifference(emptyModel.showsSuggestionBands, true)
+      // No pending suggestions → the toggle has nothing to mute, so it stays hidden.
+      expectNoDifference(emptyModel.showsSuggestionsToggle, false)
+    }
+
+    withDependencies {
+      $0.defaultFileStorage = FileStorage.inMemory(fileSystem: LockIsolated([:]))
+    } operation: {
+      @Shared(.projectState(fingerprint: "fp-toggle-pending")) var state = ProjectState(
+        cutSuggestions: [pending])
+      let model = CutSuggestionsPageModel(
+        editPlan: Fixtures.editPlan(), sourceFingerprint: "fp-toggle-pending")
+      expectNoDifference(model.showsSuggestionsToggle, true)
+    }
+  }
 }

@@ -321,7 +321,8 @@ struct TranscriptTextView: NSViewRepresentable {
       layoutManager.containerRuns = new.map { container in
         let style = TranscriptClipStyle.style(for: container.kind, variant: container.colorIndex)
         return ClipContainerRun(
-          range: container.range, fill: Self.nsColor(style.fill), ring: Self.nsColor(style.ring))
+          range: container.range, fill: Self.nsColor(style.fill), ring: Self.nsColor(style.ring),
+          dashed: style.dashed)
       }
       storage.beginEditing()
       for container in affected {

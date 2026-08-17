@@ -7,6 +7,8 @@ struct ClipContainerRun: Equatable {
   let range: NSRange
   let fill: NSColor
   let ring: NSColor
+  /// A dashed ring marks a tentative container (a suggestion); a solid ring a committed one.
+  var dashed = false
 }
 
 /// A TextKit-1 layout manager that paints clip containers behind the text: one continuous
@@ -104,7 +106,8 @@ final class ClipContainerLayoutManager: NSLayoutManager {
           width: max(0, rightX - leftX),
           height: textHeight + verticalPadding * 2)
 
-        drawContainerSegment(in: rect, roundedLeft: roundedLeft, roundedRight: roundedRight)
+        drawContainerSegment(
+          in: rect, roundedLeft: roundedLeft, roundedRight: roundedRight, dashed: run.dashed)
       }
     }
   }
@@ -120,13 +123,20 @@ final class ClipContainerLayoutManager: NSLayoutManager {
       ?? .systemFont(ofSize: NSFont.systemFontSize)
   }
 
-  private func drawContainerSegment(in rect: CGRect, roundedLeft: Bool, roundedRight: Bool) {
+  private func drawContainerSegment(
+    in rect: CGRect, roundedLeft: Bool, roundedRight: Bool, dashed: Bool
+  ) {
     let radius = min(cornerRadius, rect.height / 2, rect.width / 2)
     fillPath(rect: rect, radius: radius, roundedLeft: roundedLeft, roundedRight: roundedRight)
       .fill()
     let ring = ringPath(
       rect: rect, radius: radius, roundedLeft: roundedLeft, roundedRight: roundedRight)
     ring.lineWidth = ringWidth
+    if dashed {
+      // A short dash so the tentative outline reads clearly on the transcript's short clip runs
+      // without shimmering into a solid line. Phase 0: dashes start crisp at each segment origin.
+      ring.setLineDash([4, 3], count: 2, phase: 0)
+    }
     ring.stroke()
   }
 

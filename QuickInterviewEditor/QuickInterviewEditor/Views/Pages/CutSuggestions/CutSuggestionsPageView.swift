@@ -13,6 +13,10 @@ struct CutSuggestionsPageView: View {
       }
       .disabled(model.isSuggesting)
 
+      if model.showsSuggestionsToggle {
+        Toggle(model.showSuggestionsToggleLabel, isOn: $model.showsSuggestionBands)
+      }
+
       if model.showsProgress {
         HStack(spacing: 8) {
           ProgressView()

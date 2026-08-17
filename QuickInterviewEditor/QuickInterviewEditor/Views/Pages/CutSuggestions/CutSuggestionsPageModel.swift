@@ -67,6 +67,10 @@ final class CutSuggestionsPageModel: ViewModel {
   var actionMessage: String?
   /// The API-key entry sheet, presented when onboarding or when the user taps to add a key.
   var keyEntry: SettingsModel?
+  /// Whether pending suggestions are drawn as faint outline bands in the transcript. The ranked
+  /// list in this panel is unaffected — this only mutes the transcript overlay so the user can
+  /// hide the proposals while keeping the list. Session-local: defaults on and resets per load.
+  var showsSuggestionBands = true
 
   // MARK: - Display Text
   let startingMessage = "Analyzing transcript…"
@@ -80,6 +84,7 @@ final class CutSuggestionsPageModel: ViewModel {
   let acceptLabel = "Accept"
   let rejectLabel = "Reject"
   let revealSuggestionLabel = "Reveal suggestion in transcript and waveform"
+  let showSuggestionsToggleLabel = "Show suggestions in transcript"
 
   var suggestButtonLabel: String {
     hasAPIKey ? "Suggest Cuts" : addKeyButtonLabel
@@ -93,6 +98,10 @@ final class CutSuggestionsPageModel: ViewModel {
   /// containers the transcript draws. Accepted candidates are already slices (drawn green,
   /// so they aren't double-drawn here); rejected ones aren't drawn at all.
   var pendingSuggestions: [CutSuggestion] { projectState.pendingSuggestions }
+
+  /// The show/hide toggle only makes sense when there are pending suggestions whose transcript
+  /// outlines it can mute — hidden otherwise so it never dangles over an empty list.
+  var showsSuggestionsToggle: Bool { !pendingSuggestions.isEmpty }
 
   /// Ranked candidates grouped/labeled by product type, with per-row display values and
   /// freshness derived against the current transcript/source.
@@ -145,6 +154,25 @@ final class CutSuggestionsPageModel: ViewModel {
       addAPIKeyTapped()
       return
     }
+    await runSuggest(apiKey: apiKey)
+  }
+
+  /// Fired once when the editor loads a file, so the user lands on suggestions already in
+  /// flight instead of having to press a button. It's deliberately quiet: it does nothing when
+  /// suggestions already exist (so it never clobbers prior results or accept/reject decisions),
+  /// and, unlike the manual button, it does NOT open the key-entry sheet when no key resolves —
+  /// a background pass must never nag. The button remains the way to add a key and run by hand.
+  func autoSuggestCutsIfNeeded() async {
+    guard !isSuggesting, suggestions.isEmpty else { return }
+    guard let apiKey = resolvedAPIKey() else { return }
+    await runSuggest(apiKey: apiKey, isBackgroundPass: true)
+  }
+
+  /// The shared run: stream the cutter and fold its events into `phase`/the sidecar. Both the
+  /// manual button and the background auto-pass funnel through here so they behave identically
+  /// once a key is in hand. `isBackgroundPass` is the one difference: a background pass refuses
+  /// to overwrite suggestions that appeared while it was in flight (see the completion handler).
+  private func runSuggest(apiKey: String, isBackgroundPass: Bool = false) async {
     actionMessage = nil
     phase = .suggesting(startingMessage)
     let request = buildRequest()
@@ -161,11 +189,16 @@ final class CutSuggestionsPageModel: ViewModel {
             return
           }
           let stamped = candidates.map { stampProvenance(on: $0, from: request) }
-          // De-dupe defensively: a malformed response repeating a suggestion ID would trap
-          // `IdentifiedArray(uniqueElements:)`. Regenerating replaces the prior candidates
-          // (a merge policy that preserves accept/reject decisions is future work).
-          $projectState.withLock {
-            $0.cutSuggestions = IdentifiedArray(stamped, uniquingIDsWith: { first, _ in first })
+          // A background pass guards emptiness at start, but suggestions can land while it's in
+          // flight (a manual run, or the same file open elsewhere sharing this fingerprint's
+          // sidecar). Do the empty-check and the write in ONE locked operation so nothing can
+          // slip in between them: a background pass commits only if the sidecar is still empty
+          // (else it would silently wipe the user's accept/reject decisions); a manual run always
+          // replaces — an explicit re-run is meant to overwrite. De-dupe defensively:
+          // `uniquingIDsWith` keeps the first of any repeated ID a malformed response might emit.
+          $projectState.withLock { state in
+            guard !isBackgroundPass || state.cutSuggestions.isEmpty else { return }
+            state.cutSuggestions = IdentifiedArray(stamped, uniquingIDsWith: { first, _ in first })
           }
           phase = .idle
           return

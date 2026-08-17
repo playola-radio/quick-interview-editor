@@ -250,6 +250,9 @@ final class EditorModel: ViewModel {
     let approved = slices.map { slice in
       TranscriptClipBand(id: slice.id, wordIDs: slice.wordIDs, kind: .approved)
     }
+    // The Suggestions panel's show/hide toggle mutes the suggestion overlay without touching the
+    // ranked list: when it's off, no suggested bands are drawn (accepted slices stay put).
+    guard cutSuggestions.showsSuggestionBands else { return approved }
     let claimed = Set(approved.flatMap(\.wordIDs))
     let suggested = cutSuggestions.pendingSuggestions.compactMap {
       suggestion -> TranscriptClipBand? in

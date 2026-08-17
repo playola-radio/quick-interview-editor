@@ -46,28 +46,37 @@ struct ClipStyleColor: Equatable {
 }
 
 /// The pure look of a clip container for a given state: translucent `fill`, 1px `ring`,
-/// word-`text` colour, and whether the words are struck through. No AppKit here — the
-/// renderer maps these tokens onto `NSColor`/attributes.
+/// word-`text` colour, whether the words are struck through, and whether the ring is `dashed`.
+/// No AppKit here — the renderer maps these tokens onto `NSColor`/attributes/dash pattern.
 struct TranscriptClipStyle: Equatable {
   var fill: ClipStyleColor
   var ring: ClipStyleColor
   var text: ClipStyleColor
   var strikethrough: Bool
+  /// A dashed ring marks a tentative container. Suggestions dash their outline so a proposal
+  /// reads instantly differently from a committed slice's solid box; every other state is solid.
+  var dashed = false
 
   /// The clip palette. Clip text is white for every live state; a rejected clip dims its words
   /// and strikes them through.
   ///
-  /// A live clip (approved or suggested — most real clips are all one state) takes its colour
-  /// from `variant` (the renderer passes each clip's position) so adjacent clips are obviously
-  /// different: the palette cycles through genuinely distinct HUES (green, amber, blue, rose,
-  /// purple), not shades of one family — the only thing that reliably tells one clip from the
-  /// next when several sit back-to-back. Colour therefore marks clip boundaries, not the
-  /// approve-vs-suggest state. Selected (the one current clip) is red and rejected reads by its
-  /// dim+strike, so both ignore `variant`.
+  /// A live clip takes its colour from `variant` (the renderer passes each clip's position) so
+  /// adjacent clips are obviously different: the palette cycles through genuinely distinct HUES
+  /// (green, amber, blue, rose, purple), not shades of one family — the only thing that reliably
+  /// tells one clip from the next when several sit back-to-back. Colour therefore marks clip
+  /// boundaries, not the approve-vs-suggest state.
+  ///
+  /// Approved slices are the committed picks, so they read boldest: a filled, ringed container.
+  /// Suggestions are just proposals, so they read as a fainter OUTLINE of the same hue — nearly
+  /// no fill and a softer ring — so they never compete with the slices the user has actually
+  /// kept. Selected (the one current clip) is red and rejected reads by its dim+strike, so both
+  /// ignore `variant`.
   static func style(for kind: TranscriptClipKind, variant: Int = 0) -> TranscriptClipStyle {
     switch kind {
-    case .approved, .suggested:
-      return cyclingPalette[cyclicIndex(variant, count: cyclingPalette.count)]
+    case .approved:
+      return approvedPalette[cyclicIndex(variant, count: approvedPalette.count)]
+    case .suggested:
+      return suggestedPalette[cyclicIndex(variant, count: suggestedPalette.count)]
     case .selected:
       return solidClip(red255: 204, green255: 102, blue255: 102)
     case .rejected:
@@ -79,20 +88,40 @@ struct TranscriptClipStyle: Equatable {
     }
   }
 
-  /// Distinct-hue tints a live clip cycles through by position, ordered so no two neighbours in
-  /// the cycle are close in hue. Green, amber, blue, rose, purple all read clearly on the dark
-  /// transcript and are obviously different from one another.
-  private static let cyclingPalette = [
-    solidClip(red255: 95, green255: 185, blue255: 143),  // green
-    solidClip(red255: 208, green255: 164, blue255: 95),  // amber
-    solidClip(red255: 111, green255: 155, blue255: 230),  // blue
-    solidClip(red255: 212, green255: 120, blue255: 140),  // rose
-    solidClip(red255: 170, green255: 140, blue255: 215),  // purple
+  /// One base tint (0–255) a live clip can take. Distinct hues a clip cycles through by position,
+  /// ordered so no two neighbours in the cycle are close in hue.
+  private struct ClipHue {
+    let red: Double
+    let green: Double
+    let blue: Double
+  }
+
+  /// Green, amber, blue, rose, purple all read clearly on the dark transcript and are obviously
+  /// different from one another. Both the approved and suggested palettes derive from these same
+  /// hues, so a clip keeps its identity colour whichever state it's in — only the prominence
+  /// (filled vs outline) changes.
+  private static let clipHues = [
+    ClipHue(red: 95, green: 185, blue: 143),  // green
+    ClipHue(red: 208, green: 164, blue: 95),  // amber
+    ClipHue(red: 111, green: 155, blue: 230),  // blue
+    ClipHue(red: 212, green: 120, blue: 140),  // rose
+    ClipHue(red: 170, green: 140, blue: 215),  // purple
   ]
+
+  /// Approved slices: a filled, ringed container — the boldest live state.
+  private static let approvedPalette = clipHues.map {
+    solidClip(red255: $0.red, green255: $0.green, blue255: $0.blue)
+  }
+
+  /// Suggestions: the same hues rendered as a fainter outline (barely-there fill, softer ring)
+  /// so a proposal never reads as prominently as a kept slice.
+  private static let suggestedPalette = clipHues.map {
+    outlineClip(red255: $0.red, green255: $0.green, blue255: $0.blue)
+  }
 
   /// A live clip style from one base colour: translucent fill, 1px ring, white text, no
   /// strikethrough. The fill/ring are opaque enough that the tint reads clearly on the dark
-  /// transcript. The whole palette is built from this.
+  /// transcript. The approved palette is built from this.
   private static func solidClip(red255: Double, green255: Double, blue255: Double)
     -> TranscriptClipStyle
   {
@@ -101,6 +130,23 @@ struct TranscriptClipStyle: Equatable {
       ring: ClipStyleColor(red255: red255, green255: green255, blue255: blue255, alpha: 0.60),
       text: ClipStyleColor(red255: 255, green255: 255, blue255: 255, alpha: 1),
       strikethrough: false)
+  }
+
+  /// An outline clip style from one base colour: barely-there fill and a softer, DASHED ring so a
+  /// suggestion reads as a light, tentative frame — clearly different from an approved slice's
+  /// solid box, not just a fainter one. Its words are a translucent white so they read like a
+  /// faint cloud that recedes below the body text, blending toward the dark background rather than
+  /// standing out (a suggestion under the playhead/selection still brightens to full white — that
+  /// path is handled by the renderer's selection colour). The suggested palette is built from this.
+  private static func outlineClip(red255: Double, green255: Double, blue255: Double)
+    -> TranscriptClipStyle
+  {
+    TranscriptClipStyle(
+      fill: ClipStyleColor(red255: red255, green255: green255, blue255: blue255, alpha: 0.06),
+      ring: ClipStyleColor(red255: red255, green255: green255, blue255: blue255, alpha: 0.45),
+      text: ClipStyleColor(red255: 255, green255: 255, blue255: 255, alpha: 0.5),
+      strikethrough: false,
+      dashed: true)
   }
 
   /// A non-negative index into a variant array for any (even negative) `variant`.
