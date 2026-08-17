@@ -76,6 +76,10 @@ class TranscriptPageModel: ViewModel {
   let defaultFontSize = defaultTranscriptFontSize
   var followMode: TranscriptFollowMode = .following
   var scrollTargetWordID: Word.ID?
+  /// The word under the playhead while listening — the renderer gives it a light "current word"
+  /// highlight. Tracks what's being SAID regardless of scroll-follow, and persists on the last
+  /// word when the playhead sits in a gap or playback pauses, so you never lose your place.
+  var currentWordID: Word.ID?
   /// The clip containers to draw, derived by `EditorModel` from slices + pending suggestions
   /// and pushed in by the view. Kept here (not recomputed from slices) so the transcript stays
   /// layout-local — it knows nothing about slices or the sidecar, only which words are clips.
@@ -310,19 +314,38 @@ class TranscriptPageModel: ViewModel {
   func zoomResetTapped() { setFontSize(defaultFontSize) }
   func zoomChanged(_ size: Double) { setFontSize(size) }
 
-  /// Derives the auto-scroll target from the playhead. A playback rising edge
-  /// (false→true) always resumes following, even if the user had scrolled away.
-  /// While following and playing, the target becomes the word containing `sample`
-  /// (kept unchanged if the playhead sits in a gap between words).
+  /// Derives the auto-scroll target from the playhead. A playback rising edge (false→true)
+  /// always resumes following, even if the user had scrolled away. While following and playing,
+  /// the target becomes the word containing `sample` (kept unchanged in a gap). The current-word
+  /// HIGHLIGHT is separate — `EditorModel` drives `currentWordID` from the persistent cursor so
+  /// it tracks where you are whether playing, paused, or scrubbed.
   func playheadChanged(sample: Int?, isPlaying: Bool) {
     if isPlaying, !wasPlaying { followMode = .following }
     wasPlaying = isPlaying
-    guard isPlaying, followMode == .following, let sample, let plan = editPlan else { return }
-    scrollTargetWordID =
-      plan.words.first { word in
-        guard let start = word.startSample, let end = word.endSample else { return false }
-        return sample >= start && sample < end
-      }?.id ?? scrollTargetWordID
+    guard isPlaying, followMode == .following, let sample, let word = wordID(atSample: sample)
+    else { return }
+    if word != scrollTargetWordID { scrollTargetWordID = word }
+  }
+
+  /// The word whose audio contains `sample`, or nil when it lands in a gap / past the end.
+  private func wordID(atSample sample: Int) -> Word.ID? {
+    editPlan?.words.first { word in
+      guard let start = word.startSample, let end = word.endSample else { return false }
+      return sample >= start && sample < end
+    }?.id
+  }
+
+  /// Whether the "scroll to current word" control has somewhere to go.
+  var canScrollToCurrentWord: Bool { currentWordID != nil }
+
+  /// Re-reveals the word under the playhead and resumes follow — the "scroll to current word"
+  /// button that gets you back after scrolling away by hand. A no-op before playback has placed
+  /// a current word.
+  func scrollToCurrentWordTapped() {
+    guard let id = currentWordID else { return }
+    followMode = .following
+    revealToken += 1
+    reveal = TranscriptReveal(wordID: id, token: revealToken)
   }
 
   /// The renderer calls this when the user scrolls the transcript by hand, so
@@ -343,6 +366,7 @@ class TranscriptPageModel: ViewModel {
       words: plan.words, transcriptSegments: plan.transcriptSegments)
     document = TranscriptDocument(words: plan.words, paragraphs: paragraphs)
     gaps = wordGaps(plan.words)
+    currentWordID = nil
     recomputeRunTogether()
     // The word→range map just changed, so re-derive the cached containers against it (bands may
     // already be set — e.g. a reload — so this keeps them from pointing at stale ranges).

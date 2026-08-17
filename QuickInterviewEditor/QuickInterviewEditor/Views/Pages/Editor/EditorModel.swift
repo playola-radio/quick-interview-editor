@@ -99,7 +99,20 @@ final class EditorModel: ViewModel {
   /// playback and stays put when stopped/paused (never hidden). Kept a SEPARATE observed property
   /// (not folded into a transport struct) so its ~30 Hz updates don't invalidate views that read
   /// `transportPhase`/`transportContext` (the panel, the slice list).
-  var playheadSample = 0
+  var playheadSample = 0 {
+    didSet { syncCurrentWordToCursor() }
+  }
+
+  /// Keeps the transcript's current-word highlight on the word under the cursor, so it tracks
+  /// where you ARE — playing, paused, scrubbed, ruler-moved, or stopped — never a stale
+  /// last-heard word. Keeps the last word in a gap (never lose your place) and only writes on a
+  /// real change so a 30 Hz cursor doesn't churn the transcript view.
+  private func syncCurrentWordToCursor() {
+    guard let word = wordID(atSample: playheadSample), word != transcript.currentWordID else {
+      return
+    }
+    transcript.currentWordID = word
+  }
   /// Where the transport last started playing; Stop returns the cursor here.
   var transportOriginSample: Int?
   /// What the transport is currently playing, captured at Play. Non-observed — internal bookkeeping.
@@ -131,8 +144,9 @@ final class EditorModel: ViewModel {
   @ObservationIgnored private(set) var exportTask: Task<Void, Never>?
 
   // MARK: - Display Text
-  let addSliceLabel = "Add slice"
-  let emptyStateMessage = "Select words in the transcript, then Add slice."
+  let markAsClipLabel = "Mark as Clip"
+  let scrollToCurrentWordLabel = "Scroll to current word"
+  let emptyStateMessage = "Select words in the transcript, then Mark as Clip."
   let playLabel = "Play"
   let stopLabel = "Stop"
   let deleteLabel = "Delete slice"
@@ -355,11 +369,15 @@ final class EditorModel: ViewModel {
       if isTransportPaused { continue }
       if position.isPlaying {
         playheadSample = position.sample
-        // Only slice playback drives transcript auto-scroll follow (preview/audition/free do not).
-        transcript.playheadChanged(sample: position.sample, isPlaying: transportContext.isSlice)
-      } else if transportContext.isSlice {
-        // A false tick during slice playback ends transcript follow (so the next slice reads as a
-        // rising edge) but leaves the cursor exactly where the audio stopped.
+        // The listen contexts (a plain Play and slice playback) drive transcript auto-scroll
+        // follow, so reading along works during a plain Play, not only slice playback. Preview/
+        // audition update the cursor (and thus the highlight) but must not yank the transcript
+        // from where the user scrolled.
+        transcript.playheadChanged(
+          sample: position.sample, isPlaying: transportContext.followsTranscript)
+      } else if transportContext.followsTranscript {
+        // A false tick ends transcript follow (so the next playback reads as a rising edge) but
+        // leaves the cursor and the current-word highlight where the audio stopped.
         endTranscriptFollow()
       }
     }
@@ -630,6 +648,13 @@ final class EditorModel: ViewModel {
     mutateSlices { $0.append(slice) }
   }
 
+  // MARK: - Listen pass
+  /// The "scroll to current word" control has somewhere to go once playback has placed a word.
+  var canScrollToCurrentWord: Bool { transcript.canScrollToCurrentWord }
+
+  /// Re-centres the transcript on the word under the playhead and resumes follow.
+  func scrollToCurrentWordTapped() { transcript.scrollToCurrentWordTapped() }
+
   // MARK: - Reveal across panes
   /// Padding left on each side when framing a revealed range on the waveform, so the clip
   /// reads as an object with a little context rather than filling the viewport edge-to-edge.
@@ -838,9 +863,9 @@ final class EditorModel: ViewModel {
   /// is active) else end-of-audio, clamped to the file. Nil when the cursor is at/after that end,
   /// so Play is a no-op (Logic: pressing Play with the cursor past the region does nothing).
   private var transportPlayableRange: Range<Int>? {
-    let end = min(
-      transcript.selectedSampleRange?.upperBound ?? editPlan.source.durationSamples,
-      editPlan.source.durationSamples)
+    // Play is a straight listen-through: it runs from the cursor to the END OF THE FILE and never
+    // stops at a selection boundary. A selection is for marking a clip, not for scoping playback.
+    let end = editPlan.source.durationSamples
     let start = playheadSample
     guard start >= 0, start < end else { return nil }
     return start..<end
@@ -1492,11 +1517,20 @@ enum TransportContext: Equatable {
   case draftPreview
   case audition(EditorModel.AuditionMode)
 
-  /// True while a saved slice is the playing context — the only context that drives transcript
-  /// auto-scroll follow and the slice-row "playing" highlight.
+  /// True while a saved slice is the playing context — drives the slice-row "playing" highlight.
   var isSlice: Bool {
     if case .slice = self { return true }
     return false
+  }
+
+  /// The listen contexts — a straight Play (`free`) or slice playback — that drive the
+  /// transcript's current-word follow (auto-scroll). A boundary preview or audition must NOT
+  /// yank the transcript from where the user scrolled, so it does not follow.
+  var followsTranscript: Bool {
+    switch self {
+    case .free, .slice: return true
+    case .draftPreview, .audition: return false
+    }
   }
   /// The playing slice's id, or nil when a slice isn't the current context.
   var sliceID: Slice.ID? {

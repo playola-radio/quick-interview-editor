@@ -14,12 +14,12 @@ struct TranscriptPageView: View {
         lineSpacing: model.lineSpacing,
         selected: model.selectedWordIDSet,
         clipContainers: model.clipContainers,
+        currentWordID: model.currentWordID,
         scrollTarget: model.scrollTargetWordID,
         followMode: model.followMode,
         reveal: model.reveal
       )
       .frame(maxWidth: .infinity, maxHeight: .infinity)
-      controls
     }
     .padding(20)
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -74,15 +74,6 @@ struct TranscriptPageView: View {
     .buttonStyle(.borderless)
   }
 
-  private var controls: some View {
-    HStack(spacing: 16) {
-      Button(model.clearButtonLabel) { model.clearSelectionTapped() }
-        .disabled(!model.hasSelection)
-      Text(model.selectionSummary).foregroundStyle(Color(white: 0.6))
-      Spacer()
-    }
-    .font(.system(size: 12))
-  }
 }
 
 #Preview("Clip containers") {
@@ -109,6 +100,8 @@ struct TranscriptPageView: View {
     // A red selection overlapping the green clip, to eyeball that it draws ON TOP of the fill.
     selected: Set([10, 11, 12]),
     clipContainers: model.clipContainers,
+    // A "current word" highlight (light band) on word 30 to eyeball it against the fills.
+    currentWordID: 30,
     scrollTarget: nil,
     followMode: .following,
     reveal: nil

@@ -21,17 +21,45 @@ struct ClipContainerRun: Equatable {
 final class ClipContainerLayoutManager: NSLayoutManager {
 
   var containerRuns: [ClipContainerRun] = []
+  /// The word under the playhead while listening, or nil. Drawn as a soft light band ("current
+  /// word" highlight) above the clip fills but below the selection.
+  var currentWordRange: NSRange?
 
   private let cornerRadius: CGFloat = 6
   private let ringWidth: CGFloat = 1
   /// Symmetric breathing room above/below the glyph box (the mockup's `padding: 4px 0`); kept
   /// small because the font's ascender/descender box already includes some leading.
   private let verticalPadding: CGFloat = 3
+  /// Soft white glow for the current word — distinct from the clip hues and the red selection.
+  private let currentWordColor = NSColor(calibratedWhite: 1, alpha: 0.14)
 
   override func drawBackground(forGlyphRange glyphsToShow: NSRange, at origin: NSPoint) {
     drawClipContainers(forGlyphRange: glyphsToShow, at: origin)
-    // Selection (`.backgroundColor`) draws on top of the container fills, then glyphs above all.
+    drawCurrentWord(forGlyphRange: glyphsToShow, at: origin)
+    // Selection (`.backgroundColor`) draws on top of both, then glyphs above all.
     super.drawBackground(forGlyphRange: glyphsToShow, at: origin)
+  }
+
+  private func drawCurrentWord(forGlyphRange glyphsToShow: NSRange, at origin: NSPoint) {
+    guard let range = currentWordRange, let textContainer = textContainers.first else { return }
+    let fullGlyphRange = glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+    let visible = NSIntersectionRange(fullGlyphRange, glyphsToShow)
+    guard visible.length > 0 else { return }
+    currentWordColor.setFill()
+    enumerateLineFragments(forGlyphRange: visible) { [self] lineRect, _, _, lineGlyphRange, _ in
+      let segment = NSIntersectionRange(fullGlyphRange, lineGlyphRange)
+      guard segment.length > 0 else { return }
+      let horizontal = boundingRect(forGlyphRange: segment, in: textContainer)
+      let font = glyphFont(atGlyph: segment.location)
+      let baselineY = lineRect.minY + location(forGlyphAt: segment.location).y
+      let rect = CGRect(
+        x: horizontal.minX + origin.x,
+        y: baselineY - font.ascender + origin.y - verticalPadding,
+        width: horizontal.width,
+        height: (font.ascender - font.descender) + verticalPadding * 2)
+      let radius = min(cornerRadius, rect.height / 2, rect.width / 2)
+      NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius).fill()
+    }
   }
 
   private func drawClipContainers(forGlyphRange glyphsToShow: NSRange, at origin: NSPoint) {

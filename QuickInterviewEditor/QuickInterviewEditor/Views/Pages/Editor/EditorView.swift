@@ -8,11 +8,13 @@ struct EditorView: View {
       VStack(spacing: 0) {
         TranscriptPageView(model: model.transcript)
           .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // The selection controls (Mark as Clip / Clear) sit right under the transcript where the
+        // words are selected. The fine-tune pane is intentionally not mounted in this flow — it
+        // popped in on selection and reflowed the layout; FineTuneView + FineTuneModel stay in the
+        // codebase, ready to re-enable when boundary editing returns.
+        MarkClipBarView(model: model)
         Divider()
         WaveformView(model: model)
-        if model.showsFineTunePane {
-          FineTuneView(model: model)
-        }
       }
       Divider()
       VStack(spacing: 0) {
@@ -37,7 +39,9 @@ struct EditorView: View {
     .background(EditorKeyMonitor(model: model))
     .task { await model.loadWaveform() }
     .task { await model.observePlayback() }
-    .onChange(of: model.fineTuneSessionKey, initial: true) { _, _ in model.syncEditSession() }
+    // The fine-tune session is not opened on selection in this flow — the pane that would show
+    // it is hidden and boundary editing is deferred, so selecting words no longer spins up a
+    // hidden session (which also keeps the waveform's audition buttons from appearing).
     // The editor derives the clip bands (slices + pending suggestions, green over amber) and
     // pushes them into the transcript, which stays layout-local and only renders what it's
     // handed. `initial: true` seeds the containers on first appearance.

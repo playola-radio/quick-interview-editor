@@ -161,7 +161,7 @@ struct EditorTransportTests {
     }
   }
 
-  @Test func playEndsAtSelectionEndWhenSelectionActive() async {
+  @Test func playRunsToFileEndIgnoringSelection() async {
     let gate = TransportGate()
     let recorded = LockIsolated<(URL, Range<Int>, Int)?>(nil)
     let model = editor()
@@ -174,7 +174,9 @@ struct EditorTransportTests {
     } operation: {
       let task = Task { await model.transportPlayTapped() }
       await gate.awaitStarted()
-      expectNoDifference(recorded.value?.1, selection.lowerBound..<selection.upperBound)
+      // Plays from the cursor to the END OF THE FILE, not to the selection's end.
+      expectNoDifference(
+        recorded.value?.1, selection.lowerBound..<model.editPlan.source.durationSamples)
       await model.transportStopTapped()
       await task.value
     }

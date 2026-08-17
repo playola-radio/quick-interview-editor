@@ -13,6 +13,7 @@ struct TranscriptTextView: NSViewRepresentable {
   let lineSpacing: Double
   let selected: Set<Word.ID>
   let clipContainers: [TranscriptClipContainer]
+  let currentWordID: Word.ID?
   let scrollTarget: Word.ID?
   let followMode: TranscriptFollowMode
   let reveal: TranscriptReveal?
@@ -71,7 +72,8 @@ struct TranscriptTextView: NSViewRepresentable {
     context.coordinator.lineSpacing = lineSpacing
     context.coordinator.apply(
       text: text, fontSize: fontSize, selected: selected, clipContainers: clipContainers,
-      scrollTarget: scrollTarget, followMode: followMode, reveal: reveal)
+      currentWordID: currentWordID, scrollTarget: scrollTarget, followMode: followMode,
+      reveal: reveal)
   }
 
   @MainActor
@@ -84,13 +86,22 @@ struct TranscriptTextView: NSViewRepresentable {
     private var lastText = ""
     private var lastSelected: Set<Word.ID> = []
     private var lastClipContainers: [TranscriptClipContainer] = []
+    private var lastCurrentWordID: Word.ID?
     private var lastFontSize: Double = 0
     private var lastScrollTarget: Word.ID?
     private var lastFollowMode: TranscriptFollowMode = .following
     private var lastReveal: TranscriptReveal?
+    private var scrollTimer: Timer?
+    private var scrollFromY: CGFloat = 0
+    private var scrollToY: CGFloat = 0
+    private var scrollStartedAt = Date()
+    private let scrollDuration: TimeInterval = 0.3
 
     init(model: TranscriptPageModel) { self.model = model }
 
+    // The reveal scroll timer isn't invalidated here (a nonisolated deinit can't touch the
+    // non-Sendable Timer): it self-invalidates when the 0.3s animation completes or the scroll
+    // view goes away, retaining this coordinator only for that short window.
     deinit { NotificationCenter.default.removeObserver(self) }
 
     private static let selectedBG = NSColor(
@@ -141,16 +152,27 @@ struct TranscriptTextView: NSViewRepresentable {
     // swiftlint:disable:next function_parameter_count
     func apply(
       text: String, fontSize: Double, selected: Set<Word.ID>,
-      clipContainers: [TranscriptClipContainer], scrollTarget: Word.ID?,
+      clipContainers: [TranscriptClipContainer], currentWordID: Word.ID?, scrollTarget: Word.ID?,
       followMode: TranscriptFollowMode, reveal: TranscriptReveal?
     ) {
       guard let storage = textView?.textStorage, let textView else { return }
 
-      if text != lastText {
+      let didRebuild = text != lastText
+      if didRebuild {
         rebuildText(
           text: text, fontSize: fontSize, selected: selected, clipContainers: clipContainers)
-        return
+        lastCurrentWordID = nil
       }
+
+      // The current-word highlight is a light band the layout manager draws (not a text
+      // attribute), so moving it is a repaint, never a reflow. Applied after a rebuild too.
+      if currentWordID != lastCurrentWordID {
+        clipLayoutManager?.currentWordRange = currentWordID.flatMap { range(for: $0) }
+        lastCurrentWordID = currentWordID
+        textView.needsDisplay = true
+      }
+
+      if didRebuild { return }
 
       if fontSize != lastFontSize {
         storage.addAttribute(
@@ -178,7 +200,19 @@ struct TranscriptTextView: NSViewRepresentable {
       }
       lastFollowMode = followMode
 
-      if let target = scrollTarget, target != lastScrollTarget,
+      // An explicit reveal (scroll-to-current-word, clicking a suggestion or clip) OWNS the
+      // scroll this cycle: it animates from the current position to the centred focus word. The
+      // instant follow-scroll below is suppressed for the cycle (its target is synced so it
+      // won't fire), otherwise it would snap to the stale follow target before the animation.
+      // The token in `TranscriptReveal` changes on every request, so re-revealing re-scrolls.
+      let hasNewReveal = reveal != nil && reveal != lastReveal
+      if hasNewReveal {
+        lastScrollTarget = scrollTarget
+        if let reveal, let range = range(for: reveal.wordID) {
+          animatedScroll(toRange: range)
+        }
+        lastReveal = reveal
+      } else if let target = scrollTarget, target != lastScrollTarget,
         followMode == .following, let range = range(for: target)
       {
         // Programmatic auto-scroll goes through neither `scrollWheel` nor live-scroll,
@@ -186,15 +220,57 @@ struct TranscriptTextView: NSViewRepresentable {
         textView.scrollRangeToVisible(range)
         lastScrollTarget = target
       }
+    }
 
-      // An explicit reveal (clicking a suggestion or clip) scrolls regardless of `followMode` —
-      // the user asked to jump here, so a prior manual scroll must not suppress it. The token in
-      // `TranscriptReveal` changes on every request, so re-revealing the same word re-scrolls.
-      if let reveal, reveal != lastReveal {
-        if let range = range(for: reveal.wordID) {
-          textView.scrollRangeToVisible(range)
-        }
-        lastReveal = reveal
+    /// Smoothly scrolls the range to the vertical centre of the viewport, interpolating from the
+    /// CURRENT scroll position (animating `NSClipView.bounds` via `.animator()` jumps to the top
+    /// first, so it's driven by hand). Programmatic scrolling goes through neither `scrollWheel`
+    /// nor live-scroll, so it is never mistaken for a user scroll (which pauses follow).
+    private func animatedScroll(toRange range: NSRange) {
+      guard let textView, let scrollView, let layoutManager = textView.layoutManager,
+        let container = textView.textContainer
+      else { return }
+      layoutManager.ensureLayout(for: container)
+      let glyphRange = layoutManager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+      let rect = layoutManager.boundingRect(forGlyphRange: glyphRange, in: container)
+      let clip = scrollView.contentView
+      let viewportHeight = clip.bounds.height
+      let center = rect.midY + textView.textContainerInset.height - viewportHeight / 2
+      let maxY = max(0, textView.frame.height - viewportHeight)
+      let targetY = min(max(0, center), maxY)
+      let startY = clip.bounds.origin.y
+      guard abs(targetY - startY) > 0.5 else { return }
+
+      scrollTimer?.invalidate()
+      scrollFromY = startY
+      scrollToY = targetY
+      scrollStartedAt = Date()
+      // Target-action (not a `@Sendable` closure) so the per-frame main-actor scroll work is
+      // concurrency-clean; the timer runs on the main run loop.
+      scrollTimer = Timer.scheduledTimer(
+        timeInterval: 1 / 60, target: self, selector: #selector(stepScrollAnimation),
+        userInfo: nil, repeats: true)
+    }
+
+    @objc private func stepScrollAnimation() {
+      guard let scrollView else {
+        scrollTimer?.invalidate()
+        scrollTimer = nil
+        return
+      }
+      let fraction = min(1, Date().timeIntervalSince(scrollStartedAt) / scrollDuration)
+      // ease-in-out cubic
+      let eased =
+        fraction < 0.5
+        ? 4 * fraction * fraction * fraction
+        : 1 - pow(-2 * fraction + 2, 3) / 2
+      let content = scrollView.contentView
+      content.setBoundsOrigin(
+        NSPoint(x: content.bounds.origin.x, y: scrollFromY + (scrollToY - scrollFromY) * eased))
+      scrollView.reflectScrolledClipView(content)
+      if fraction >= 1 {
+        scrollTimer?.invalidate()
+        scrollTimer = nil
       }
     }
 
