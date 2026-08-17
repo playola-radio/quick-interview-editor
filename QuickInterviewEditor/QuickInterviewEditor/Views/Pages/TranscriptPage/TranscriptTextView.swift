@@ -200,25 +200,25 @@ struct TranscriptTextView: NSViewRepresentable {
       }
       lastFollowMode = followMode
 
-      if let target = scrollTarget, target != lastScrollTarget,
+      // An explicit reveal (scroll-to-current-word, clicking a suggestion or clip) OWNS the
+      // scroll this cycle: it animates from the current position to the centred focus word. The
+      // instant follow-scroll below is suppressed for the cycle (its target is synced so it
+      // won't fire), otherwise it would snap to the stale follow target before the animation.
+      // The token in `TranscriptReveal` changes on every request, so re-revealing re-scrolls.
+      let hasNewReveal = reveal != nil && reveal != lastReveal
+      if hasNewReveal {
+        lastScrollTarget = scrollTarget
+        if let reveal, let range = range(for: reveal.wordID) {
+          animatedScroll(toRange: range)
+        }
+        lastReveal = reveal
+      } else if let target = scrollTarget, target != lastScrollTarget,
         followMode == .following, let range = range(for: target)
       {
         // Programmatic auto-scroll goes through neither `scrollWheel` nor live-scroll,
         // so it can never be mistaken for a user scroll — no guard flag needed.
         textView.scrollRangeToVisible(range)
         lastScrollTarget = target
-      }
-
-      // An explicit reveal (scroll-to-current-word, clicking a suggestion or clip) scrolls
-      // regardless of `followMode` — the user asked to jump here, so a prior manual scroll must
-      // not suppress it. It animates, centring the focus word, so the jump reads as movement
-      // rather than a teleport. The token in `TranscriptReveal` changes on every request, so
-      // re-revealing the same word re-scrolls.
-      if let reveal, reveal != lastReveal {
-        if let range = range(for: reveal.wordID) {
-          animatedScroll(toRange: range)
-        }
-        lastReveal = reveal
       }
     }
 
