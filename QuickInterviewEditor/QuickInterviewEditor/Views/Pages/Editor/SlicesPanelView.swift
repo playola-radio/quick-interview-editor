@@ -27,8 +27,6 @@ struct SlicesPanelView: View {
         .help(model.redoLabel).accessibilityLabel(model.redoLabel)
       }
       HStack(spacing: 8) {
-        Button(model.addSliceLabel) { model.addSliceTapped() }
-          .disabled(!model.canAddSlice)
         Spacer()
         Button(model.exportAllLabel) { model.exportAllTapped() }
           .disabled(!model.canExportAll)

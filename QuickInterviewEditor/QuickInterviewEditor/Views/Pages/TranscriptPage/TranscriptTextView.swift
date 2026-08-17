@@ -13,6 +13,7 @@ struct TranscriptTextView: NSViewRepresentable {
   let lineSpacing: Double
   let selected: Set<Word.ID>
   let clipContainers: [TranscriptClipContainer]
+  let currentWordID: Word.ID?
   let scrollTarget: Word.ID?
   let followMode: TranscriptFollowMode
   let reveal: TranscriptReveal?
@@ -71,7 +72,8 @@ struct TranscriptTextView: NSViewRepresentable {
     context.coordinator.lineSpacing = lineSpacing
     context.coordinator.apply(
       text: text, fontSize: fontSize, selected: selected, clipContainers: clipContainers,
-      scrollTarget: scrollTarget, followMode: followMode, reveal: reveal)
+      currentWordID: currentWordID, scrollTarget: scrollTarget, followMode: followMode,
+      reveal: reveal)
   }
 
   @MainActor
@@ -84,6 +86,7 @@ struct TranscriptTextView: NSViewRepresentable {
     private var lastText = ""
     private var lastSelected: Set<Word.ID> = []
     private var lastClipContainers: [TranscriptClipContainer] = []
+    private var lastCurrentWordID: Word.ID?
     private var lastFontSize: Double = 0
     private var lastScrollTarget: Word.ID?
     private var lastFollowMode: TranscriptFollowMode = .following
@@ -141,16 +144,27 @@ struct TranscriptTextView: NSViewRepresentable {
     // swiftlint:disable:next function_parameter_count
     func apply(
       text: String, fontSize: Double, selected: Set<Word.ID>,
-      clipContainers: [TranscriptClipContainer], scrollTarget: Word.ID?,
+      clipContainers: [TranscriptClipContainer], currentWordID: Word.ID?, scrollTarget: Word.ID?,
       followMode: TranscriptFollowMode, reveal: TranscriptReveal?
     ) {
       guard let storage = textView?.textStorage, let textView else { return }
 
-      if text != lastText {
+      let didRebuild = text != lastText
+      if didRebuild {
         rebuildText(
           text: text, fontSize: fontSize, selected: selected, clipContainers: clipContainers)
-        return
+        lastCurrentWordID = nil
       }
+
+      // The current-word highlight is a light band the layout manager draws (not a text
+      // attribute), so moving it is a repaint, never a reflow. Applied after a rebuild too.
+      if currentWordID != lastCurrentWordID {
+        clipLayoutManager?.currentWordRange = currentWordID.flatMap { range(for: $0) }
+        lastCurrentWordID = currentWordID
+        textView.needsDisplay = true
+      }
+
+      if didRebuild { return }
 
       if fontSize != lastFontSize {
         storage.addAttribute(

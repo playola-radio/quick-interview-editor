@@ -131,8 +131,9 @@ final class EditorModel: ViewModel {
   @ObservationIgnored private(set) var exportTask: Task<Void, Never>?
 
   // MARK: - Display Text
-  let addSliceLabel = "Add slice"
-  let emptyStateMessage = "Select words in the transcript, then Add slice."
+  let markAsClipLabel = "Mark as Clip"
+  let scrollToCurrentWordLabel = "Scroll to current word"
+  let emptyStateMessage = "Select words in the transcript, then Mark as Clip."
   let playLabel = "Play"
   let stopLabel = "Stop"
   let deleteLabel = "Delete slice"
@@ -355,11 +356,13 @@ final class EditorModel: ViewModel {
       if isTransportPaused { continue }
       if position.isPlaying {
         playheadSample = position.sample
-        // Only slice playback drives transcript auto-scroll follow (preview/audition/free do not).
-        transcript.playheadChanged(sample: position.sample, isPlaying: transportContext.isSlice)
-      } else if transportContext.isSlice {
-        // A false tick during slice playback ends transcript follow (so the next slice reads as a
-        // rising edge) but leaves the cursor exactly where the audio stopped.
+        // Any transport playback — the free listen pass included — drives the transcript's
+        // current-word highlight and (while following) auto-scroll, so reading along works
+        // during a plain Play, not only slice playback.
+        transcript.playheadChanged(sample: position.sample, isPlaying: true)
+      } else {
+        // A false tick ends transcript follow (so the next playback reads as a rising edge) but
+        // leaves the cursor and the current-word highlight where the audio stopped.
         endTranscriptFollow()
       }
     }
@@ -629,6 +632,13 @@ final class EditorModel: ViewModel {
     guard slices[id: slice.id] == nil else { return }
     mutateSlices { $0.append(slice) }
   }
+
+  // MARK: - Listen pass
+  /// The "scroll to current word" control has somewhere to go once playback has placed a word.
+  var canScrollToCurrentWord: Bool { transcript.canScrollToCurrentWord }
+
+  /// Re-centres the transcript on the word under the playhead and resumes follow.
+  func scrollToCurrentWordTapped() { transcript.scrollToCurrentWordTapped() }
 
   // MARK: - Reveal across panes
   /// Padding left on each side when framing a revealed range on the waveform, so the clip
