@@ -54,6 +54,25 @@ echo "==> Signing engine + cut-suggester executables"
 sign_runtime "$ENGINE_ENTITLEMENTS" "$ENGINE_DIR/logic-markers-engine"
 sign_runtime "$ENGINE_ENTITLEMENTS" "$ENGINE_DIR/cut-suggester-engine"
 
+# Sparkle 2.x embeds nested code bundles (an Autoupdate executable, a nested
+# Updater.app, and two XPC services) inside Sparkle.framework. A flat codesign of
+# the framework leaves those ad-hoc/unsigned, which fails notarization + Gatekeeper
+# and breaks Sparkle's own installer launch. Sign them inside-out (deepest first)
+# BEFORE the framework loop signs Sparkle.framework itself. No entitlements: Sparkle
+# isn't sandboxed here. Versions/B is the current Sparkle layout (2.9.6); re-verify
+# the version dir if Sparkle is bumped.
+SPARKLE="$APP/Contents/Frameworks/Sparkle.framework"
+if [ -d "$SPARKLE" ]; then
+  echo "==> Signing Sparkle nested helpers (inside-out)"
+  for xpc in "$SPARKLE/Versions/B/XPCServices/"*.xpc; do
+    [ -e "$xpc" ] && codesign --force --sign "$IDENTITY" --options runtime --timestamp "$xpc"
+  done
+  [ -d "$SPARKLE/Versions/B/Updater.app" ] && \
+    codesign --force --sign "$IDENTITY" --options runtime --timestamp "$SPARKLE/Versions/B/Updater.app"
+  [ -f "$SPARKLE/Versions/B/Autoupdate" ] && \
+    codesign --force --sign "$IDENTITY" --options runtime --timestamp "$SPARKLE/Versions/B/Autoupdate"
+fi
+
 if [ -d "$APP/Contents/Frameworks" ]; then
   echo "==> Signing embedded frameworks/dylibs"
   while IFS= read -r fw; do
@@ -65,6 +84,27 @@ fi
 echo "==> Signing the app (outermost)"
 codesign --force --sign "$IDENTITY" --options runtime --timestamp \
   --entitlements "$APP_ENTITLEMENTS" "$APP"
+
+echo "==> Guard: every Mach-O must be signed with Team FSRSPV9N9Q"
+# Belt-and-suspenders: catch any Mach-O (nested Sparkle helper, engine lib, etc.)
+# that slipped through unsigned or with the wrong team before we notarize.
+# `file` prints an extra line per slice for universal binaries — e.g.
+# "…/Autoupdate (for architecture arm64): …" — whose cut(1) prefix is a pseudo-path
+# that doesn't exist. Drop those with `sort -u` + a real-file test so fat binaries
+# (Sparkle ships x86_64+arm64) don't produce false "unsigned" hits that abort a
+# correctly-signed release.
+unsigned=0
+while IFS= read -r macho; do
+  [ -z "$macho" ] && continue
+  [ -f "$macho" ] || continue
+  if ! codesign -dvvv "$macho" 2>&1 | grep -q "TeamIdentifier=FSRSPV9N9Q"; then
+    echo "   UNSIGNED/wrong-team: $macho" >&2
+    unsigned=$((unsigned + 1))
+  fi
+done < <(find "$APP" -type f -print0 | xargs -0 file 2>/dev/null \
+           | grep 'Mach-O' | cut -d: -f1 | sort -u)
+[ "$unsigned" -eq 0 ] || { echo "error: $unsigned Mach-O binaries not properly signed" >&2; exit 1; }
+echo "    all Mach-O binaries signed with our Team ID"
 
 echo "==> Verify (codesign --verify --strict --deep)"
 codesign --verify --strict --deep --verbose=4 "$APP"
