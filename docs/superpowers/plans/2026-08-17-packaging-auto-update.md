@@ -51,14 +51,28 @@ Copied verbatim from the spec; every task inherits these.
   local (see memory `qie-ci-xcode-version-skew`). Prefer `@MainActor`-explicit,
   `@Sendable`-clean code; build must pass on the CI toolchain, not just locally.
 - **Config, not literals:** `SUFeedURL`, `RELEASE_S3_BUCKET`, `RELEASE_S3_PREFIX`
-  are set once (project.yml / env). **Resolved (PR 1):** host mirrors the sibling
-  **PlayolaAudioProcessor** app — bucket `playola-static`, prefix
-  `downloads/QuickInterviewEditor`, raw bucket URL (no CloudFront), uploaded with
-  `AWS_PROFILE=default` (already writes to this bucket). So
-  `SUFeedURL=https://playola-static.s3.amazonaws.com/downloads/QuickInterviewEditor/appcast.xml`
-  (already baked into project.yml), `RELEASE_S3_BUCKET=playola-static`,
-  `RELEASE_S3_PREFIX=downloads/QuickInterviewEditor`,
-  `RELEASE_DOWNLOAD_HOST=https://playola-static.s3.amazonaws.com`.
+  are set once (project.yml / env). **Resolved (PR 1):**
+  - **Files (appcast.xml + DMG) live on S3** — bucket `playola-static`, prefix
+    `downloads/QuickInterviewEditor`, uploaded with `AWS_PROFILE=default` (already
+    writes to this bucket, proven by the sibling **PlayolaAudioProcessor**). So
+    `RELEASE_S3_BUCKET=playola-static`, `RELEASE_S3_PREFIX=downloads/QuickInterviewEditor`,
+    `RELEASE_DOWNLOAD_HOST=https://playola-static.s3.amazonaws.com` (the enclosure
+    DMG URL points straight at S3 for bandwidth).
+  - **`SUFeedURL` is an owned playola.fm URL, NOT the S3 URL:**
+    `https://playola.fm/apps/quick-interview-editor/appcast.xml` (baked into
+    project.yml). playola.fm (Netlify) 200-proxies that path to the S3 appcast via
+    a `netlify.toml` redirect (a permanent, portable anchor we can repoint even if
+    we leave AWS). **One-time human setup:** add to the playola.fm site —
+    ```toml
+    [[redirects]]
+      from = "/apps/quick-interview-editor/appcast.xml"
+      to = "https://playola-static.s3.amazonaws.com/downloads/QuickInterviewEditor/appcast.xml"
+      status = 200
+      force = true
+    ```
+    The release lane still only does `aws s3 cp` (single publish target); Netlify
+    transparently serves the proxied feed. Upload appcast.xml with
+    `--cache-control no-cache` so clients aren't served a stale feed.
 
 ---
 
@@ -863,7 +877,7 @@ git add packaging/appcast.rb && git commit -m "feat(packaging): signed appcast i
     # Sync existing appcast down first so history is preserved, then re-run? For a
     # single canonical file we upload the appended local copy. Keep old DMGs (no --delete).
     sh("cd .. && aws --profile #{profile} s3 cp '#{dmg}' 's3://#{bucket}/#{prefix}/' ")
-    sh("cd .. && aws --profile #{profile} s3 cp packaging/dist/appcast.xml 's3://#{bucket}/#{prefix}/appcast.xml' --content-type application/xml")
+    sh("cd .. && aws --profile #{profile} s3 cp packaging/dist/appcast.xml 's3://#{bucket}/#{prefix}/appcast.xml' --content-type application/xml --cache-control no-cache")
 
     UI.success("Released #{version}. Run the manual verification checklist (packaging/README.md) before announcing.")
   end
