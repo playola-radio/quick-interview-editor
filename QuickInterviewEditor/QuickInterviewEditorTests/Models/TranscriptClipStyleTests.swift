@@ -5,27 +5,62 @@ import Testing
 
 struct TranscriptClipStyleTests {
 
-  /// A live clip (approved or suggested) takes its colour from the shared cycling palette, so
-  /// the two states share a style for a given position — colour marks the clip boundary, not
-  /// the state.
-  @Test func approvedAndSuggestedShareTheCyclingPalette() {
+  /// Approved and suggested share a hue for a given position (colour marks the clip boundary),
+  /// but a suggestion reads as a fainter outline: same RGB, less fill, softer ring than the
+  /// filled approved slice — so a proposal never competes with a kept slice.
+  @Test func suggestedIsAFainterOutlineOfTheSameHueAsApproved() {
     for variant in 0..<6 {
-      expectNoDifference(
-        TranscriptClipStyle.style(for: .approved, variant: variant),
-        TranscriptClipStyle.style(for: .suggested, variant: variant))
+      let approved = TranscriptClipStyle.style(for: .approved, variant: variant)
+      let suggested = TranscriptClipStyle.style(for: .suggested, variant: variant)
+
+      expectNoDifference(suggested.fill.red, approved.fill.red)
+      expectNoDifference(suggested.fill.green, approved.fill.green)
+      expectNoDifference(suggested.fill.blue, approved.fill.blue)
+
+      #expect(suggested.fill.alpha < approved.fill.alpha)
+      #expect(suggested.ring.alpha < approved.ring.alpha)
     }
   }
 
-  /// Variant 0 is the palette base (green) and every live variant keeps white text, no strike.
-  @Test func liveVariantsAreWhiteTextNoStrike() {
+  /// Variant 0's suggested outline is the pinned green-hued, dashed frame.
+  @Test func suggestedVariantZeroIsTheGreenDashedOutline() {
+    expectNoDifference(
+      TranscriptClipStyle.style(for: .suggested, variant: 0),
+      TranscriptClipStyle(
+        fill: ClipStyleColor(red255: 95, green255: 185, blue255: 143, alpha: 0.06),
+        ring: ClipStyleColor(red255: 95, green255: 185, blue255: 143, alpha: 0.45),
+        text: ClipStyleColor(red255: 255, green255: 255, blue255: 255, alpha: 0.5),
+        strikethrough: false,
+        dashed: true))
+  }
+
+  /// Only suggestions dash their ring — the tentative-vs-committed cue. Every other state, at
+  /// every variant, draws a solid ring.
+  @Test func onlySuggestionsDashTheRing() {
+    for variant in 0..<6 {
+      expectNoDifference(TranscriptClipStyle.style(for: .suggested, variant: variant).dashed, true)
+      expectNoDifference(TranscriptClipStyle.style(for: .approved, variant: variant).dashed, false)
+    }
+    expectNoDifference(TranscriptClipStyle.style(for: .selected).dashed, false)
+    expectNoDifference(TranscriptClipStyle.style(for: .rejected).dashed, false)
+  }
+
+  /// Approved words are full white; suggested words are a translucent white cloud that recedes
+  /// toward the background. Neither strikes through, at any variant.
+  @Test func liveVariantTextColours() {
     expectNoDifference(
       TranscriptClipStyle.style(for: .approved, variant: 0).fill,
       ClipStyleColor(red255: 95, green255: 185, blue255: 143, alpha: 0.28))
     for variant in 0..<6 {
-      let style = TranscriptClipStyle.style(for: .suggested, variant: variant)
+      let approved = TranscriptClipStyle.style(for: .approved, variant: variant)
       expectNoDifference(
-        style.text, ClipStyleColor(red255: 255, green255: 255, blue255: 255, alpha: 1))
-      expectNoDifference(style.strikethrough, false)
+        approved.text, ClipStyleColor(red255: 255, green255: 255, blue255: 255, alpha: 1))
+      expectNoDifference(approved.strikethrough, false)
+
+      let suggested = TranscriptClipStyle.style(for: .suggested, variant: variant)
+      expectNoDifference(
+        suggested.text, ClipStyleColor(red255: 255, green255: 255, blue255: 255, alpha: 0.5))
+      expectNoDifference(suggested.strikethrough, false)
     }
   }
 

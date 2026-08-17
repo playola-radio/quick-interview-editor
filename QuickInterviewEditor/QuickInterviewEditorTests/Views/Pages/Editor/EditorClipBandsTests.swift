@@ -92,6 +92,18 @@ struct EditorClipBandsTests {
     }
   }
 
+  /// Hiding suggestions (the panel toggle) drops the suggested bands but leaves accepted slices.
+  @Test func hidingSuggestionsDropsSuggestedBandsButKeepsSlices() {
+    let pending = Fixtures.cutSuggestion(id: Fixtures.uuid(9), wordIDs: [7, 8], status: .pending)
+    withEditor(suggestions: [pending]) { model in
+      model.slices = [slice(Fixtures.uuid(1), wordIDs: [1, 2])]
+      model.cutSuggestions.showsSuggestionBands = false
+      expectNoDifference(
+        model.clipBands,
+        [TranscriptClipBand(id: Fixtures.uuid(1), wordIDs: [1, 2], kind: .approved)])
+    }
+  }
+
   @Test func suggestionFullyCoveredBySlicesProducesNoBand() {
     let pending = Fixtures.cutSuggestion(id: Fixtures.uuid(9), wordIDs: [1, 2], status: .pending)
     withEditor(suggestions: [pending]) { model in

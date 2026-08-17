@@ -39,6 +39,10 @@ struct EditorView: View {
     .background(EditorKeyMonitor(model: model))
     .task { await model.loadWaveform() }
     .task { await model.observePlayback() }
+    // Kick off a background suggestion pass as soon as the file is open, so the user lands on
+    // suggestions already in flight. Quietly no-ops when suggestions already exist or no API key
+    // resolves — it never opens the key-entry sheet on its own.
+    .task { await model.cutSuggestions.autoSuggestCutsIfNeeded() }
     // The fine-tune session is not opened on selection in this flow — the pane that would show
     // it is hidden and boundary editing is deferred, so selecting words no longer spins up a
     // hidden session (which also keeps the waveform's audition buttons from appearing).
