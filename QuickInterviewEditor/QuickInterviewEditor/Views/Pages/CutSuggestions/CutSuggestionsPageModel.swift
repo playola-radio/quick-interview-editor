@@ -188,21 +188,17 @@ final class CutSuggestionsPageModel: ViewModel {
                 + "Existing suggestions were left unchanged.")
             return
           }
+          let stamped = candidates.map { stampProvenance(on: $0, from: request) }
           // A background pass guards emptiness at start, but suggestions can land while it's in
           // flight (a manual run, or the same file open elsewhere sharing this fingerprint's
-          // sidecar). Committing now would replace them — silently wiping the user's
-          // accept/reject decisions. So a background pass only writes if the sidecar is still
-          // empty; a manual run always commits (an explicit re-run is meant to replace).
-          if isBackgroundPass, !suggestions.isEmpty {
-            phase = .idle
-            return
-          }
-          let stamped = candidates.map { stampProvenance(on: $0, from: request) }
-          // De-dupe defensively: a malformed response repeating a suggestion ID would trap
-          // `IdentifiedArray(uniqueElements:)`. Regenerating replaces the prior candidates
-          // (a merge policy that preserves accept/reject decisions is future work).
-          $projectState.withLock {
-            $0.cutSuggestions = IdentifiedArray(stamped, uniquingIDsWith: { first, _ in first })
+          // sidecar). Do the empty-check and the write in ONE locked operation so nothing can
+          // slip in between them: a background pass commits only if the sidecar is still empty
+          // (else it would silently wipe the user's accept/reject decisions); a manual run always
+          // replaces — an explicit re-run is meant to overwrite. De-dupe defensively:
+          // `uniquingIDsWith` keeps the first of any repeated ID a malformed response might emit.
+          $projectState.withLock { state in
+            guard !isBackgroundPass || state.cutSuggestions.isEmpty else { return }
+            state.cutSuggestions = IdentifiedArray(stamped, uniquingIDsWith: { first, _ in first })
           }
           phase = .idle
           return
