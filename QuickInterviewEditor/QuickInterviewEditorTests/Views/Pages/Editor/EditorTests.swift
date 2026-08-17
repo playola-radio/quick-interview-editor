@@ -230,7 +230,7 @@ struct EditorTests {
     addSlices(model, [(0, 1)])  // one undo entry: the add
     let slice = model.slices[0]
     await withDependencies {
-      $0.audioPlayer.play = { _, _, _, _ in await gate.play() }
+      $0.audioPlayer.play = { _, _, _, _, _ in await gate.play() }
       $0.audioPlayer.stop = { _ in
         stopped.setValue(true)
         gate.release()
@@ -256,7 +256,7 @@ struct EditorTests {
     addSlices(model, [(2, 3)])  // Slice 2 — the mutation we'll undo
     let playing = model.slices[0]
     await withDependencies {
-      $0.audioPlayer.play = { _, _, _, _ in await gate.play() }
+      $0.audioPlayer.play = { _, _, _, _, _ in await gate.play() }
       $0.audioPlayer.stop = { _ in
         stopped.setValue(true)
         gate.release()
@@ -315,8 +315,8 @@ struct EditorTests {
     model.addSliceTapped()
     let slice = model.slices[0]
     await withDependencies {
-      $0.audioPlayer.play = { url, range, rate, _ in
-        recorded.setValue((url, range, rate))
+      $0.audioPlayer.play = { url, range, sampleRate, _, _ in
+        recorded.setValue((url, range, sampleRate))
         return await gate.play()
       }
       $0.audioPlayer.stop = { _ in gate.release() }
@@ -340,7 +340,7 @@ struct EditorTests {
     addSlices(model, [(0, 2)])
     let slice = model.slices[0]
     await withDependencies {
-      $0.audioPlayer.play = { _, _, _, _ in await gate.play() }
+      $0.audioPlayer.play = { _, _, _, _, _ in await gate.play() }
       $0.audioPlayer.stop = { _ in gate.release() }
     } operation: {
       let slicePlay = Task { await model.playSliceTapped(slice.id) }
@@ -366,7 +366,7 @@ struct EditorTests {
     model.addSliceTapped()
     let slice = model.slices[0]
     await withDependencies {
-      $0.audioPlayer.play = { _, _, _, _ in await gate.play() }
+      $0.audioPlayer.play = { _, _, _, _, _ in await gate.play() }
       $0.audioPlayer.stop = { _ in gate.release() }
     } operation: {
       let task = Task { await model.playSliceTapped(slice.id) }
@@ -384,7 +384,7 @@ struct EditorTests {
     model.addSliceTapped()
     let slice = model.slices[0]
     await withDependencies {
-      $0.audioPlayer.play = { _, _, _, _ in await gate.play() }
+      $0.audioPlayer.play = { _, _, _, _, _ in await gate.play() }
       $0.audioPlayer.stop = { _ in gate.release() }
     } operation: {
       let task = Task { await model.playSliceTapped(slice.id) }  // pure Play shortcut
@@ -403,7 +403,7 @@ struct EditorTests {
     model.addSliceTapped()
     let slice = model.slices[0]
     await withDependencies {
-      $0.audioPlayer.play = { _, _, _, _ in throw EngineClientError.engineFailed("boom") }
+      $0.audioPlayer.play = { _, _, _, _, _ in throw EngineClientError.engineFailed("boom") }
     } operation: {
       await withKnownIssue {
         await model.playSliceTapped(slice.id)
@@ -424,7 +424,7 @@ struct EditorTests {
     expectNoDifference(model.sliceRows[id: first.id]?.isPlaying, false)
     expectNoDifference(model.sliceRows[id: first.id]?.playButtonLabel, model.playLabel)
     await withDependencies {
-      $0.audioPlayer.play = { _, _, _, _ in await gate.play() }
+      $0.audioPlayer.play = { _, _, _, _, _ in await gate.play() }
       $0.audioPlayer.stop = { _ in gate.release() }
     } operation: {
       let task = Task { await model.playSliceTapped(first.id) }
@@ -447,7 +447,7 @@ struct EditorTests {
     model.addSliceTapped()
     let slice = model.slices[0]
     await withDependencies {
-      $0.audioPlayer.play = { _, _, _, _ in await gate.play() }
+      $0.audioPlayer.play = { _, _, _, _, _ in await gate.play() }
       $0.audioPlayer.stop = { _ in
         stopped.setValue(true)
         gate.release()
@@ -591,7 +591,7 @@ struct EditorTests {
     addSlices(model, [(0, 1)])
     let slice = model.slices[0]
     await withDependencies {
-      $0.audioPlayer.play = { _, _, _, _ in await gate.play() }
+      $0.audioPlayer.play = { _, _, _, _, _ in await gate.play() }
       $0.audioPlayer.stop = { session in stoppedSession.setValue(session) }
     } operation: {
       let task = Task { await model.playSliceTapped(slice.id) }
@@ -623,7 +623,7 @@ struct EditorTests {
     addSlices(model, [(0, 1)])
     let slice = model.slices[0]
     await withDependencies {
-      $0.audioPlayer.play = { _, _, _, _ in await gate.play() }
+      $0.audioPlayer.play = { _, _, _, _, _ in await gate.play() }
       $0.audioPlayer.stop = { _ in }
     } operation: {
       let first = Task { await model.playSliceTapped(slice.id) }
@@ -652,7 +652,7 @@ struct EditorTests {
     let id = model.slices[0].id
     model.slices[0].endSample = model.slices[0].startSample
     await withDependencies {
-      $0.audioPlayer.play = { _, _, _, _ in
+      $0.audioPlayer.play = { _, _, _, _, _ in
         played.setValue(true)
         return .finished
       }
@@ -674,7 +674,7 @@ struct EditorTests {
     model.slices[0].startSample = dur
     model.slices[0].endSample = dur + 1000
     await withDependencies {
-      $0.audioPlayer.play = { _, _, _, _ in
+      $0.audioPlayer.play = { _, _, _, _, _ in
         played.setValue(true)
         return .finished
       }
@@ -715,7 +715,7 @@ struct EditorTests {
     addSlices(model, [(0, 1)])
     let slice = model.slices[0]
     await withDependencies {
-      $0.audioPlayer.play = { _, _, _, _ in await gate.play() }
+      $0.audioPlayer.play = { _, _, _, _, _ in await gate.play() }
       $0.audioPlayer.stop = { _ in gate.release() }
     } operation: {
       let task = Task { await model.playSliceTapped(slice.id) }

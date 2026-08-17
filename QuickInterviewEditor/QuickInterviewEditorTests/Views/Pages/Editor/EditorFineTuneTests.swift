@@ -584,7 +584,7 @@ struct EditorFineTuneTests {
     let gate = PreviewPlayGate()
 
     await withDependencies {
-      $0.audioPlayer.play = { _, _, _, _ in await gate.play() }
+      $0.audioPlayer.play = { _, _, _, _, _ in await gate.play() }
       $0.audioPlayer.stop = { _ in }
     } operation: {
       let first = Task { await model.previewEditTapped() }  // session 1, suspends
@@ -616,7 +616,7 @@ struct EditorFineTuneTests {
     let recorded = LockIsolated<Range<Int>?>(nil)
 
     await withDependencies {
-      $0.audioPlayer.play = { _, range, _, _ in
+      $0.audioPlayer.play = { _, range, _, _, _ in
         recorded.setValue(range)
         return .finished
       }
@@ -637,7 +637,7 @@ struct EditorFineTuneTests {
     model.cutOutNudged(byMs: 10)
     let draft = model.fineTune.draftRange!
     await withDependencies {
-      $0.audioPlayer.play = { _, range, _, _ in
+      $0.audioPlayer.play = { _, range, _, _, _ in
         recorded.setValue(range)
         return await gate.play()
       }

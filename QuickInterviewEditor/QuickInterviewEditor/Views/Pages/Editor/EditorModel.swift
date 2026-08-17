@@ -9,6 +9,8 @@ enum EditorKey {
   case zoomIn
   case zoomOut
   case zoomFit
+  case speedUp
+  case speedDown
 }
 
 @MainActor
@@ -62,6 +64,13 @@ final class EditorModel: ViewModel {
     // Clicking a suggestion reveals it across both panes so the user can review/audition it.
     cutSuggestions.onSelectSuggestion = { [weak self] suggestion in
       self?.cutSuggestionSelected(suggestion)
+    }
+    // The speed control lives in the transcript panel, but the transport owns the shared player, so
+    // apply its changes here — live while playing and remembered for the next play. Each change
+    // applies the model's LATEST committed rate (not the value that triggered this callback), so
+    // two rapid changes whose Tasks reach the player out of order still converge on the newest.
+    transcript.onPlaybackRateChanged = { [weak self] _ in
+      Task { await self?.applyPlaybackRate() }
     }
   }
 
@@ -628,6 +637,8 @@ final class EditorModel: ViewModel {
     case .zoomIn: waveform.zoomInTapped()
     case .zoomOut: waveform.zoomOutTapped()
     case .zoomFit: waveform.zoomFitToggled(selection: transcript.selectedSampleRange)
+    case .speedUp: transcript.speedUpTapped()
+    case .speedDown: transcript.speedDownTapped()
     }
     return true
   }
@@ -844,6 +855,14 @@ final class EditorModel: ViewModel {
   let transportPauseLabel = "Pause"
   let transportStopLabel = "Stop"
 
+  /// Applies the transcript panel's current playback speed to the shared player: live if audio is
+  /// playing, and remembered for the next play otherwise. Reads the latest committed rate so racing
+  /// callers converge. The player keeps the plan-sample math intact at any rate, so the cursor
+  /// stays aligned without adjustment.
+  func applyPlaybackRate() async {
+    await audioPlayer.setRate(transcript.playbackRate)
+  }
+
   var isTransportPlaying: Bool {
     if case .playing = transportPhase { return true }
     return false
@@ -921,8 +940,11 @@ final class EditorModel: ViewModel {
     transportPhase = .playing(session)
     let outcome: PlaybackEnd
     do {
+      // The speed rides along with the start (not a separate awaited call), so no suspension point
+      // sits between `.playing(session)` and the player marking the session current — a Stop or
+      // selection snap can't slip in and orphan the audio.
       outcome = try await audioPlayer.play(
-        canonicalAudioURL, range, editPlan.source.sampleRate, session)
+        canonicalAudioURL, range, editPlan.source.sampleRate, transcript.playbackRate, session)
     } catch {
       reportIssue(error)
       outcome = .stopped
