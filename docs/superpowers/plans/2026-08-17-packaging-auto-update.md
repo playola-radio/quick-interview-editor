@@ -649,12 +649,49 @@ git add packaging/make-dmg.sh && git commit -m "feat(packaging): make-dmg.sh (no
 **Files:**
 - Modify: `packaging/sign-app.sh`
 
-**Context:** `sign-app.sh` already signs inside-out correctly. The spec's "fix" is
-a **guard**: after signing, assert every Mach-O under the app is signed with our
-Team ID, so a future stray unsigned dylib fails loudly instead of at notarization.
+**Context:** `sign-app.sh` signs the engine tree inside-out correctly, but its
+`Contents/Frameworks` loop only matches `*.framework`/`*.dylib` and signs each
+match **flatly** (a single `codesign` with no recursion). That was fine before
+Sparkle. **Sparkle 2.x breaks this assumption** (confirmed against the built app
+in PR 1): `Sparkle.framework` embeds nested code bundles that must be signed
+inside-out *before* the framework —
+- `Sparkle.framework/Versions/B/Autoupdate` (a Mach-O executable),
+- `Sparkle.framework/Versions/B/Updater.app` (a nested app bundle), and
+- `Sparkle.framework/Versions/B/XPCServices/Downloader.xpc` + `Installer.xpc`.
+
+A flat `codesign` of `Sparkle.framework` leaves those nested bundles ad-hoc/unsigned,
+so notarization + Gatekeeper (and Sparkle's own installer launch) will fail. This
+was surfaced by the PR 1 Codex review. So Task 8 has **two** parts: actually sign
+Sparkle's nested bundles inside-out (Step 0), **and** add the belt-and-suspenders
+Mach-O guard (Step 1).
+
+- [ ] **Step 0: Sign Sparkle's nested bundles inside-out.** Before the existing
+  framework loop signs `Sparkle.framework`, sign each nested `.xpc`, then
+  `Updater.app`, then the `Autoupdate` executable, with the hardened runtime (no
+  entitlements needed — Sparkle isn't sandboxed here). Deepest-first, e.g.:
+
+```bash
+SPARKLE="$APP/Contents/Frameworks/Sparkle.framework"
+if [ -d "$SPARKLE" ]; then
+  echo "==> Signing Sparkle nested helpers (inside-out)"
+  for xpc in "$SPARKLE/Versions/B/XPCServices/"*.xpc; do
+    [ -e "$xpc" ] && codesign --force --sign "$IDENTITY" --options runtime --timestamp "$xpc"
+  done
+  [ -d "$SPARKLE/Versions/B/Updater.app" ] && \
+    codesign --force --sign "$IDENTITY" --options runtime --timestamp "$SPARKLE/Versions/B/Updater.app"
+  [ -f "$SPARKLE/Versions/B/Autoupdate" ] && \
+    codesign --force --sign "$IDENTITY" --options runtime --timestamp "$SPARKLE/Versions/B/Autoupdate"
+fi
+```
+
+  Then let the existing `*.framework` loop sign `Sparkle.framework` itself (now
+  that its innards are signed). Verify Sparkle's version tag (`Versions/B`) against
+  the pinned Sparkle release before shipping — bump the path if a future Sparkle
+  changes it.
 
 - [ ] **Step 1: Add a post-sign verification loop** before the final "Signed OK"
-  line:
+  line (this guard would *catch* the unsigned Sparkle helpers above, but Step 0 is
+  what actually *fixes* them):
 
 ```bash
 echo "==> Guard: every Mach-O must be signed with Team FSRSPV9N9Q"
