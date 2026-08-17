@@ -21,7 +21,7 @@
 	<key>SUEnableAutomaticChecks</key>
 	<true/>
 	<key>SUFeedURL</key>
-	<string>https://REPLACE_WITH_PUBLIC_HOST/qie/appcast.xml</string>
+	<string>https://playola-static.s3.amazonaws.com/downloads/QuickInterviewEditor/appcast.xml</string>
 	<key>SUPublicEDKey</key>
 	<string>WyAypjfp2RUEqO+iIb/iYTTYwVq5AaXJWUxT9pwzrog=</string>
 	<key>SUScheduledCheckInterval</key>
