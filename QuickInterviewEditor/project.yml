@@ -19,6 +19,9 @@ packages:
   XCTestDynamicOverlay:
     url: https://github.com/pointfreeco/xctest-dynamic-overlay
     from: "1.5.0"
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    exactVersion: "2.9.6"
 targets:
   QuickInterviewEditor:
     type: application
@@ -29,10 +32,33 @@ targets:
         buildPhase: resources
       - path: Resources/Fixtures/project-state.json
         buildPhase: resources
+    info:
+      path: QuickInterviewEditor/Info.plist
+      properties:
+        # Keep the version keys pointing at the build settings so MARKETING_VERSION /
+        # CURRENT_PROJECT_VERSION stay the single source of truth (XcodeGen would
+        # otherwise bake in literal "1.0"/"1" defaults here).
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        # Sparkle self-update. appcast.xml + DMG both live on the public
+        # `playola-static` S3 bucket under `downloads/QuickInterviewEditor/`,
+        # served by the raw S3 URL — exactly how the sibling PlayolaAudioProcessor
+        # distributes (no Netlify/CloudFront in the path). Feed goes live in PR 2.
+        # SUPublicEDKey is the EdDSA public key from the login-Keychain private key
+        # (Setup Task 0 — safe to ship publicly).
+        SUFeedURL: https://playola-static.s3.amazonaws.com/downloads/QuickInterviewEditor/appcast.xml
+        SUPublicEDKey: WyAypjfp2RUEqO+iIb/iYTTYwVq5AaXJWUxT9pwzrog=
+        SUEnableAutomaticChecks: true
+        SUScheduledCheckInterval: 86400
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: fm.playola.QuickInterviewEditor
         SWIFT_VERSION: "6.0"
+        # Single source of truth for the app version. sparkle:version ==
+        # CFBundleVersion (CURRENT_PROJECT_VERSION) — a monotonically increasing
+        # integer; CFBundleShortVersionString (MARKETING_VERSION) is the display.
+        MARKETING_VERSION: "1.0.0"
+        CURRENT_PROJECT_VERSION: "1"
         GENERATE_INFOPLIST_FILE: YES
         ENABLE_TESTABILITY: YES
         CODE_SIGN_STYLE: Automatic
@@ -46,6 +72,8 @@ targets:
         product: IdentifiedCollections
       - package: XCTestDynamicOverlay
         product: IssueReporting
+      - package: Sparkle
+        product: Sparkle
   QuickInterviewEditorTests:
     type: bundle.unit-test
     platform: macOS

@@ -31,6 +31,40 @@ struct AppLaunchTests {
     #expect(model.modelSetup != nil)
   }
 
+  @Test func viewAppearedStartsUpdater() {
+    let started = LockIsolated(false)
+    let model = withDependencies {
+      $0.modelDownloader.installedLocation = { _ in nil }
+      $0.updater = UpdaterClient(
+        start: { started.setValue(true) },
+        checkForUpdates: {},
+        canCheckForUpdates: { true })
+    } operation: {
+      AppLaunchModel(requiresManagedModels: false)
+    }
+
+    model.viewAppeared()
+    expectNoDifference(started.value, true)
+  }
+
+  @Test func viewAppearedRunsLaunchTasksOnlyOnce() {
+    let startCount = LockIsolated(0)
+    let model = withDependencies {
+      $0.modelDownloader.installedLocation = { _ in nil }
+      $0.updater = UpdaterClient(
+        start: { startCount.withValue { $0 += 1 } },
+        checkForUpdates: {},
+        canCheckForUpdates: { true })
+    } operation: {
+      AppLaunchModel(requiresManagedModels: false)
+    }
+
+    model.viewAppeared()
+    model.viewAppeared()
+    model.viewAppeared()
+    expectNoDifference(startCount.value, 1)
+  }
+
   @Test func modelSetupCompletionAdvancesToEditor() async {
     let installation = ModelInstallation(
       whisperModelDir: URL(fileURLWithPath: "/Models/w"),

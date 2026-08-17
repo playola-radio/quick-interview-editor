@@ -10,6 +10,9 @@ import Observation
 @Observable
 final class AppLaunchModel: ViewModel {
 
+  // MARK: - Dependencies
+  @ObservationIgnored @Dependency(\.updater) var updater
+
   // MARK: - Phase
   enum Phase: Equatable {
     case modelSetup
@@ -50,6 +53,23 @@ final class AppLaunchModel: ViewModel {
     }
   }
 
+  // MARK: - Properties
+  private var didRunLaunchTasks = false
+
   // MARK: - View Helpers
   var showsModelSetup: Bool { phase == .modelSetup }
+
+  // MARK: - User Actions
+  /// Run once on first appearance. `onAppear` can fire repeatedly (window reopen,
+  /// tab switches), so the one-shot guard keeps the relocation prompt from nagging
+  /// the user again and again within a single process. Relocation runs first; if it
+  /// kicks off a move + relaunch this process is terminating, so we skip starting
+  /// the updater here — the relocated copy starts its own on launch.
+  func viewAppeared() {
+    guard !didRunLaunchTasks else { return }
+    didRunLaunchTasks = true
+    let relocating = InstallLocation.offerMoveToApplicationsIfNeeded()
+    guard !relocating else { return }
+    updater.start()
+  }
 }

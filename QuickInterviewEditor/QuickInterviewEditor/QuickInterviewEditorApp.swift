@@ -13,6 +13,7 @@ struct QuickInterviewEditorApp: App {
     .defaultSize(width: 1200, height: 800)
     .commands {
       TranscriptionCommands(root: model.root)
+      UpdaterCommands()
     }
 
     Settings {
