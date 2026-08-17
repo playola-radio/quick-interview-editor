@@ -147,7 +147,12 @@ platform :mac do
         aws --profile #{profile} s3 cp "s3://#{bucket}/$key" packaging/dist/appcast.xml   # exists → must succeed
         echo "fetched existing appcast"
       elif printf '%s' "$err" | grep -qiE 'Not Found|404'; then
-        echo "no existing appcast — first release"
+        # Remote is genuinely absent → start a FRESH feed. packaging/dist is
+        # persistent + gitignored, so a leftover appcast.xml from a prior
+        # staging/prod run must be cleared, or appcast.rb would append stale
+        # entries (wrong URLs) and upload them under this prefix.
+        rm -f packaging/dist/appcast.xml
+        echo "no existing appcast — first release (cleared any stale local copy)"
       else
         echo "error: cannot read existing appcast (not a confirmed 404), aborting:" >&2
         printf '%s\\n' "$err" >&2; exit 1

@@ -22,13 +22,20 @@ SHORT="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Co
 BUILD="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP/Contents/Info.plist")"
 DMG="$DIST/QuickInterviewEditor-$SHORT-$BUILD.dmg"
 rm -f "$DMG"
+# create-dmg copies the CONTENTS of its source folder into the image, so it must be
+# given a folder that CONTAINS QuickInterviewEditor.app — not the .app itself (that
+# would copy Contents/… to the DMG root, leaving no app for --icon/--app-drop-link
+# and breaking drag-to-Applications). Stage the signed bundle into a clean temp dir.
+STAGE="$(mktemp -d "${TMPDIR:-/tmp}/qie-dmg.XXXXXX")"
+trap 'rm -rf "$STAGE"' EXIT
+/usr/bin/ditto "$APP" "$STAGE/QuickInterviewEditor.app"
 echo "==> Building DMG: $(basename "$DMG")"
 create-dmg \
   --volname "QuickInterviewEditor $SHORT" \
   --app-drop-link 480 200 \
   --icon "QuickInterviewEditor.app" 160 200 \
   --window-size 640 400 \
-  "$DMG" "$APP"
+  "$DMG" "$STAGE"
 echo "==> Signing the DMG (Developer ID)"
 codesign --force --sign "$IDENTITY" --timestamp "$DMG"
 echo "==> Notarizing the DMG"
