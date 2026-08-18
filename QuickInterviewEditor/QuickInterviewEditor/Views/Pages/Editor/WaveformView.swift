@@ -13,7 +13,7 @@ struct WaveformView: View {
       header
       WaveformLaneView(
         waveform: model.waveform,
-        playheadSample: model.playheadSample,
+        playhead: { model.playheadSample },
         highlightRange: model.activeEditingRange,
         onRulerMove: { model.rulerMovedPlayhead(toX: $0) },
         onBodyClick: { model.waveformClicked(atX: $0, extending: $1) },

@@ -16,7 +16,7 @@ import SwiftUI
 /// `waveform.playheadX(for:)` in their own bodies so only they reposition on a tick.
 struct WaveformLaneView<Overlay: View>: View {
   let waveform: WaveformModel
-  let playheadSample: Int?
+  let playhead: () -> Int?
   let highlightRange: Range<Int>?
   let onRulerMove: (CGFloat) -> Void
   let onBodyClick: (CGFloat, Bool) -> Void
@@ -62,7 +62,7 @@ struct WaveformLaneView<Overlay: View>: View {
   private var rulerStrip: some View {
     ZStack(alignment: .leading) {
       Color(white: 0.1)
-      RulerPlayhead(waveform: waveform, playheadSample: playheadSample)
+      RulerPlayhead(waveform: waveform, playhead: playhead)
     }
     .frame(maxWidth: .infinity)
     .frame(height: stripHeight)
@@ -81,7 +81,7 @@ struct WaveformLaneView<Overlay: View>: View {
     } else {
       ZStack(alignment: .leading) {
         WaveformCanvas(waveform: waveform, highlight: highlight)
-        WaveformPlayhead(waveform: waveform, playheadSample: playheadSample)
+        WaveformPlayhead(waveform: waveform, playhead: playhead)
       }
     }
   }
@@ -130,10 +130,10 @@ private struct WaveformCanvas: View {
 /// waveform canvas.
 private struct WaveformPlayhead: View {
   let waveform: WaveformModel
-  let playheadSample: Int?
+  let playhead: () -> Int?
 
   var body: some View {
-    if let sample = playheadSample, let positionX = waveform.playheadX(for: sample) {
+    if let sample = playhead(), let positionX = waveform.playheadX(for: sample) {
       Rectangle()
         .fill(Color(red: 0.96, green: 0.86, blue: 0.4))
         .frame(width: 1.5)
@@ -148,10 +148,10 @@ private struct WaveformPlayhead: View {
 /// geometry as the band's playhead, so the two read as one continuous line.
 private struct RulerPlayhead: View {
   let waveform: WaveformModel
-  let playheadSample: Int?
+  let playhead: () -> Int?
 
   var body: some View {
-    if let sample = playheadSample, let positionX = waveform.playheadX(for: sample) {
+    if let sample = playhead(), let positionX = waveform.playheadX(for: sample) {
       Rectangle()
         .fill(Color(red: 0.96, green: 0.86, blue: 0.4))
         .frame(width: 1.5)
