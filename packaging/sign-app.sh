@@ -96,13 +96,31 @@ echo "==> Guard: every Mach-O must be signed with Team FSRSPV9N9Q"
 # `file` prints an extra line per slice for universal binaries — e.g.
 # "…/Autoupdate (for architecture arm64): …" — whose cut(1) prefix is a pseudo-path
 # that doesn't exist. Drop those with `sort -u` + a real-file test so fat binaries
-# (Sparkle ships x86_64+arm64) don't produce false "unsigned" hits that abort a
-# correctly-signed release.
+# (Sparkle ships x86_64+arm64) don't produce false "unsigned" hits.
+#
+# CRITICAL: distinguish "codesign could not read the signature" (a TRANSIENT failure
+# — running hundreds of `codesign -dvvv` in a tight loop right after sealing a
+# multi-GB bundle intermittently errors on read) from "read OK but wrong/absent
+# team" (a REAL problem). Only a *successful* read (exit 0) is trusted; a read error
+# is retried with backoff. Ignoring codesign's exit status here previously flagged
+# ~330 correctly-signed binaries and aborted a valid release.
+guard_team_ok() { # $1=path -> 0 our team, 1 wrong/absent team (retries transient read errors)
+  local m="$1" i out
+  for i in 1 2 3 4 5; do
+    if out="$(codesign -dvvv "$m" 2>&1)"; then      # exit 0 => signature was read
+      printf '%s' "$out" | grep -q "TeamIdentifier=FSRSPV9N9Q"
+      return                                        # grep's status: 0 our team, 1 not
+    fi
+    sleep 0.5                                        # read failed transiently; settle + retry
+  done
+  echo "   (codesign never read $m after retries)" >&2
+  return 1
+}
 unsigned=0
 while IFS= read -r macho; do
   [ -z "$macho" ] && continue
   [ -f "$macho" ] || continue
-  if ! codesign -dvvv "$macho" 2>&1 | grep -q "TeamIdentifier=FSRSPV9N9Q"; then
+  if ! guard_team_ok "$macho"; then
     echo "   UNSIGNED/wrong-team: $macho" >&2
     unsigned=$((unsigned + 1))
   fi
