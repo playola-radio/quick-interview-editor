@@ -38,6 +38,9 @@ final class EditorModel: ViewModel {
   var waveform: WaveformModel
   var fineTune: FineTuneModel
   var cutSuggestions: CutSuggestionsPageModel
+  /// The slice-detail edit modal, presented when non-nil. A separate, scoped model — distinct
+  /// from `fineTune`, which drives the docked pane — so the two can't fight over one session.
+  var editSlice: EditSliceModel?
 
   init(sourceURL: URL, canonicalAudioURL: URL, editPlan: EditPlan, sourceFingerprint: String? = nil)
   {
@@ -381,16 +384,27 @@ final class EditorModel: ViewModel {
       if isTransportPaused { continue }
       if position.isPlaying {
         playheadSample = position.sample
+        // The slice-detail edit modal owns its own scoped playhead/transcript while it's the
+        // playback context, so push the live position into it here — the modal has no other way
+        // to see ticks from the shared player.
+        if case .sliceEdit = transportContext {
+          editSlice?.updatePlayback(sample: position.sample, isPlaying: true)
+        }
         // The listen contexts (a plain Play and slice playback) drive transcript auto-scroll
         // follow, so reading along works during a plain Play, not only slice playback. Preview/
         // audition update the cursor (and thus the highlight) but must not yank the transcript
         // from where the user scrolled.
         transcript.playheadChanged(
           sample: position.sample, isPlaying: transportContext.followsTranscript)
-      } else if transportContext.followsTranscript {
-        // A false tick ends transcript follow (so the next playback reads as a rising edge) but
-        // leaves the cursor and the current-word highlight where the audio stopped.
-        endTranscriptFollow()
+      } else {
+        if transportContext.followsTranscript {
+          // A false tick ends transcript follow (so the next playback reads as a rising edge) but
+          // leaves the cursor and the current-word highlight where the audio stopped.
+          endTranscriptFollow()
+        }
+        if case .sliceEdit = transportContext {
+          editSlice?.updatePlayback(sample: playheadSample, isPlaying: false)
+        }
       }
     }
   }
@@ -717,6 +731,37 @@ final class EditorModel: ViewModel {
   func zoomWaveformToSelection() {
     guard let range = transcript.selectedSampleRange else { return }
     waveform.zoomToFit(range, paddingFraction: waveformFramePadding)
+  }
+
+  // MARK: - Slice-detail edit modal
+
+  /// Opens the slice-detail edit modal for `id`, scoped to that slice's own fine-tune session.
+  /// Guarded the same way switching the docked pane's target is (`hasUnsavedChange`) so opening
+  /// the modal can't silently strand or clobber an in-flight docked-pane edit.
+  func editSliceTapped(_ id: Slice.ID) {
+    guard let slice = slices[id: id], !fineTune.hasUnsavedChange else { return }
+    let child = EditSliceModel(slice: slice, editPlan: editPlan)
+    child.columnsProvider = { [weak self] window, width in
+      self?.waveform.columns(in: window, pixelWidth: width) ?? []
+    }
+    child.onCommit = { [weak self] range in self?.commitSliceEdit(id: id, range: range) }
+    child.onPlay = { [weak self] range in
+      await self?.beginTransportPlayback(range: range, context: .sliceEdit)
+    }
+    child.onPause = { [weak self] in await self?.transportPauseTapped() }
+    child.onStop = { [weak self] in await self?.transportStopTapped() }
+    // R4: the transport always plays a whole range, never from an arbitrary point, so seeking
+    // inside the modal repositions the persistent cursor rather than re-anchoring playback.
+    child.onSeek = { [weak self] sample in
+      guard let self else { return }
+      playheadSample = sample
+      editSlice?.updatePlayback(sample: sample, isPlaying: isTransportPlaying)
+    }
+    child.onDismiss = { [weak self] in
+      Task { await self?.transportStopTapped() }
+      self?.editSlice = nil
+    }
+    editSlice = child
   }
 
   func addSliceTapped() {
