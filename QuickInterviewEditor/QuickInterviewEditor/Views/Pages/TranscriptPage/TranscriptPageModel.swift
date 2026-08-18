@@ -392,6 +392,16 @@ class TranscriptPageModel: ViewModel {
     if word != scrollTargetWordID { scrollTargetWordID = word }
   }
 
+  /// Sets the current-word HIGHLIGHT to the word under `sample`, mirroring how `EditorModel`
+  /// drives the main editor's `currentWordID` from its persistent cursor — used by a scoped
+  /// transcript (the slice-detail modal) that has no `EditorModel` to do it for them. Keeps the
+  /// last word in a gap (never clears on a nil lookup) and only writes on a real change so a
+  /// fast-ticking playhead doesn't churn the transcript view.
+  func currentWordChanged(toSample sample: Int?) {
+    guard let sample, let word = wordID(atSample: sample), word != currentWordID else { return }
+    currentWordID = word
+  }
+
   /// The word whose audio contains `sample`, or nil when it lands in a gap / past the end.
   private func wordID(atSample sample: Int) -> Word.ID? {
     editPlan?.words.first { word in

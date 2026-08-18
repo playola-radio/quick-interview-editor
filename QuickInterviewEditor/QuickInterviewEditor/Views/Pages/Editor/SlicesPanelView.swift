@@ -124,9 +124,9 @@ private struct SliceCard: View {
         Button(row.playButtonLabel) {
           Task { await model.playSliceTapped(row.id) }
         }
-        // "Edit cuts" (fine-tune) is deferred with the rest of the boundary-editing UI, so it's
-        // not offered on a clip in this flow. `sliceSelected` / the fine-tune model stay for
-        // when it returns.
+        Button(model.editSliceLabel) {
+          model.editSliceTapped(row.id)
+        }
         Button(model.exportLabel) {
           model.exportSliceTapped(row.id)
         }
@@ -150,6 +150,9 @@ private struct SliceCard: View {
     .overlay(
       RoundedRectangle(cornerRadius: 11)
         .stroke(Color(red: 0.8, green: 0.4, blue: 0.4), lineWidth: row.isActive ? 1.5 : 0)
+    )
+    .simultaneousGesture(
+      TapGesture(count: 2).onEnded { model.editSliceTapped(row.id) }
     )
   }
 }

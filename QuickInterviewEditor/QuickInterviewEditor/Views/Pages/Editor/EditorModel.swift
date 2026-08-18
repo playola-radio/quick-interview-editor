@@ -38,6 +38,9 @@ final class EditorModel: ViewModel {
   var waveform: WaveformModel
   var fineTune: FineTuneModel
   var cutSuggestions: CutSuggestionsPageModel
+  /// The slice-detail edit modal, presented when non-nil. A separate, scoped model — distinct
+  /// from `fineTune`, which drives the docked pane — so the two can't fight over one session.
+  var editSlice: EditSliceModel?
 
   init(sourceURL: URL, canonicalAudioURL: URL, editPlan: EditPlan, sourceFingerprint: String? = nil)
   {
@@ -159,6 +162,7 @@ final class EditorModel: ViewModel {
   let playLabel = "Play"
   let stopLabel = "Stop"
   let deleteLabel = "Delete slice"
+  let editSliceLabel = "Edit"
   let exportLabel = "Export"
   let exportAllLabel = "Export all"
   let cancelExportLabel = "Cancel export"
@@ -381,16 +385,27 @@ final class EditorModel: ViewModel {
       if isTransportPaused { continue }
       if position.isPlaying {
         playheadSample = position.sample
+        // The slice-detail edit modal owns its own scoped playhead/transcript while it's the
+        // playback context, so push the live position into it here — the modal has no other way
+        // to see ticks from the shared player.
+        if case .sliceEdit = transportContext {
+          editSlice?.updatePlayback(sample: position.sample, isPlaying: true)
+        }
         // The listen contexts (a plain Play and slice playback) drive transcript auto-scroll
         // follow, so reading along works during a plain Play, not only slice playback. Preview/
         // audition update the cursor (and thus the highlight) but must not yank the transcript
         // from where the user scrolled.
         transcript.playheadChanged(
           sample: position.sample, isPlaying: transportContext.followsTranscript)
-      } else if transportContext.followsTranscript {
-        // A false tick ends transcript follow (so the next playback reads as a rising edge) but
-        // leaves the cursor and the current-word highlight where the audio stopped.
-        endTranscriptFollow()
+      } else {
+        if transportContext.followsTranscript {
+          // A false tick ends transcript follow (so the next playback reads as a rising edge) but
+          // leaves the cursor and the current-word highlight where the audio stopped.
+          endTranscriptFollow()
+        }
+        if case .sliceEdit = transportContext {
+          editSlice?.updatePlayback(sample: playheadSample, isPlaying: false)
+        }
       }
     }
   }
@@ -719,6 +734,80 @@ final class EditorModel: ViewModel {
     waveform.zoomToFit(range, paddingFraction: waveformFramePadding)
   }
 
+  // MARK: - Slice-detail edit modal
+
+  /// Opens the slice-detail edit modal for `id`, scoped to that slice's own fine-tune session.
+  /// Guarded the same way switching the docked pane's target is (`hasUnsavedChange`) so opening
+  /// the modal can't silently strand or clobber an in-flight docked-pane edit.
+  func editSliceTapped(_ id: Slice.ID) {
+    guard let slice = slices[id: id], !fineTune.hasUnsavedChange else { return }
+    // Opening the modal supersedes any in-progress MAIN playback — the main timeline and its
+    // hidden transcript shouldn't keep running behind the sheet. Snapshot-stop it (covers a PAUSED
+    // main transport too, not just a playing one) so this stop, which may land after the modal's
+    // own Play has started a fresh `.sliceEdit` session, can never kill that newer session.
+    stopActiveTransportSnapshotting()
+    let child = EditSliceModel(slice: slice, editPlan: editPlan)
+    child.columnsProvider = { [weak self] window, width in
+      self?.waveform.columns(in: window, pixelWidth: width) ?? []
+    }
+    child.onCommit = { [weak self] range in self?.commitSliceEdit(id: id, range: range) }
+    child.onPlay = { [weak self] range in
+      guard let self else { return }
+      // Resume the paused `.sliceEdit` session in place ONLY when its scheduled range still
+      // matches — a nudge while paused changes the draft, so a drifted range must start a fresh
+      // play from the new boundaries rather than resume the stale one. Any other phase (stopped,
+      // or some foreign paused context) begins a fresh `.sliceEdit` playback.
+      if isTransportPaused, case .sliceEdit = transportContext, transportRange == range {
+        await transportPlayTapped()
+        // Resume can fail (e.g. an engine restart) and leave the phase paused. The modal set
+        // `isPlaying` optimistically, so publish the TRUE phase back or its button would lie —
+        // showing Pause over silent, paused audio.
+        editSlice?.updatePlayback(sample: playheadSample, isPlaying: isTransportPlaying)
+      } else {
+        await beginTransportPlayback(range: range, context: .sliceEdit)
+      }
+    }
+    child.onPause = { [weak self] in await self?.transportPauseTapped() }
+    child.onStop = { [weak self] in await self?.transportStopTapped() }
+    // R4: the transport always plays a whole range, never from an arbitrary point, so seeking
+    // inside the modal repositions the persistent cursor rather than re-anchoring playback.
+    // v1 decision: this does NOT re-anchor an active play — a click-to-seek during playback is a
+    // cursor reposition only, and the next position tick overwrites it. Deferred to a later pass.
+    child.onSeek = { [weak self] sample in
+      guard let self else { return }
+      playheadSample = sample
+      editSlice?.updatePlayback(sample: sample, isPlaying: isTransportPlaying)
+    }
+    child.onDismiss = { [weak self] in
+      self?.stopActiveTransportSnapshotting()
+      self?.editSlice = nil
+    }
+    editSlice = child
+  }
+
+  /// Stops whatever playback the transport currently owns, capturing its session SYNCHRONOUSLY so
+  /// a later async stop can't kill a newer session. Mirrors `transportStopTapped` (returns the
+  /// cursor to origin, stops OUR session only) but is safe to call across a modal open/dismiss
+  /// transition where a fresh `.sliceEdit` session may start right after this returns. Idempotent:
+  /// a no-op when nothing is playing, so overlapping open/dismiss stop paths can all call it.
+  func stopActiveTransportSnapshotting() {
+    guard let session = transportPhase.session else { return }
+    if let origin = transportOriginSample { playheadSample = origin }
+    resetTransportState()
+    endTranscriptFollow()
+    Task { [weak self] in await self?.stopOwnedPlayback(session) }
+  }
+
+  /// The SwiftUI `sheet(onDismiss:)` hook — covers Escape / outside-click dismissals that bypass
+  /// the Save/Cancel buttons. Guarded on `editSlice == nil` so a rapid dismiss→reopen can't let
+  /// this stale callback (it fires after the dismissal transaction) stop the NEXT modal's freshly
+  /// started session: when a new modal is already present it owns its own transport lifecycle, and
+  /// the old modal's session was already stopped by its dismiss path or by the new modal's open.
+  func sliceEditSheetDismissed() {
+    guard editSlice == nil else { return }
+    stopActiveTransportSnapshotting()
+  }
+
   func addSliceTapped() {
     guard canAddSlice, let range = transcript.selectedSampleRange else { return }
     let wordIDs = transcript.orderedSelectedWordIDs
@@ -956,11 +1045,22 @@ final class EditorModel: ViewModel {
     // (`.stopped`) likewise leaves the cursor put.
     guard transportPhase.session == session else { return }
     if outcome == .finished { playheadSample = range.upperBound }
+    // Capture the slice-edit child (if this playback was the modal's) BEFORE the reset clears the
+    // context — reaching here past the session guard means the modal wasn't torn down, so this IS
+    // the owning modal. A natural finish / cross-tab supersede must publish "stopped" back to it.
+    let owningSliceEdit: EditSliceModel? = {
+      if case .sliceEdit = transportContext { return editSlice }
+      return nil
+    }()
     resetTransportState()
     // Reset transcript follow here too: on a cross-tab `.superseded` (and on a natural end whose
     // final stop tick races this cleanup) `observePlayback` may never see a gated false tick, so
     // without this a slice's `wasPlaying` stays true and the next slice misses its rising edge.
     endTranscriptFollow()
+    // The position loop drops the trailing false tick on a natural finish (the reset above cleared
+    // the session it guards on), so the modal would never learn it stopped without this explicit
+    // publish. `stopTapped`/dismiss handle their own paths; this covers finish + cross-tab supersede.
+    owningSliceEdit?.updatePlayback(sample: playheadSample, isPlaying: false)
   }
 
   /// Pause button. Freezes the cursor at the exact sample the player reports and holds the
@@ -1137,7 +1237,7 @@ final class EditorModel: ViewModel {
   /// guarded). A no-op unless a preview or audition is the current context.
   private func cancelPreviewOrAuditionIfNeeded() {
     switch transportContext {
-    case .draftPreview, .audition: break
+    case .draftPreview, .audition, .sliceEdit: break
     case .free, .slice: return
     }
     let session = transportPhase.session
@@ -1163,6 +1263,16 @@ final class EditorModel: ViewModel {
     fineTune.nudgeCutOut(byMs: deltaMs)
   }
 
+  /// Commits an existing slice's cut points to `range` as exactly ONE `mutateSlices` (one undo
+  /// entry): word IDs, snippet, and warnings are re-derived from the new range. A no-op if the
+  /// slice no longer exists (e.g. deleted out from under an in-flight edit).
+  func commitSliceEdit(id: Slice.ID, range: Range<Int>) {
+    guard slices[id: id] != nil else { return }
+    mutateSlices { slices in
+      if let slice = slices[id: id] { slices[id: id] = updatedSlice(slice, to: range) }
+    }
+  }
+
   /// Commits the draft as exactly ONE `mutateSlices` (one undo entry) for a whole drag: an
   /// existing slice's cut points are updated (word IDs + snippet + warnings re-derived from
   /// the new range); a pending selection becomes a new slice. No-op when nothing changed.
@@ -1171,10 +1281,7 @@ final class EditorModel: ViewModel {
     else { return }
     switch target {
     case .slice(let id):
-      guard slices[id: id] != nil else { return }
-      mutateSlices { slices in
-        if let slice = slices[id: id] { slices[id: id] = updatedSlice(slice, to: draft) }
-      }
+      commitSliceEdit(id: id, range: draft)
       fineTune.markCommitted(draft)
     case .pendingSelection:
       let slice = makeSlice(range: draft)
@@ -1541,6 +1648,10 @@ enum TransportContext: Equatable {
   case slice(Slice.ID)
   case draftPreview
   case audition(EditorModel.AuditionMode)
+  /// Previewing a boundary edit made inside the slice-detail edit modal. Treated like
+  /// `.draftPreview`: no slice-row highlight, and the main transcript must not follow while the
+  /// modal previews.
+  case sliceEdit
 
   /// True while a saved slice is the playing context — drives the slice-row "playing" highlight.
   var isSlice: Bool {
@@ -1554,7 +1665,7 @@ enum TransportContext: Equatable {
   var followsTranscript: Bool {
     switch self {
     case .free, .slice: return true
-    case .draftPreview, .audition: return false
+    case .draftPreview, .audition, .sliceEdit: return false
     }
   }
   /// The playing slice's id, or nil when a slice isn't the current context.
