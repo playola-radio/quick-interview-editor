@@ -635,15 +635,9 @@ final class EditorModel: ViewModel {
     deltaX: CGFloat, deltaY: CGFloat, hasPreciseDeltas: Bool,
     optionDown: Bool, commandDown: Bool, atX positionX: CGFloat
   ) {
-    guard deltaX.isFinite, deltaY.isFinite else { return }
-    if commandDown {
-      waveform.zoomByFactor(
-        Self.scrollZoomFactor(deltaY: deltaY, hasPreciseDeltas: hasPreciseDeltas),
-        anchoredAtX: positionX)
-    } else {
-      waveform.panByPixels(
-        Self.scrollPanPixels(deltaX: deltaX, deltaY: deltaY, hasPreciseDeltas: hasPreciseDeltas))
-    }
+    waveform.scrolled(
+      deltaX: deltaX, deltaY: deltaY, hasPreciseDeltas: hasPreciseDeltas,
+      optionDown: optionDown, commandDown: commandDown, atX: positionX)
   }
   // swiftlint:enable function_parameter_count
 
@@ -1603,24 +1597,6 @@ final class EditorModel: ViewModel {
 
   private func cancelMessage(copied: Int, total: Int) -> String {
     "Export cancelled — \(copied) of \(total) exported."
-  }
-
-  /// Points a line-based mouse wheel "click" is worth (trackpads report pixel-precise deltas
-  /// already). Pan/zoom sensitivity constants; on-screen direction verified in QA.
-  private static let pointsPerScrollLine: CGFloat = 40
-  private static let pixelsPerZoomDouble = 300.0
-
-  private static func scrollPanPixels(
-    deltaX: CGFloat, deltaY: CGFloat, hasPreciseDeltas: Bool
-  ) -> CGFloat {
-    let primary = abs(deltaX) >= abs(deltaY) ? deltaX : deltaY
-    return hasPreciseDeltas ? primary : primary * pointsPerScrollLine
-  }
-
-  private static func scrollZoomFactor(deltaY: CGFloat, hasPreciseDeltas: Bool) -> Double {
-    let dy = Double(hasPreciseDeltas ? deltaY : deltaY * pointsPerScrollLine)
-    // spp *= factor; scrolling "away" should zoom in (spp < 1). Flip the sign in QA if inverted.
-    return pow(2.0, -dy / pixelsPerZoomDouble)
   }
 }
 
