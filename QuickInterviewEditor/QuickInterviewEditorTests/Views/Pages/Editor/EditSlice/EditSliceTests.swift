@@ -127,4 +127,52 @@ struct EditSliceTests {
     #expect(model.playheadSample == 15_000)
     #expect(model.isPlaying == true)
   }
+
+  // MARK: - FIX 1: isPlaying resets on Pause/Stop (the modal's play/pause button no longer wedges)
+
+  @Test func pauseTappedResetsIsPlaying() async {
+    let (model, _) = makeModel()
+    model.updatePlayback(sample: 12_000, isPlaying: true)
+
+    await model.playPauseTapped()  // isPlaying, so this pauses
+
+    #expect(model.isPlaying == false)
+  }
+
+  @Test func stopTappedResetsIsPlaying() async {
+    let (model, _) = makeModel()
+    model.updatePlayback(sample: 12_000, isPlaying: true)
+
+    await model.stopTapped()
+
+    #expect(model.isPlaying == false)
+  }
+
+  @Test func playTappedFromStoppedSetsIsPlayingAndPlaysTheDraftRange() async {
+    let (model, slice) = makeModel()
+    var played: [Range<Int>] = []
+    model.onPlay = { played.append($0) }
+
+    await model.playPauseTapped()  // not playing, so this plays
+
+    #expect(model.isPlaying == true)
+    expectNoDifference(played, [slice.startSample..<slice.endSample])
+  }
+
+  // MARK: - FIX 2: updatePlayback highlights the current word in the scoped transcript
+
+  @Test func updatePlaybackHighlightsTheCurrentWordInTheScopedTranscript() {
+    let plan = Fixtures.editPlan()
+    let sliceWordIDs = Array(plan.words.prefix(3).map(\.id))
+    let slice = Slice(
+      id: UUID(), name: "S", startSample: 0, endSample: 20_000,
+      wordIDs: sliceWordIDs, snippet: "", warnings: [])
+    let model = EditSliceModel(slice: slice, editPlan: plan)
+    let targetWord = plan.words.first { $0.id == sliceWordIDs[1] }!
+    let sampleInsideWord = targetWord.startSample!
+
+    model.updatePlayback(sample: sampleInsideWord, isPlaying: true)
+
+    expectNoDifference(model.transcript.currentWordID, targetWord.id)
+  }
 }

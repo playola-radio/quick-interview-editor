@@ -741,6 +741,12 @@ final class EditorModel: ViewModel {
   /// the modal can't silently strand or clobber an in-flight docked-pane edit.
   func editSliceTapped(_ id: Slice.ID) {
     guard let slice = slices[id: id], !fineTune.hasUnsavedChange else { return }
+    // Opening the modal supersedes any in-progress MAIN playback — the main timeline and its
+    // hidden transcript shouldn't keep running behind the sheet. The modal's own later Play starts
+    // a fresh `.sliceEdit` session, so this only needs to stop what's already going.
+    if isTransportPlaying {
+      Task { await transportStopTapped() }
+    }
     let child = EditSliceModel(slice: slice, editPlan: editPlan)
     child.columnsProvider = { [weak self] window, width in
       self?.waveform.columns(in: window, pixelWidth: width) ?? []
@@ -753,6 +759,8 @@ final class EditorModel: ViewModel {
     child.onStop = { [weak self] in await self?.transportStopTapped() }
     // R4: the transport always plays a whole range, never from an arbitrary point, so seeking
     // inside the modal repositions the persistent cursor rather than re-anchoring playback.
+    // v1 decision: this does NOT re-anchor an active play — a click-to-seek during playback is a
+    // cursor reposition only, and the next position tick overwrites it. Deferred to a later pass.
     child.onSeek = { [weak self] sample in
       guard let self else { return }
       playheadSample = sample

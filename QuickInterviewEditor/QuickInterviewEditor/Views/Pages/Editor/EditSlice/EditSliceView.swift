@@ -76,12 +76,17 @@ private struct SliceOverviewWaveform: View {
   }
 
   private func playheadX(width: CGFloat) -> CGFloat? {
-    guard let sample = model.playheadSample, model.overviewWindow.contains(sample) else {
+    // Inclusive of the upper bound: the transport rests the cursor at `range.upperBound` on a
+    // natural finish, and a right-edge click resolves to `upperBound` too, so a half-open
+    // `contains` would wrongly hide the playhead exactly at the slice's end.
+    guard let sample = model.playheadSample,
+      (model.overviewWindow.lowerBound...model.overviewWindow.upperBound).contains(sample)
+    else {
       return nil
     }
     let fraction =
       Double(sample - model.overviewWindow.lowerBound) / Double(model.overviewWindow.count)
-    return width * CGFloat(fraction)
+    return min(width, width * CGFloat(fraction))
   }
 
   private func sample(atX positionX: CGFloat, width: CGFloat) -> Int {

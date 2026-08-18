@@ -89,12 +89,17 @@ final class EditSliceModel: ViewModel, Identifiable {
   func playPauseTapped() async {
     if isPlaying {
       await onPause()
+      isPlaying = false
     } else if let range = fineTune.draftRange ?? fineTune.committedRange {
       await onPlay(range)
+      isPlaying = true
     }
   }
 
-  func stopTapped() async { await onStop() }
+  func stopTapped() async {
+    await onStop()
+    isPlaying = false
+  }
 
   func seekTapped(toSample sample: Int) async { await onSeek(sample) }
 
@@ -103,5 +108,6 @@ final class EditSliceModel: ViewModel, Identifiable {
     playheadSample = sample
     self.isPlaying = isPlaying
     transcript.playheadChanged(sample: sample, isPlaying: isPlaying)
+    transcript.currentWordChanged(toSample: sample)
   }
 }

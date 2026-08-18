@@ -37,7 +37,16 @@ struct EditorView: View {
       }
     )
     .background(EditorKeyMonitor(model: model))
-    .sheet(item: $model.editSlice) { EditSliceView(model: $0) }
+    // `onDismiss` covers EVERY way the sheet can go away — Save, Cancel, AND an Escape-key/
+    // outside-click dismissal that bypasses both buttons — so `.sliceEdit` transport can never be
+    // left orphaned. `transportStopTapped` is idempotent (`canTransportStop` guards it), so the
+    // button paths' own `Task { await model.transportStopTapped() }` in `onDismiss` (wired in
+    // `editSliceTapped`) double-stopping here is harmless.
+    .sheet(
+      item: $model.editSlice,
+      onDismiss: { Task { await model.transportStopTapped() } },
+      content: { EditSliceView(model: $0) }
+    )
     .task { await model.loadWaveform() }
     .task { await model.observePlayback() }
     // Kick off a background suggestion pass as soon as the file is open, so the user lands on
