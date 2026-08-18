@@ -179,9 +179,11 @@ tree with a never-reused `CFBundleVersion`. Env overrides (defaults shown):
 `RELEASE_DOWNLOAD_HOST=https://playola-static.s3.amazonaws.com`,
 `AWS_PROFILE=default`.
 
-To rehearse without touching S3, point the release at a **staging prefix**
-(`RELEASE_S3_PREFIX=downloads/QuickInterviewEditor-staging`, matching
-`RELEASE_DOWNLOAD_HOST`) and run the checklist against that URL.
+To rehearse without changing production objects, point the release at a
+**staging prefix** (`RELEASE_S3_PREFIX=downloads/QuickInterviewEditor-staging`,
+matching `RELEASE_DOWNLOAD_HOST`) and run the checklist against that URL. This
+still uploads to S3 — `release` always does — it just isolates the artifacts
+under a separate prefix so the production feed and DMGs are untouched.
 
 ### Release-verification checklist (run every release, before announcing)
 
@@ -239,9 +241,20 @@ the forced rotation.
 
 ### Rollback
 
-Old DMGs stay in S3 (the release never deletes them). To roll back, point the
-appcast's latest `<item>` enclosure back at a prior DMG's URL (or re-run
-`appcast.rb` against the older DMG) and re-upload `appcast.xml`.
+Old DMGs stay in S3 (the release never deletes them), and every prior release's
+`<item>` stays in `appcast.xml`. To pull a bad release, **remove its `<item>`**
+from `appcast.xml` (the one whose `sparkle:version` matches the bad build) and
+re-upload `appcast.xml` — the previous good `<item>` becomes the newest offered
+update again.
+
+Do **not** just retarget the latest item's enclosure at an older DMG: that pairs
+a newer `sparkle:version` with an older app bundle (whose `CFBundleVersion` no
+longer matches), which Sparkle treats inconsistently. And do **not** re-run
+`appcast.rb` against the older DMG: it only replaces the item with that same
+`sparkle:version`, leaving the bad newer item in the feed and still selected.
+
+Sparkle does not downgrade, so users already on the bad build won't revert
+automatically — ship a fixed **higher** version to reach them.
 
 ## How the app finds the engine
 

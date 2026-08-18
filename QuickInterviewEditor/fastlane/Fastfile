@@ -120,7 +120,14 @@ platform :mac do
     { "RELEASE_S3_BUCKET" => bucket, "RELEASE_S3_PREFIX" => prefix, "AWS_PROFILE" => profile }.each do |k, v|
       UI.user_error!("#{k} has unexpected characters: #{v.inspect}") unless v.match?(%r{\A[A-Za-z0-9._/-]+\z})
     end
-    UI.user_error!("RELEASE_DOWNLOAD_HOST must be https: #{host.inspect}") unless host.start_with?("https://")
+    # Strict URL charset (not just an https: prefix): `host` is interpolated into
+    # single-quoted `sh` commands below via `url`, so a value like
+    # `https://h'; rm -rf ~ #` would break out of the quotes. Allow only
+    # scheme://host[:port][/path] over a safe charset — no quotes, spaces, or shell
+    # metacharacters — same fail-closed posture as the bucket/prefix/profile checks.
+    unless host.match?(%r{\Ahttps://[A-Za-z0-9.-]+(?::\d+)?(?:/[A-Za-z0-9._/-]*)?\z})
+      UI.user_error!("RELEASE_DOWNLOAD_HOST must be a plain https URL with no shell metacharacters: #{host.inspect}")
+    end
 
     sh("cd ../.. && packaging/package-engine.sh")
     sh("cd ../.. && packaging/package-cut-suggester.sh")
