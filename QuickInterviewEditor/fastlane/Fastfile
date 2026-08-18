@@ -184,7 +184,10 @@ platform :mac do
     # Server-side S3->S3 copy of the DMG just uploaded — no multi-GB re-upload from
     # here. no-cache so a click always fetches the newest release (not a cached old
     # one); explicit disk-image content-type so browsers download rather than sniff.
-    sh("cd ../.. && aws --profile #{profile} s3 cp 's3://#{bucket}/#{prefix}/#{name}' 's3://#{bucket}/#{prefix}/QuickInterviewEditor-latest.dmg' --content-type application/x-apple-diskimage --cache-control no-cache")
+    # --metadata-directive REPLACE is REQUIRED: an S3->S3 copy defaults to preserving
+    # the source's metadata, which would silently drop our cache-control/content-type
+    # and let the stable URL serve a stale installer from a cache.
+    sh("cd ../.. && aws --profile #{profile} s3 cp 's3://#{bucket}/#{prefix}/#{name}' 's3://#{bucket}/#{prefix}/QuickInterviewEditor-latest.dmg' --metadata-directive REPLACE --content-type application/x-apple-diskimage --cache-control no-cache")
 
     sh("cd ../.. && aws --profile #{profile} s3 cp packaging/dist/appcast.xml 's3://#{bucket}/#{prefix}/appcast.xml' --content-type application/xml --cache-control no-cache")
 
