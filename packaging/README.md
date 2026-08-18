@@ -136,11 +136,26 @@ place, preserving the user's Keychain-stored API key.
 packaging/make-dmg.sh    # 6. hdiutil -> sign + notarize + staple the DMG
 sparkle sign_update <dmg>  # 7. EdDSA-sign the DMG (private key from login Keychain)
 packaging/appcast.rb …   # 8. append a signed <item> to appcast.xml (idempotent)
-aws s3 cp …              # 9. upload DMG (kept for rollback) + appcast.xml (no-cache)
+aws s3 cp …              # 9. upload versioned DMG (kept for rollback), copy it to
+                         #    QuickInterviewEditor-latest.dmg, upload appcast.xml (no-cache)
 ```
 
 All nine steps run from **one lane**, locally (Decision 3 — the multi-GB
 Apple-Silicon engine freeze is impractical on hosted CI).
+
+### Website download link
+
+The lane also server-side-copies each release's DMG to a **stable** key,
+`QuickInterviewEditor-latest.dmg`, so the website link never needs updating.
+Point the site's download button at:
+
+```
+https://playola-static.s3.amazonaws.com/downloads/QuickInterviewEditor/QuickInterviewEditor-latest.dmg
+```
+
+It is uploaded `--cache-control no-cache`, so a click always fetches the newest
+release. This is the **first-install** path only; existing users update in place
+via Sparkle (the appcast points at the versioned DMG, not `latest`).
 
 ### Prerequisites (one-time)
 
