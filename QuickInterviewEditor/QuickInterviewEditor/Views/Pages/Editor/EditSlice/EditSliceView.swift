@@ -68,7 +68,9 @@ private struct SliceOverviewWaveform: View {
           cutLine(width: width, fraction: fraction)
         }
         if let fraction = model.overviewPlayheadFraction {
-          Rectangle().fill(playheadColor).frame(width: 1.5).offset(x: width * CGFloat(fraction))
+          let playheadWidth: CGFloat = 1.5
+          Rectangle().fill(playheadColor).frame(width: playheadWidth)
+            .offset(x: lineOffset(width: width, fraction: fraction, lineWidth: playheadWidth))
         }
       }
       .clipShape(RoundedRectangle(cornerRadius: 4))
@@ -85,7 +87,16 @@ private struct SliceOverviewWaveform: View {
   }
 
   private func cutLine(width: CGFloat, fraction: Double) -> some View {
-    Rectangle().fill(cutLineColor).frame(width: 1).offset(x: width * CGFloat(fraction))
+    let lineWidth: CGFloat = 1
+    return Rectangle().fill(cutLineColor).frame(width: lineWidth)
+      .offset(x: lineOffset(width: width, fraction: fraction, lineWidth: lineWidth))
+  }
+
+  /// Keeps a boundary/playhead line fully inside the clipped overview: a `fraction` of 1 would
+  /// otherwise land the line at `x == width`, just past the trailing clip edge, hiding it. Clamps
+  /// the offset to `[0, width - lineWidth]` so the endpoint lines stay flush against the edge.
+  private func lineOffset(width: CGFloat, fraction: Double, lineWidth: CGFloat) -> CGFloat {
+    min(max(0, width * CGFloat(fraction)), max(0, width - lineWidth))
   }
 }
 
