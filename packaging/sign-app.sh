@@ -54,6 +54,30 @@ echo "==> Signing engine + cut-suggester executables"
 sign_runtime "$ENGINE_ENTITLEMENTS" "$ENGINE_DIR/logic-markers-engine"
 sign_runtime "$ENGINE_ENTITLEMENTS" "$ENGINE_DIR/cut-suggester-engine"
 
+# Sparkle 2.x embeds nested code bundles (an Autoupdate executable, a nested
+# Updater.app, and two XPC services) inside Sparkle.framework. A flat codesign of
+# the framework leaves those ad-hoc/unsigned, which fails notarization + Gatekeeper
+# and breaks Sparkle's own installer launch. Sign them inside-out (deepest first)
+# BEFORE the framework loop signs Sparkle.framework itself. No entitlements: Sparkle
+# isn't sandboxed here. Versions/B is the current Sparkle layout (2.9.6); re-verify
+# the version dir if Sparkle is bumped.
+SPARKLE="$APP/Contents/Frameworks/Sparkle.framework"
+if [ -d "$SPARKLE" ]; then
+  echo "==> Signing Sparkle nested helpers (inside-out)"
+  # --preserve-metadata=entitlements keeps whatever entitlements Sparkle ships on its
+  # XPC services (empty in 2.9.6 for a non-sandboxed host, but Sparkle's sandboxed XPC
+  # services carry sandbox entitlements — preserving is Sparkle's documented guidance
+  # and future-proofs a version bump). https://sparkle-project.github.io/documentation/sandboxing/
+  for xpc in "$SPARKLE/Versions/B/XPCServices/"*.xpc; do
+    [ -e "$xpc" ] && codesign --force --sign "$IDENTITY" --options runtime --timestamp \
+      --preserve-metadata=entitlements "$xpc"
+  done
+  [ -d "$SPARKLE/Versions/B/Updater.app" ] && \
+    codesign --force --sign "$IDENTITY" --options runtime --timestamp "$SPARKLE/Versions/B/Updater.app"
+  [ -f "$SPARKLE/Versions/B/Autoupdate" ] && \
+    codesign --force --sign "$IDENTITY" --options runtime --timestamp "$SPARKLE/Versions/B/Autoupdate"
+fi
+
 if [ -d "$APP/Contents/Frameworks" ]; then
   echo "==> Signing embedded frameworks/dylibs"
   while IFS= read -r fw; do
@@ -65,6 +89,45 @@ fi
 echo "==> Signing the app (outermost)"
 codesign --force --sign "$IDENTITY" --options runtime --timestamp \
   --entitlements "$APP_ENTITLEMENTS" "$APP"
+
+echo "==> Guard: every Mach-O must be signed with Team FSRSPV9N9Q"
+# Belt-and-suspenders: catch any Mach-O (nested Sparkle helper, engine lib, etc.)
+# that slipped through unsigned or with the wrong team before we notarize.
+# `file` prints an extra line per slice for universal binaries — e.g.
+# "…/Autoupdate (for architecture arm64): …" — whose cut(1) prefix is a pseudo-path
+# that doesn't exist. Drop those with `sort -u` + a real-file test so fat binaries
+# (Sparkle ships x86_64+arm64) don't produce false "unsigned" hits.
+#
+# CRITICAL: distinguish "codesign could not read the signature" (a TRANSIENT failure
+# — running hundreds of `codesign -dvvv` in a tight loop right after sealing a
+# multi-GB bundle intermittently errors on read) from "read OK but wrong/absent
+# team" (a REAL problem). Only a *successful* read (exit 0) is trusted; a read error
+# is retried with backoff. Ignoring codesign's exit status here previously flagged
+# ~330 correctly-signed binaries and aborted a valid release.
+guard_team_ok() { # $1=path -> 0 our team, 1 wrong/absent team (retries transient read errors)
+  local m="$1" i out
+  for i in 1 2 3 4 5; do
+    if out="$(codesign -dvvv "$m" 2>&1)"; then      # exit 0 => signature was read
+      printf '%s' "$out" | grep -q "TeamIdentifier=FSRSPV9N9Q"
+      return                                        # grep's status: 0 our team, 1 not
+    fi
+    sleep 0.5                                        # read failed transiently; settle + retry
+  done
+  echo "   (codesign never read $m after retries)" >&2
+  return 1
+}
+unsigned=0
+while IFS= read -r macho; do
+  [ -z "$macho" ] && continue
+  [ -f "$macho" ] || continue
+  if ! guard_team_ok "$macho"; then
+    echo "   UNSIGNED/wrong-team: $macho" >&2
+    unsigned=$((unsigned + 1))
+  fi
+done < <(find "$APP" -type f -print0 | xargs -0 file 2>/dev/null \
+           | grep 'Mach-O' | cut -d: -f1 | sort -u)
+[ "$unsigned" -eq 0 ] || { echo "error: $unsigned Mach-O binaries not properly signed" >&2; exit 1; }
+echo "    all Mach-O binaries signed with our Team ID"
 
 echo "==> Verify (codesign --verify --strict --deep)"
 codesign --verify --strict --deep --verbose=4 "$APP"
