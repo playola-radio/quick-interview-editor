@@ -37,6 +37,7 @@ struct EditorView: View {
       }
     )
     .background(EditorKeyMonitor(model: model))
+    .sheet(item: $model.editSlice) { EditSliceView(model: $0) }
     .task { await model.loadWaveform() }
     .task { await model.observePlayback() }
     // Kick off a background suggestion pass as soon as the file is open, so the user lands on

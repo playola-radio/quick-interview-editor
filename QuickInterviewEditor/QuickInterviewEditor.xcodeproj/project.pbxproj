@@ -54,6 +54,7 @@
 		3E0D23A6109F0336AC4166EB /* IdentifiedCollections in Frameworks */ = {isa = PBXBuildFile; productRef = C6F6FFAF4946EF45EF1AE24D /* IdentifiedCollections */; };
 		3EED2118C589B3B9B11AA652 /* TranscriptClipStyleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 706A1034CD57DF0E1958888D /* TranscriptClipStyleTests.swift */; };
 		400038A99E3154F30C58ABF4 /* SourceFingerprintTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B1AD8AB1D15502BEE03558E /* SourceFingerprintTests.swift */; };
+		42F59B5DBBDAA131C7DFDECE /* EditSliceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD4516489B5C925C3DD24E8F /* EditSliceView.swift */; };
 		4708785E372745CA3F94E75A /* CutSuggestionsPageTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8757CB1C9E2614E65C7A3F20 /* CutSuggestionsPageTests.swift */; };
 		4821AD4B53662749E9F966B9 /* AppLaunchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C584101861B497D434BD5F00 /* AppLaunchView.swift */; };
 		487E82A504ADA5C10E75E01A /* UpdaterCommandsModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B58E74CF2E24C0AE6E43FCF7 /* UpdaterCommandsModelTests.swift */; };
@@ -85,6 +86,7 @@
 		727F3057A98E3F0DDA43D6DF /* AnthropicAPIKeyResolutionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C926B28E4F7EE504AEBA9698 /* AnthropicAPIKeyResolutionTests.swift */; };
 		7330F0C05BA43441535889AB /* WaveformInteractionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE15846DE288E94E3D4ACD36 /* WaveformInteractionView.swift */; };
 		756FEC229B9F824352BE4D57 /* edit-plan-v2.json in Resources */ = {isa = PBXBuildFile; fileRef = 4881DD551D6727B533A2C3A7 /* edit-plan-v2.json */; };
+		767C76CA3B29970952D59D69 /* BoundaryInset.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBFE48491B14C729718F8517 /* BoundaryInset.swift */; };
 		7742FDC7D65B2788C36D6522 /* ViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 340DF12DDCE384A3A7FAFF4F /* ViewModel.swift */; };
 		7D02F2C8C654CDC50EAE7BC9 /* EditorAuditionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54D37A7FBE9F9B56D63ABE13 /* EditorAuditionTests.swift */; };
 		7E56FEC9DE02981429DAF9DE /* CanonicalAudioStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0BD0C997619379A57E176AC /* CanonicalAudioStoreTests.swift */; };
@@ -324,6 +326,7 @@
 		C7C4BC51CF02F763C1A466B2 /* ExportNamingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportNamingTests.swift; sourceTree = "<group>"; };
 		C926B28E4F7EE504AEBA9698 /* AnthropicAPIKeyResolutionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnthropicAPIKeyResolutionTests.swift; sourceTree = "<group>"; };
 		C940BB5A197C986FAF096F93 /* SourceFingerprint.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SourceFingerprint.swift; sourceTree = "<group>"; };
+		CBFE48491B14C729718F8517 /* BoundaryInset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BoundaryInset.swift; sourceTree = "<group>"; };
 		CDB2B2989C30934A0043C8DC /* SmokeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmokeTests.swift; sourceTree = "<group>"; };
 		CDB75E8909EA443A5FB175E2 /* CutSuggestionAccept.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CutSuggestionAccept.swift; sourceTree = "<group>"; };
 		CEFAC7D37A8CD8BCE6C5F178 /* CanonicalAudioStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanonicalAudioStore.swift; sourceTree = "<group>"; };
@@ -349,6 +352,7 @@
 		FA08AD54DC59B6F59481D196 /* KeychainClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainClient.swift; sourceTree = "<group>"; };
 		FA1B4EC8F8A763FD0F5FE1EE /* SongTabTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SongTabTests.swift; sourceTree = "<group>"; };
 		FAB5AE7B614B3DFF39BEB171 /* CutSuggestClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CutSuggestClientTests.swift; sourceTree = "<group>"; };
+		FD4516489B5C925C3DD24E8F /* EditSliceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditSliceView.swift; sourceTree = "<group>"; };
 		FE15846DE288E94E3D4ACD36 /* WaveformInteractionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WaveformInteractionView.swift; sourceTree = "<group>"; };
 		FE3E8DA32C72A6D6463BF00D /* CutSuggestionsPageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CutSuggestionsPageView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -380,6 +384,7 @@
 		0585C4227A03C1412AFB332E /* Editor */ = {
 			isa = PBXGroup;
 			children = (
+				CBFE48491B14C729718F8517 /* BoundaryInset.swift */,
 				454FED79956592EAA554D73A /* EditorKeyMonitor.swift */,
 				7BD517DB17FCCECB191BA3EE /* EditorModel.swift */,
 				CF59032A8FB779A2205DB749 /* EditorView.swift */,
@@ -656,6 +661,7 @@
 			isa = PBXGroup;
 			children = (
 				77B6CF523129B089804A14CD /* EditSliceModel.swift */,
+				FD4516489B5C925C3DD24E8F /* EditSliceView.swift */,
 			);
 			path = EditSlice;
 			sourceTree = "<group>";
@@ -1050,6 +1056,7 @@
 				4821AD4B53662749E9F966B9 /* AppLaunchView.swift in Sources */,
 				C595884140FF8A84B4E144C8 /* AudioPlayerClient.swift in Sources */,
 				040207BF50636ADA05DDBF32 /* AuditionKeyMonitor.swift in Sources */,
+				767C76CA3B29970952D59D69 /* BoundaryInset.swift in Sources */,
 				07132AD42696C596F39D4EAB /* CanonicalAudioStore.swift in Sources */,
 				E593D6FE505E82B5CBACEC7E /* ClipContainerLayoutManager.swift in Sources */,
 				054524450980F5589AA19E9A /* CutSuggestClient.swift in Sources */,
@@ -1064,6 +1071,7 @@
 				CAF3A5854AEA701E237EBF4F /* DiarizationEvidence.swift in Sources */,
 				D7E2BD1FA39BAA582CAB13BE /* EditPlan.swift in Sources */,
 				0E1D0E0176E2FD8F372B8FAD /* EditSliceModel.swift in Sources */,
+				42F59B5DBBDAA131C7DFDECE /* EditSliceView.swift in Sources */,
 				E496B3397BA1F577FD0502BC /* EditorKeyMonitor.swift in Sources */,
 				63FBB7BDA190D163F5D8BC1C /* EditorModel.swift in Sources */,
 				8556704810F445FB50F79DC2 /* EditorView.swift in Sources */,
