@@ -1137,7 +1137,7 @@ final class EditorModel: ViewModel {
   /// guarded). A no-op unless a preview or audition is the current context.
   private func cancelPreviewOrAuditionIfNeeded() {
     switch transportContext {
-    case .draftPreview, .audition: break
+    case .draftPreview, .audition, .sliceEdit: break
     case .free, .slice: return
     }
     let session = transportPhase.session
@@ -1163,6 +1163,16 @@ final class EditorModel: ViewModel {
     fineTune.nudgeCutOut(byMs: deltaMs)
   }
 
+  /// Commits an existing slice's cut points to `range` as exactly ONE `mutateSlices` (one undo
+  /// entry): word IDs, snippet, and warnings are re-derived from the new range. A no-op if the
+  /// slice no longer exists (e.g. deleted out from under an in-flight edit).
+  func commitSliceEdit(id: Slice.ID, range: Range<Int>) {
+    guard slices[id: id] != nil else { return }
+    mutateSlices { slices in
+      if let slice = slices[id: id] { slices[id: id] = updatedSlice(slice, to: range) }
+    }
+  }
+
   /// Commits the draft as exactly ONE `mutateSlices` (one undo entry) for a whole drag: an
   /// existing slice's cut points are updated (word IDs + snippet + warnings re-derived from
   /// the new range); a pending selection becomes a new slice. No-op when nothing changed.
@@ -1171,10 +1181,7 @@ final class EditorModel: ViewModel {
     else { return }
     switch target {
     case .slice(let id):
-      guard slices[id: id] != nil else { return }
-      mutateSlices { slices in
-        if let slice = slices[id: id] { slices[id: id] = updatedSlice(slice, to: draft) }
-      }
+      commitSliceEdit(id: id, range: draft)
       fineTune.markCommitted(draft)
     case .pendingSelection:
       let slice = makeSlice(range: draft)
@@ -1541,6 +1548,10 @@ enum TransportContext: Equatable {
   case slice(Slice.ID)
   case draftPreview
   case audition(EditorModel.AuditionMode)
+  /// Previewing a boundary edit made inside the slice-detail edit modal. Treated like
+  /// `.draftPreview`: no slice-row highlight, and the main transcript must not follow while the
+  /// modal previews.
+  case sliceEdit
 
   /// True while a saved slice is the playing context — drives the slice-row "playing" highlight.
   var isSlice: Bool {
@@ -1554,7 +1565,7 @@ enum TransportContext: Equatable {
   var followsTranscript: Bool {
     switch self {
     case .free, .slice: return true
-    case .draftPreview, .audition: return false
+    case .draftPreview, .audition, .sliceEdit: return false
     }
   }
   /// The playing slice's id, or nil when a slice isn't the current context.
