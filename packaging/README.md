@@ -144,7 +144,6 @@ Apple-Silicon engine freeze is impractical on hosted CI).
 
 ### Prerequisites (one-time)
 
-- **`create-dmg`**: `brew install create-dmg`.
 - **notarytool profile** `qie-notary` in the login Keychain (see
   `notarize-app.sh` header); export `NOTARY_PROFILE=qie-notary` before releasing.
 - **Sparkle EdDSA keypair**: the **public** key is baked into `project.yml`
