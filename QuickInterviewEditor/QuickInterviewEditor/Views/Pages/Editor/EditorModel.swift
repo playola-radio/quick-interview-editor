@@ -162,6 +162,7 @@ final class EditorModel: ViewModel {
   let playLabel = "Play"
   let stopLabel = "Stop"
   let deleteLabel = "Delete slice"
+  let editSliceLabel = "Edit"
   let exportLabel = "Export"
   let exportAllLabel = "Export all"
   let cancelExportLabel = "Cancel export"
