@@ -49,6 +49,7 @@ final class EditSliceModel: ViewModel, Identifiable {
   // MARK: - Display Text
   let saveLabel = "Save cut"
   let cancelLabel = "Cancel"
+  let stopLabel = "Stop"
 
   // MARK: - View Helpers
   var canSave: Bool { fineTune.hasUnsavedChange }

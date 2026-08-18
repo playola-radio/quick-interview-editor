@@ -5,7 +5,7 @@ import SwiftUI
 /// Pure visuals — every value and gesture is forwarded to `model`, which owns all geometry
 /// and state.
 struct EditSliceView: View {
-  @Bindable var model: EditSliceModel
+  let model: EditSliceModel
 
   var body: some View {
     VStack(spacing: 12) {
@@ -28,7 +28,7 @@ struct EditSliceView: View {
           Image(systemName: model.playButtonSystemImage)
         }
         .help(model.playPauseLabel)
-        Button("Stop") { Task { await model.stopTapped() } }
+        Button(model.stopLabel) { Task { await model.stopTapped() } }
         Spacer()
         Button(model.cancelLabel) { model.cancelTapped() }
         Button(model.saveLabel) { model.saveTapped() }
