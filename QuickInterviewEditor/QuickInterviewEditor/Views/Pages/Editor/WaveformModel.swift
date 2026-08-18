@@ -219,6 +219,28 @@ final class WaveformModel: ViewModel {
     scrolled(toStartSample: visibleStartSample - Int((Double(deltaX) * samplesPerPixel).rounded()))
   }
 
+  // swiftlint:disable function_parameter_count
+  /// Wheel/trackpad on the waveform. Holding ⌘ while scrolling ⇒ cursor-anchored horizontal
+  /// zoom; a plain scroll (no ⌘) ⇒ horizontal pan. ⌘ is a single modifier that a Magic Mouse
+  /// swipe reliably carries, matching how Logic users reach for zoom. `optionDown` is accepted
+  /// for forward-compatibility but does not affect the decision. Interpretation lives here,
+  /// not the view.
+  func scrolled(
+    deltaX: CGFloat, deltaY: CGFloat, hasPreciseDeltas: Bool,
+    optionDown: Bool, commandDown: Bool, atX positionX: CGFloat
+  ) {
+    guard deltaX.isFinite, deltaY.isFinite else { return }
+    if commandDown {
+      zoomByFactor(
+        Self.scrollZoomFactor(deltaY: deltaY, hasPreciseDeltas: hasPreciseDeltas),
+        anchoredAtX: positionX)
+    } else {
+      panByPixels(
+        Self.scrollPanPixels(deltaX: deltaX, deltaY: deltaY, hasPreciseDeltas: hasPreciseDeltas))
+    }
+  }
+  // swiftlint:enable function_parameter_count
+
   func zoomToFitAll() {
     guard viewportWidth > 0, totalSamples > 0 else { return }
     samplesPerPixel = clampedSamplesPerPixel(fitSamplesPerPixel())
@@ -288,6 +310,24 @@ final class WaveformModel: ViewModel {
     var samplesPerPixel: Double
     var visibleStartSample: Int
     var selection: Range<Int>?
+  }
+
+  /// Points a line-based mouse wheel "click" is worth (trackpads report pixel-precise deltas
+  /// already). Pan/zoom sensitivity constants; on-screen direction verified in QA.
+  private static let pointsPerScrollLine: CGFloat = 40
+  private static let pixelsPerZoomDouble = 300.0
+
+  private static func scrollPanPixels(
+    deltaX: CGFloat, deltaY: CGFloat, hasPreciseDeltas: Bool
+  ) -> CGFloat {
+    let primary = abs(deltaX) >= abs(deltaY) ? deltaX : deltaY
+    return hasPreciseDeltas ? primary : primary * pointsPerScrollLine
+  }
+
+  private static func scrollZoomFactor(deltaY: CGFloat, hasPreciseDeltas: Bool) -> Double {
+    let dy = Double(hasPreciseDeltas ? deltaY : deltaY * pointsPerScrollLine)
+    // spp *= factor; scrolling "away" should zoom in (spp < 1). Flip the sign in QA if inverted.
+    return pow(2.0, -dy / pixelsPerZoomDouble)
   }
 
   /// The coarsest level whose bucket size doesn't exceed `spp` (so each pixel aggregates
