@@ -133,7 +133,7 @@ uploads both to S3. Sparkle in the app reads that appcast and self-updates in
 place, preserving the user's Keychain-stored API key.
 
 ```text
-packaging/make-dmg.sh    # 6. create-dmg -> sign + notarize + staple the DMG
+packaging/make-dmg.sh    # 6. hdiutil -> sign + notarize + staple the DMG
 sparkle sign_update <dmg>  # 7. EdDSA-sign the DMG (private key from login Keychain)
 packaging/appcast.rb …   # 8. append a signed <item> to appcast.xml (idempotent)
 aws s3 cp …              # 9. upload DMG (kept for rollback) + appcast.xml (no-cache)
