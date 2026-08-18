@@ -44,7 +44,8 @@ struct WaveformLaneView<Overlay: View>: View {
           onBodyClick: onBodyClick,
           onAreaSelectBegan: onAreaSelectBegan,
           onAreaSelectChanged: onAreaSelectChanged,
-          onAreaSelectEnded: onAreaSelectEnded))
+          onAreaSelectEnded: onAreaSelectEnded)
+      )
       .overlay(alignment: .topLeading) {
         if let highlight {
           auditionOverlay(highlight)
