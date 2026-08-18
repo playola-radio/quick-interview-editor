@@ -39,12 +39,12 @@ struct EditorView: View {
     .background(EditorKeyMonitor(model: model))
     // `onDismiss` covers EVERY way the sheet can go away — Save, Cancel, AND an Escape-key/
     // outside-click dismissal that bypasses both buttons — so `.sliceEdit` transport can never be
-    // left orphaned. `transportStopTapped` is idempotent (`canTransportStop` guards it), so the
-    // button paths' own `Task { await model.transportStopTapped() }` in `onDismiss` (wired in
-    // `editSliceTapped`) double-stopping here is harmless.
+    // left orphaned. `sliceEditSheetDismissed` captures the session synchronously (so a late stop
+    // can't kill a newer one) and skips the stop when a new modal is already present, so the button
+    // paths' own dismiss stop plus a rapid dismiss→reopen are both handled safely.
     .sheet(
       item: $model.editSlice,
-      onDismiss: { Task { await model.transportStopTapped() } },
+      onDismiss: { model.sliceEditSheetDismissed() },
       content: { EditSliceView(model: $0) }
     )
     .task { await model.loadWaveform() }

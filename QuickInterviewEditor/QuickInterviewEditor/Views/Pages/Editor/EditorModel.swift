@@ -742,18 +742,30 @@ final class EditorModel: ViewModel {
   func editSliceTapped(_ id: Slice.ID) {
     guard let slice = slices[id: id], !fineTune.hasUnsavedChange else { return }
     // Opening the modal supersedes any in-progress MAIN playback — the main timeline and its
-    // hidden transcript shouldn't keep running behind the sheet. The modal's own later Play starts
-    // a fresh `.sliceEdit` session, so this only needs to stop what's already going.
-    if isTransportPlaying {
-      Task { await transportStopTapped() }
-    }
+    // hidden transcript shouldn't keep running behind the sheet. Snapshot-stop it (covers a PAUSED
+    // main transport too, not just a playing one) so this stop, which may land after the modal's
+    // own Play has started a fresh `.sliceEdit` session, can never kill that newer session.
+    stopActiveTransportSnapshotting()
     let child = EditSliceModel(slice: slice, editPlan: editPlan)
     child.columnsProvider = { [weak self] window, width in
       self?.waveform.columns(in: window, pixelWidth: width) ?? []
     }
     child.onCommit = { [weak self] range in self?.commitSliceEdit(id: id, range: range) }
     child.onPlay = { [weak self] range in
-      await self?.beginTransportPlayback(range: range, context: .sliceEdit)
+      guard let self else { return }
+      // Resume the paused `.sliceEdit` session in place ONLY when its scheduled range still
+      // matches — a nudge while paused changes the draft, so a drifted range must start a fresh
+      // play from the new boundaries rather than resume the stale one. Any other phase (stopped,
+      // or some foreign paused context) begins a fresh `.sliceEdit` playback.
+      if isTransportPaused, case .sliceEdit = transportContext, transportRange == range {
+        await transportPlayTapped()
+        // Resume can fail (e.g. an engine restart) and leave the phase paused. The modal set
+        // `isPlaying` optimistically, so publish the TRUE phase back or its button would lie —
+        // showing Pause over silent, paused audio.
+        editSlice?.updatePlayback(sample: playheadSample, isPlaying: isTransportPlaying)
+      } else {
+        await beginTransportPlayback(range: range, context: .sliceEdit)
+      }
     }
     child.onPause = { [weak self] in await self?.transportPauseTapped() }
     child.onStop = { [weak self] in await self?.transportStopTapped() }
@@ -767,10 +779,33 @@ final class EditorModel: ViewModel {
       editSlice?.updatePlayback(sample: sample, isPlaying: isTransportPlaying)
     }
     child.onDismiss = { [weak self] in
-      Task { await self?.transportStopTapped() }
+      self?.stopActiveTransportSnapshotting()
       self?.editSlice = nil
     }
     editSlice = child
+  }
+
+  /// Stops whatever playback the transport currently owns, capturing its session SYNCHRONOUSLY so
+  /// a later async stop can't kill a newer session. Mirrors `transportStopTapped` (returns the
+  /// cursor to origin, stops OUR session only) but is safe to call across a modal open/dismiss
+  /// transition where a fresh `.sliceEdit` session may start right after this returns. Idempotent:
+  /// a no-op when nothing is playing, so overlapping open/dismiss stop paths can all call it.
+  func stopActiveTransportSnapshotting() {
+    guard let session = transportPhase.session else { return }
+    if let origin = transportOriginSample { playheadSample = origin }
+    resetTransportState()
+    endTranscriptFollow()
+    Task { [weak self] in await self?.stopOwnedPlayback(session) }
+  }
+
+  /// The SwiftUI `sheet(onDismiss:)` hook — covers Escape / outside-click dismissals that bypass
+  /// the Save/Cancel buttons. Guarded on `editSlice == nil` so a rapid dismiss→reopen can't let
+  /// this stale callback (it fires after the dismissal transaction) stop the NEXT modal's freshly
+  /// started session: when a new modal is already present it owns its own transport lifecycle, and
+  /// the old modal's session was already stopped by its dismiss path or by the new modal's open.
+  func sliceEditSheetDismissed() {
+    guard editSlice == nil else { return }
+    stopActiveTransportSnapshotting()
   }
 
   func addSliceTapped() {
@@ -1010,11 +1045,22 @@ final class EditorModel: ViewModel {
     // (`.stopped`) likewise leaves the cursor put.
     guard transportPhase.session == session else { return }
     if outcome == .finished { playheadSample = range.upperBound }
+    // Capture the slice-edit child (if this playback was the modal's) BEFORE the reset clears the
+    // context — reaching here past the session guard means the modal wasn't torn down, so this IS
+    // the owning modal. A natural finish / cross-tab supersede must publish "stopped" back to it.
+    let owningSliceEdit: EditSliceModel? = {
+      if case .sliceEdit = transportContext { return editSlice }
+      return nil
+    }()
     resetTransportState()
     // Reset transcript follow here too: on a cross-tab `.superseded` (and on a natural end whose
     // final stop tick races this cleanup) `observePlayback` may never see a gated false tick, so
     // without this a slice's `wasPlaying` stays true and the next slice misses its rising edge.
     endTranscriptFollow()
+    // The position loop drops the trailing false tick on a natural finish (the reset above cleared
+    // the session it guards on), so the modal would never learn it stopped without this explicit
+    // publish. `stopTapped`/dismiss handle their own paths; this covers finish + cross-tab supersede.
+    owningSliceEdit?.updatePlayback(sample: playheadSample, isPlaying: false)
   }
 
   /// Pause button. Freezes the cursor at the exact sample the player reports and holds the

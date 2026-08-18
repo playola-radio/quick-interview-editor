@@ -148,6 +148,41 @@ struct EditSliceTests {
     #expect(model.isPlaying == false)
   }
 
+  @Test func stopTappedDelegatesToOnStop() async {
+    let (model, _) = makeModel()
+    var stops = 0
+    model.onStop = { stops += 1 }
+    model.updatePlayback(sample: 12_000, isPlaying: true)
+
+    await model.stopTapped()
+
+    #expect(stops == 1)
+    #expect(model.isPlaying == false)
+  }
+
+  @Test func seekTappedForwardsTheRequestedSampleToOnSeek() async {
+    let (model, _) = makeModel()
+    var sought: [Int] = []
+    model.onSeek = { sought.append($0) }
+
+    await model.seekTapped(toSample: 23_456)
+
+    expectNoDifference(sought, [23_456])
+  }
+
+  /// The parent publishes a natural finish back through `updatePlayback`; the modal must reflect
+  /// it as stopped. Guards the FIX 1/4 regression where `isPlaying` was set true AFTER `onPlay`
+  /// (which returns only once playback has ended), leaving the button stuck on "Pause".
+  @Test func parentPublishingAStoppedTickClearsIsPlaying() {
+    let (model, _) = makeModel()
+    model.updatePlayback(sample: 12_000, isPlaying: true)
+    #expect(model.isPlaying == true)
+
+    model.updatePlayback(sample: 12_000, isPlaying: false)
+
+    #expect(model.isPlaying == false)
+  }
+
   @Test func playTappedFromStoppedSetsIsPlayingAndPlaysTheDraftRange() async {
     let (model, slice) = makeModel()
     var played: [Range<Int>] = []
@@ -157,6 +192,44 @@ struct EditSliceTests {
 
     #expect(model.isPlaying == true)
     expectNoDifference(played, [slice.startSample..<slice.endSample])
+  }
+
+  // MARK: - Overview geometry (model owns sample↔fraction mapping; the view only scales by width)
+
+  private func geometryModel() -> EditSliceModel {
+    let plan = Fixtures.editPlan()
+    let slice = Slice(
+      id: UUID(), name: "S", startSample: 10_000, endSample: 20_000,
+      wordIDs: [], snippet: "", warnings: [])
+    return EditSliceModel(slice: slice, editPlan: plan)
+  }
+
+  @Test func overviewPlayheadFractionMapsTheCursorAcrossTheWindow() {
+    let model = geometryModel()  // window 10_000..<20_000
+    model.playheadSample = 15_000
+    expectNoDifference(model.overviewPlayheadFraction, 0.5)
+    model.playheadSample = 20_000  // upper bound is inclusive
+    expectNoDifference(model.overviewPlayheadFraction, 1.0)
+    model.playheadSample = 5_000  // before the slice → hidden
+    #expect(model.overviewPlayheadFraction == nil)
+  }
+
+  @Test func overviewSeekSampleMapsAFractionBackToASampleAndClamps() {
+    let model = geometryModel()  // window 10_000..<20_000
+    expectNoDifference(model.overviewSeekSample(atFraction: 0), 10_000)
+    expectNoDifference(model.overviewSeekSample(atFraction: 0.5), 15_000)
+    expectNoDifference(model.overviewSeekSample(atFraction: 1), 20_000)
+    expectNoDifference(model.overviewSeekSample(atFraction: 2), 20_000)  // clamped past the edge
+  }
+
+  @Test func overviewCutFractionsTrackTheLiveDraftRange() {
+    let model = geometryModel()  // draft starts equal to the committed window
+    expectNoDifference(model.overviewCutInFraction, 0)
+    expectNoDifference(model.overviewCutOutFraction, 1)
+
+    model.fineTune.nudgeCutIn(byMs: 20)  // pull the cut-in inward
+
+    #expect((model.overviewCutInFraction ?? 0) > 0)
   }
 
   // MARK: - FIX 2: updatePlayback highlights the current word in the scoped transcript

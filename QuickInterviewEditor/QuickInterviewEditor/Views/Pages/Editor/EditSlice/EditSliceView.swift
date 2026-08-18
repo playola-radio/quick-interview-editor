@@ -42,14 +42,16 @@ struct EditSliceView: View {
 }
 
 /// The edge-to-edge overview waveform for the whole slice: reuses ``InsetSilhouette`` (no
-/// kept/discarded tint — the whole span is "kept" from this zoomed-out view), a playhead line
-/// derived from `model.playheadSample`, and a tap-to-seek gesture. All geometry here is plain
-/// pixel math over model-owned values; the model owns every decision about samples and time.
+/// kept/discarded tint — the whole span is "kept" from this zoomed-out view), the live draft
+/// Cut-in/Cut-out lines, a playhead line, and a tap-to-seek gesture. The view owns only pixels:
+/// it multiplies the model's 0...1 fractions by its width and normalizes a tap back to a fraction.
+/// Every sample↔position decision lives on `model`.
 private struct SliceOverviewWaveform: View {
   let model: EditSliceModel
 
   private let waveColor = Color(white: 0.42)
   private let playheadColor = Color(red: 0.96, green: 0.86, blue: 0.4)
+  private let cutLineColor = Color(white: 0.9)
 
   var body: some View {
     GeometryReader { geometry in
@@ -59,8 +61,14 @@ private struct SliceOverviewWaveform: View {
         InsetSilhouette(
           columns: model.overviewColumns(pixelWidth: width), keptSpan: nil,
           waveColor: waveColor, keptColor: waveColor)
-        if let playheadX = playheadX(width: width) {
-          Rectangle().fill(playheadColor).frame(width: 1.5).offset(x: playheadX)
+        if let fraction = model.overviewCutInFraction {
+          cutLine(width: width, fraction: fraction)
+        }
+        if let fraction = model.overviewCutOutFraction {
+          cutLine(width: width, fraction: fraction)
+        }
+        if let fraction = model.overviewPlayheadFraction {
+          Rectangle().fill(playheadColor).frame(width: 1.5).offset(x: width * CGFloat(fraction))
         }
       }
       .clipShape(RoundedRectangle(cornerRadius: 4))
@@ -68,31 +76,16 @@ private struct SliceOverviewWaveform: View {
       .gesture(
         DragGesture(minimumDistance: 0, coordinateSpace: .local)
           .onEnded { value in
-            let sample = sample(atX: value.location.x, width: width)
+            let fraction = width > 0 ? Double(value.location.x) / Double(width) : 0
+            let sample = model.overviewSeekSample(atFraction: fraction)
             Task { await model.seekTapped(toSample: sample) }
           }
       )
     }
   }
 
-  private func playheadX(width: CGFloat) -> CGFloat? {
-    // Inclusive of the upper bound: the transport rests the cursor at `range.upperBound` on a
-    // natural finish, and a right-edge click resolves to `upperBound` too, so a half-open
-    // `contains` would wrongly hide the playhead exactly at the slice's end.
-    guard let sample = model.playheadSample,
-      (model.overviewWindow.lowerBound...model.overviewWindow.upperBound).contains(sample)
-    else {
-      return nil
-    }
-    let fraction =
-      Double(sample - model.overviewWindow.lowerBound) / Double(model.overviewWindow.count)
-    return min(width, width * CGFloat(fraction))
-  }
-
-  private func sample(atX positionX: CGFloat, width: CGFloat) -> Int {
-    let clampedX = min(max(positionX, 0), width)
-    let fraction = width > 0 ? Double(clampedX) / Double(width) : 0
-    return model.overviewWindow.lowerBound + Int(fraction * Double(model.overviewWindow.count))
+  private func cutLine(width: CGFloat, fraction: Double) -> some View {
+    Rectangle().fill(cutLineColor).frame(width: 1).offset(x: width * CGFloat(fraction))
   }
 }
 
@@ -110,8 +103,8 @@ private struct FineTuneInsets: View {
         discardedSpan: model.fineTune.cutInDiscardedSpan, lineX: model.fineTune.cutInLineX,
         isTight: model.fineTune.isCutInTight, nudgeBackLabel: model.fineTune.nudgeBackLabel,
         nudgeForwardLabel: model.fineTune.nudgeForwardLabel,
-        onNudgeBack: { model.cutInNudged(byMs: -model.fineTune.nudgeMs) },
-        onNudgeForward: { model.cutInNudged(byMs: model.fineTune.nudgeMs) },
+        onNudgeBack: { model.cutInNudgedBack() },
+        onNudgeForward: { model.cutInNudgedForward() },
         onDrag: { model.cutInDragged(toInsetX: $0) })
       BoundaryInset(
         label: model.fineTune.cutOutLabel, timeLabel: model.fineTune.cutOutTimeLabel,
@@ -120,8 +113,8 @@ private struct FineTuneInsets: View {
         discardedSpan: model.fineTune.cutOutDiscardedSpan, lineX: model.fineTune.cutOutLineX,
         isTight: model.fineTune.isCutOutTight, nudgeBackLabel: model.fineTune.nudgeBackLabel,
         nudgeForwardLabel: model.fineTune.nudgeForwardLabel,
-        onNudgeBack: { model.cutOutNudged(byMs: -model.fineTune.nudgeMs) },
-        onNudgeForward: { model.cutOutNudged(byMs: model.fineTune.nudgeMs) },
+        onNudgeBack: { model.cutOutNudgedBack() },
+        onNudgeForward: { model.cutOutNudgedForward() },
         onDrag: { model.cutOutDragged(toInsetX: $0) })
       Spacer(minLength: 0)
     }
