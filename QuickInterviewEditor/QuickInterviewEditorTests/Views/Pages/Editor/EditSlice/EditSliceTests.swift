@@ -87,4 +87,44 @@ struct EditSliceTests {
 
     expectNoDifference(asked, [5_000..<25_000])
   }
+
+  @Test func playTappedPlaysTheDraftRange() async {
+    let (model, slice) = makeModel()
+    var played: [Range<Int>] = []
+    model.onPlay = { played.append($0) }
+
+    await model.playPauseTapped()
+
+    expectNoDifference(played, [slice.startSample..<slice.endSample])
+  }
+
+  @Test func playTappedUsesTheLiveDraftAfterNudging() async {
+    let (model, _) = makeModel()
+    var played: [Range<Int>] = []
+    model.onPlay = { played.append($0) }
+    model.fineTune.nudgeCutIn(byMs: 20)
+    let draft = model.fineTune.draftRange
+
+    await model.playPauseTapped()
+
+    expectNoDifference(played, [draft].compactMap { $0 })
+  }
+
+  @Test func playTappedWhilePlayingPauses() async {
+    let (model, _) = makeModel()
+    var pauses = 0
+    model.onPause = { pauses += 1 }
+    model.updatePlayback(sample: 12_000, isPlaying: true)
+
+    await model.playPauseTapped()
+
+    #expect(pauses == 1)
+  }
+
+  @Test func updatePlaybackReflectsPlayheadAndDrivesScopedTranscript() {
+    let (model, _) = makeModel()
+    model.updatePlayback(sample: 15_000, isPlaying: true)
+    #expect(model.playheadSample == 15_000)
+    #expect(model.isPlaying == true)
+  }
 }

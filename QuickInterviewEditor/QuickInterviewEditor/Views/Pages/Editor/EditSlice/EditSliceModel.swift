@@ -39,6 +39,12 @@ final class EditSliceModel: ViewModel, Identifiable {
   var onCommit: (Range<Int>) -> Void = { _ in }
   var onDismiss: () -> Void = {}
   var columnsProvider: (Range<Int>, CGFloat) -> [WaveformColumn] = { _, _ in [] }
+  var onPlay: (Range<Int>) async -> Void = { _ in }
+  var onPause: () async -> Void = {}
+  var onStop: () async -> Void = {}
+  var onSeek: (Int) async -> Void = { _ in }
+  var isPlaying = false
+  var playheadSample: Int?
 
   // MARK: - Display Text
   let saveLabel = "Save cut"
@@ -46,6 +52,8 @@ final class EditSliceModel: ViewModel, Identifiable {
 
   // MARK: - View Helpers
   var canSave: Bool { fineTune.hasUnsavedChange }
+  var playPauseLabel: String { isPlaying ? "Pause" : "Play" }
+  var playButtonSystemImage: String { isPlaying ? "pause.fill" : "play.fill" }
 
   func overviewColumns(pixelWidth: CGFloat) -> [WaveformColumn] {
     columnsProvider(overviewWindow, pixelWidth)
@@ -76,4 +84,23 @@ final class EditSliceModel: ViewModel, Identifiable {
   func cutOutDragged(toInsetX positionX: CGFloat) { fineTune.dragCutOut(toInsetX: positionX) }
   func cutInNudged(byMs ms: Double) { fineTune.nudgeCutIn(byMs: ms) }
   func cutOutNudged(byMs ms: Double) { fineTune.nudgeCutOut(byMs: ms) }
+
+  func playPauseTapped() async {
+    if isPlaying {
+      await onPause()
+    } else if let range = fineTune.draftRange ?? fineTune.committedRange {
+      await onPlay(range)
+    }
+  }
+
+  func stopTapped() async { await onStop() }
+
+  func seekTapped(toSample sample: Int) async { await onSeek(sample) }
+
+  /// Called by EditorModel's position loop while `.sliceEdit` is the transport context.
+  func updatePlayback(sample: Int?, isPlaying: Bool) {
+    playheadSample = sample
+    self.isPlaying = isPlaying
+    transcript.playheadChanged(sample: sample, isPlaying: isPlaying)
+  }
 }
