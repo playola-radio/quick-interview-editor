@@ -49,4 +49,42 @@ struct EditSliceTests {
     #expect(committed == 0)
     #expect(dismissed == 1)
   }
+
+  @Test func scopedTranscriptContainsExactlyTheSliceWords() {
+    let plan = Fixtures.editPlan()
+    let sliceWordIDs = Array(plan.words.prefix(3).map(\.id))
+    let slice = Slice(
+      id: UUID(), name: "S", startSample: 0, endSample: 20_000,
+      wordIDs: sliceWordIDs, snippet: "", warnings: [])
+    let model = EditSliceModel(slice: slice, editPlan: plan)
+
+    expectNoDifference(
+      model.transcript.document.wordRanges.map(\.wordID), sliceWordIDs)
+  }
+
+  @Test func overviewWindowIsTheCommittedSliceRange() {
+    let plan = Fixtures.editPlan()
+    let slice = Slice(
+      id: UUID(), name: "S", startSample: 5_000, endSample: 25_000,
+      wordIDs: [], snippet: "", warnings: [])
+    let model = EditSliceModel(slice: slice, editPlan: plan)
+    #expect(model.overviewWindow == 5_000..<25_000)
+  }
+
+  @Test func overviewColumnsAskTheProviderForTheOverviewWindow() {
+    let plan = Fixtures.editPlan()
+    let slice = Slice(
+      id: UUID(), name: "S", startSample: 5_000, endSample: 25_000,
+      wordIDs: [], snippet: "", warnings: [])
+    let model = EditSliceModel(slice: slice, editPlan: plan)
+    var asked: [Range<Int>] = []
+    model.columnsProvider = { window, _ in
+      asked.append(window)
+      return []
+    }
+
+    _ = model.overviewColumns(pixelWidth: 600)
+
+    expectNoDifference(asked, [5_000..<25_000])
+  }
 }
