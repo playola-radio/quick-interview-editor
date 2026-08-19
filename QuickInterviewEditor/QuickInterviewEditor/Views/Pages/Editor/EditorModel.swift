@@ -248,6 +248,25 @@ final class EditorModel: ViewModel {
   /// mid-drag.
   var activeEditingRange: Range<Int>? { fineTune.draftRange ?? activeOrSelectedRange }
 
+  // MARK: - Selection (source samples — the single source of truth)
+  /// The freeform selected range in SOURCE samples. Plain @Observable — not @Shared, not in the
+  /// undo stack. During migration it is SEEDED from the transcript selection; later tasks flip the
+  /// writers so this becomes authoritative and the transcript derives from it.
+  var audioSelection: Range<Int>?
+  /// The fixed edge held during a marquee / shift-extend (set in Task 6).
+  var selectionAnchorSample: Int?
+  /// The edge currently being drag-edited (set in Task 8).
+  var selectionEditingEdge: SelectionEdge?
+
+  /// Read facade every downstream reader migrates onto (spec §6). Backed by `audioSelection`.
+  var selectedSourceRange: Range<Int>? { audioSelection }
+
+  /// Migration seam (step 1): keep `audioSelection` mirrored from the transcript selection until
+  /// the writers flip (Task 6/7). Called from `EditorView`'s selection `onChange`.
+  func seedSelectionFromTranscript() {
+    audioSelection = transcript.selectedSampleRange
+  }
+
   /// What the fine-tune pane binds to: a live transcript selection takes precedence (a fresh
   /// selection is a new-slice intent that retargets the pane), else the active slice.
   /// `sliceSelected` clears the selection so an edited slice cleanly becomes the driver.
