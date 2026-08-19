@@ -976,16 +976,22 @@ final class EditorModel: ViewModel {
     return !timelineRemovals.contains { $0.removedRange.overlaps(range) }
   }
 
-  /// Drives ⌫ enablement and the Remove Section menu item.
+  /// Drives ⌫ enablement and the Remove Section menu item. Also blocked while an export is
+  /// in flight — an in-progress export is rendering the un-cut canonical audio, so adding a
+  /// removal mid-export would leave the finished AIFF stale relative to what the editor shows.
   var canRemoveSelectedSection: Bool {
     guard let range = selectedSourceRange else { return false }
-    return canRemove(sourceRange: range)
+    return canRemove(sourceRange: range) && !isExporting
   }
 
   /// Turns the current selection into a `TimelineRemoval` with the default 20 ms
-  /// equal-power crossfade, then clears the selection.
+  /// equal-power crossfade, then clears the selection. Belt-and-suspenders guard on
+  /// `isExporting` (mirrors `canRemoveSelectedSection`) so a stale invocation can't mutate
+  /// the document while an export is rendering.
   func removeSelectedSectionTapped() async {
-    guard let range = selectedSourceRange, canRemove(sourceRange: range) else { return }
+    guard !isExporting, let range = selectedSourceRange, canRemove(sourceRange: range) else {
+      return
+    }
     let removal = TimelineRemoval(
       id: UUID(), removedRange: range,
       crossfade: Crossfade(lengthSamples: defaultCrossfadeSamples, curve: .equalPower))

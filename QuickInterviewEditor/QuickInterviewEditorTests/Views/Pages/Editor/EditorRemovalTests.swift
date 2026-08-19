@@ -155,6 +155,43 @@ struct EditorRemovalTests {
     }
   }
 
+  /// Reverse of the export-gate race: an in-flight export is rendering the un-cut canonical
+  /// audio, so adding a removal mid-export would leave the finished AIFF stale relative to
+  /// what the editor now shows/persists. Both the enablement and the action must block.
+  @Test func removeSelectedSectionBlockedWhileExporting() async {
+    let fileSystem = LockIsolated<[URL: Data]>([:])
+    await withDependencies {
+      $0.defaultFileStorage = FileStorage.inMemory(fileSystem: fileSystem)
+    } operation: {
+      let model = editor(fingerprint: "fp-remove-during-export")
+      model.transcript.selectWords(
+        anchorID: model.editPlan.words[1].id, focusID: model.editPlan.words[2].id)
+      model.exportPhase = .exporting(current: 1, total: 1)
+
+      expectNoDifference(model.canRemoveSelectedSection, false)
+
+      await model.removeSelectedSectionTapped()
+
+      expectNoDifference(model.timelineRemovals, [])
+    }
+  }
+
+  /// Sanity check alongside the export-gate test above: the same selection with an idle
+  /// export phase is NOT over-blocked by the new guard.
+  @Test func removeSelectedSectionAllowedWhenNotExporting() {
+    let fileSystem = LockIsolated<[URL: Data]>([:])
+    withDependencies {
+      $0.defaultFileStorage = FileStorage.inMemory(fileSystem: fileSystem)
+    } operation: {
+      let model = editor(fingerprint: "fp-remove-not-exporting")
+      model.transcript.selectWords(
+        anchorID: model.editPlan.words[1].id, focusID: model.editPlan.words[2].id)
+      model.exportPhase = .idle
+
+      expectNoDifference(model.canRemoveSelectedSection, true)
+    }
+  }
+
   @Test func canRemoveRejectsCrossSeamAndEmptySelections() {
     let fileSystem = LockIsolated<[URL: Data]>([:])
     withDependencies {
