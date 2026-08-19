@@ -29,9 +29,11 @@ final class AppLaunchModel: ViewModel {
   ///   engine), which gates on model setup; `false` for dev, which goes straight
   ///   to the editor. Defaults to `LiveEngine.isPackaged`.
   init(requiresManagedModels: Bool = LiveEngine.isPackaged) {
-    // Canonical audio caches are per-session derived data. On launch no editor
-    // references any prior-run dir, so prune them all before any new one is created.
-    CanonicalAudioStore.pruneAll()
+    // Reap only *stale* canonical audio dirs (leftovers from a crashed run), never a
+    // blanket wipe: this launch can overlap a still-running instance (auto-update
+    // relaunch, relocation's second instance, a manual double-launch), and wiping the
+    // shared cache would strand that instance's export mid-session.
+    CanonicalAudioStore.reapStale()
     // Warm the engine-fingerprint memo off the main actor so the first import
     // doesn't stall on hashing the engine (notably the frozen binary in packaged builds).
     Task.detached(priority: .utility) { _ = EngineFingerprint.current() }

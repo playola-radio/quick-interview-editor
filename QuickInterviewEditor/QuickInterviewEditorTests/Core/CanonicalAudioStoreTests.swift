@@ -56,14 +56,45 @@ struct CanonicalAudioStoreTests {
     #expect(FileManager.default.fileExists(atPath: plan.path))
   }
 
-  @Test func pruneAllRemovesEveryJobDir() throws {
+  /// Ages a job dir by back-dating its modification time, so reap tests are deterministic
+  /// without sleeping. Reaping keys on the dir's `contentModificationDate`.
+  private func age(_ jobDir: URL, to date: Date) throws {
+    try FileManager.default.setAttributes([.modificationDate: date], ofItemAtPath: jobDir.path)
+  }
+
+  @Test func reapStaleRemovesAgedDirsAndKeepsFreshOnes() throws {
     let (base, plan) = try makeSandbox()
     defer { try? FileManager.default.removeItem(at: base.deletingLastPathComponent()) }
 
-    _ = try CanonicalAudioStore.store(planAIFF: plan, in: base)
-    _ = try CanonicalAudioStore.store(planAIFF: plan, in: base)
-    CanonicalAudioStore.pruneAll(in: base)
+    let now = Date(timeIntervalSince1970: 1_000_000_000)
+    let stale = try CanonicalAudioStore.store(planAIFF: plan, in: base).deletingLastPathComponent()
+    let fresh = try CanonicalAudioStore.store(planAIFF: plan, in: base).deletingLastPathComponent()
+    try age(stale, to: now.addingTimeInterval(-8 * 24 * 60 * 60))  // 8 days old
+    try age(fresh, to: now.addingTimeInterval(-60 * 60))  // 1 hour old
 
+    CanonicalAudioStore.reapStale(olderThan: 7 * 24 * 60 * 60, in: base, now: now)
+
+    #expect(!FileManager.default.fileExists(atPath: stale.path))
+    #expect(FileManager.default.fileExists(atPath: fresh.path))  // a live session's dir survives
+  }
+
+  @Test func reapStaleLeavesEveryRecentDir() throws {
+    let (base, plan) = try makeSandbox()
+    defer { try? FileManager.default.removeItem(at: base.deletingLastPathComponent()) }
+
+    let now = Date(timeIntervalSince1970: 1_000_000_000)
+    let dir = try CanonicalAudioStore.store(planAIFF: plan, in: base).deletingLastPathComponent()
+    try age(dir, to: now.addingTimeInterval(-6 * 24 * 60 * 60))  // 6 days old, under the cutoff
+
+    CanonicalAudioStore.reapStale(olderThan: 7 * 24 * 60 * 60, in: base, now: now)
+
+    #expect(FileManager.default.fileExists(atPath: dir.path))
+  }
+
+  @Test func reapStaleOnMissingBaseIsSafe() {
+    let base = FileManager.default.temporaryDirectory
+      .appendingPathComponent("qie-canonical-missing-\(UUID().uuidString)")
+    CanonicalAudioStore.reapStale(in: base)  // must not throw or crash
     #expect(!FileManager.default.fileExists(atPath: base.path))
   }
 }
