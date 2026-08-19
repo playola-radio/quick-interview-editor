@@ -71,23 +71,6 @@ struct EditSliceTests {
     #expect(model.overviewWindow == 5_000..<25_000)
   }
 
-  @Test func overviewColumnsAskTheProviderForTheOverviewWindow() {
-    let plan = Fixtures.editPlan()
-    let slice = Slice(
-      id: UUID(), name: "S", startSample: 5_000, endSample: 25_000,
-      wordIDs: [], snippet: "", warnings: [])
-    let model = EditSliceModel(slice: slice, editPlan: plan)
-    var asked: [Range<Int>] = []
-    model.columnsProvider = { window, _ in
-      asked.append(window)
-      return []
-    }
-
-    _ = model.overviewColumns(pixelWidth: 600)
-
-    expectNoDifference(asked, [5_000..<25_000])
-  }
-
   @Test func playTappedPlaysTheDraftRange() async {
     let (model, slice) = makeModel()
     var played: [Range<Int>] = []
@@ -108,6 +91,87 @@ struct EditSliceTests {
     await model.playPauseTapped()
 
     expectNoDifference(played, [draft].compactMap { $0 })
+  }
+
+  @Test func playStartsFromThePlayheadWhenTheCursorIsInsideTheSlice() async {
+    let (model, slice) = makeModel()
+    var played: [Range<Int>] = []
+    model.onPlay = { played.append($0) }
+    model.playheadSample = slice.startSample + 5_000  // cursor parked mid-slice
+
+    await model.playPauseTapped()
+
+    expectNoDifference(played, [(slice.startSample + 5_000)..<slice.endSample])
+  }
+
+  @Test func playFallsBackToTheCutInWhenTheCursorIsOutsideTheSlice() async {
+    let (model, slice) = makeModel()
+    var played: [Range<Int>] = []
+    model.onPlay = { played.append($0) }
+    model.playheadSample = slice.endSample + 10_000  // cursor past the slice
+
+    await model.playPauseTapped()
+
+    expectNoDifference(played, [slice.startSample..<slice.endSample])
+  }
+
+  @Test func seekWhilePlayingReAnchorsPlaybackToTheClick() async {
+    let model = laneModel()  // slice 10_000..<20_000, spp 100, start 0
+    var played: [Range<Int>] = []
+    var sought: [Int] = []
+    model.onPlay = { played.append($0) }
+    model.onSeek = { sought.append($0) }
+    model.updatePlayback(sample: 12_000, isPlaying: true)
+
+    await model.waveformSeeked(toX: 150)  // sample 15_000, inside the slice
+
+    expectNoDifference(played, [15_000..<20_000])  // keeps playing from the click to the cut-out
+    #expect(sought.isEmpty)  // it re-anchors, it does not merely reposition
+  }
+
+  @Test func seekAtTheCutOutWhilePlayingStopsInsteadOfLeavingPlaybackRunning() async {
+    let model = laneModel()  // slice 10_000..<20_000, spp 100, start 0
+    var played: [Range<Int>] = []
+    var sought: [Int] = []
+    var stops = 0
+    model.onPlay = { played.append($0) }
+    model.onSeek = { sought.append($0) }
+    model.onStop = { stops += 1 }
+    model.updatePlayback(sample: 12_000, isPlaying: true)
+
+    await model.waveformSeeked(toX: 1000)  // clamps to the cut-out (20_000)
+
+    #expect(stops == 1)  // stops rather than leaving playback running past the click
+    expectNoDifference(sought, [20_000])  // parks the cursor at the cut-out
+    #expect(played.isEmpty)  // does not re-anchor to an empty range
+  }
+
+  @Test func rulerDragWhilePlayingRepositionsCursorWithoutReAnchoring() async {
+    let model = laneModel()  // slice 10_000..<20_000, spp 100, start 0
+    var played: [Range<Int>] = []
+    var sought: [Int] = []
+    model.onPlay = { played.append($0) }
+    model.onSeek = { sought.append($0) }
+    model.updatePlayback(sample: 12_000, isPlaying: true)
+
+    await model.waveformDragged(toX: 150)  // sample 15_000
+
+    expectNoDifference(sought, [15_000])  // cursor-only — a ruler scrub never restarts playback
+    #expect(played.isEmpty)
+  }
+
+  @Test func seekWhilePausedRepositionsWithoutReplaying() async {
+    let model = laneModel()  // slice 10_000..<20_000, spp 100, start 0
+    var played: [Range<Int>] = []
+    var sought: [Int] = []
+    model.onPlay = { played.append($0) }
+    model.onSeek = { sought.append($0) }
+    // not playing (paused/stopped)
+
+    await model.waveformSeeked(toX: 150)  // sample 15_000
+
+    expectNoDifference(sought, [15_000])  // just moves the cursor
+    #expect(played.isEmpty)  // no playback started
   }
 
   @Test func playTappedWhilePlayingPauses() async {
@@ -194,42 +258,74 @@ struct EditSliceTests {
     expectNoDifference(played, [slice.startSample..<slice.endSample])
   }
 
-  // MARK: - Overview geometry (model owns sample↔fraction mapping; the view only scales by width)
+  // MARK: - Waveform lane (the sheet's own WaveformModel; nav-only, insets still edit)
 
-  private func geometryModel() -> EditSliceModel {
+  /// A model whose lane is seeded and laid out with predictable geometry (no focus-fit), so
+  /// view-x ↔ sample mapping is exact: window 10_000..<20_000, spp 100, visibleStart 0.
+  private func laneModel() -> EditSliceModel {
     let plan = Fixtures.editPlan()
     let slice = Slice(
       id: UUID(), name: "S", startSample: 10_000, endSample: 20_000,
       wordIDs: [], snippet: "", warnings: [])
-    return EditSliceModel(slice: slice, editPlan: plan)
+    let model = EditSliceModel(slice: slice, editPlan: plan)
+    model.waveform.totalSamples = 100_000
+    model.waveform.viewportResized(width: 1000)  // fit spp 100, visibleStart 0
+    return model
   }
 
-  @Test func overviewPlayheadFractionMapsTheCursorAcrossTheWindow() {
-    let model = geometryModel()  // window 10_000..<20_000
-    model.playheadSample = 15_000
-    expectNoDifference(model.overviewPlayheadFraction, 0.5)
-    model.playheadSample = 20_000  // upper bound is inclusive
-    expectNoDifference(model.overviewPlayheadFraction, 1.0)
-    model.playheadSample = 5_000  // before the slice → hidden
-    #expect(model.overviewPlayheadFraction == nil)
+  @Test func highlightRangeTracksTheLiveDraftRange() {
+    let (model, slice) = makeModel()
+    expectNoDifference(model.waveformHighlightRange, slice.startSample..<slice.endSample)
+    model.fineTune.nudgeCutIn(byMs: 20)
+    expectNoDifference(model.waveformHighlightRange, model.fineTune.draftRange)
   }
 
-  @Test func overviewSeekSampleMapsAFractionBackToASampleAndClamps() {
-    let model = geometryModel()  // window 10_000..<20_000
-    expectNoDifference(model.overviewSeekSample(atFraction: 0), 10_000)
-    expectNoDifference(model.overviewSeekSample(atFraction: 0.5), 15_000)
-    expectNoDifference(model.overviewSeekSample(atFraction: 1), 20_000)
-    expectNoDifference(model.overviewSeekSample(atFraction: 2), 20_000)  // clamped past the edge
+  @Test func waveformSeekedMapsXToSampleAndForwardsToOnSeek() async {
+    let model = laneModel()  // window 10_000..<20_000, spp 100, start 0
+    var sought: [Int] = []
+    model.onSeek = { sought.append($0) }
+
+    await model.waveformSeeked(toX: 150)  // 150 px * 100 spp = sample 15_000
+
+    expectNoDifference(sought, [15_000])
   }
 
-  @Test func overviewCutFractionsTrackTheLiveDraftRange() {
-    let model = geometryModel()  // draft starts equal to the committed window
-    expectNoDifference(model.overviewCutInFraction, 0)
-    expectNoDifference(model.overviewCutOutFraction, 1)
+  @Test func waveformSeekedClampsInsideTheSliceBeingEdited() async {
+    let model = laneModel()  // window 10_000..<20_000
+    var sought: [Int] = []
+    model.onSeek = { sought.append($0) }
 
-    model.fineTune.nudgeCutIn(byMs: 20)  // pull the cut-in inward
+    await model.waveformSeeked(toX: 50)  // sample 5_000, before the slice -> clamps to lower
+    await model.waveformSeeked(toX: 500)  // sample 50_000, past the slice -> clamps to upper
 
-    #expect((model.overviewCutInFraction ?? 0) > 0)
+    expectNoDifference(sought, [10_000, 20_000])
+  }
+
+  @Test func waveformSeekedIsANoOpWithoutUsableGeometry() async {
+    let (model, _) = makeModel()  // lane never seeded/laid out
+    var sought: [Int] = []
+    model.onSeek = { sought.append($0) }
+
+    await model.waveformSeeked(toX: 150)
+
+    #expect(sought.isEmpty)
+  }
+
+  @Test func zoomButtonsForwardToTheLane() {
+    let model = laneModel()  // fit spp 100
+    model.zoomInTapped()
+    expectNoDifference(model.waveform.samplesPerPixel, 50)
+    model.zoomOutTapped()
+    expectNoDifference(model.waveform.samplesPerPixel, 100)
+  }
+
+  @Test func zoomFitTogglesAgainstTheSlice() {
+    let model = laneModel()  // slice 10_000..<20_000, spp 100
+    model.zoomInTapped()  // spp 50, so a fit is a visible change
+    model.zoomFitTapped()  // fit the whole slice (10_000..<20_000, 10_000 wide) -> spp 10
+    expectNoDifference(model.waveform.samplesPerPixel, 10)
+    model.zoomFitTapped()  // same slice -> restore the pre-fit zoom
+    expectNoDifference(model.waveform.samplesPerPixel, 50)
   }
 
   // MARK: - FIX 2: updatePlayback highlights the current word in the scoped transcript
