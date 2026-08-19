@@ -524,10 +524,12 @@ struct EditorRemovalTests {
     }
   }
 
-  /// Regression (Codex adversarial review, Task 9): `syncEditSession()` intentionally HOLDS an
-  /// unsaved pending draft across a selection change — a design that assumes a visible pane with
-  /// Save/Cancel. With no pane mounted here, ⌫ must not silently act on a stale, no-longer-visible
-  /// nudged range once the user has moved on to a different selection.
+  /// Regression (coordinator-flagged deadlock, Task 9 follow-up fix): a `.pendingSelection`
+  /// draft is a disposable CANDIDATE with no pane protecting it, so `syncEditSession()` must
+  /// freely abandon a dirty draft the moment the live selection moves on to a different range —
+  /// NOT hold it forever like a `.slice` edit would. Select A, nudge it dirty, then select B:
+  /// the session must retarget cleanly to B (draft == B, not dirty), and Remove Section must act
+  /// on B, not the abandoned A'.
   @Test func removeSelectedSectionAfterReselectingRemovesTheNewSelectionNotTheStaleNudgedDraft()
     async
   {
@@ -541,15 +543,16 @@ struct EditorRemovalTests {
       let nudgedA = model.fineTune.draftRange!
       #expect(nudgedA != selectionA)
 
-      // Select different words (B) without saving/cancelling the held draft on A.
+      // Select different words (B) — the dirty draft on A is abandoned, not held.
       model.transcript.selectWords(
         anchorID: model.editPlan.words[4].id, focusID: model.editPlan.words[5].id)
       model.syncEditSession()
       let selectionB = model.transcript.selectedSampleRange!
       #expect(selectionB != nudgedA)
-      // The pending draft is still held on the stale A — `syncEditSession()`'s existing
-      // hold-until-resolved behavior, unaffected by this task.
-      expectNoDifference(model.fineTune.draftRange, nudgedA)
+      // The session retargeted cleanly to B — no stale draft, no unsaved change.
+      expectNoDifference(model.fineTune.draftRange, selectionB)
+      expectNoDifference(model.fineTune.committedRange, selectionB)
+      #expect(!model.fineTune.hasUnsavedChange)
 
       await model.removeSelectedSectionTapped()
 
@@ -558,35 +561,66 @@ struct EditorRemovalTests {
     }
   }
 
-  /// Same Codex finding, other direction: once the draft is stale (anchored to an abandoned
-  /// selection A while B is now selected), a nudge key must fall through unconsumed rather than
-  /// silently mutate the invisible A draft and swallow a keypress the user meant for B.
-  @Test func nudgeKeysAreNoOpsOnceTheSessionIsStaleFromAReselect() {
+  /// The deadlock, directly: nudging A and then reselecting B must NOT permanently disable
+  /// `canAddSlice` for B or block `editSliceTapped` on an existing slice — both were previously
+  /// wedged forever because the abandoned dirty draft on A was held rather than discarded.
+  @Test func reselectingAfterADirtyPendingDraftDoesNotPermanentlyBlockAddSliceOrEditSlice() {
     let fileSystem = LockIsolated<[URL: Data]>([:])
     withDependencies {
       $0.defaultFileStorage = FileStorage.inMemory(fileSystem: fileSystem)
     } operation: {
-      let (model, _) = selectionEditor(fingerprint: "fp-nudge-stale")
+      let model = editor(fingerprint: "fp-deadlock-repro")
+      // An existing slice, added and selection cleared, before touching the A/B dance below.
+      model.transcript.selectWords(
+        anchorID: model.editPlan.words[7].id, focusID: model.editPlan.words[8].id)
+      model.addSliceTapped()
+      let existingSlice = model.slices[0]
+      #expect(!model.transcript.hasSelection)
+
+      model.transcript.selectWords(
+        anchorID: model.editPlan.words[1].id, focusID: model.editPlan.words[2].id)
       model.syncEditSession()
-      #expect(model.editorKeyDown(.nudgeCutOutLater))
-      let staleDraft = model.fineTune.draftRange!
+      #expect(model.editorKeyDown(.nudgeCutOutLater))  // dirty draft on A
+      #expect(model.fineTune.hasUnsavedChange)
 
       model.transcript.selectWords(
         anchorID: model.editPlan.words[4].id, focusID: model.editPlan.words[5].id)
       model.syncEditSession()
 
-      expectNoDifference(model.editorKeyDown(.nudgeCutInEarlier), false)
-      expectNoDifference(model.editorKeyDown(.nudgeCutInLater), false)
-      expectNoDifference(model.editorKeyDown(.nudgeCutOutEarlier), false)
-      expectNoDifference(model.editorKeyDown(.nudgeCutOutLater), false)
-      // The stale draft is untouched — not further mutated while invisible.
-      expectNoDifference(model.fineTune.draftRange, staleDraft)
+      // Not stuck: B is addable...
+      #expect(model.canAddSlice)
+      // ...and the existing slice's fine-tune pane opens.
+      model.editSliceTapped(existingSlice.id)
+      expectNoDifference(model.editSlice?.sliceID, existingSlice.id)
     }
   }
 
-  /// Same regression, via Clear: a stale held draft must not make Remove Section eligible once
-  /// nothing is visibly selected.
-  @Test func removeSelectedSectionIsDisabledAfterClearingASelectionWithAStaleNudgedDraft() {
+  /// Once the draft is freely abandoned on reselect (the fix above), a nudge key on the NEW
+  /// selection must actually work — proving the deadlock doesn't leave nudging inert either.
+  @Test func nudgeKeysWorkOnANewSelectionAfterAbandoningAPriorDirtyDraft() {
+    let fileSystem = LockIsolated<[URL: Data]>([:])
+    withDependencies {
+      $0.defaultFileStorage = FileStorage.inMemory(fileSystem: fileSystem)
+    } operation: {
+      let (model, _) = selectionEditor(fingerprint: "fp-nudge-fresh-after-abandon")
+      model.syncEditSession()
+      #expect(model.editorKeyDown(.nudgeCutOutLater))  // dirty draft on A, abandoned below
+
+      model.transcript.selectWords(
+        anchorID: model.editPlan.words[4].id, focusID: model.editPlan.words[5].id)
+      model.syncEditSession()
+      let selectionB = model.transcript.selectedSampleRange!
+
+      #expect(model.editorKeyDown(.nudgeCutOutLater))
+      expectNoDifference(
+        model.fineTune.draftRange, selectionB.lowerBound..<(selectionB.upperBound + 441))
+    }
+  }
+
+  /// Same fix, via Clear: an abandoned dirty draft must not leave the app in a bad state once
+  /// nothing is selected — the session fully clears, so Remove Section is (correctly) disabled
+  /// rather than silently eligible against the discarded draft.
+  @Test func clearingASelectionAfterADirtyNudgeFullyClearsTheSessionNotStuckDirty() {
     let fileSystem = LockIsolated<[URL: Data]>([:])
     withDependencies {
       $0.defaultFileStorage = FileStorage.inMemory(fileSystem: fileSystem)
@@ -600,6 +634,9 @@ struct EditorRemovalTests {
       model.syncEditSession()
 
       expectNoDifference(model.canRemoveSelectedSection, false)
+      expectNoDifference(model.fineTune.target, nil)
+      expectNoDifference(model.fineTune.draftRange, nil)
+      #expect(!model.fineTune.hasUnsavedChange)
     }
   }
 }

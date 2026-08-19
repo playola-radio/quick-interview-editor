@@ -1459,20 +1459,33 @@ final class EditorModel: ViewModel {
   /// active slice or selection changes, and lazily before any edit gesture. Preserves an
   /// in-progress draft: it only (re)begins when the target changed, no session is open, or the
   /// committed range drifted (e.g. an undo moved the active slice).
+  ///
+  /// The "hold an unsaved draft until Save/Cancel" protection below applies ONLY to a currently
+  /// open `.slice` session (`fineTune.isEditingExistingSlice`) — it's editing a real, already
+  /// -committed slice's real cut points, so silently discarding the draft would lose that data,
+  /// and (pre-Task-9) it has a visible pane with Save/Cancel to resolve it. A `.pendingSelection`
+  /// draft is a disposable CANDIDATE that commits nothing on its own, and Task 9 wires its session
+  /// with no pane at all — so holding it the same way is a dead end: the app would refuse to
+  /// retarget it to any later selection, permanently blocking `canAddSlice`/`editSliceTapped` for
+  /// every future selection (found in adversarial review of Task 9). A dirty pending draft is
+  /// therefore always free to be abandoned the moment the live selection/target moves on.
   func syncEditSession() {
     guard let target = fineTuneTarget, let range = activeOrSelectedRange else {
-      // Don't tear down ANY unsaved edit (existing-slice or tuned pending selection) just because
-      // the target went nil — the user must Save or Cancel first.
-      if fineTune.target != nil, !fineTune.hasUnsavedChange {
+      // Don't tear down an unsaved SLICE edit just because the target went nil — the user must
+      // Save or Cancel first. A dirty PENDING-SELECTION draft has nothing protecting it, so it's
+      // discarded right along with a clean one.
+      if fineTune.target != nil, !fineTune.isEditingExistingSlice || !fineTune.hasUnsavedChange {
         cancelPreviewOrAuditionIfNeeded()  // closing the pane removes the region + Stop control
         fineTune.clear()
       }
       return
     }
-    // Never abandon an unsaved edit by retargeting — a new transcript selection arriving mid-edit,
-    // for either a slice edit (target changes) or a tuned pending draft (the anchor range drifts).
-    // The held draft is preserved until the user Saves or Cancels.
-    if fineTune.hasUnsavedChange, fineTune.target != target || fineTune.committedRange != range {
+    // Never abandon an unsaved SLICE edit by retargeting — a new transcript selection arriving
+    // mid-edit holds it until Save/Cancel. A dirty PENDING-SELECTION draft is NOT held: it falls
+    // through to `shouldBegin` below, which re-anchors (and so discards the abandoned draft).
+    if fineTune.isEditingExistingSlice, fineTune.hasUnsavedChange,
+      fineTune.target != target || fineTune.committedRange != range
+    {
       return
     }
     // Re-anchor when the target changed, no session is open, or the anchor range drifted from the
