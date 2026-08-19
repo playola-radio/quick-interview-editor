@@ -220,6 +220,122 @@ struct WaveformTests {
     #expect(model.visibleStartSample == 5000)
   }
 
+  // MARK: - Vertical (amplitude) zoom
+
+  @Test func amplitudeScaleDefaultsToOne() {
+    let model = WaveformModel()
+    #expect(model.amplitudeScale == 1.0)
+  }
+
+  @Test func amplitudeZoomDraggedUpwardIncreasesScale() {
+    let model = WaveformModel()
+    model.amplitudeZoomDragBegan()
+    model.amplitudeZoomDragged(byPixels: 150)  // one "double" step
+    expectNoDifference(model.amplitudeScale, 2.0)
+  }
+
+  @Test func amplitudeZoomDraggedDownwardDecreasesScale() {
+    let model = WaveformModel()
+    model.amplitudeScale = 4.0
+    model.amplitudeZoomDragBegan()
+    model.amplitudeZoomDragged(byPixels: -150)  // one "halve" step
+    expectNoDifference(model.amplitudeScale, 2.0)
+  }
+
+  @Test func amplitudeZoomClampsAtMaximum() {
+    let model = WaveformModel()
+    model.amplitudeZoomDragBegan()
+    model.amplitudeZoomDragged(byPixels: 100_000)
+    expectNoDifference(model.amplitudeScale, 8.0)
+  }
+
+  @Test func amplitudeZoomClampsAtMinimum() {
+    let model = WaveformModel()
+    model.amplitudeScale = 4.0
+    model.amplitudeZoomDragBegan()
+    model.amplitudeZoomDragged(byPixels: -100_000)
+    expectNoDifference(model.amplitudeScale, 1.0)
+  }
+
+  @Test func amplitudeZoomDragRecomputesFromAnchorRatherThanAccumulating() {
+    let model = WaveformModel()
+    model.amplitudeZoomDragBegan()  // anchors at 1.0
+    model.amplitudeZoomDragged(byPixels: 150)
+    expectNoDifference(model.amplitudeScale, 2.0)
+    model.amplitudeZoomDragged(byPixels: 0)  // relative to the anchor, not the last value
+    expectNoDifference(model.amplitudeScale, 1.0)
+  }
+
+  @Test func amplitudeZoomDragBeganCapturesTheCurrentScaleAsTheNewAnchor() {
+    let model = WaveformModel()
+    model.amplitudeZoomDragBegan()
+    model.amplitudeZoomDragged(byPixels: 150)  // 2.0
+    model.amplitudeZoomDragBegan()  // re-anchors at 2.0
+    model.amplitudeZoomDragged(byPixels: 150)  // one more double step from the new anchor
+    expectNoDifference(model.amplitudeScale, 4.0)
+  }
+
+  @Test func amplitudeZoomResetSetsScaleToOne() {
+    let model = WaveformModel()
+    model.amplitudeScale = 4.0
+    model.amplitudeZoomResetTapped()
+    expectNoDifference(model.amplitudeScale, 1.0)
+  }
+
+  @Test func amplitudeZoomDoesNotAffectHorizontalGeometry() {
+    let model = makeModel(
+      totalSamples: 1_000_000, viewportWidth: 1000, samplesPerPixel: 100, start: 200_000)
+    model.amplitudeZoomDragBegan()
+    model.amplitudeZoomDragged(byPixels: 150)
+    model.amplitudeZoomResetTapped()
+    expectNoDifference(model.samplesPerPixel, 100)
+    expectNoDifference(model.visibleStartSample, 200_000)
+  }
+
+  @Test func canAmplitudeZoomFalseWithoutAWaveform() {
+    let model = WaveformModel()
+    #expect(model.canAmplitudeZoom == false)
+  }
+
+  @Test func canAmplitudeZoomTrueWithALoadedWaveform() {
+    let model = makeModel(
+      totalSamples: 1000, viewportWidth: 100, samplesPerPixel: 10,
+      base: (mins: [-0.5], maxs: [0.5]))
+    #expect(model.canAmplitudeZoom == true)
+  }
+
+  @Test func amplitudeZoomIncrementedDoublesScale() {
+    let model = WaveformModel()
+    model.amplitudeZoomIncremented()
+    expectNoDifference(model.amplitudeScale, 2.0)
+  }
+
+  @Test func amplitudeZoomDecrementedHalvesScale() {
+    let model = WaveformModel()
+    model.amplitudeScale = 4.0
+    model.amplitudeZoomDecremented()
+    expectNoDifference(model.amplitudeScale, 2.0)
+  }
+
+  @Test func amplitudeZoomIncrementedClampsAtMaximum() {
+    let model = WaveformModel()
+    model.amplitudeScale = 8.0
+    model.amplitudeZoomIncremented()
+    expectNoDifference(model.amplitudeScale, 8.0)
+  }
+
+  @Test func amplitudeZoomDecrementedClampsAtMinimum() {
+    let model = WaveformModel()
+    model.amplitudeZoomDecremented()
+    expectNoDifference(model.amplitudeScale, 1.0)
+  }
+
+  @Test func amplitudeZoomAccessibilityValueReflectsScale() {
+    let model = WaveformModel()
+    model.amplitudeScale = 2.0
+    #expect(model.amplitudeZoomAccessibilityValue == "200%")
+  }
+
   // MARK: - load
 
   @Test func loadPopulatesWaveformViaClientAndFitsZoom() async {
@@ -236,6 +352,34 @@ struct WaveformTests {
     #expect(model.isLoading == false)
     #expect(model.totalSamples == 1000)
     #expect(model.samplesPerPixel == 10)  // fit: 1000 / 100
+  }
+
+  @Test func loadResetsAmplitudeScaleToOne() async {
+    let fixture = Waveform.pyramid(
+      baseMins: [0], baseMaxs: [0.5], sampleRate: 44100, totalSamples: 500)
+    let model = withDependencies {
+      $0.waveform = WaveformClient(loadWaveform: { _, _, _ in fixture })
+    } operation: {
+      WaveformModel()
+    }
+    model.amplitudeScale = 4.0
+    await model.load(url: URL(fileURLWithPath: "/x"), planSampleRate: 44100, durationSamples: 500)
+    expectNoDifference(model.amplitudeScale, 1.0)
+  }
+
+  @Test func loadDiscardsAStaleInFlightDragAnchor() async {
+    let fixture = Waveform.pyramid(
+      baseMins: [0], baseMaxs: [0.5], sampleRate: 44100, totalSamples: 500)
+    let model = withDependencies {
+      $0.waveform = WaveformClient(loadWaveform: { _, _, _ in fixture })
+    } operation: {
+      WaveformModel()
+    }
+    model.amplitudeScale = 4.0
+    model.amplitudeZoomDragBegan()  // anchors at 4.0, mid-drag when a new file starts loading
+    await model.load(url: URL(fileURLWithPath: "/x"), planSampleRate: 44100, durationSamples: 500)
+    model.amplitudeZoomDragged(byPixels: 0)  // a leftover mouseDragged from the old gesture
+    expectNoDifference(model.amplitudeScale, 1.0)
   }
 
   @Test func loadIsIdempotentOnceLoaded() async {
@@ -475,6 +619,26 @@ struct WaveformTests {
     #expect(model.sampleRate == 44100)
     #expect(model.isLoading == false)
     #expect(calls.value == 0)  // adopt never decodes — it borrows the decoded pyramid
+  }
+
+  @Test func adoptResetsAmplitudeScaleToOne() {
+    let fixture = Waveform.pyramid(
+      baseMins: [0], baseMaxs: [0.5], sampleRate: 44100, totalSamples: 1000)
+    let model = WaveformModel()
+    model.amplitudeScale = 4.0
+    model.adopt(waveform: fixture, totalSamples: 1000, sampleRate: 44100, contentRange: nil)
+    expectNoDifference(model.amplitudeScale, 1.0)
+  }
+
+  @Test func adoptDiscardsAStaleInFlightDragAnchor() {
+    let fixture = Waveform.pyramid(
+      baseMins: [0], baseMaxs: [0.5], sampleRate: 44100, totalSamples: 1000)
+    let model = WaveformModel()
+    model.amplitudeScale = 4.0
+    model.amplitudeZoomDragBegan()  // anchors at 4.0, mid-drag when the model is reseeded
+    model.adopt(waveform: fixture, totalSamples: 1000, sampleRate: 44100, contentRange: nil)
+    model.amplitudeZoomDragged(byPixels: 0)  // a leftover mouseDragged from the old gesture
+    expectNoDifference(model.amplitudeScale, 1.0)
   }
 
   @Test func adoptFitsTheContentRangeEdgeToEdgeOnTheFirstLayout() {

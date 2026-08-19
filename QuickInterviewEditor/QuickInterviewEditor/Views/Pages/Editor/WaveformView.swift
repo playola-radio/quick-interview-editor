@@ -48,6 +48,8 @@ struct WaveformView: View {
           .foregroundStyle(Color(white: 0.44))
       }
       Spacer()
+      WaveformAmplitudeZoomButton(waveform: model.waveform)
+        .disabled(!model.waveform.canAmplitudeZoom)
       Button {
         model.editedWaveform.zoomOutTapped()
       } label: {

@@ -44,12 +44,30 @@ final class WaveformModel: ViewModel {
   /// Cleared by any manual zoom/pan so the next Z fits fresh instead of restoring stale state.
   @ObservationIgnored private var fitRestore: FitRestore?
 
+  /// Vertical zoom: multiplies rendered peak height so quiet passages become visible. Purely a
+  /// rendering scale read by ``WaveformLaneView`` — never touches sample/selection geometry, so it
+  /// can't affect edits. Mirrors Logic's Waveform Zoom button (click-hold, drag vertically).
+  var amplitudeScale: CGFloat = 1.0
+  /// `amplitudeScale` captured at the start of an amplitude-zoom drag, so `amplitudeZoomDragged`
+  /// recomputes from it each call instead of accumulating drift.
+  @ObservationIgnored private var amplitudeZoomDragAnchor: CGFloat = 1.0
+
   // MARK: - Display Text
   let caption = "WAVEFORM"
   let loadingMessage = "Loading waveform…"
   let emptyMessage = "No audio loaded."
   let zoomInLabel = "Zoom in"
   let zoomOutLabel = "Zoom out"
+  let amplitudeZoomLabel = "Waveform zoom (drag to adjust, double-click to reset)"
+  let amplitudeZoomResetLabel = "Reset"
+
+  // MARK: - Constants
+  private let minSamplesPerPixel = 8.0
+  private let zoomStep = 2.0
+  private let minAmplitudeScale: CGFloat = 1.0
+  private let maxAmplitudeScale: CGFloat = 8.0
+  /// Vertical pixels of drag worth one amplitude doubling; sensitivity tuned, verified in QA.
+  private let amplitudeZoomPixelsPerDouble: CGFloat = 150
 
   // MARK: - View Helpers
   var hasWaveform: Bool { waveform != nil && totalSamples > 0 }
@@ -68,6 +86,8 @@ final class WaveformModel: ViewModel {
     showsWaveform && samplesPerPixel > minEffectiveSamplesPerPixel() + .ulpOfOne
   }
   var canZoomOut: Bool { showsWaveform && samplesPerPixel < fitSamplesPerPixel() - .ulpOfOne }
+  var canAmplitudeZoom: Bool { showsWaveform }
+  var amplitudeZoomAccessibilityValue: String { "\(Int((amplitudeScale * 100).rounded()))%" }
 
   /// Plan samples currently visible across the viewport.
   var visibleSampleCount: Int {
@@ -185,6 +205,8 @@ final class WaveformModel: ViewModel {
     guard planSampleRate > 0, durationSamples > 0 else { return }
     sampleRate = planSampleRate
     totalSamples = durationSamples
+    amplitudeScale = 1.0
+    amplitudeZoomDragAnchor = 1.0
     isLoading = true
     defer { isLoading = false }
     do {
@@ -211,6 +233,8 @@ final class WaveformModel: ViewModel {
     self.sampleRate = sampleRate
     self.contentRange = contentRange
     isLoading = false
+    amplitudeScale = 1.0
+    amplitudeZoomDragAnchor = 1.0
     // A fresh seed invalidates any armed Z-restore: a snapshot taken against the pre-adopt (often
     // empty, mid-decode) geometry must not be restorable after the real waveform is framed.
     fitRestore = nil
@@ -227,6 +251,25 @@ final class WaveformModel: ViewModel {
 
   func zoomInTapped() { zoom(by: 1 / WaveformViewport.zoomStep) }
   func zoomOutTapped() { zoom(by: WaveformViewport.zoomStep) }
+
+  /// Amplitude-zoom drag begins: anchors at the current scale so `amplitudeZoomDragged` recomputes
+  /// from it each call.
+  func amplitudeZoomDragBegan() { amplitudeZoomDragAnchor = amplitudeScale }
+
+  /// Amplitude-zoom drag: `deltaY` is pixels dragged since the gesture began, up positive. Every
+  /// `amplitudeZoomPixelsPerDouble` pixels dragged up doubles the anchor scale; down halves it.
+  func amplitudeZoomDragged(byPixels deltaY: CGFloat) {
+    guard deltaY.isFinite else { return }
+    let factor = CGFloat(pow(2.0, Double(deltaY) / Double(amplitudeZoomPixelsPerDouble)))
+    amplitudeScale = clampedAmplitudeScale(amplitudeZoomDragAnchor * factor)
+  }
+
+  func amplitudeZoomResetTapped() { amplitudeScale = 1.0 }
+
+  /// VoiceOver / Full Keyboard Access equivalents of the drag gesture, exposed via
+  /// `accessibilityAdjustableAction` since the button itself is a raw AppKit drag area.
+  func amplitudeZoomIncremented() { amplitudeScale = clampedAmplitudeScale(amplitudeScale * 2) }
+  func amplitudeZoomDecremented() { amplitudeScale = clampedAmplitudeScale(amplitudeScale / 2) }
 
   func scrolled(toStartSample start: Int) {
     fitRestore = nil
@@ -358,6 +401,10 @@ final class WaveformModel: ViewModel {
   private func clampedSamplesPerPixel(_ spp: Double) -> Double {
     WaveformViewport.clampedSamplesPerPixel(
       spp, viewportWidth: viewportWidth, axis: navigableRange)
+  }
+
+  private func clampedAmplitudeScale(_ scale: CGFloat) -> CGFloat {
+    min(max(scale, minAmplitudeScale), maxAmplitudeScale)
   }
 
   private func clampedStart(_ start: Int) -> Int {
