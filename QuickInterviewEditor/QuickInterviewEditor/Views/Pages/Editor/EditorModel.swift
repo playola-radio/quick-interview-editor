@@ -90,9 +90,13 @@ final class EditorModel: ViewModel {
 
   // MARK: - Properties
   var slices: IdentifiedArrayOf<Slice> = []
-  /// Undo/redo history over `slices` only — never selection, zoom, playback, or export
-  /// phase. Every slice mutation routes through `mutateSlices`, which records here.
-  var sliceUndo = UndoStack<IdentifiedArrayOf<Slice>>()
+  /// Removed source ranges (with their crossfades) that collapse the timeline. Mutated
+  /// only through `mutateDocument`, alongside `slices`, so the two move together on undo.
+  var timelineRemovals: IdentifiedArrayOf<TimelineRemoval> = []
+  /// Undo/redo history over the document (`slices` + `timelineRemovals`) — never
+  /// selection, zoom, playback, or export phase. Every document mutation routes
+  /// through `mutateDocument`, which records here.
+  var documentUndo = UndoStack<EditorDocumentState>()
   /// The slice currently open in the fine-tune pane. Edit-target state, NOT playback state — a
   /// slice can be active (being edited) without playing, and vice versa.
   var activeSliceID: Slice.ID?
@@ -154,6 +158,19 @@ final class EditorModel: ViewModel {
   private var nextSliceNumber = 1
   private var lastExportTightNames: [String] = []
   @ObservationIgnored private(set) var exportTask: Task<Void, Never>?
+
+  /// Maps between source and edited sample coordinates given the current removals.
+  /// Cheap to construct; rebuilt from `timelineRemovals` on every read rather than cached.
+  var editedTimeline: EditedTimeline {
+    EditedTimeline(
+      sourceDurationSamples: editPlan.source.durationSamples,
+      removals: Array(timelineRemovals))
+  }
+
+  /// The undoable document snapshot: `slices` and `timelineRemovals` together.
+  private var documentState: EditorDocumentState {
+    EditorDocumentState(slices: slices, timelineRemovals: timelineRemovals)
+  }
 
   // MARK: - Display Text
   let markAsClipLabel = "Mark as Clip"
@@ -291,8 +308,8 @@ final class EditorModel: ViewModel {
   var canAddSlice: Bool { transcript.selectedSampleRange != nil && !fineTune.hasUnsavedChange }
   // Undo/redo restore `slices` wholesale; doing that under an open cut edit would leave the
   // draft anchored to a stale committed range, so gate on Save/Cancel first.
-  var canUndo: Bool { sliceUndo.canUndo && !hasUncommittedSliceEdit }
-  var canRedo: Bool { sliceUndo.canRedo && !hasUncommittedSliceEdit }
+  var canUndo: Bool { documentUndo.canUndo && !hasUncommittedSliceEdit }
+  var canRedo: Bool { documentUndo.canRedo && !hasUncommittedSliceEdit }
 
   var sliceCountLabel: String {
     "\(slices.count) \(slices.count == 1 ? "clip" : "clips")"
@@ -652,15 +669,30 @@ final class EditorModel: ViewModel {
     return true
   }
 
-  /// The single funnel for every `slices` mutation: snapshots before/after and records
-  /// the change on the undo stack (a no-op when nothing changed). Restoring history via
-  /// `undoTapped`/`redoTapped` deliberately bypasses this — it assigns `slices` directly
-  /// so replaying the stack never records a new entry.
-  func mutateSlices(_ body: (inout IdentifiedArrayOf<Slice>) -> Void) {
-    let old = slices
-    body(&slices)
-    sliceUndo.record(before: old, after: slices)
+  /// The single funnel for every document mutation (`slices` + `timelineRemovals`):
+  /// snapshots before/after and records the change on the undo stack (a no-op when
+  /// nothing changed), then persists the removals. Restoring history via
+  /// `undoTapped`/`redoTapped` deliberately bypasses this — it assigns the fields
+  /// directly so replaying the stack never records a new entry.
+  func mutateDocument(_ body: (inout EditorDocumentState) -> Void) {
+    let old = documentState
+    var new = old
+    body(&new)
+    slices = new.slices
+    timelineRemovals = new.timelineRemovals
+    documentUndo.record(before: old, after: new)
+    persistTimelineRemovals()
   }
+
+  /// `slices`-only convenience over `mutateDocument`, kept so every existing slice
+  /// mutation site reads the same as before.
+  func mutateSlices(_ body: (inout IdentifiedArrayOf<Slice>) -> Void) {
+    mutateDocument { doc in body(&doc.slices) }
+  }
+
+  /// Writes `timelineRemovals` to the per-file project sidecar. Stub — real body lands
+  /// alongside the sidecar wiring.
+  private func persistTimelineRemovals() {}
 
   /// Adds an accepted suggestion's slice to the editor. Idempotent by `Slice.id` (a
   /// re-accept is a no-op), routed through `mutateSlices` so it's exportable and undoable.
@@ -845,21 +877,28 @@ final class EditorModel: ViewModel {
   }
 
   // MARK: - Undo / Redo
-  /// Restores the previous `slices` snapshot, then reconciles playback. History stores
-  /// only `slices`, so anything derived (selection, zoom, export phase, playback) is left
-  /// as-is except where reconciliation demands otherwise.
+  /// Restores the previous document snapshot (`slices` + `timelineRemovals`), then
+  /// reconciles playback. History stores only the document, so anything derived
+  /// (selection, zoom, export phase, playback) is left as-is except where reconciliation
+  /// demands otherwise.
   func undoTapped() async {
     // Guard here too, not just on `canUndo`: a menu item or keyboard shortcut could fire this
     // while an existing-slice edit is open, which would rewind `slices` under a live draft.
-    guard !hasUncommittedSliceEdit, let restored = sliceUndo.undo(current: slices) else { return }
-    slices = restored
+    guard !hasUncommittedSliceEdit, let restored = documentUndo.undo(current: documentState)
+    else { return }
+    slices = restored.slices
+    timelineRemovals = restored.timelineRemovals
+    persistTimelineRemovals()
     await reconcilePlayback()
   }
 
-  /// Reapplies the next `slices` snapshot on the redo branch, then reconciles playback.
+  /// Reapplies the next document snapshot on the redo branch, then reconciles playback.
   func redoTapped() async {
-    guard !hasUncommittedSliceEdit, let restored = sliceUndo.redo(current: slices) else { return }
-    slices = restored
+    guard !hasUncommittedSliceEdit, let restored = documentUndo.redo(current: documentState)
+    else { return }
+    slices = restored.slices
+    timelineRemovals = restored.timelineRemovals
+    persistTimelineRemovals()
     await reconcilePlayback()
   }
 

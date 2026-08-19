@@ -223,6 +223,25 @@ struct EditorTests {
     expectNoDifference(model.slices.map(\.name), ["Slice 1", "Slice 3"])
   }
 
+  @Test func removalUndoRedoRoundTrips() async {
+    let model = editor()
+    #expect(!model.canUndo)
+    model.mutateDocument { doc in
+      doc.timelineRemovals.append(
+        TimelineRemoval(
+          id: Fixtures.uuid(3), removedRange: 1000..<2000,
+          crossfade: Crossfade(lengthSamples: 480, curve: .equalPower)))
+    }
+    expectNoDifference(model.timelineRemovals.count, 1)
+    #expect(model.canUndo)
+
+    await model.undoTapped()
+    expectNoDifference(model.timelineRemovals, [])
+
+    await model.redoTapped()
+    expectNoDifference(model.timelineRemovals.count, 1)
+  }
+
   @Test func undoRemovingPlayingSliceReconcilesPlayback() async {
     let gate = PlayerGate()
     let stopped = LockIsolated(false)
