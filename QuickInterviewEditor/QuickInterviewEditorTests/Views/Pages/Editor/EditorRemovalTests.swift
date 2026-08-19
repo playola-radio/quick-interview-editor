@@ -408,4 +408,198 @@ struct EditorRemovalTests {
       #expect(model.playheadX! < beforePlayheadX!)
     }
   }
+
+  // MARK: - Boundary nudge (Task 9)
+
+  /// Selects words 1..2 (indices) and returns both the model and the resulting raw selection —
+  /// the same words `removeSelectedSectionCreatesRemovalWithDefaultCrossfade` uses, chosen for
+  /// their wide margin (28,268 samples) so a 441-sample nudge never hits the file or min-slice
+  /// clamp.
+  private func selectionEditor(fingerprint: String) -> (model: EditorModel, selection: Range<Int>) {
+    let model = editor(fingerprint: fingerprint)
+    model.transcript.selectWords(
+      anchorID: model.editPlan.words[1].id, focusID: model.editPlan.words[2].id)
+    return (model, model.transcript.selectedSampleRange!)
+  }
+
+  @Test func selectingWordsThenSyncingOpensAPendingSelectionSession() {
+    let fileSystem = LockIsolated<[URL: Data]>([:])
+    withDependencies {
+      $0.defaultFileStorage = FileStorage.inMemory(fileSystem: fileSystem)
+    } operation: {
+      let (model, selection) = selectionEditor(fingerprint: "fp-nudge-open")
+      model.syncEditSession()
+      expectNoDifference(model.fineTune.target, .pendingSelection)
+      expectNoDifference(model.fineTune.draftRange, selection)
+    }
+  }
+
+  /// 10 ms at the fixture's 44,100 Hz sample rate is exactly 441 samples.
+  @Test func nudgeCutInLaterMovesTheStartLaterBy441Samples() {
+    let fileSystem = LockIsolated<[URL: Data]>([:])
+    withDependencies {
+      $0.defaultFileStorage = FileStorage.inMemory(fileSystem: fileSystem)
+    } operation: {
+      let (model, selection) = selectionEditor(fingerprint: "fp-nudge-cutin-later")
+      model.syncEditSession()
+      #expect(model.editorKeyDown(.nudgeCutInLater))
+      expectNoDifference(
+        model.fineTune.draftRange, (selection.lowerBound + 441)..<selection.upperBound)
+    }
+  }
+
+  @Test func nudgeCutInEarlierMovesTheStartEarlierBy441Samples() {
+    let fileSystem = LockIsolated<[URL: Data]>([:])
+    withDependencies {
+      $0.defaultFileStorage = FileStorage.inMemory(fileSystem: fileSystem)
+    } operation: {
+      let (model, selection) = selectionEditor(fingerprint: "fp-nudge-cutin-earlier")
+      model.syncEditSession()
+      #expect(model.editorKeyDown(.nudgeCutInEarlier))
+      expectNoDifference(
+        model.fineTune.draftRange, (selection.lowerBound - 441)..<selection.upperBound)
+    }
+  }
+
+  @Test func nudgeCutOutLaterMovesTheEndLaterBy441Samples() {
+    let fileSystem = LockIsolated<[URL: Data]>([:])
+    withDependencies {
+      $0.defaultFileStorage = FileStorage.inMemory(fileSystem: fileSystem)
+    } operation: {
+      let (model, selection) = selectionEditor(fingerprint: "fp-nudge-cutout-later")
+      model.syncEditSession()
+      #expect(model.editorKeyDown(.nudgeCutOutLater))
+      expectNoDifference(
+        model.fineTune.draftRange, selection.lowerBound..<(selection.upperBound + 441))
+    }
+  }
+
+  @Test func nudgeCutOutEarlierMovesTheEndEarlierBy441Samples() {
+    let fileSystem = LockIsolated<[URL: Data]>([:])
+    withDependencies {
+      $0.defaultFileStorage = FileStorage.inMemory(fileSystem: fileSystem)
+    } operation: {
+      let (model, selection) = selectionEditor(fingerprint: "fp-nudge-cutout-earlier")
+      model.syncEditSession()
+      #expect(model.editorKeyDown(.nudgeCutOutEarlier))
+      expectNoDifference(
+        model.fineTune.draftRange, selection.lowerBound..<(selection.upperBound - 441))
+    }
+  }
+
+  /// With no selection (so no fine-tune session ever opens), all four nudge keys must fall
+  /// through unconsumed rather than crash or silently mutate a nonexistent draft.
+  @Test func nudgeKeysAreNoOpsWithNoSelectionOrSessionOpen() {
+    let fileSystem = LockIsolated<[URL: Data]>([:])
+    withDependencies {
+      $0.defaultFileStorage = FileStorage.inMemory(fileSystem: fileSystem)
+    } operation: {
+      let model = editor(fingerprint: "fp-nudge-no-session")
+      expectNoDifference(model.editorKeyDown(.nudgeCutInEarlier), false)
+      expectNoDifference(model.editorKeyDown(.nudgeCutInLater), false)
+      expectNoDifference(model.editorKeyDown(.nudgeCutOutEarlier), false)
+      expectNoDifference(model.editorKeyDown(.nudgeCutOutLater), false)
+      expectNoDifference(model.fineTune.target, nil)
+    }
+  }
+
+  @Test func removeSelectedSectionAfterANudgeRemovesTheNudgedRangeNotTheRawSelection() async {
+    let fileSystem = LockIsolated<[URL: Data]>([:])
+    await withDependencies {
+      $0.defaultFileStorage = FileStorage.inMemory(fileSystem: fileSystem)
+    } operation: {
+      let (model, selection) = selectionEditor(fingerprint: "fp-nudge-remove")
+      model.syncEditSession()
+      #expect(model.editorKeyDown(.nudgeCutOutLater))
+      let nudgedRange = model.fineTune.draftRange!
+      #expect(nudgedRange != selection)
+
+      await model.removeSelectedSectionTapped()
+
+      expectNoDifference(model.timelineRemovals.count, 1)
+      expectNoDifference(model.timelineRemovals.first?.removedRange, nudgedRange)
+      // The session tears down with the removal.
+      expectNoDifference(model.fineTune.target, nil)
+      expectNoDifference(model.fineTune.draftRange, nil)
+    }
+  }
+
+  /// Regression (Codex adversarial review, Task 9): `syncEditSession()` intentionally HOLDS an
+  /// unsaved pending draft across a selection change — a design that assumes a visible pane with
+  /// Save/Cancel. With no pane mounted here, ⌫ must not silently act on a stale, no-longer-visible
+  /// nudged range once the user has moved on to a different selection.
+  @Test func removeSelectedSectionAfterReselectingRemovesTheNewSelectionNotTheStaleNudgedDraft()
+    async
+  {
+    let fileSystem = LockIsolated<[URL: Data]>([:])
+    await withDependencies {
+      $0.defaultFileStorage = FileStorage.inMemory(fileSystem: fileSystem)
+    } operation: {
+      let (model, selectionA) = selectionEditor(fingerprint: "fp-nudge-reselect")
+      model.syncEditSession()
+      #expect(model.editorKeyDown(.nudgeCutOutLater))
+      let nudgedA = model.fineTune.draftRange!
+      #expect(nudgedA != selectionA)
+
+      // Select different words (B) without saving/cancelling the held draft on A.
+      model.transcript.selectWords(
+        anchorID: model.editPlan.words[4].id, focusID: model.editPlan.words[5].id)
+      model.syncEditSession()
+      let selectionB = model.transcript.selectedSampleRange!
+      #expect(selectionB != nudgedA)
+      // The pending draft is still held on the stale A — `syncEditSession()`'s existing
+      // hold-until-resolved behavior, unaffected by this task.
+      expectNoDifference(model.fineTune.draftRange, nudgedA)
+
+      await model.removeSelectedSectionTapped()
+
+      expectNoDifference(model.timelineRemovals.count, 1)
+      expectNoDifference(model.timelineRemovals.first?.removedRange, selectionB)
+    }
+  }
+
+  /// Same Codex finding, other direction: once the draft is stale (anchored to an abandoned
+  /// selection A while B is now selected), a nudge key must fall through unconsumed rather than
+  /// silently mutate the invisible A draft and swallow a keypress the user meant for B.
+  @Test func nudgeKeysAreNoOpsOnceTheSessionIsStaleFromAReselect() {
+    let fileSystem = LockIsolated<[URL: Data]>([:])
+    withDependencies {
+      $0.defaultFileStorage = FileStorage.inMemory(fileSystem: fileSystem)
+    } operation: {
+      let (model, _) = selectionEditor(fingerprint: "fp-nudge-stale")
+      model.syncEditSession()
+      #expect(model.editorKeyDown(.nudgeCutOutLater))
+      let staleDraft = model.fineTune.draftRange!
+
+      model.transcript.selectWords(
+        anchorID: model.editPlan.words[4].id, focusID: model.editPlan.words[5].id)
+      model.syncEditSession()
+
+      expectNoDifference(model.editorKeyDown(.nudgeCutInEarlier), false)
+      expectNoDifference(model.editorKeyDown(.nudgeCutInLater), false)
+      expectNoDifference(model.editorKeyDown(.nudgeCutOutEarlier), false)
+      expectNoDifference(model.editorKeyDown(.nudgeCutOutLater), false)
+      // The stale draft is untouched — not further mutated while invisible.
+      expectNoDifference(model.fineTune.draftRange, staleDraft)
+    }
+  }
+
+  /// Same regression, via Clear: a stale held draft must not make Remove Section eligible once
+  /// nothing is visibly selected.
+  @Test func removeSelectedSectionIsDisabledAfterClearingASelectionWithAStaleNudgedDraft() {
+    let fileSystem = LockIsolated<[URL: Data]>([:])
+    withDependencies {
+      $0.defaultFileStorage = FileStorage.inMemory(fileSystem: fileSystem)
+    } operation: {
+      let (model, _) = selectionEditor(fingerprint: "fp-nudge-clear")
+      model.syncEditSession()
+      #expect(model.editorKeyDown(.nudgeCutOutLater))
+      #expect(model.fineTune.hasUnsavedChange)
+
+      model.transcript.clearSelectionTapped()
+      model.syncEditSession()
+
+      expectNoDifference(model.canRemoveSelectedSection, false)
+    }
+  }
 }

@@ -13,6 +13,13 @@ enum EditorKey {
   case speedUp
   case speedDown
   case removeSection
+  /// Nudges a pending removal's cut points by `FineTuneModel.nudgeMs` before commit — the
+  /// forced-alignment word boundaries the removal starts from can blur ~10-20ms into a
+  /// neighbor's tail/onset (Task 9).
+  case nudgeCutInEarlier
+  case nudgeCutInLater
+  case nudgeCutOutEarlier
+  case nudgeCutOutLater
 }
 
 @MainActor
@@ -766,6 +773,28 @@ final class EditorModel: ViewModel {
       // two delete targets.
       guard canRemoveSelectedSection else { return false }
       Task { await removeSelectedSectionTapped() }
+    case .nudgeCutInEarlier, .nudgeCutInLater, .nudgeCutOutEarlier, .nudgeCutOutLater:
+      return nudgePendingRemoval(key)
+    }
+    return true
+  }
+
+  /// Nudges the pending removal's draft cut points before commit — split out of
+  /// `editorKeyDown`'s switch to keep its cyclomatic complexity in check. Scoped strictly to a
+  /// `.pendingSelection` fine-tune session anchored to the CURRENT selection (see
+  /// `isPendingRemovalSessionCurrent`) — a `.slice` session (opened editing an existing slice)
+  /// must not have its cut points hijacked by these keys, and neither may a stale session left
+  /// behind by a since-changed selection: mutating an invisible draft while swallowing the key
+  /// would silently do nothing the user can see. Both fall through unconsumed (`false`), same as
+  /// no session being open at all.
+  private func nudgePendingRemoval(_ key: EditorKey) -> Bool {
+    guard isPendingRemovalSessionCurrent else { return false }
+    switch key {
+    case .nudgeCutInEarlier: fineTune.nudgeCutIn(byMs: -fineTune.nudgeMs)
+    case .nudgeCutInLater: fineTune.nudgeCutIn(byMs: fineTune.nudgeMs)
+    case .nudgeCutOutEarlier: fineTune.nudgeCutOut(byMs: -fineTune.nudgeMs)
+    case .nudgeCutOutLater: fineTune.nudgeCutOut(byMs: fineTune.nudgeMs)
+    default: return false
     }
     return true
   }
@@ -981,10 +1010,31 @@ final class EditorModel: ViewModel {
     timelineRemovals.isEmpty ? nil : "Playback preview does not yet blend cuts (coming next)."
   }
 
-  /// The current selected SOURCE range. Named explicitly (rather than reading
-  /// `transcript.selectedSampleRange` inline) so a future marquee-only range can
-  /// slot in here without touching every call site.
-  private var selectedSourceRange: Range<Int>? { transcript.selectedSampleRange }
+  /// True while a `.pendingSelection` fine-tune session's draft is still anchored to the CURRENT
+  /// transcript selection — `committedRange` (the session's un-nudged baseline) equals
+  /// `transcript.selectedSampleRange`. False for no session, a `.slice` session, or a STALE
+  /// pending session left behind after the selection moved on (or cleared) without the held draft
+  /// being saved or cancelled.
+  ///
+  /// This distinction matters because there's no fine-tune PANE mounted here (Task 9 wires the
+  /// session invisibly): `syncEditSession()` intentionally HOLDS an unsaved draft across a
+  /// selection change or Clear rather than discarding it, so the user can Save/Cancel it — a
+  /// design that assumes a visible pane. Without this check, a user who nudges range A, then
+  /// selects (or clears to) a different range B, would have ⌫ silently remove the stale, no
+  /// longer visible A' instead of what's actually highlighted (found in adversarial review), and
+  /// a further nudge keypress meant for B would instead mutate the invisible, abandoned A' draft
+  /// while swallowing the key.
+  private var isPendingRemovalSessionCurrent: Bool {
+    fineTune.target == .pendingSelection
+      && fineTune.committedRange == transcript.selectedSampleRange
+  }
+
+  /// The SOURCE range a removal would apply to: the (possibly nudged) draft when
+  /// `isPendingRemovalSessionCurrent`, so a boundary nudge (Task 9) actually changes what gets
+  /// removed; the raw selection otherwise.
+  private var pendingRemovalSourceRange: Range<Int>? {
+    isPendingRemovalSessionCurrent ? fineTune.draftRange : transcript.selectedSampleRange
+  }
 
   /// Whether `range` can become a removal: non-empty and not overlapping an
   /// existing removal's source span (cross-seam rejection, spec §4.7).
@@ -997,16 +1047,18 @@ final class EditorModel: ViewModel {
   /// in flight — an in-progress export is rendering the un-cut canonical audio, so adding a
   /// removal mid-export would leave the finished AIFF stale relative to what the editor shows.
   var canRemoveSelectedSection: Bool {
-    guard let range = selectedSourceRange else { return false }
+    guard let range = pendingRemovalSourceRange else { return false }
     return canRemove(sourceRange: range) && !isExporting
   }
 
-  /// Turns the current selection into a `TimelineRemoval` with the default 20 ms
-  /// equal-power crossfade, then clears the selection. Belt-and-suspenders guard on
-  /// `isExporting` (mirrors `canRemoveSelectedSection`) so a stale invocation can't mutate
-  /// the document while an export is rendering.
+  /// Turns the current selection (or its nudged draft, if a boundary-nudge session is open) into
+  /// a `TimelineRemoval` with the default 20 ms equal-power crossfade, then clears the selection
+  /// and the fine-tune session. Belt-and-suspenders guard on `isExporting` (mirrors
+  /// `canRemoveSelectedSection`) so a stale invocation can't mutate the document while an export
+  /// is rendering.
   func removeSelectedSectionTapped() async {
-    guard !isExporting, let range = selectedSourceRange, canRemove(sourceRange: range) else {
+    guard !isExporting, let range = pendingRemovalSourceRange, canRemove(sourceRange: range)
+    else {
       return
     }
     let removal = TimelineRemoval(
@@ -1019,6 +1071,7 @@ final class EditorModel: ViewModel {
           ?? Array(doc.timelineRemovals))
     }
     transcript.clearSelectionTapped()
+    fineTune.clear()
     await reconcilePlayback()
   }
 

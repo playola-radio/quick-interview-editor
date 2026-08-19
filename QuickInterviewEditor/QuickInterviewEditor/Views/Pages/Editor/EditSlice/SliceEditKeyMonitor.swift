@@ -69,7 +69,10 @@ struct SliceEditKeyMonitor: NSViewRepresentable {
 
     /// Performs the classified key if focus allows it. Returns whether the key was consumed (so the
     /// caller swallows it instead of letting it beep). Only the zoom keys and Space act here; the
-    /// speed keys and section-removal are main-editor concerns and fall through untouched.
+    /// speed keys, section-removal, and the removal boundary-nudge keys (Task 9) are main-editor
+    /// concerns and fall through untouched — this sheet edits an existing slice's cut points via
+    /// its own scoped `EditSliceModel`, not the removal-only `fineTune.target == .pendingSelection`
+    /// session.
     private func handle(zoomKey: EditorKey?, isSpace: Bool, isARepeat: Bool) -> Bool {
       // Only act when this sheet's window is key (a local monitor sees every window's keys).
       guard let window = host?.window, window.isKeyWindow else { return false }
@@ -94,7 +97,8 @@ struct SliceEditKeyMonitor: NSViewRepresentable {
         if isARepeat { return true }
         model.zoomFitTapped()
         return true
-      case .speedUp, .speedDown, .removeSection:
+      case .speedUp, .speedDown, .removeSection, .nudgeCutInEarlier, .nudgeCutInLater,
+        .nudgeCutOutEarlier, .nudgeCutOutLater:
         return false
       }
     }
