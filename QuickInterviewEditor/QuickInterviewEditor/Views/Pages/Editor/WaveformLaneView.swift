@@ -135,9 +135,10 @@ private struct WaveformCanvas: View {
     // Read observed model output here so SwiftUI re-renders on change; the Canvas
     // closure then draws the captured values.
     let columns = waveform.visibleColumns()
+    let amplitudeScale = waveform.amplitudeScale
     Canvas { context, size in
       let midY = size.height / 2
-      let scale = size.height / 2 * 0.9
+      let scale = size.height / 2 * 0.9 * amplitudeScale
       if let highlight {
         context.fill(
           Path(CGRect(x: highlight.positionX, y: 0, width: highlight.width, height: size.height)),
@@ -368,6 +369,85 @@ private struct WaveformInteractionLayer: NSViewRepresentable {
         commandDown: flags.contains(.command),
         atX: localX(event))
       // Consume: do NOT call super, so an enclosing ScrollView never double-scrolls.
+    }
+  }
+}
+
+/// Logic's "Waveform Zoom" control: click-and-hold, then drag vertically to scale the waveform's
+/// amplitude; double-click resets to 1×. This mirrors Logic Pro's actual gesture — there is no
+/// keyboard shortcut for vertical zoom. AppKit-backed because SwiftUI has no built-in
+/// click-hold-drag gesture; all the math lives on the model, this view only forwards raw mouse facts.
+struct WaveformAmplitudeZoomButton: View {
+  let waveform: WaveformModel
+  @Environment(\.isEnabled) private var isEnabled
+
+  var body: some View {
+    Image(systemName: "arrow.up.and.down")
+      .frame(width: 22, height: 22)
+      .overlay(WaveformAmplitudeZoomDragArea(waveform: waveform))
+      .help(waveform.amplitudeZoomLabel)
+      .opacity(isEnabled ? 1 : 0.35)
+      .accessibilityElement(children: .ignore)
+      .accessibilityLabel(waveform.amplitudeZoomLabel)
+      .accessibilityValue(waveform.amplitudeZoomAccessibilityValue)
+      .accessibilityAdjustableAction { direction in
+        switch direction {
+        case .increment: waveform.amplitudeZoomIncremented()
+        case .decrement: waveform.amplitudeZoomDecremented()
+        @unknown default: break
+        }
+      }
+      .accessibilityAction(named: Text("Reset")) { waveform.amplitudeZoomResetTapped() }
+  }
+}
+
+private struct WaveformAmplitudeZoomDragArea: NSViewRepresentable {
+  let waveform: WaveformModel
+
+  func makeNSView(context: Context) -> DragView {
+    let view = DragView()
+    view.waveform = waveform
+    view.isEnabled = context.environment.isEnabled
+    return view
+  }
+
+  func updateNSView(_ nsView: DragView, context: Context) {
+    nsView.waveform = waveform
+    nsView.isEnabled = context.environment.isEnabled
+  }
+
+  final class DragView: NSView {
+    var waveform: WaveformModel?
+    var isEnabled = true
+
+    private var dragStartY: CGFloat?
+
+    override var acceptsFirstResponder: Bool { false }
+
+    private func localY(_ event: NSEvent) -> CGFloat {
+      convert(event.locationInWindow, from: nil).y
+    }
+
+    override func mouseDown(with event: NSEvent) {
+      guard isEnabled else { return }
+      if event.clickCount >= 2 {
+        dragStartY = nil
+        waveform?.amplitudeZoomResetTapped()
+        return
+      }
+      waveform?.amplitudeZoomDragBegan()
+      dragStartY = localY(event)
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+      guard isEnabled, let start = dragStartY else { return }
+      // AppKit's bottom-left-origin coordinates already give "drag up = positive delta", matching
+      // the model's up-increases-scale convention with no sign flip needed.
+      waveform?.amplitudeZoomDragged(byPixels: localY(event) - start)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+      dragStartY = nil
     }
   }
 }

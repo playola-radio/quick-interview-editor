@@ -74,6 +74,8 @@ private struct SliceWaveformLane: View {
   private var zoomHeader: some View {
     HStack(spacing: 8) {
       Spacer()
+      WaveformAmplitudeZoomButton(waveform: model.waveform)
+        .disabled(!model.waveform.canAmplitudeZoom)
       Button {
         model.zoomOutTapped()
       } label: {
