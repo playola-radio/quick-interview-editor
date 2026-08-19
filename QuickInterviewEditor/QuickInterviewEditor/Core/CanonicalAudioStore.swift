@@ -10,9 +10,21 @@ import Foundation
 /// <jobID>/canonical.aiff`.
 ///
 /// Lifecycle: created during transcription (``store(planAIFF:in:)``), owned by the
-/// editor and removed on tab close (``remove(_:in:)``), and any dirs left by a prior
-/// run are pruned at launch (``pruneAll(in:)``) — at launch no editor references any
-/// of them, so all are stale.
+/// editor and removed on tab close (``remove(_:in:)``), and any dirs left by a
+/// crashed or force-quit run are reaped once they age out (``reapStale(olderThan:in:now:)``).
+///
+/// Reaping is age-based, NOT a blanket wipe, because a launch can overlap a still-running
+/// instance — the auto-update relaunch, the relocation's deliberate second instance
+/// (`InstallLocation`, `createsNewApplicationInstance = true`), or a manual double-launch.
+/// A blanket prune at launch would delete the canonical audio the *other* instance is
+/// actively editing, stranding its next export. A just-imported dir is far younger than the
+/// cutoff, so in practice a launch never reaps another instance's working audio.
+///
+/// The known gap: a job dir's mtime reflects when it was written, not when it was last used,
+/// so a session left open PAST the cutoff (days) could still be reaped by another instance's
+/// launch. We accept that over a lock/heartbeat ownership scheme: the window is days, not the
+/// seconds-long relaunch overlap that caused the original bug, and export re-checks the file
+/// before rendering. Revisit with per-process ownership if long-lived sessions prove common.
 enum CanonicalAudioStore {
 
   /// The fixed file name inside each per-job dir.
@@ -50,10 +62,33 @@ enum CanonicalAudioStore {
     try? FileManager.default.removeItem(at: dir)
   }
 
-  /// Removes every cached canonical dir. Called at launch, when nothing references
-  /// any prior-run dir.
-  static func pruneAll(in base: URL? = nil) {
+  /// Default reap cutoff: a week. A live editor's canonical dir is minted fresh at import,
+  /// so a dir untouched for a week belongs only to a session that is long gone.
+  static let staleAfter: TimeInterval = 7 * 24 * 60 * 60
+
+  /// Reaps per-job dirs untouched for at least `maxAge` — leftovers from a crashed or
+  /// force-quit run whose editor never got to call ``remove(_:in:)``. Safe to call at
+  /// launch even while another instance is running: that instance's canonical audio was
+  /// minted moments ago, so it is far younger than `maxAge` and is left alone. A dir whose
+  /// age can't be read is kept, so a transient stat error never deletes live work.
+  static func reapStale(
+    olderThan maxAge: TimeInterval = staleAfter, in base: URL? = nil, now: Date = Date()
+  ) {
     guard let base = try? (base ?? baseDirectory()) else { return }
-    try? FileManager.default.removeItem(at: base)
+    let fm = FileManager.default
+    guard
+      let dirs = try? fm.contentsOfDirectory(
+        at: base, includingPropertiesForKeys: [.contentModificationDateKey],
+        options: [.skipsHiddenFiles])
+    else { return }
+    for dir in dirs {
+      guard
+        let modified = try? dir.resourceValues(forKeys: [.contentModificationDateKey])
+          .contentModificationDate
+      else { continue }
+      if now.timeIntervalSince(modified) > maxAge {
+        try? fm.removeItem(at: dir)
+      }
+    }
   }
 }

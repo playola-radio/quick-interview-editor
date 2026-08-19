@@ -915,6 +915,108 @@ struct EditorTests {
     #expect(!FileManager.default.fileExists(atPath: workDir.path))
   }
 
+  @Test func exportWithMissingCanonicalAudioFailsClearlyWithoutRendering() async throws {
+    // A canonical dir reaped out from under a live session (overlapping instance's
+    // launch cleanup): export must refuse with actionable copy, never hand the engine a
+    // dead path or prompt for a destination.
+    let missing = FileManager.default.temporaryDirectory
+      .appendingPathComponent("qie-missing-\(UUID().uuidString)", isDirectory: true)
+      .appendingPathComponent("canonical.aiff")
+    let model = EditorModel(
+      sourceURL: URL(fileURLWithPath: "/clip.m4a"),
+      canonicalAudioURL: missing, editPlan: Fixtures.editPlan())
+    addSlices(model, [(0, 1)])
+
+    await withDependencies {
+      $0.engine.renderSlices = { _ in
+        Issue.record("engine must not render when the canonical audio is missing")
+        return AsyncThrowingStream { $0.finish() }
+      }
+      $0.workspace.chooseDirectory = {
+        Issue.record("must not prompt for a destination when the canonical audio is missing")
+        return nil
+      }
+    } operation: {
+      model.exportAllTapped()
+      await model.exportTask?.value
+    }
+
+    expectNoDifference(model.exportPhase, .failed(model.canonicalMissingMessage))
+  }
+
+  @Test func awaitExportTeardownWaitsForTheInFlightRender() async throws {
+    // A tab close / re-import must not delete the canonical AIFF mid-render. This proves the
+    // teardown await only returns AFTER the render finishes, so the discard that follows it
+    // can never race an in-flight export.
+    let model = editor()
+    addSlices(model, [(0, 1)])
+    let ids = model.slices.map(\.id)
+    let workDir = try makeTempDir()
+    let destination = try makeTempDir()
+    defer { try? FileManager.default.removeItem(at: destination) }
+    let rendered = try renderedSlices(for: ids, workDir: workDir)
+    let order = LockIsolated<[String]>([])
+    let gate = PlayerGate()
+
+    await withDependencies {
+      $0.engine.renderSlices = { _ in
+        AsyncThrowingStream { continuation in
+          Task {
+            order.withValue { $0.append("render-start") }
+            _ = await gate.play()  // suspend the render until the test releases it
+            order.withValue { $0.append("render-end") }
+            continuation.yield(.completed(RenderResult(slices: rendered, workDir: workDir)))
+            continuation.finish()
+          }
+        }
+      }
+      $0.workspace.reveal = { _ in }
+    } operation: {
+      model.destinationURL = destination
+      model.exportAllTapped()
+      await gate.awaitStarted()  // render is now in flight, suspended
+      let teardown = Task {
+        await model.awaitExportTeardown()
+        order.withValue { $0.append("teardown-returned") }
+      }
+      gate.release()  // let the render complete
+      await model.exportTask?.value
+      await teardown.value
+    }
+
+    expectNoDifference(order.value, ["render-start", "render-end", "teardown-returned"])
+  }
+
+  @Test func exportFailsClearlyWhenCanonicalVanishesWhileChoosingDestination() async throws {
+    // Present at the tap (passes the pre-picker check) but reaped while the destination
+    // picker is open — the post-picker recheck must refuse instead of rendering a dead path.
+    let dir = try makeTempDir()
+    let canonical = dir.appendingPathComponent("canonical.aiff")
+    try Data("aiff".utf8).write(to: canonical)
+    let model = EditorModel(
+      sourceURL: URL(fileURLWithPath: "/clip.m4a"),
+      canonicalAudioURL: canonical, editPlan: Fixtures.editPlan())
+    addSlices(model, [(0, 1)])
+    let destination = try makeTempDir()
+    defer { try? FileManager.default.removeItem(at: destination) }
+
+    await withDependencies {
+      $0.workspace.chooseDirectory = {
+        try? FileManager.default.removeItem(at: canonical)  // vanishes while the picker is open
+        return destination
+      }
+      $0.engine.renderSlices = { _ in
+        Issue.record("engine must not render after the canonical audio vanished")
+        return AsyncThrowingStream { $0.finish() }
+      }
+    } operation: {
+      model.exportAllTapped()
+      await model.exportTask?.value
+    }
+
+    expectNoDifference(model.exportPhase, .failed(model.canonicalMissingMessage))
+  }
+
   @Test func exportAllMapsResultsByIdNotOrder() async throws {
     let model = editor()
     addSlices(model, [(0, 1), (2, 3)])

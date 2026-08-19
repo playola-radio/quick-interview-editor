@@ -162,6 +162,12 @@ final class EditorModel: ViewModel {
   let exportLabel = "Export"
   let exportAllLabel = "Export all"
   let cancelExportLabel = "Cancel export"
+  /// Shown when the canonical AIFF backing this session has vanished before a render —
+  /// e.g. cleared by an app update or a second window's launch cleanup. Re-importing
+  /// re-materializes it. Named as user-facing copy, not an engine error, on purpose.
+  let canonicalMissingMessage =
+    "The working audio for this file is no longer available — it can be cleared by an app "
+    + "update or another window. Re-import the file to export again."
   let undoLabel = "Undo"
   let redoLabel = "Redo"
   let tightBadgeLabel = "Tight join"
@@ -1312,9 +1318,19 @@ final class EditorModel: ViewModel {
     exportTask?.cancel()
   }
 
+  /// Waits for any in-flight export to finish unwinding. The engine subprocess reads the
+  /// canonical AIFF, so a caller tearing this editor down (tab close, re-import) must await
+  /// this — after ``cancelExportTapped()`` — before ``discardCanonicalAudio()``, or it could
+  /// delete the file out from under a render still in flight.
+  func awaitExportTeardown() async {
+    await exportTask?.value
+  }
+
   // MARK: - Lifecycle
   /// Removes this session's canonical audio cache dir. Called when the tab closes:
   /// the AIFF is derived data, rebuildable by re-transcribing, so it shouldn't linger.
+  /// Only safe once any in-flight export has been cancelled AND awaited
+  /// (``awaitExportTeardown()``) — the engine reads this file during render.
   func discardCanonicalAudio() {
     CanonicalAudioStore.remove(canonicalAudioURL)
   }
@@ -1358,17 +1374,42 @@ final class EditorModel: ViewModel {
   /// Marks the export as running synchronously (so the buttons disable immediately
   /// and a rapid second tap can't start a parallel export) and spawns the worker,
   /// keeping a handle so `cancelExportTapped` can kill the process group.
+  /// Whether the canonical AIFF still backs this session. It can be reaped or purged out
+  /// from under a live editor (an overlapping instance's launch cleanup, a low-disk cache
+  /// purge), so export verifies it rather than trusting the URL captured at load.
+  private var canonicalAudioIsOnDisk: Bool {
+    FileManager.default.fileExists(atPath: canonicalAudioURL.path)
+  }
+
   private func startExport(_ targets: [Slice]) {
+    // Fail loud at the tap with actionable copy instead of opening a destination picker and
+    // then handing the engine a dead path that surfaces as a raw "no such file".
+    guard canonicalAudioIsOnDisk else {
+      exportPhase = .failed(canonicalMissingMessage)
+      return
+    }
     exportTask?.cancel()
     exportPhase = .exporting(current: 0, total: targets.count)
     exportTask = Task { await performExport(targets) }
   }
 
-  private func performExport(_ targets: [Slice]) async {
+  /// Resolves the export destination, then re-checks the canonical audio is still on disk —
+  /// it can vanish while the destination picker is open. Sets the terminal phase and returns
+  /// nil when export can't proceed.
+  private func exportDestination() async -> URL? {
     guard let destination = await resolvedDestination() else {
       exportPhase = .idle
-      return
+      return nil
     }
+    guard canonicalAudioIsOnDisk else {
+      exportPhase = .failed(canonicalMissingMessage)
+      return nil
+    }
+    return destination
+  }
+
+  private func performExport(_ targets: [Slice]) async {
+    guard let destination = await exportDestination() else { return }
     exportPhase = .exporting(current: 0, total: targets.count)
 
     do {

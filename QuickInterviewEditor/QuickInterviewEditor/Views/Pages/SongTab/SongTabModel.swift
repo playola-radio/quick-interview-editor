@@ -142,6 +142,7 @@ final class SongTabModel: ViewModel, Identifiable {
     if let previous = editor {
       previous.cancelExportTapped()
       await previous.stopPlaybackTapped()
+      await previous.awaitExportTeardown()  // let the cancelled render unwind before deleting its input
       previous.discardCanonicalAudio()
     }
     editor = nil
