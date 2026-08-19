@@ -68,6 +68,12 @@ struct EditedTimeline: Equatable {
     // Clamp each removal's crossfade to the handle available on both sides:
     // it can never eat more than the kept segment immediately to its left or
     // immediately to its right.
+    //
+    // Known limitation (spec §4.2): each removal is clamped independently, so
+    // two seams sharing a kept island shorter than both requested crossfades
+    // can each claim the full island, over-claiming it in edited space. This
+    // is spec-mandated behavior for a rare edge case; PR2's audio blending
+    // will revisit it.
     let clampedLengths: [Int] = normalized.indices.map { index in
       let leftHandle = sourceRangesList[index].count
       let rightHandle = sourceRangesList[index + 1].count
@@ -118,6 +124,7 @@ struct EditedTimeline: Equatable {
         let removedRange = removals[removalIndex].removedRange
         let distanceToStart = sourceSample - removedRange.lowerBound
         let distanceToEnd = removedRange.upperBound - sourceSample
+        // Tie (equidistant from both edges) prefers the left edge.
         return distanceToStart <= distanceToEnd
           ? editedPositionOfCutStart(atRemoval: removalIndex)
           : editedPositionOfCutEnd(atRemoval: removalIndex)
