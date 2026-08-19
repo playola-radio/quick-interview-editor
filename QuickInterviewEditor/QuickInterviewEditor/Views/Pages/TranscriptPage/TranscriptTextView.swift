@@ -13,6 +13,7 @@ struct TranscriptTextView: NSViewRepresentable {
   let lineSpacing: Double
   let selected: Set<Word.ID>
   let clipContainers: [TranscriptClipContainer]
+  let removedWordIDs: Set<Word.ID>
   let currentWordID: Word.ID?
   let scrollTarget: Word.ID?
   let followMode: TranscriptFollowMode
@@ -62,7 +63,8 @@ struct TranscriptTextView: NSViewRepresentable {
     context.coordinator.lineSpacing = lineSpacing
     context.coordinator.observeScroll()
     context.coordinator.rebuildText(
-      text: text, fontSize: fontSize, selected: selected, clipContainers: clipContainers)
+      text: text, fontSize: fontSize, selected: selected, clipContainers: clipContainers,
+      removedWordIDs: removedWordIDs)
     return scroll
   }
 
@@ -72,8 +74,8 @@ struct TranscriptTextView: NSViewRepresentable {
     context.coordinator.lineSpacing = lineSpacing
     context.coordinator.apply(
       text: text, fontSize: fontSize, selected: selected, clipContainers: clipContainers,
-      currentWordID: currentWordID, scrollTarget: scrollTarget, followMode: followMode,
-      reveal: reveal)
+      removedWordIDs: removedWordIDs, currentWordID: currentWordID, scrollTarget: scrollTarget,
+      followMode: followMode, reveal: reveal)
   }
 
   @MainActor
@@ -86,6 +88,7 @@ struct TranscriptTextView: NSViewRepresentable {
     private var lastText = ""
     private var lastSelected: Set<Word.ID> = []
     private var lastClipContainers: [TranscriptClipContainer] = []
+    private var lastRemovedWordIDs: Set<Word.ID> = []
     private var lastCurrentWordID: Word.ID?
     private var lastFontSize: Double = 0
     private var lastScrollTarget: Word.ID?
@@ -120,7 +123,7 @@ struct TranscriptTextView: NSViewRepresentable {
 
     func rebuildText(
       text: String, fontSize: Double, selected: Set<Word.ID>,
-      clipContainers: [TranscriptClipContainer]
+      clipContainers: [TranscriptClipContainer], removedWordIDs: Set<Word.ID>
     ) {
       guard let storage = textView?.textStorage else { return }
       let attr = NSMutableAttributedString(string: text)
@@ -141,10 +144,15 @@ struct TranscriptTextView: NSViewRepresentable {
       lastFontSize = fontSize
       lastSelected = []
       lastClipContainers = []
-      // Clips first (they colour their words white/dim), then selection paints the red
-      // highlight + white text on top of whichever words are selected.
+      lastRemovedWordIDs = []
+      // Clips first (they colour their words white/dim), then removed words get their
+      // strikethrough, then selection paints the red highlight + white text on top of
+      // whichever words are selected — each pass recomputes through `setForeground`, so a
+      // later pass never gets stomped by an earlier one.
       applyClipContainers(clipContainers)
       lastClipContainers = clipContainers
+      lastRemovedWordIDs = removedWordIDs
+      applyRemovedWordIDs(added: removedWordIDs, removed: [])
       lastSelected = selected
       applySelection(added: selected, removed: [])
     }
@@ -152,7 +160,8 @@ struct TranscriptTextView: NSViewRepresentable {
     // swiftlint:disable:next function_parameter_count
     func apply(
       text: String, fontSize: Double, selected: Set<Word.ID>,
-      clipContainers: [TranscriptClipContainer], currentWordID: Word.ID?, scrollTarget: Word.ID?,
+      clipContainers: [TranscriptClipContainer], removedWordIDs: Set<Word.ID>,
+      currentWordID: Word.ID?, scrollTarget: Word.ID?,
       followMode: TranscriptFollowMode, reveal: TranscriptReveal?
     ) {
       guard let storage = textView?.textStorage, let textView else { return }
@@ -160,7 +169,8 @@ struct TranscriptTextView: NSViewRepresentable {
       let didRebuild = text != lastText
       if didRebuild {
         rebuildText(
-          text: text, fontSize: fontSize, selected: selected, clipContainers: clipContainers)
+          text: text, fontSize: fontSize, selected: selected, clipContainers: clipContainers,
+          removedWordIDs: removedWordIDs)
         lastCurrentWordID = nil
       }
 
@@ -185,6 +195,11 @@ struct TranscriptTextView: NSViewRepresentable {
         applyClipContainers(clipContainers)
         lastClipContainers = clipContainers
       }
+
+      let removedAdded = removedWordIDs.subtracting(lastRemovedWordIDs)
+      let removedRemoved = lastRemovedWordIDs.subtracting(removedWordIDs)
+      lastRemovedWordIDs = removedWordIDs
+      applyRemovedWordIDs(added: removedAdded, removed: removedRemoved)
 
       let selAdded = selected.subtracting(lastSelected)
       let selRemoved = lastSelected.subtracting(selected)
@@ -292,13 +307,18 @@ struct TranscriptTextView: NSViewRepresentable {
       lastClipContainers.first { NSLocationInRange(location, $0.range) }?.kind
     }
 
+    /// The single authority for both a word's text colour AND its strikethrough. Strikethrough
+    /// is the UNION of "inside a rejected clip" and "inside a removed section" — every diff
+    /// (selection, clip, removed-words) routes through here so none of them can stomp the
+    /// others when a word is affected by more than one.
     private func setForeground(storage: NSTextStorage, wordRange: NSRange, wordID: Word.ID) {
       let kind = clipKind(atLocation: wordRange.location)
       storage.addAttribute(
         .foregroundColor,
         value: foregroundColor(selected: lastSelected.contains(wordID), kind: kind),
         range: wordRange)
-      if kind == .rejected {
+      let struck = kind == .rejected || lastRemovedWordIDs.contains(wordID)
+      if struck {
         storage.addAttribute(
           .strikethroughStyle, value: NSUnderlineStyle.single.rawValue, range: wordRange)
       } else {
@@ -337,6 +357,20 @@ struct TranscriptTextView: NSViewRepresentable {
       // add/remove. Band changes are infrequent (a clip is created/accepted/rejected), so a
       // full redraw is cheap and correct.
       textView?.needsDisplay = true
+    }
+
+    /// Refreshes strikethrough (and, incidentally, foreground colour) for every word whose
+    /// removed-section membership just changed — `lastRemovedWordIDs` is already updated by the
+    /// caller, so `setForeground` reads the new state. Words entering `removedWordIDs` gain the
+    /// strike; words leaving it lose it unless a rejected clip still covers them.
+    private func applyRemovedWordIDs(added: Set<Word.ID>, removed: Set<Word.ID>) {
+      guard let storage = textView?.textStorage else { return }
+      storage.beginEditing()
+      for id in added.union(removed) {
+        guard let wordRange = range(for: id) else { continue }
+        setForeground(storage: storage, wordRange: wordRange, wordID: id)
+      }
+      storage.endEditing()
     }
 
     private func applySelection(added: Set<Word.ID>, removed: Set<Word.ID>) {

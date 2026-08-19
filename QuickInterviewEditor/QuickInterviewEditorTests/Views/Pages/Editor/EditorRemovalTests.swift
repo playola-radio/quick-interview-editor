@@ -91,6 +91,30 @@ struct EditorRemovalTests {
     }
   }
 
+  /// Word 3's midpoint (77704 + (98916-77704)/2 = 88310) falls inside the removal below;
+  /// words 1, 2, and 4's midpoints do not.
+  @Test func removedWordIDsTracksMidpointMembershipAndClearsOnUndo() async {
+    let fileSystem = LockIsolated<[URL: Data]>([:])
+    await withDependencies {
+      $0.defaultFileStorage = FileStorage.inMemory(fileSystem: fileSystem)
+    } operation: {
+      let model = editor(fingerprint: "fp-removed-words")
+      let word3 = model.editPlan.words[2].id
+      expectNoDifference(model.removedWordIDs, [])
+
+      model.mutateDocument { doc in
+        doc.timelineRemovals.append(
+          TimelineRemoval(
+            id: Fixtures.uuid(5), removedRange: 80_000..<100_000,
+            crossfade: Crossfade(lengthSamples: 48, curve: .equalPower)))
+      }
+      expectNoDifference(model.removedWordIDs, [word3])
+
+      await model.undoTapped()
+      expectNoDifference(model.removedWordIDs, [])
+    }
+  }
+
   @Test func seamOverlaysDerivedFromTimeline() {
     let fileSystem = LockIsolated<[URL: Data]>([:])
     withDependencies {

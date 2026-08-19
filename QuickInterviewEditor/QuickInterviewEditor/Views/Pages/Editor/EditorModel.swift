@@ -297,6 +297,15 @@ final class EditorModel: ViewModel {
   /// Words missing sample bounds are excluded.
   var redRanges: [Range<Int>] { transcript.runTogetherSampleRanges }
 
+  // MARK: - Removed words (transcript)
+  /// Words struck through in the transcript because their MIDPOINT falls inside ANY removed
+  /// section, reusing the same midpoint-membership rule as marquee selection
+  /// (`wordIDs(overlapping:words:)`). Derived from `timelineRemovals`, so a removal or its
+  /// undo both update this without any separate bookkeeping.
+  var removedWordIDs: Set<Word.ID> {
+    Set(timelineRemovals.flatMap { wordIDs(overlapping: $0.removedRange, words: editPlan.words) })
+  }
+
   // MARK: - Clip containers (transcript)
   /// The clip bands the transcript draws as tinted containers: real slices are `approved`
   /// (green); still-pending cut suggestions are `suggested` (amber). Derived read-only from

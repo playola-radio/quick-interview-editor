@@ -62,6 +62,11 @@ struct EditorView: View {
     .onChange(of: model.clipBands, initial: true) { _, bands in
       model.transcript.clipBands = bands
     }
+    // Words whose midpoint falls inside a removed section get struck through — same
+    // pushed-in pattern as `clipBands`, so the transcript doesn't know about removals.
+    .onChange(of: model.removedWordIDs, initial: true) { _, ids in
+      model.transcript.removedWordIDs = ids
+    }
     .onChange(of: model.transcript.selectedSampleRange) { _, newRange in
       // Capture the cursor token synchronously at the moment the selection changes, so a ruler click
       // landing before this snap runs is seen as the newer cursor action and the snap yields to it.
