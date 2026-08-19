@@ -3,6 +3,7 @@ import Foundation
 import IdentifiedCollections
 import IssueReporting
 import Observation
+import Sharing
 
 /// The editor-global shortcuts the key monitor can deliver. PR 2 adds transport cases here.
 enum EditorKey {
@@ -22,6 +23,12 @@ final class EditorModel: ViewModel {
   @ObservationIgnored @Dependency(\.engine) var engine
   @ObservationIgnored @Dependency(\.workspace) var workspace
   @ObservationIgnored @Dependency(\.continuousClock) var clock
+
+  // MARK: - Shared State
+  /// The per-file project sidecar, keyed by `sourceFingerprint` — the same store
+  /// `cutSuggestions` shares, so both stay backed by one file. Only `timelineRemovals`
+  /// is written through here; the sidecar's other sections are `cutSuggestions`' concern.
+  @ObservationIgnored @Shared var projectState: ProjectState
 
   // MARK: - Initialization
   /// The user's original file — used **only** to name exported clips (its stem).
@@ -58,7 +65,9 @@ final class EditorModel: ViewModel {
     // `EditorModel(...)` in `withDependencies(from:)`), so the child inherits the same deps.
     self.cutSuggestions = CutSuggestionsPageModel(
       editPlan: editPlan, sourceFingerprint: fingerprint)
+    _projectState = Shared(.projectState(fingerprint: fingerprint))
     super.init()
+    self.timelineRemovals = projectState.timelineRemovals
     // Accepting a suggestion adds its slice here (idempotently), through the shared
     // mutation funnel so it's exportable and undoable like any other slice.
     cutSuggestions.onAcceptSlice = { [weak self] slice in
@@ -690,9 +699,11 @@ final class EditorModel: ViewModel {
     mutateDocument { doc in body(&doc.slices) }
   }
 
-  /// Writes `timelineRemovals` to the per-file project sidecar. Stub — real body lands
-  /// alongside the sidecar wiring.
-  private func persistTimelineRemovals() {}
+  /// Writes `timelineRemovals` to the per-file project sidecar so it survives engine
+  /// re-runs and reloads.
+  private func persistTimelineRemovals() {
+    $projectState.withLock { $0.timelineRemovals = timelineRemovals }
+  }
 
   /// Adds an accepted suggestion's slice to the editor. Idempotent by `Slice.id` (a
   /// re-accept is a no-op), routed through `mutateSlices` so it's exportable and undoable.
