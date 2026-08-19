@@ -31,4 +31,23 @@ struct EditorKeyMonitorTests {
   @Test func plainZZoomsToFit() {
     expectNoDifference(key(6, [], characters: "z"), .zoomFit)
   }
+
+  @Test func plainDeleteMapsToRemoveSection() {
+    expectNoDifference(key(51), .removeSection)  // ⌫
+  }
+
+  @Test func modifiedDeleteFallsThrough() {
+    expectNoDifference(key(51, .command), nil)  // ⌘⌫
+    expectNoDifference(key(51, .option), nil)  // ⌥⌫
+  }
+
+  @Test func plainArrowsNudgeCutIn() {
+    expectNoDifference(key(123), .nudgeCutInEarlier)  // ←
+    expectNoDifference(key(124), .nudgeCutInLater)  // →
+  }
+
+  @Test func shiftArrowsNudgeCutOut() {
+    expectNoDifference(key(123, .shift), .nudgeCutOutEarlier)  // ⇧←
+    expectNoDifference(key(124, .shift), .nudgeCutOutLater)  // ⇧→
+  }
 }

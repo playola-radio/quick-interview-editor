@@ -9,9 +9,11 @@ struct EditorView: View {
         TranscriptPageView(model: model.transcript)
           .frame(maxWidth: .infinity, maxHeight: .infinity)
         // The selection controls (Mark as Clip / Clear) sit right under the transcript where the
-        // words are selected. The fine-tune pane is intentionally not mounted in this flow — it
-        // popped in on selection and reflowed the layout; FineTuneView + FineTuneModel stay in the
-        // codebase, ready to re-enable when boundary editing returns.
+        // words are selected. The fine-tune PANE is intentionally not mounted in this flow — it
+        // popped in on selection and reflowed the layout; FineTuneView stays in the codebase,
+        // unmounted, ready to re-enable when a visual boundary-editing UI returns. The fine-tune
+        // SESSION itself is wired below (`fineTuneSessionKey`) so the ←/→ nudge keys (Task 9) have
+        // a draft to move even with no pane on screen.
         MarkClipBarView(model: model)
         Divider()
         WaveformView(model: model)
@@ -53,14 +55,22 @@ struct EditorView: View {
     // suggestions already in flight. Quietly no-ops when suggestions already exist or no API key
     // resolves — it never opens the key-entry sheet on its own.
     .task { await model.cutSuggestions.autoSuggestCutsIfNeeded() }
-    // The fine-tune session is not opened on selection in this flow — the pane that would show
-    // it is hidden and boundary editing is deferred, so selecting words no longer spins up a
-    // hidden session (which also keeps the waveform's audition buttons from appearing).
+    // A fresh transcript/waveform selection (or an active-slice change) opens/reconciles a
+    // fine-tune session — invisible, since the pane isn't mounted, but it gives ←/→/⇧←/⇧→ a
+    // `draftRange` to nudge before the pending removal commits (Task 9). `activeEditingRange`/
+    // `waveformHighlightSpan` already prefer the draft over the raw selection, so the existing
+    // waveform highlight moves with the nudge automatically — no new UI needed.
+    .onChange(of: model.fineTuneSessionKey) { _, _ in model.syncEditSession() }
     // The editor derives the clip bands (slices + pending suggestions, green over amber) and
     // pushes them into the transcript, which stays layout-local and only renders what it's
     // handed. `initial: true` seeds the containers on first appearance.
     .onChange(of: model.clipBands, initial: true) { _, bands in
       model.transcript.clipBands = bands
+    }
+    // Words whose midpoint falls inside a removed section get struck through — same
+    // pushed-in pattern as `clipBands`, so the transcript doesn't know about removals.
+    .onChange(of: model.removedWordIDs, initial: true) { _, ids in
+      model.transcript.removedWordIDs = ids
     }
     .onChange(of: model.transcript.selectedSampleRange) { _, newRange in
       // Capture the cursor token synchronously at the moment the selection changes, so a ruler click

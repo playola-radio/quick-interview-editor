@@ -67,18 +67,37 @@ struct EditorKeyMonitor: NSViewRepresentable {
     ) -> EditorKey? {
       let relevant: NSEvent.ModifierFlags = [.command, .shift, .option, .control]
       let modifiers = rawModifiers.intersection(relevant)
+      if let arrowKey = Self.arrowKey(forKeyCode: keyCode, modifiers: modifiers) {
+        return arrowKey
+      }
       switch keyCode {
-      case 123 where modifiers == .command: return .zoomOut  // ⌘←
-      case 124 where modifiers == .command: return .zoomIn  // ⌘→
       // `<` / `>` (Shift-comma / Shift-period) step the playback speed down / up. Matched by
       // physical key + Shift rather than `charactersIgnoringModifiers`, whose Shift handling is
       // ambiguous across layouts — the comma/period keys are 43/47, mirroring the arrow keyCodes.
       case 43 where modifiers == .shift: return .speedDown  // <
       case 47 where modifiers == .shift: return .speedUp  // >
+      case 51 where modifiers.isEmpty: return .removeSection  // ⌫ (⌘⌫/⌥⌫ fall through)
       default: break
       }
       if modifiers.isEmpty, characters?.lowercased() == "z" { return .zoomFit }
       return nil
+    }
+
+    /// Left/Right arrow keys only, split out of `editorKey` to keep its cyclomatic complexity in
+    /// check: ⌘←/⌘→ zoom, plain ←/→ nudge the pending removal's start (cut-in), Shift-←/→ nudge
+    /// its end (cut-out) — Task 9.
+    private static func arrowKey(
+      forKeyCode keyCode: UInt16, modifiers: NSEvent.ModifierFlags
+    ) -> EditorKey? {
+      switch keyCode {
+      case 123 where modifiers == .command: return .zoomOut  // ⌘←
+      case 124 where modifiers == .command: return .zoomIn  // ⌘→
+      case 123 where modifiers.isEmpty: return .nudgeCutInEarlier  // ←
+      case 124 where modifiers.isEmpty: return .nudgeCutInLater  // →
+      case 123 where modifiers == .shift: return .nudgeCutOutEarlier  // ⇧←
+      case 124 where modifiers == .shift: return .nudgeCutOutLater  // ⇧→
+      default: return nil
+      }
     }
 
     /// Performs `key` if focus allows it. Returns whether the key was consumed (so the caller
@@ -89,10 +108,14 @@ struct EditorKeyMonitor: NSViewRepresentable {
       guard let window = host?.window, window.isKeyWindow else { return false }
       // Stand down while a text field is being edited (e.g. renaming a slice).
       if let responder = window.firstResponder as? NSText, responder.isEditable { return false }
-      // Z is a toggle and the speed keys step discrete presets; swallow auto-repeat so holding one
-      // doesn't flicker fit↔restore or blow through every speed (and doesn't beep). The arrow zoom
-      // keys intentionally keep repeating.
-      if isARepeat, key == .zoomFit || key == .speedUp || key == .speedDown { return true }
+      // Z is a toggle, the speed keys step discrete presets, and ⌫ removes a section; swallow
+      // auto-repeat on all three so holding one doesn't flicker fit↔restore, blow through every
+      // speed, or fire multiple removals (and doesn't beep). The arrow zoom keys intentionally
+      // keep repeating.
+      if isARepeat, key == .zoomFit || key == .speedUp || key == .speedDown || key == .removeSection
+      {
+        return true
+      }
       return model?.editorKeyDown(key) ?? false
     }
   }

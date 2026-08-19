@@ -93,6 +93,39 @@ struct WaveformTests {
     #expect(columns[2].min == -0.6)  // pixel 2 covers [4,6) -> bucket 1
   }
 
+  // MARK: - sourcePeak
+
+  @Test func sourcePeakReturnsBucketAtChosenLevel() {
+    let mins: [Float] = [-0.1, -0.2, -0.3, -0.4, -0.5, -0.6, -0.7, -0.8]
+    let maxs: [Float] = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]
+    let model = makeModel(
+      totalSamples: 32, viewportWidth: 8, samplesPerPixel: 4, base: (mins, maxs))
+    let peak = model.sourcePeak(in: 0..<4, samplesPerPixel: 4)
+    #expect(peak?.min == -0.1)
+    #expect(peak?.max == 0.1)
+  }
+
+  @Test func sourcePeakClampsToFileBounds() {
+    let mins: [Float] = [-0.1, -0.2, -0.3, -0.4, -0.5, -0.6, -0.7, -0.8]
+    let maxs: [Float] = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]
+    let model = makeModel(
+      totalSamples: 30, viewportWidth: 8, samplesPerPixel: 4, base: (mins, maxs))
+    // requested [28,40) clamps to [28,30) -> still bucket 7.
+    let peak = model.sourcePeak(in: 28..<40, samplesPerPixel: 4)
+    #expect(peak?.min == -0.8)
+    #expect(peak?.max == 0.8)
+  }
+
+  @Test func sourcePeakNilWithoutWaveformOrEmptyRange() {
+    let unloaded = makeModel(totalSamples: 32, viewportWidth: 8, samplesPerPixel: 4)
+    #expect(unloaded.sourcePeak(in: 0..<4, samplesPerPixel: 4) == nil)
+
+    let loaded = makeModel(
+      totalSamples: 32, viewportWidth: 8, samplesPerPixel: 4, base: ([-0.1], [0.1]),
+      baseBucketSize: 32)
+    #expect(loaded.sourcePeak(in: 4..<4, samplesPerPixel: 4) == nil)
+  }
+
   // MARK: - span / overlays
 
   @Test func spanClipsToViewport() {

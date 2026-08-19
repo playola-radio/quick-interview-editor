@@ -31,6 +31,10 @@ struct SlicesPanelView: View {
         Button(model.exportAllLabel) { model.exportAllTapped() }
           .disabled(!model.canExportAll)
       }
+      if let note = model.exportBlockedByRemovalsNote {
+        Text(note).font(.system(size: 11))
+          .foregroundStyle(Color(red: 0.89, green: 0.58, blue: 0.58))
+      }
       if model.showsExportStatus {
         ExportStatus(model: model)
       }

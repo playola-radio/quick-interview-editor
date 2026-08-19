@@ -96,40 +96,45 @@ struct EditorFineTuneTests {
     expectNoDifference(model.fineTune.committedRange, model.transcript.selectedSampleRange)
   }
 
-  @Test func changingSelectionHoldsAnUnsavedPendingDraft() {
+  /// Updated (Task 9 deadlock fix): a `.pendingSelection` draft is a disposable CANDIDATE that
+  /// commits nothing on its own and (since Task 9) has no pane with Save/Cancel protecting it —
+  /// unlike a `.slice` edit, which IS still held (see `aSelectionDoesNotDropAnUnsavedSliceEditUntilResolved`
+  /// below, unchanged). So picking different words before saving must freely abandon the tuning
+  /// and retarget to the new selection, not hold the stale draft forever.
+  @Test func changingSelectionAbandonsAnUnsavedPendingDraftAndRetargets() {
     let model = editor()
     selectWords(model.transcript, 0, 2)
     model.syncEditSession()
     model.cutOutNudged(byMs: 10)  // tuned pending draft on selection A
-    let draftA = model.fineTune.draftRange
     #expect(model.fineTune.hasUnsavedChange)
 
-    // Picking different words before saving must NOT silently discard the tuning — the draft is
-    // held (symmetric with an unsaved slice edit) until the user Saves or Cancels.
     selectWords(model.transcript, 4, 6)
     model.syncEditSession()
-    expectNoDifference(model.fineTune.draftRange, draftA)  // still the tuned A
-    #expect(model.fineTune.hasUnsavedChange)
-    #expect(model.showsFineTunePane)
-
-    // Cancel releases the hold; the pane then retargets to the new selection.
-    model.cancelEditTapped()
+    // Retargeted cleanly to the new selection — the abandoned A tuning is gone, not held.
     expectNoDifference(model.fineTune.committedRange, model.transcript.selectedSampleRange)
+    expectNoDifference(model.fineTune.draftRange, model.transcript.selectedSampleRange)
+    #expect(!model.fineTune.hasUnsavedChange)
+    #expect(model.showsFineTunePane)
   }
 
-  @Test func savingAHeldPendingDraftUsesTheTunedRangeNotTheNewSelection() {
+  /// Updated (Task 9 deadlock fix): since the abandoned A draft is discarded on reselect (see
+  /// above), Save cut after reselecting commits the NEW selection B, not the stale A tuning.
+  @Test func savingAfterReselectingUsesTheNewSelectionNotTheAbandonedDraft() {
     let model = editor()
     selectWords(model.transcript, 0, 2)
     model.syncEditSession()
     model.cutOutNudged(byMs: 10)  // tuned pending draft on selection A
     let draftA = model.fineTune.draftRange!
 
-    // A different selection arrives; the draft is held. Save cut commits the tuned A, not B.
+    // A different selection arrives; the abandoned A tuning is discarded, not held.
     selectWords(model.transcript, 4, 6)
     model.syncEditSession()
+    let selectionB = model.transcript.selectedSampleRange!
+    #expect(selectionB != draftA)
+
     model.commitEditTapped()
     let added = model.slices.last!
-    expectNoDifference(added.startSample..<added.endSample, draftA)
+    expectNoDifference(added.startSample..<added.endSample, selectionB)
   }
 
   // MARK: - Commit = one undo entry, re-derived membership

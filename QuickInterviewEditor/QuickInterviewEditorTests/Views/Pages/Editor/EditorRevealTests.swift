@@ -24,10 +24,15 @@ struct EditorRevealTests {
     let model = EditorModel(
       sourceURL: URL(fileURLWithPath: "/clip.m4a"),
       canonicalAudioURL: Fixtures.canonicalAudioURL, editPlan: plan())
-    // Stand in for a loaded waveform so zoom-to-selection has geometry to work with.
+    // Stand in for a loaded waveform so zoom-to-selection has geometry to work with. Reveal now
+    // drives the EDITED adapter (identity timeline here — plan durationSamples 1_000_000 — so the
+    // math is 1:1 with the old source axis), so give it the same viewport/zoom.
     model.waveform.totalSamples = 1_000_000
     model.waveform.viewportWidth = 1000
     model.waveform.samplesPerPixel = 1000  // fit-whole-file, so a zoom is a visible change
+    model.editedWaveform.viewportWidth = 1000
+    model.editedWaveform.samplesPerPixel = 1000
+    model.editedWaveform.visibleStartSample = 0
     return model
   }
 
@@ -40,8 +45,8 @@ struct EditorRevealTests {
     expectNoDifference(model.transcript.selectedWordIDSet, [1, 2, 3])
     expectNoDifference(model.transcript.reveal, TranscriptReveal(wordID: 1, token: 1))
     // range 100_000..<250_000 (count 150_000), padded ×1.2 over 1000 px ⇒ 180 spp, centered.
-    expectNoDifference(model.waveform.samplesPerPixel, 180)
-    expectNoDifference(model.waveform.visibleStartSample, 85_000)
+    expectNoDifference(model.editedWaveform.samplesPerPixel, 180)
+    expectNoDifference(model.editedWaveform.visibleStartSample, 85_000)
   }
 
   @Test func clickingAStaleSuggestionLeavesTheViewWhereItIs() {
@@ -50,16 +55,16 @@ struct EditorRevealTests {
     model.transcript.selectWords(anchorID: 1, focusID: 1)
     model.zoomWaveformToSelection()
     let priorReveal = model.transcript.reveal
-    let priorSpp = model.waveform.samplesPerPixel
-    let priorStart = model.waveform.visibleStartSample
+    let priorSpp = model.editedWaveform.samplesPerPixel
+    let priorStart = model.editedWaveform.visibleStartSample
 
     // The suggestion references words no longer in the plan → must not jump the view.
     model.cutSuggestionSelected(Fixtures.cutSuggestion(id: Fixtures.uuid(9), wordIDs: [900, 901]))
 
     expectNoDifference(model.transcript.selectedWordIDSet, [1])
     expectNoDifference(model.transcript.reveal, priorReveal)
-    expectNoDifference(model.waveform.samplesPerPixel, priorSpp)
-    expectNoDifference(model.waveform.visibleStartSample, priorStart)
+    expectNoDifference(model.editedWaveform.samplesPerPixel, priorSpp)
+    expectNoDifference(model.editedWaveform.visibleStartSample, priorStart)
   }
 
   @Test func clickingAPartiallyStaleSuggestionLeavesTheViewWhereItIs() {
@@ -67,16 +72,16 @@ struct EditorRevealTests {
     model.transcript.selectWords(anchorID: 1, focusID: 1)
     model.zoomWaveformToSelection()
     let priorReveal = model.transcript.reveal
-    let priorSpp = model.waveform.samplesPerPixel
-    let priorStart = model.waveform.visibleStartSample
+    let priorSpp = model.editedWaveform.samplesPerPixel
+    let priorStart = model.editedWaveform.visibleStartSample
 
     // One surviving word (1) and one missing (900) — must NOT reveal the survivor's narrower span.
     model.cutSuggestionSelected(Fixtures.cutSuggestion(id: Fixtures.uuid(9), wordIDs: [1, 900]))
 
     expectNoDifference(model.transcript.selectedWordIDSet, [1])
     expectNoDifference(model.transcript.reveal, priorReveal)
-    expectNoDifference(model.waveform.samplesPerPixel, priorSpp)
-    expectNoDifference(model.waveform.visibleStartSample, priorStart)
+    expectNoDifference(model.editedWaveform.samplesPerPixel, priorSpp)
+    expectNoDifference(model.editedWaveform.visibleStartSample, priorStart)
   }
 
   @Test func clickingASuggestionResolvesEndpointsByPositionNotArrayOrder() {
@@ -88,7 +93,7 @@ struct EditorRevealTests {
 
     expectNoDifference(model.transcript.selectedWordIDSet, [1, 2, 3])
     expectNoDifference(model.transcript.reveal, TranscriptReveal(wordID: 1, token: 1))
-    expectNoDifference(model.waveform.samplesPerPixel, 180)
+    expectNoDifference(model.editedWaveform.samplesPerPixel, 180)
   }
 
   @Test func clickingASuggestionWithNoWordsIsANoOp() {
@@ -99,7 +104,7 @@ struct EditorRevealTests {
 
     expectNoDifference(model.transcript.selectedWordIDSet, [])
     #expect(model.transcript.reveal == nil)
-    expectNoDifference(model.waveform.samplesPerPixel, 1000)
+    expectNoDifference(model.editedWaveform.samplesPerPixel, 1000)
   }
 
   @Test func clickingASavedClipRevealsItTheSameWay() {
@@ -115,20 +120,20 @@ struct EditorRevealTests {
     expectNoDifference(model.transcript.selectedWordIDSet, [2, 3])
     expectNoDifference(model.transcript.reveal, TranscriptReveal(wordID: 2, token: 1))
     // range 150_000..<250_000 (count 100_000), padded ×1.2 over 1000 px ⇒ 120 spp, centered.
-    expectNoDifference(model.waveform.samplesPerPixel, 120)
-    expectNoDifference(model.waveform.visibleStartSample, 140_000)
+    expectNoDifference(model.editedWaveform.samplesPerPixel, 120)
+    expectNoDifference(model.editedWaveform.visibleStartSample, 140_000)
   }
 
   @Test func revealingAnUnknownClipIsANoOp() {
     let model = editor()
     model.sliceRevealTapped(Fixtures.uuid(99))
     expectNoDifference(model.transcript.selectedWordIDSet, [])
-    expectNoDifference(model.waveform.samplesPerPixel, 1000)
+    expectNoDifference(model.editedWaveform.samplesPerPixel, 1000)
   }
 
   @Test func zoomWaveformToSelectionIsANoOpWithNoSelection() {
     let model = editor()
     model.zoomWaveformToSelection()
-    expectNoDifference(model.waveform.samplesPerPixel, 1000)
+    expectNoDifference(model.editedWaveform.samplesPerPixel, 1000)
   }
 }

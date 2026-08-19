@@ -14,6 +14,7 @@ struct TranscriptPageView: View {
         lineSpacing: model.lineSpacing,
         selected: model.selectedWordIDSet,
         clipContainers: model.clipContainers,
+        removedWordIDs: model.removedWordIDs,
         currentWordID: model.currentWordID,
         scrollTarget: model.scrollTargetWordID,
         followMode: model.followMode,
@@ -122,6 +123,7 @@ struct TranscriptPageView: View {
     // A red selection overlapping the green clip, to eyeball that it draws ON TOP of the fill.
     selected: Set([10, 11, 12]),
     clipContainers: model.clipContainers,
+    removedWordIDs: [],
     // A "current word" highlight (light band) on word 30 to eyeball it against the fills.
     currentWordID: 30,
     scrollTarget: nil,

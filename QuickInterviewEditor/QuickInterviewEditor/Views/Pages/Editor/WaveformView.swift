@@ -12,7 +12,7 @@ struct WaveformView: View {
     VStack(alignment: .leading, spacing: 8) {
       header
       WaveformLaneView(
-        waveform: model.waveform,
+        waveform: model.editedWaveform,
         playhead: { model.playheadSample },
         highlightRange: model.activeEditingRange,
         onRulerMove: { model.rulerMovedPlayhead(toX: $0) },
@@ -20,6 +20,7 @@ struct WaveformView: View {
         onAreaSelectBegan: { model.waveformAreaSelectBegan(atX: $0, extending: $1) },
         onAreaSelectChanged: { model.waveformAreaSelectChanged(toX: $0) },
         onAreaSelectEnded: { model.waveformAreaSelectEnded(toX: $0) },
+        seams: model.seamSpans,
         auditionOverlay: { span in
           if model.canAudition { AuditionEdgeButtons(model: model, span: span) }
         }
@@ -41,20 +42,25 @@ struct WaveformView: View {
           .font(.system(size: 11, weight: .medium))
           .foregroundStyle(Color(red: 0.96, green: 0.86, blue: 0.4))
       }
+      if let note = model.removalPlaybackNote {
+        Text(note)
+          .font(.system(size: 11, weight: .medium))
+          .foregroundStyle(Color(white: 0.44))
+      }
       Spacer()
       Button {
-        model.waveform.zoomOutTapped()
+        model.editedWaveform.zoomOutTapped()
       } label: {
         Image(systemName: "minus.magnifyingglass")
       }
-      .disabled(!model.waveform.canZoomOut)
+      .disabled(!model.editedWaveform.canZoomOut)
       .help(model.waveform.zoomOutLabel)
       Button {
-        model.waveform.zoomInTapped()
+        model.editedWaveform.zoomInTapped()
       } label: {
         Image(systemName: "plus.magnifyingglass")
       }
-      .disabled(!model.waveform.canZoomIn)
+      .disabled(!model.editedWaveform.canZoomIn)
       .help(model.waveform.zoomInLabel)
     }
     .buttonStyle(.borderless)
