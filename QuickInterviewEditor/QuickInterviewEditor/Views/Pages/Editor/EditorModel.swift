@@ -941,6 +941,14 @@ final class EditorModel: ViewModel {
   /// rate. PR 2 makes it user-editable per removal.
   var defaultCrossfadeSamples: Int { Int(0.020 * Double(editPlan.source.sampleRate)) }
 
+  /// Surfaces the interim limitation while removals exist but playback hasn't caught up:
+  /// the collapsed waveform and transcript reflect the removal, but the transport still
+  /// plays the original contiguous audio (no crossfade blend yet — that lands in PR 2).
+  /// `nil` when there's nothing to warn about.
+  var removalPlaybackNote: String? {
+    timelineRemovals.isEmpty ? nil : "Playback preview does not yet blend cuts (coming next)."
+  }
+
   /// The current selected SOURCE range. Named explicitly (rather than reading
   /// `transcript.selectedSampleRange` inline) so a future marquee-only range can
   /// slot in here without touching every call site.

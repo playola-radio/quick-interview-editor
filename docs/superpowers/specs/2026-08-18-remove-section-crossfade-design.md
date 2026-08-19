@@ -289,6 +289,9 @@ export) is complete at PR 2; PR 3 adds Logic-parity editing; PR 4 adds slice sco
    *Interim limitation (state in the PR):* playback still plays the original contiguous
    ranges — the deletion is visible and persisted but not yet audible. Blending lands in
    PR 2.
+   **Status: complete.** `EditorModel.removalPlaybackNote` surfaces the interim limitation
+   in the waveform header (subtle status text, shown only while `timelineRemovals` is
+   non-empty) so the silent playback isn't confusing while PR 2 is pending.
 2. **Hear it + export it.** The single Swift equal-power PCM crossfade renderer;
    `AudioPlayerClient.playRenderedBuffer`; continuous scheduled playback that blends
    across every seam (kept-segment interiors from source + pre-rendered seam buffers),
