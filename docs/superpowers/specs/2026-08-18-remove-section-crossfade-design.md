@@ -308,6 +308,17 @@ export) is complete at PR 2; PR 3 adds Logic-parity editing; PR 4 adds slice sco
 Later / follow-up: reconcile cut-suggester / tight-join warnings with real crossfades;
 document/version migration if the project format changes further.
 
+**PR 1 addendum (post-review, user-requested):** word boundaries from forced alignment
+are not cut-frame-accurate — natural speech blurs adjacent words by ~10-20ms, so a clean
+word selection can still cut into the tail/onset of a neighboring word. PR 1 wires the
+pre-existing `FineTuneModel` boundary-nudge machinery (`nudgeCutIn`/`nudgeCutOut`, 10ms
+step) onto the pending-removal selection so the cut point can be nudged before commit —
+see the PR 1 plan's Task 9. **User has stated a further future want: very granular
+zoom in the waveform itself**, i.e. being able to zoom in far enough to place/inspect cut
+points near-sample-accurately by eye, not just nudge by a fixed step. Not scoped yet —
+revisit when PR 3 ("Editable seam UI parity") designs the full drag/numeric boundary
+editor; the current `WaveformViewport.minSamplesPerPixel` zoom floor may need lowering.
+
 ## 7. Risks & open questions
 
 - **Continuous playback complexity.** Scheduling kept-segment interiors + seam buffers

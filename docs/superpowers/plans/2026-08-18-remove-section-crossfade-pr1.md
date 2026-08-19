@@ -700,6 +700,54 @@ Then open the PR against `main` with a body that: summarizes the 4-PR feature, s
 
 ---
 
+## Task 9 (post-review addendum): Pre-commit boundary nudge for section removal
+
+**Why:** PR 1 shipped and was under human review when real usage surfaced a usability gap: forced-alignment word boundaries blur by ~10-20ms between words in natural speech, so a clean word selection can still cut into a neighbor's tail/onset. The fix is to let the user nudge the pending removal's start/end by small steps before committing — spec addendum in `docs/superpowers/specs/2026-08-18-remove-section-crossfade-design.md` §6.
+
+**Key finding:** the machinery already exists and is fully built, pre-dating this PR: `FineTuneModel` has `begin(target:range:)`, `nudgeCutIn(byMs:)`/`nudgeCutOut(byMs:)` (10ms step, `minSliceMs` floor, clamped to the file), `draftRange`. `EditorModel.fineTuneTarget` already resolves `.pendingSelection` whenever `transcript.selectedSampleRange != nil`, and `EditorModel.syncEditSession()` already opens/reconciles a session for it — it is simply never invoked from a live view (`FineTuneView` is never mounted; `showsFineTunePane` has zero consumers, confirmed by grep). `activeEditingRange`/`waveformHighlightSpan` already prefer `fineTune.draftRange`, so nudging will move the existing waveform highlight with **no new UI**. This is wiring, not a new subsystem.
+
+**Files:**
+- Modify: `EditorView.swift` (wire `syncEditSession()` to selection changes), `EditorModel.swift` (`EditorKey` cases, `editorKeyDown`, unify the pending-removal range, clear the session on commit), `EditorKeyMonitor.swift` (arrow-key → nudge mapping).
+- Test: `EditorRemovalTests.swift` (or a new focused file), `EditorKeyMonitorTests.swift`.
+
+**Interfaces:**
+- `EditorView`: add `.onChange(of: model.fineTuneSessionKey) { _, _ in model.syncEditSession() }` beside the existing selection/clipBands onChanges. This makes a fresh transcript/waveform selection open a `.pendingSelection` fine-tune session automatically — invisible (no pane), but `draftRange` now exists and tracks the selection.
+- `EditorModel`: add `EditorKey` cases `.nudgeCutInEarlier`, `.nudgeCutInLater`, `.nudgeCutOutEarlier`, `.nudgeCutOutLater`. In `editorKeyDown`, handle them via a private helper: guard `fineTune.target == .pendingSelection` (NOT `.slice` — a slice-edit session, if ever open, must not have its cut points hijacked by removal nudge keys) else return `false` (unconsumed, falls through); else nudge the named boundary in the named time direction using `fineTune.nudgeMs` as the magnitude:
+  - `.nudgeCutInEarlier` → `fineTune.nudgeCutIn(byMs: -fineTune.nudgeMs)` (start boundary moves earlier in time)
+  - `.nudgeCutInLater` → `fineTune.nudgeCutIn(byMs: fineTune.nudgeMs)` (start boundary moves later in time)
+  - `.nudgeCutOutEarlier` → `fineTune.nudgeCutOut(byMs: -fineTune.nudgeMs)` (end boundary moves earlier in time)
+  - `.nudgeCutOutLater` → `fineTune.nudgeCutOut(byMs: fineTune.nudgeMs)` (end boundary moves later in time)
+  For both edges, "Earlier" is always a negative delta and "Later" is always a positive delta — this is the sign convention `FineTuneModel.nudgeCutIn`/`nudgeCutOut` already use internally (`moveStart(to: draftRange.lowerBound + samples(forMs: deltaMs))` / `moveEnd(to: draftRange.upperBound + samples(forMs: deltaMs))`), so no inversion is needed anywhere in this wiring. Return `true` (consumed) after nudging.
+  - Add `private var pendingRemovalSourceRange: Range<Int>? { fineTune.target == .pendingSelection ? fineTune.draftRange : transcript.selectedSampleRange }` — the single range both the enablement check and the commit use, so a nudged draft (if a session happens to be open) is authoritative, and a plain unnudged selection (session not yet opened, e.g. tests that construct state directly) still works.
+  - `canRemove(sourceRange:)`/`canRemoveSelectedSection` and `removeSelectedSectionTapped()`: use `pendingRemovalSourceRange` instead of `transcript.selectedSampleRange` directly.
+  - On successful commit in `removeSelectedSectionTapped()`, call `fineTune.clear()` in addition to the existing `transcript.clearSelectionTapped()`, so the session tears down with the removal.
+- `EditorKeyMonitor.Coordinator.editorKey(forKeyCode:modifiers:characters:)`: add, in the free keyCode-123/124 space (Left/Right; the `.command` variants are already zoom, unaffected):
+  ```swift
+  case 123 where modifiers.isEmpty: return .nudgeCutInEarlier   // ←
+  case 124 where modifiers.isEmpty: return .nudgeCutInLater     // →
+  case 123 where modifiers == .shift: return .nudgeCutOutEarlier  // ⇧←
+  case 124 where modifiers == .shift: return .nudgeCutOutLater    // ⇧→
+  ```
+  Do NOT add these to the auto-repeat swallow set (holding the key should keep nudging, matching how the existing ⌘←/⌘→ zoom keys "intentionally keep repeating").
+
+**Known, accepted limitation (do not attempt to fix here):** `FineTuneModel`'s boundary clamp is unaware of `timelineRemovals` — nudging could in principle push a draft into another removal's territory. The existing `canRemove(sourceRange:)` overlap check at commit time already rejects that (⌫ becomes a silent no-op), so this is safe, just without live feedback. Out of scope; note it as a deferred minor.
+
+- [ ] **Step 1: Write failing tests** covering: (a) after `model.transcript.selectWords(...)` then `model.syncEditSession()`, `model.fineTune.target == .pendingSelection` and `model.fineTune.draftRange == selection`; (b) `editorKeyDown(.nudgeCutInLater)` moves `draftRange.lowerBound` later by `Int((10.0/1000 * Double(sampleRate)).rounded())` samples (hand-compute with the fixture's 44100 sample rate → 441 samples); (c) same for `.nudgeCutOutEarlier`/`.nudgeCutOutLater`/`.nudgeCutInEarlier`; (d) nudge keys return `false` (no-op) with no selection/session open; (e) `removeSelectedSectionTapped()` after a nudge removes the nudged range, not the raw selection; (f) confirm existing slice-target fine-tune behavior (`sliceSelected`, `commitSliceEdit`, undo/redo of slice cuts) is unaffected — run those existing tests unchanged. `expectNoDifference` for values.
+- [ ] **Step 2: Run to verify failure** — `cd QuickInterviewEditor && make test`. Expected: FAIL (new EditorKey cases/behavior don't exist).
+- [ ] **Step 3: Implement** per the Interfaces above.
+- [ ] **Step 4: Run to verify pass** — `cd QuickInterviewEditor && make test`. Expected: PASS, FULL suite green (this touches the shared `editorKeyDown`/`syncEditSession` paths — confirm no existing test, especially slice-editing and undo/redo tests, regresses).
+- [ ] **Step 5: Format, lint, commit**
+
+```bash
+cd QuickInterviewEditor && make format && make lint && make format-check
+git add -A
+git commit -m "feat: nudge the pending removal's cut points before commit (Task 9)"
+```
+
+This lands as additional commits on the SAME branch/PR (#51) — it directly fixes basic usability of the delete gesture already in that PR, so bundling avoids a churny follow-up PR for "make the shipped feature usable." Bot reviews (Greptile/CodeRabbit) will re-run on the push; handle per `/fix-review`.
+
+---
+
 ## Self-Review (completed by plan author)
 
 **Spec coverage (§ → task):** §4.1 coordinate model → Task 2, Task 7. §4.2 data model + normalization + clamp → Task 1, Task 2. §4.3 undo widening + `mutateDocument` → Task 4. §4.6 delete gesture (transcript + marquee), ⌫ → Task 6, Task 7. §4.7 word-hide (existing midpoint logic — no new code needed since collapsed rendering hides removed-range words via the edited axis; verify in Task 7 manual check) + cross-seam rejection → Task 6. §4.8 persistence → Task 3, Task 5. §6 PR1 interim limitation → Task 8. Continuous audition / export / editable-seam UI / slice-local → **out of scope (PR 2–4), intentionally.**
