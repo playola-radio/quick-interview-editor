@@ -153,8 +153,6 @@ final class EditorModel: ViewModel {
   }
   /// Where the transport last started playing; Stop returns the cursor here.
   var transportOriginSample: Int?
-  /// What the transport is currently playing, captured at Play. Non-observed — internal bookkeeping.
-  @ObservationIgnored private var transportRange: Range<Int>?
   /// Bumped whenever something authoritatively places the cursor outside the selection-snap path — a
   /// ruler move or a transport start. A deferred selection snap (`transportSelectionChanged`) captures
   /// this at selection-change time (via `cursorMoveToken`) and bails if it changed, so it can neither
@@ -214,6 +212,12 @@ final class EditorModel: ViewModel {
   let exportLabel = "Export"
   let exportAllLabel = "Export all"
   let cancelExportLabel = "Cancel export"
+  /// Shown when the canonical AIFF backing this session has vanished before a render —
+  /// e.g. cleared by an app update or a second window's launch cleanup. Re-importing
+  /// re-materializes it. Named as user-facing copy, not an engine error, on purpose.
+  let canonicalMissingMessage =
+    "The working audio for this file is no longer available — it can be cleared by an app "
+    + "update or another window. Re-import the file to export again."
   let undoLabel = "Undo"
   let redoLabel = "Redo"
   let tightBadgeLabel = "Tight join"
@@ -463,6 +467,22 @@ final class EditorModel: ViewModel {
     if editedWaveform.viewportWidth > 0 {
       editedWaveform.viewportResized(width: editedWaveform.viewportWidth)
     }
+    // A slice sheet opened WHILE the file was still decoding adopted a nil/empty waveform (a
+    // one-time snapshot, unlike the old live column closure). Now that the decode is done, seed
+    // that open sheet so its lane and insets fill in instead of staying blank for its lifetime.
+    reseedEditSliceWaveformIfNeeded()
+  }
+
+  /// Re-seeds an open slice sheet's lane from the now-decoded waveform, but only when that sheet's
+  /// lane is still empty (opened mid-decode). A sheet opened after the decode already shows its
+  /// waveform, so the guard skips it — a lane the user has zoomed/scrolled over real data is never
+  /// re-fit. (A mid-decode lane draws nothing, so snapping it to frame the slice when the audio
+  /// finally arrives is the intended reveal, not a lost interaction.)
+  private func reseedEditSliceWaveformIfNeeded() {
+    guard let editSlice, waveform.showsWaveform, !editSlice.waveform.showsWaveform else { return }
+    editSlice.waveform.adopt(
+      waveform: waveform.waveform, totalSamples: waveform.totalSamples,
+      sampleRate: waveform.sampleRate, contentRange: editSlice.overviewWindow)
   }
 
   /// Streams playback positions from the (shared) player into the persistent playhead cursor.
@@ -520,7 +540,6 @@ final class EditorModel: ViewModel {
     transportPhase = .stopped
     transportContext = .free
     transportOriginSample = nil
-    transportRange = nil
   }
 
   /// Stops the given session, or does nothing if it's nil. A nil session means THIS editor
@@ -861,32 +880,39 @@ final class EditorModel: ViewModel {
     // own Play has started a fresh `.sliceEdit` session, can never kill that newer session.
     stopActiveTransportSnapshotting()
     let child = EditSliceModel(slice: slice, editPlan: editPlan)
-    child.columnsProvider = { [weak self] window, width in
-      self?.waveform.columns(in: window, pixelWidth: width) ?? []
-    }
+    // Give the sheet its OWN lane, seeded from the already-decoded pyramid so nothing is re-decoded,
+    // pinned to this slice (you cannot scroll or zoom past its boundaries). It must not share the
+    // main editor's WaveformModel (that one is bound to the main viewport's zoom/scroll/width).
+    child.waveform.adopt(
+      waveform: waveform.waveform, totalSamples: waveform.totalSamples,
+      sampleRate: waveform.sampleRate, contentRange: slice.startSample..<slice.endSample)
     child.onCommit = { [weak self] range in self?.commitSliceEdit(id: id, range: range) }
     child.onPlay = { [weak self] range in
-      guard let self else { return }
-      // Resume the paused `.sliceEdit` session in place ONLY when its scheduled range still
-      // matches — a nudge while paused changes the draft, so a drifted range must start a fresh
-      // play from the new boundaries rather than resume the stale one. Any other phase (stopped,
-      // or some foreign paused context) begins a fresh `.sliceEdit` playback.
-      if isTransportPaused, case .sliceEdit = transportContext, transportRange == range {
-        await transportPlayTapped()
-        // Resume can fail (e.g. an engine restart) and leave the phase paused. The modal set
-        // `isPlaying` optimistically, so publish the TRUE phase back or its button would lie —
-        // showing Pause over silent, paused audio.
-        editSlice?.updatePlayback(sample: playheadSample, isPlaying: isTransportPlaying)
-      } else {
-        await beginTransportPlayback(range: range, context: .sliceEdit)
-      }
+      // Logic model: Play always plays `range` from the playhead as a fresh, exclusive `.sliceEdit`
+      // playback (the child derives `range` from the cursor). Pause merely freezes the cursor; the
+      // next Play re-plays from it, and seeking mid-play passes a new range here to re-anchor. There
+      // is no bespoke resume/drift branch — `beginTransportPlayback` supersedes any prior (playing or
+      // paused) session cleanly.
+      await self?.beginTransportPlayback(range: range, context: .sliceEdit)
     }
-    child.onPause = { [weak self] in await self?.transportPauseTapped() }
-    child.onStop = { [weak self] in await self?.transportStopTapped() }
-    // R4: the transport always plays a whole range, never from an arbitrary point, so seeking
-    // inside the modal repositions the persistent cursor rather than re-anchoring playback.
-    // v1 decision: this does NOT re-anchor an active play — a click-to-seek during playback is a
-    // cursor reposition only, and the next position tick overwrites it. Deferred to a later pass.
+    child.onPause = { [weak self] in
+      guard let self else { return }
+      await transportPauseTapped()
+      // Publish the frozen cursor back to the sheet so its "play from the playhead" uses the exact
+      // pause point (the position loop stops ticking once paused, so it won't otherwise learn it).
+      editSlice?.updatePlayback(sample: playheadSample, isPlaying: isTransportPlaying)
+    }
+    child.onStop = { [weak self] in
+      guard let self else { return }
+      await transportStopTapped()
+      // Stop returns the cursor to the play origin; publish it so the sheet's next "play from the
+      // playhead" starts there rather than from a stale last-tick sample.
+      editSlice?.updatePlayback(sample: playheadSample, isPlaying: isTransportPlaying)
+    }
+    // R4: the transport always plays a whole range, never from an arbitrary point. This callback is
+    // the CURSOR-ONLY path — it repositions the persistent cursor and starts nothing. A seek taken
+    // WHILE playing on the waveform body does not reach here: `EditSliceModel.waveformSeeked` routes
+    // that case to `onPlay`, which re-anchors playback from the click to the cut-out.
     child.onSeek = { [weak self] sample in
       guard let self else { return }
       playheadSample = sample
@@ -1207,7 +1233,6 @@ final class EditorModel: ViewModel {
     let session = PlaybackSessionID()
     transportContext = context
     transportOriginSample = range.lowerBound
-    transportRange = range
     playheadSample = range.lowerBound
     // A transport start authoritatively places the cursor, so it takes cursor authority too: a
     // selection snap deferred from before this Play must bail rather than stop us and snap back.
@@ -1609,9 +1634,19 @@ final class EditorModel: ViewModel {
     exportTask?.cancel()
   }
 
+  /// Waits for any in-flight export to finish unwinding. The engine subprocess reads the
+  /// canonical AIFF, so a caller tearing this editor down (tab close, re-import) must await
+  /// this — after ``cancelExportTapped()`` — before ``discardCanonicalAudio()``, or it could
+  /// delete the file out from under a render still in flight.
+  func awaitExportTeardown() async {
+    await exportTask?.value
+  }
+
   // MARK: - Lifecycle
   /// Removes this session's canonical audio cache dir. Called when the tab closes:
   /// the AIFF is derived data, rebuildable by re-transcribing, so it shouldn't linger.
+  /// Only safe once any in-flight export has been cancelled AND awaited
+  /// (``awaitExportTeardown()``) — the engine reads this file during render.
   func discardCanonicalAudio() {
     CanonicalAudioStore.remove(canonicalAudioURL)
   }
@@ -1687,17 +1722,42 @@ final class EditorModel: ViewModel {
   /// Marks the export as running synchronously (so the buttons disable immediately
   /// and a rapid second tap can't start a parallel export) and spawns the worker,
   /// keeping a handle so `cancelExportTapped` can kill the process group.
+  /// Whether the canonical AIFF still backs this session. It can be reaped or purged out
+  /// from under a live editor (an overlapping instance's launch cleanup, a low-disk cache
+  /// purge), so export verifies it rather than trusting the URL captured at load.
+  private var canonicalAudioIsOnDisk: Bool {
+    FileManager.default.fileExists(atPath: canonicalAudioURL.path)
+  }
+
   private func startExport(_ targets: [Slice]) {
+    // Fail loud at the tap with actionable copy instead of opening a destination picker and
+    // then handing the engine a dead path that surfaces as a raw "no such file".
+    guard canonicalAudioIsOnDisk else {
+      exportPhase = .failed(canonicalMissingMessage)
+      return
+    }
     exportTask?.cancel()
     exportPhase = .exporting(current: 0, total: targets.count)
     exportTask = Task { await performExport(targets) }
   }
 
-  private func performExport(_ targets: [Slice]) async {
+  /// Resolves the export destination, then re-checks the canonical audio is still on disk —
+  /// it can vanish while the destination picker is open. Sets the terminal phase and returns
+  /// nil when export can't proceed.
+  private func exportDestination() async -> URL? {
     guard let destination = await resolvedDestination() else {
       exportPhase = .idle
-      return
+      return nil
     }
+    guard canonicalAudioIsOnDisk else {
+      exportPhase = .failed(canonicalMissingMessage)
+      return nil
+    }
+    return destination
+  }
+
+  private func performExport(_ targets: [Slice]) async {
+    guard let destination = await exportDestination() else { return }
     exportPhase = .exporting(current: 0, total: targets.count)
 
     do {

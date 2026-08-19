@@ -160,6 +160,7 @@
 		CF1A36E0C7591D0EE042AAB9 /* TranscriptionCacheKeyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B5F265398B71392F9665945 /* TranscriptionCacheKeyTests.swift */; };
 		D48EC3DED2EB8A824377E142 /* WaveformClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B61BB907EAD6192C2B3779B8 /* WaveformClientTests.swift */; };
 		D7E2BD1FA39BAA582CAB13BE /* EditPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A8D3E1944317B3EFEE5C170 /* EditPlan.swift */; };
+		D973AA16417A0DC4DF5EF164 /* SliceEditKeyMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEA8503A987CB794DC566975 /* SliceEditKeyMonitor.swift */; };
 		D9C4768EAE67DC98FCA42E18 /* ImportPageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 990E56AF2E3DE415036CB683 /* ImportPageView.swift */; };
 		DB11FB675227EDA325DFFAA3 /* EditPlanV2DecodeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98AF849A99658DB929493E32 /* EditPlanV2DecodeTests.swift */; };
 		DC3D8E449E7D4C241C8A6AE3 /* TransportPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7ED94B792CC5DE39305E419C /* TransportPanelView.swift */; };
@@ -348,6 +349,7 @@
 		CBFE48491B14C729718F8517 /* BoundaryInset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BoundaryInset.swift; sourceTree = "<group>"; };
 		CDB2B2989C30934A0043C8DC /* SmokeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmokeTests.swift; sourceTree = "<group>"; };
 		CDB75E8909EA443A5FB175E2 /* CutSuggestionAccept.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CutSuggestionAccept.swift; sourceTree = "<group>"; };
+		CEA8503A987CB794DC566975 /* SliceEditKeyMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SliceEditKeyMonitor.swift; sourceTree = "<group>"; };
 		CEFAC7D37A8CD8BCE6C5F178 /* CanonicalAudioStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanonicalAudioStore.swift; sourceTree = "<group>"; };
 		CF59032A8FB779A2205DB749 /* EditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorView.swift; sourceTree = "<group>"; };
 		CF93217F20AC5E520D21D194 /* ClipContainerLayoutManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipContainerLayoutManager.swift; sourceTree = "<group>"; };
@@ -683,6 +685,7 @@
 			children = (
 				77B6CF523129B089804A14CD /* EditSliceModel.swift */,
 				FD4516489B5C925C3DD24E8F /* EditSliceView.swift */,
+				CEA8503A987CB794DC566975 /* SliceEditKeyMonitor.swift */,
 			);
 			path = EditSlice;
 			sourceTree = "<group>";
@@ -1147,6 +1150,7 @@
 				9A0F620F78E146D1CCAB1969 /* SettingsView.swift in Sources */,
 				C58D5951CA0D6BBBCC70DF52 /* Slice.swift in Sources */,
 				E6336CA1DA3102CBE17144CA /* SliceBuilder.swift in Sources */,
+				D973AA16417A0DC4DF5EF164 /* SliceEditKeyMonitor.swift in Sources */,
 				C9D62B7EDE70F69A2338091B /* SliceWarnings.swift in Sources */,
 				BC13D6EAD35EBE4FC240C2C6 /* SlicesPanelView.swift in Sources */,
 				881898A69DDBC442BABAC876 /* SongTabModel.swift in Sources */,

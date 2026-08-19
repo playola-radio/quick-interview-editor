@@ -452,4 +452,184 @@ struct WaveformTests {
     expectNoDifference(model.visibleStartSample, 0)
     expectNoDifference(model.samplesPerPixel, 1000)
   }
+
+  // MARK: - adopt (seed a second model from an already-decoded waveform, no re-decode)
+
+  @Test func adoptSeedsDecodedWaveformWithoutTouchingTheClient() {
+    let calls = LockIsolated(0)
+    let fixture = Waveform.pyramid(
+      baseMins: [0, -0.5], baseMaxs: [0.1, 0.8], sampleRate: 44100, totalSamples: 1000)
+    let model = withDependencies {
+      $0.waveform = WaveformClient(loadWaveform: { _, _, _ in
+        calls.withValue { $0 += 1 }
+        return fixture
+      })
+    } operation: {
+      WaveformModel()
+    }
+
+    model.adopt(waveform: fixture, totalSamples: 1000, sampleRate: 44100, contentRange: nil)
+
+    expectNoDifference(model.waveform, fixture)
+    #expect(model.totalSamples == 1000)
+    #expect(model.sampleRate == 44100)
+    #expect(model.isLoading == false)
+    #expect(calls.value == 0)  // adopt never decodes — it borrows the decoded pyramid
+  }
+
+  @Test func adoptFitsTheContentRangeEdgeToEdgeOnTheFirstLayout() {
+    let model = WaveformModel()  // viewport not measured yet
+    model.adopt(
+      waveform: nil, totalSamples: 1_000_000, sampleRate: 44100,
+      contentRange: 400_000..<600_000)
+    #expect(model.viewportWidth == 0)  // nothing to fit until the lane reports a width
+
+    model.viewportResized(width: 1000)
+
+    // Pinned to the 200_000-wide slice, fit edge-to-edge: spp 200, start at the slice's lower bound.
+    expectNoDifference(model.samplesPerPixel, 200)
+    expectNoDifference(model.visibleStartSample, 400_000)
+  }
+
+  @Test func adoptWithoutContentRangeFitsTheWholeFileOnFirstLayout() {
+    let model = WaveformModel()
+    model.adopt(waveform: nil, totalSamples: 100_000, sampleRate: 44100, contentRange: nil)
+    model.viewportResized(width: 1000)
+    expectNoDifference(model.samplesPerPixel, 100)  // 100_000 / 1000
+    expectNoDifference(model.visibleStartSample, 0)
+  }
+
+  @Test func adoptFitsImmediatelyWhenTheViewportIsAlreadyMeasured() {
+    let model = WaveformModel()
+    model.viewportResized(width: 1000)  // measured first
+    model.adopt(
+      waveform: nil, totalSamples: 1_000_000, sampleRate: 44100,
+      contentRange: 400_000..<600_000)
+    expectNoDifference(model.samplesPerPixel, 200)
+    expectNoDifference(model.visibleStartSample, 400_000)
+  }
+
+  @Test func adoptFitsTheContentRangeAcrossAZeroWidthFirstLayout() {
+    let model = WaveformModel()
+    model.adopt(
+      waveform: nil, totalSamples: 1_000_000, sampleRate: 44100,
+      contentRange: 400_000..<600_000)
+
+    model.viewportResized(width: 0)  // a fitted sheet can report a 0-width first layout
+    model.viewportResized(width: 1000)  // the real layout still frames the slice
+
+    expectNoDifference(model.samplesPerPixel, 200)
+    expectNoDifference(model.visibleStartSample, 400_000)
+  }
+
+  @Test func adoptedFitIsNotReappliedOnLaterResizes() {
+    let model = WaveformModel()
+    model.adopt(
+      waveform: nil, totalSamples: 1_000_000, sampleRate: 44100,
+      contentRange: 400_000..<600_000)
+    model.viewportResized(width: 1000)  // fit the slice (spp 200)
+    model.zoomInTapped()  // spp 100, so there's room to scroll within the slice
+    model.panByPixels(-10)
+    let scrolledStart = model.visibleStartSample
+
+    model.viewportResized(width: 1000)  // a later relayout must NOT reset the user's zoom/scroll
+
+    expectNoDifference(model.samplesPerPixel, 100)
+    expectNoDifference(model.visibleStartSample, scrolledStart)
+  }
+
+  // MARK: - contentRange pins the lane to the slice (only the slice is navigable)
+
+  @Test func contentRangePinsZoomOutToTheSlice() {
+    // Seed a real pyramid so `showsWaveform` is true — otherwise `canZoomOut` is false for lack of a
+    // waveform, and the assertion wouldn't actually exercise the pin.
+    let fixture = Waveform.pyramid(
+      baseMins: [0, -0.5], baseMaxs: [0.1, 0.8], sampleRate: 44100, totalSamples: 1_000_000)
+    let model = WaveformModel()
+    model.adopt(
+      waveform: fixture, totalSamples: 1_000_000, sampleRate: 44100,
+      contentRange: 400_000..<600_000)
+    model.viewportResized(width: 1000)  // fit the slice: spp 200
+
+    #expect(model.canZoomOut == false)  // already showing the whole slice; can't zoom out further
+    model.zoomInTapped()  // spp 100
+    for _ in 0..<10 { model.zoomOutTapped() }
+    expectNoDifference(model.samplesPerPixel, 200)  // clamps at the slice fit, never the whole file
+    #expect(model.visibleSampleCount == 200_000)  // exactly the slice width
+  }
+
+  @Test func contentRangePinsScrollToTheSlice() {
+    let model = WaveformModel()
+    model.adopt(
+      waveform: nil, totalSamples: 1_000_000, sampleRate: 44100,
+      contentRange: 400_000..<600_000)
+    model.viewportResized(width: 1000)  // spp 200, visibleCount 200_000
+    model.zoomInTapped()  // spp 100, visibleCount 100_000 -> room to scroll inside the slice
+
+    model.scrolled(toStartSample: 0)  // hard toward the file start
+    expectNoDifference(model.visibleStartSample, 400_000)  // clamps at the slice start, not 0
+
+    model.scrolled(toStartSample: 10_000_000)  // hard toward the file end
+    expectNoDifference(model.visibleStartSample, 500_000)  // slice end (600_000) - visibleCount
+  }
+
+  @Test func aDegeneratePinStaysInertRatherThanExposingTheWholeFile() {
+    let model = WaveformModel()
+    // An empty pin (a malformed slice) must NOT widen back to the whole file.
+    model.adopt(
+      waveform: nil, totalSamples: 1_000_000, sampleRate: 44100,
+      contentRange: 500_000..<500_000)
+    model.viewportResized(width: 1000)
+
+    model.scrolled(toStartSample: 0)  // try to escape to the file start
+    expectNoDifference(model.visibleStartSample, 500_000)  // stuck at the pin, never the whole file
+  }
+
+  @Test func visibleColumnsDoNotReadPastAPinnedSlice() {
+    let mins: [Float] = [-0.1, -0.2, -0.3, -0.4, -0.5, -0.6, -0.7, -0.8]
+    let maxs: [Float] = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]
+    let fixture = Waveform.pyramid(
+      baseMins: mins, baseMaxs: maxs, sampleRate: 44100, totalSamples: 8, baseBucketSize: 1)
+    let model = WaveformModel()
+    model.adopt(waveform: fixture, totalSamples: 8, sampleRate: 44100, contentRange: 0..<5)
+    // ceil -> 6 columns; the 6th pixel's range would spill to sample 5 (just past the slice)
+    model.viewportWidth = 6
+    model.samplesPerPixel = 1
+    model.visibleStartSample = 0
+
+    let columns = model.visibleColumns()
+
+    #expect(columns.count == 5)  // the out-of-slice spill column is dropped, not clamped-and-drawn
+    #expect(columns.allSatisfy { $0.min >= -0.5 })  // never reads bucket 5+ (mins -0.6…-0.8)
+  }
+
+  @Test func adoptClearsAnArmedZoomFitRestore() {
+    let model = WaveformModel()
+    model.totalSamples = 1_000_000
+    model.viewportResized(width: 1000)  // fit whole file: spp 1000
+    model.zoomFitToggled(selection: 400_000..<600_000)  // fits (spp 200), arms restore of spp 1000
+
+    // A fresh reseed must invalidate that armed restore — its snapshot is pre-adopt geometry.
+    model.adopt(
+      waveform: nil, totalSamples: 1_000_000, sampleRate: 44100,
+      contentRange: 400_000..<600_000)
+    let sppAfterAdopt = model.samplesPerPixel  // adopt fit the slice: spp 200
+
+    // must fit fresh, NOT restore the stale pre-adopt spp of 1000
+    model.zoomFitToggled(selection: 400_000..<600_000)
+
+    expectNoDifference(model.samplesPerPixel, sppAfterAdopt)
+  }
+
+  @Test func contentRangeLeavesAbsoluteSampleMappingIntact() {
+    let model = WaveformModel()
+    model.adopt(
+      waveform: nil, totalSamples: 1_000_000, sampleRate: 44100,
+      contentRange: 400_000..<600_000)
+    model.viewportResized(width: 1000)  // spp 200, visibleStart 400_000
+    // Coordinates stay in ABSOLUTE plan samples (so the shared pyramid + playhead still line up).
+    #expect(model.xToSample(0) == 400_000)
+    #expect(model.xToSample(5) == 401_000)  // 400_000 + 5 * 200
+    #expect(model.sampleToX(401_000) == 5)
+  }
 }

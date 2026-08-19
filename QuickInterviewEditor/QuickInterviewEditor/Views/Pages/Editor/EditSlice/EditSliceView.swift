@@ -1,9 +1,9 @@
 import SwiftUI
 
-/// The slice-detail sheet: the scoped transcript, an edge-to-edge overview waveform, the two
-/// magnified boundary insets (reusing ``BoundaryInset``), a transport row, and Cancel/Save.
-/// Pure visuals — every value and gesture is forwarded to `model`, which owns all geometry
-/// and state.
+/// The slice-detail sheet: the scoped transcript, the full ``WaveformLaneView`` (same ruler / zoom /
+/// scroll / seek as the main editor, scoped to this slice), the two magnified boundary insets
+/// (reusing ``BoundaryInset``), a transport row, and Cancel/Save. Pure visuals — every value and
+/// gesture is forwarded to `model`, which owns all geometry and state.
 struct EditSliceView: View {
   let model: EditSliceModel
 
@@ -12,12 +12,11 @@ struct EditSliceView: View {
       Text(model.title).font(.headline)
 
       TranscriptPageView(model: model.transcript)
-        .frame(minHeight: 160)
+        .frame(minHeight: 160, maxHeight: .infinity)
 
       Divider()
 
-      SliceOverviewWaveform(model: model)
-        .frame(height: 120)
+      SliceWaveformLane(model: model)
 
       FineTuneInsets(model: model)
 
@@ -37,66 +36,61 @@ struct EditSliceView: View {
       }
     }
     .padding()
-    .frame(minWidth: 720, minHeight: 560)
+    .presentationSizing(.fitted)
+    .frame(
+      minWidth: 1040, idealWidth: 1140, maxWidth: .infinity,
+      minHeight: 680, idealHeight: 800, maxHeight: .infinity
+    )
+    // ⌘← / ⌘→ step-zoom and Z zoom-to-fit, scoped to this sheet's lane (the main editor's monitor
+    // stands down because its window isn't key while the sheet is up).
+    .background(SliceEditKeyMonitor(model: model))
   }
 }
 
-/// The edge-to-edge overview waveform for the whole slice: reuses ``InsetSilhouette`` (no
-/// kept/discarded tint — the whole span is "kept" from this zoomed-out view), the live draft
-/// Cut-in/Cut-out lines, a playhead line, and a tap-to-seek gesture. The view owns only pixels:
-/// it multiplies the model's 0...1 fractions by its width and normalizes a tap back to a fraction.
-/// Every sample↔position decision lives on `model`.
-private struct SliceOverviewWaveform: View {
+/// The slice's waveform lane: the same reusable ``WaveformLaneView`` the main editor mounts, wired
+/// for navigation only. Ruler/body clicks seek the cursor; the draft kept range is the highlight
+/// band. Marquee area-select is intentionally inert here — boundary editing is the fine-tune insets'
+/// job, so a lane selection would have no meaning (a deliberate divergence from the main editor).
+private struct SliceWaveformLane: View {
   let model: EditSliceModel
 
-  private let waveColor = Color(white: 0.42)
-  private let playheadColor = Color(red: 0.96, green: 0.86, blue: 0.4)
-  private let cutLineColor = Color(white: 0.9)
-
   var body: some View {
-    GeometryReader { geometry in
-      let width = geometry.size.width
-      ZStack(alignment: .leading) {
-        Color(white: 0.03)
-        InsetSilhouette(
-          columns: model.overviewColumns(pixelWidth: width), keptSpan: nil,
-          waveColor: waveColor, keptColor: waveColor)
-        if let fraction = model.overviewCutInFraction {
-          cutLine(width: width, fraction: fraction)
-        }
-        if let fraction = model.overviewCutOutFraction {
-          cutLine(width: width, fraction: fraction)
-        }
-        if let fraction = model.overviewPlayheadFraction {
-          let playheadWidth: CGFloat = 1.5
-          Rectangle().fill(playheadColor).frame(width: playheadWidth)
-            .offset(x: lineOffset(width: width, fraction: fraction, lineWidth: playheadWidth))
-        }
-      }
-      .clipShape(RoundedRectangle(cornerRadius: 4))
-      .contentShape(Rectangle())
-      .gesture(
-        DragGesture(minimumDistance: 0, coordinateSpace: .local)
-          .onEnded { value in
-            let fraction = width > 0 ? Double(value.location.x) / Double(width) : 0
-            let sample = model.overviewSeekSample(atFraction: fraction)
-            Task { await model.seekTapped(toSample: sample) }
-          }
+    VStack(alignment: .leading, spacing: 8) {
+      zoomHeader
+      WaveformLaneView(
+        waveform: model.waveform,
+        playhead: { model.playheadSample },
+        highlightRange: model.waveformHighlightRange,
+        onRulerMove: { positionX in Task { await model.waveformDragged(toX: positionX) } },
+        onBodyClick: { positionX, _ in Task { await model.waveformSeeked(toX: positionX) } },
+        onAreaSelectBegan: { _, _ in },
+        onAreaSelectChanged: { _ in },
+        onAreaSelectEnded: { _ in },
+        auditionOverlay: { _ in EmptyView() }
       )
     }
   }
 
-  private func cutLine(width: CGFloat, fraction: Double) -> some View {
-    let lineWidth: CGFloat = 1
-    return Rectangle().fill(cutLineColor).frame(width: lineWidth)
-      .offset(x: lineOffset(width: width, fraction: fraction, lineWidth: lineWidth))
-  }
-
-  /// Keeps a boundary/playhead line fully inside the clipped overview: a `fraction` of 1 would
-  /// otherwise land the line at `x == width`, just past the trailing clip edge, hiding it. Clamps
-  /// the offset to `[0, width - lineWidth]` so the endpoint lines stay flush against the edge.
-  private func lineOffset(width: CGFloat, fraction: Double, lineWidth: CGFloat) -> CGFloat {
-    min(max(0, width * CGFloat(fraction)), max(0, width - lineWidth))
+  private var zoomHeader: some View {
+    HStack(spacing: 8) {
+      Spacer()
+      Button {
+        model.zoomOutTapped()
+      } label: {
+        Image(systemName: "minus.magnifyingglass")
+      }
+      .disabled(!model.canZoomOut)
+      .help(model.zoomOutLabel)
+      Button {
+        model.zoomInTapped()
+      } label: {
+        Image(systemName: "plus.magnifyingglass")
+      }
+      .disabled(!model.canZoomIn)
+      .help(model.zoomInLabel)
+    }
+    .buttonStyle(.borderless)
+    .foregroundStyle(Color(white: 0.6))
   }
 }
 

@@ -6,7 +6,7 @@ import Observation
 /// existing, tested pieces: ``WaveformModel`` (stays source-pure — the pyramid it owns never
 /// moves) supplies peaks per SOURCE range; ``EditedTimeline`` maps SOURCE↔EDITED coordinates
 /// and reports which source ranges a pixel's edited window touches; ``WaveformViewport``
-/// supplies the zoom/pan/clamp/fit formulas, reused here with `duration: editedDurationSamples`
+/// supplies the zoom/pan/clamp/fit formulas, reused here with `axis: 0..<editedDurationSamples`
 /// instead of the source's total length. This adapter owns its own EDITED viewport state —
 /// it never reads or writes `source`'s `visibleStartSample`/`samplesPerPixel`.
 @MainActor
@@ -189,7 +189,7 @@ final class EditedWaveformAdapter {
     guard viewportWidth > 0, editedDurationSamples > 0, factor > 0 else { return }
     fitRestore = nil
     let result = WaveformViewport.zoomByFactor(
-      factor, anchoredAtX: cursorX, viewportWidth: viewportWidth, duration: editedDurationSamples,
+      factor, anchoredAtX: cursorX, viewportWidth: viewportWidth, axis: 0..<editedDurationSamples,
       samplesPerPixel: samplesPerPixel, visibleStartSample: visibleStartSample)
     samplesPerPixel = result.samplesPerPixel
     visibleStartSample = result.visibleStartSample
@@ -224,7 +224,7 @@ final class EditedWaveformAdapter {
     if paddingFraction > 0 { fitRestore = nil }
     let result = WaveformViewport.zoomToFit(
       editedRange, paddingFraction: paddingFraction, viewportWidth: viewportWidth,
-      duration: editedDurationSamples)
+      axis: 0..<editedDurationSamples)
     samplesPerPixel = result.samplesPerPixel
     visibleStartSample = result.visibleStartSample
   }
@@ -292,7 +292,7 @@ final class EditedWaveformAdapter {
     guard viewportWidth > 0, editedDurationSamples > 0 else { return }
     fitRestore = nil
     let result = WaveformViewport.zoom(
-      by: factor, viewportWidth: viewportWidth, duration: editedDurationSamples,
+      by: factor, viewportWidth: viewportWidth, axis: 0..<editedDurationSamples,
       samplesPerPixel: samplesPerPixel, visibleStartSample: visibleStartSample)
     samplesPerPixel = result.samplesPerPixel
     visibleStartSample = result.visibleStartSample
@@ -300,28 +300,40 @@ final class EditedWaveformAdapter {
 
   private func fitSamplesPerPixel() -> Double {
     WaveformViewport.fitSamplesPerPixel(
-      viewportWidth: viewportWidth, duration: editedDurationSamples)
+      viewportWidth: viewportWidth, axis: 0..<editedDurationSamples)
   }
 
   private func minEffectiveSamplesPerPixel() -> Double {
     WaveformViewport.minEffectiveSamplesPerPixel(
-      viewportWidth: viewportWidth, duration: editedDurationSamples)
+      viewportWidth: viewportWidth, axis: 0..<editedDurationSamples)
   }
 
   private func clampedSamplesPerPixel(_ spp: Double) -> Double {
     WaveformViewport.clampedSamplesPerPixel(
-      spp, viewportWidth: viewportWidth, duration: editedDurationSamples)
+      spp, viewportWidth: viewportWidth, axis: 0..<editedDurationSamples)
   }
 
   private func clampedStart(_ start: Int) -> Int {
     WaveformViewport.clampedStart(
       start, viewportWidth: viewportWidth, samplesPerPixel: samplesPerPixel,
-      duration: editedDurationSamples)
+      axis: 0..<editedDurationSamples)
   }
 
   private struct FitRestore {
     var samplesPerPixel: Double
     var visibleStartSample: Int
     var sourceSelection: Range<Int>?
+  }
+}
+
+/// The edited/collapsed axis drives ``WaveformLaneView`` in the main editor. The lane's
+/// `forSource:` requirements are literal here — every read maps SOURCE↔EDITED through the timeline.
+extension EditedWaveformAdapter: WaveformLaneDriving {
+  func laneSpan(forSource sourceRange: Range<Int>) -> WaveformSpan? {
+    span(forSource: sourceRange)
+  }
+
+  func lanePlayheadX(forSource sourceSample: Int) -> CGFloat? {
+    playheadX(forSource: sourceSample)
   }
 }

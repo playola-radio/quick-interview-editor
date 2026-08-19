@@ -2,12 +2,16 @@ import CoreGraphics
 import Foundation
 
 /// Pure viewport math for the waveform: zoom/pan/clamp/fit/coordinate-transform formulas,
-/// parameterized by `viewportWidth` and a `duration` (the total number of samples on
-/// whatever axis is in play). This is a stateless helper — `WaveformModel` owns the
-/// `@Observable` viewport state (`visibleStartSample`, `samplesPerPixel`, …) and calls into
-/// these functions with its current values, assigning the results back to its own stored
-/// properties. Kept axis-agnostic (rather than hardcoded to `totalSamples`) so a later
-/// edited/collapsed axis can reuse the identical rules without duplicating this math.
+/// parameterized by `viewportWidth` and an `axis` — the half-open sample range the viewport
+/// may cover. The axis need not start at 0: `WaveformModel` passes its `navigableRange` (the
+/// whole file, or a slice-pinned sub-window with a non-zero lower bound), while
+/// `EditedWaveformAdapter` passes `0..<editedDurationSamples`. Fit/clamp are relative to the
+/// axis's bounds (its `count` for zoom-to-fit, its `lowerBound` as the scroll floor). This is a
+/// stateless helper — `WaveformModel` owns the `@Observable` viewport state
+/// (`visibleStartSample`, `samplesPerPixel`, …) and calls into these functions with its current
+/// values, assigning the results back to its own stored properties. Kept axis-agnostic (rather
+/// than hardcoded to `totalSamples`) so both the source and the edited/collapsed axis reuse the
+/// identical rules without duplicating this math.
 enum WaveformViewport {
 
   // MARK: - Constants
@@ -20,21 +24,21 @@ enum WaveformViewport {
 
   // MARK: - Fit / clamp
 
-  static func fitSamplesPerPixel(viewportWidth: CGFloat, duration: Int) -> Double {
-    guard viewportWidth > 0, duration > 0 else { return 1 }
-    return Double(duration) / Double(viewportWidth)
+  static func fitSamplesPerPixel(viewportWidth: CGFloat, axis: Range<Int>) -> Double {
+    guard viewportWidth > 0, axis.count > 0 else { return 1 }
+    return Double(axis.count) / Double(viewportWidth)
   }
 
-  static func minEffectiveSamplesPerPixel(viewportWidth: CGFloat, duration: Int) -> Double {
-    min(minSamplesPerPixel, fitSamplesPerPixel(viewportWidth: viewportWidth, duration: duration))
+  static func minEffectiveSamplesPerPixel(viewportWidth: CGFloat, axis: Range<Int>) -> Double {
+    min(minSamplesPerPixel, fitSamplesPerPixel(viewportWidth: viewportWidth, axis: axis))
   }
 
-  static func clampedSamplesPerPixel(_ spp: Double, viewportWidth: CGFloat, duration: Int)
+  static func clampedSamplesPerPixel(_ spp: Double, viewportWidth: CGFloat, axis: Range<Int>)
     -> Double
   {
     min(
-      max(spp, minEffectiveSamplesPerPixel(viewportWidth: viewportWidth, duration: duration)),
-      fitSamplesPerPixel(viewportWidth: viewportWidth, duration: duration))
+      max(spp, minEffectiveSamplesPerPixel(viewportWidth: viewportWidth, axis: axis)),
+      fitSamplesPerPixel(viewportWidth: viewportWidth, axis: axis))
   }
 
   /// Samples currently visible across the viewport at `samplesPerPixel`.
@@ -44,13 +48,14 @@ enum WaveformViewport {
   }
 
   static func clampedStart(
-    _ start: Int, viewportWidth: CGFloat, samplesPerPixel: Double, duration: Int
+    _ start: Int, viewportWidth: CGFloat, samplesPerPixel: Double, axis: Range<Int>
   ) -> Int {
     let maxStart = max(
-      0,
-      duration - visibleSampleCount(viewportWidth: viewportWidth, samplesPerPixel: samplesPerPixel)
+      axis.lowerBound,
+      axis.upperBound
+        - visibleSampleCount(viewportWidth: viewportWidth, samplesPerPixel: samplesPerPixel)
     )
-    return min(max(start, 0), maxStart)
+    return min(max(start, axis.lowerBound), maxStart)
   }
 
   // MARK: - Coordinate transforms
@@ -73,19 +78,19 @@ enum WaveformViewport {
   /// Center-anchored zoom: multiplies `samplesPerPixel` by `factor`, then re-centers the
   /// viewport on the sample that was at its center beforehand.
   static func zoom(
-    by factor: Double, viewportWidth: CGFloat, duration: Int, samplesPerPixel: Double,
+    by factor: Double, viewportWidth: CGFloat, axis: Range<Int>, samplesPerPixel: Double,
     visibleStartSample: Int
   ) -> (samplesPerPixel: Double, visibleStartSample: Int) {
     let visibleCount = visibleSampleCount(
       viewportWidth: viewportWidth, samplesPerPixel: samplesPerPixel)
     let center = visibleStartSample + visibleCount / 2
     let newSamplesPerPixel = clampedSamplesPerPixel(
-      samplesPerPixel * factor, viewportWidth: viewportWidth, duration: duration)
+      samplesPerPixel * factor, viewportWidth: viewportWidth, axis: axis)
     let newVisibleCount = visibleSampleCount(
       viewportWidth: viewportWidth, samplesPerPixel: newSamplesPerPixel)
     let newStart = clampedStart(
       center - newVisibleCount / 2, viewportWidth: viewportWidth,
-      samplesPerPixel: newSamplesPerPixel, duration: duration)
+      samplesPerPixel: newSamplesPerPixel, axis: axis)
     return (newSamplesPerPixel, newStart)
   }
 
@@ -94,15 +99,15 @@ enum WaveformViewport {
   /// pinned to `cursorX`. Recomputed from the current invariant, so repeated small wheel
   /// deltas don't accumulate drift.
   static func zoomByFactor(
-    _ factor: Double, anchoredAtX cursorX: CGFloat, viewportWidth: CGFloat, duration: Int,
+    _ factor: Double, anchoredAtX cursorX: CGFloat, viewportWidth: CGFloat, axis: Range<Int>,
     samplesPerPixel: Double, visibleStartSample: Int
   ) -> (samplesPerPixel: Double, visibleStartSample: Int) {
     let sampleUnderCursor = Double(visibleStartSample) + Double(cursorX) * samplesPerPixel
     let newSamplesPerPixel = clampedSamplesPerPixel(
-      samplesPerPixel * factor, viewportWidth: viewportWidth, duration: duration)
+      samplesPerPixel * factor, viewportWidth: viewportWidth, axis: axis)
     let newStart = clampedStart(
       Int((sampleUnderCursor - Double(cursorX) * newSamplesPerPixel).rounded()),
-      viewportWidth: viewportWidth, samplesPerPixel: newSamplesPerPixel, duration: duration)
+      viewportWidth: viewportWidth, samplesPerPixel: newSamplesPerPixel, axis: axis)
     return (newSamplesPerPixel, newStart)
   }
   // swiftlint:enable function_parameter_count
@@ -119,17 +124,17 @@ enum WaveformViewport {
   /// breathing room on each side (0.1 ⇒ the range fills the middle ~83% of the width); 0
   /// fills edge-to-edge.
   static func zoomToFit(
-    _ range: Range<Int>, paddingFraction: Double, viewportWidth: CGFloat, duration: Int
+    _ range: Range<Int>, paddingFraction: Double, viewportWidth: CGFloat, axis: Range<Int>
   ) -> (samplesPerPixel: Double, visibleStartSample: Int) {
     let padded = Double(range.count) * (1 + 2 * max(0, paddingFraction))
     let newSamplesPerPixel = clampedSamplesPerPixel(
-      padded / Double(viewportWidth), viewportWidth: viewportWidth, duration: duration)
+      padded / Double(viewportWidth), viewportWidth: viewportWidth, axis: axis)
     let center = range.lowerBound + range.count / 2
     let newVisibleCount = visibleSampleCount(
       viewportWidth: viewportWidth, samplesPerPixel: newSamplesPerPixel)
     let newStart = clampedStart(
       center - newVisibleCount / 2, viewportWidth: viewportWidth,
-      samplesPerPixel: newSamplesPerPixel, duration: duration)
+      samplesPerPixel: newSamplesPerPixel, axis: axis)
     return (newSamplesPerPixel, newStart)
   }
 

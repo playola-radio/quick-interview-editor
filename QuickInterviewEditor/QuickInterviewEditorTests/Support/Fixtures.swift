@@ -68,8 +68,16 @@ enum Fixtures {
     UUID(uuidString: String(format: "00000000-0000-0000-0000-%012d", index))!
   }
 
-  /// A stand-in canonical audio URL for tests — no file is read (audio I/O is mocked).
-  static let canonicalAudioURL = URL(fileURLWithPath: "/tmp/qie-canonical.aiff")
+  /// A stand-in canonical audio URL for tests. A tiny real file backs it so export's
+  /// pre-render existence check passes; its bytes are never decoded (audio I/O is mocked).
+  static let canonicalAudioURL: URL = {
+    let url = FileManager.default.temporaryDirectory
+      .appendingPathComponent("qie-canonical.aiff")
+    if !FileManager.default.fileExists(atPath: url.path) {
+      try? Data("canonical".utf8).write(to: url)
+    }
+    return url
+  }()
 
   static func transcriptionResult(
     _ plan: EditPlan = editPlan(), canonicalAudioURL: URL = canonicalAudioURL

@@ -34,6 +34,11 @@ final class WaveformModel: ViewModel {
   var visibleStartSample = 0
   /// `visibleStartSample` captured at the start of a drag-pan gesture.
   @ObservationIgnored private var dragAnchorStartSample = 0
+  /// The navigable extent of the lane, in plan samples: `nil` ⇒ the whole file (the main editor);
+  /// a window ⇒ the lane is pinned to it, so the slice-edit sheet shows ONLY the slice — you cannot
+  /// scroll or zoom past its start/end. Reads still resolve against the shared full-file pyramid in
+  /// absolute samples; this bounds the viewport only.
+  @ObservationIgnored private var contentRange: Range<Int>?
   /// Zoom+scroll captured by `zoomFitToggled` so a second Z press can restore it, along with
   /// the selection that was fitted — restore only applies if the selection hasn't changed.
   /// Cleared by any manual zoom/pan so the next Z fits fresh instead of restoring stale state.
@@ -81,11 +86,15 @@ final class WaveformModel: ViewModel {
     let columnCount = Int(viewportWidth.rounded(.up))
     var columns: [WaveformColumn] = []
     columns.reserveCapacity(columnCount)
+    // Clamp reads to the navigable range (the whole file for the main editor; the slice for a
+    // pinned sheet) so a right-edge column — `columnCount` is `ceil(width)`, so the last pixel can
+    // spill past the content — never draws audio from beyond the pinned slice.
+    let bounds = navigableRange
     for pixel in 0..<columnCount {
       let start = visibleStartSample + Int((Double(pixel) * samplesPerPixel).rounded(.down))
       let end = visibleStartSample + Int((Double(pixel + 1) * samplesPerPixel).rounded(.down))
-      let lo = max(0, min(start, totalSamples))
-      let hi = max(0, min(end, totalSamples))
+      let lo = max(bounds.lowerBound, min(start, bounds.upperBound))
+      let hi = max(bounds.lowerBound, min(end, bounds.upperBound))
       guard hi > lo else { continue }
       let peak = level.peak(in: lo..<hi)
       columns.append(WaveformColumn(positionX: CGFloat(pixel), min: peak.min, max: peak.max))
@@ -188,6 +197,26 @@ final class WaveformModel: ViewModel {
     if viewportWidth > 0 { samplesPerPixel = clampedSamplesPerPixel(fitSamplesPerPixel()) }
   }
 
+  /// Seeds this model from an ALREADY-decoded waveform (shared from another model) instead of
+  /// decoding via the client, then normalizes geometry the way `load` does. Used by the slice-edit
+  /// sheet: it borrows the main editor's decoded pyramid rather than re-decoding the file, so it
+  /// gets a fully-interactive lane (zoom/scroll/ruler) for free. Sharing the same `Waveform` value
+  /// between two models is safe — its pyramid arrays are read-only here. `contentRange`, when given,
+  /// pins the navigable extent to that window (the sheet shows ONLY the slice); `nil` navigates the
+  /// whole file. The initial fit frames the navigable range: immediately if the viewport is already
+  /// measured, otherwise on the first `viewportResized` (its `wasUnset` fit already uses it).
+  func adopt(waveform: Waveform?, totalSamples: Int, sampleRate: Int, contentRange: Range<Int>?) {
+    self.waveform = waveform
+    self.totalSamples = totalSamples
+    self.sampleRate = sampleRate
+    self.contentRange = contentRange
+    isLoading = false
+    // A fresh seed invalidates any armed Z-restore: a snapshot taken against the pre-adopt (often
+    // empty, mid-decode) geometry must not be restorable after the real waveform is framed.
+    fitRestore = nil
+    if viewportWidth > 0 { zoomToFitAll() }
+  }
+
   func viewportResized(width: CGFloat) {
     let wasUnset = viewportWidth <= 0
     viewportWidth = width
@@ -221,7 +250,7 @@ final class WaveformModel: ViewModel {
     guard viewportWidth > 0, totalSamples > 0, factor > 0 else { return }
     fitRestore = nil
     let result = WaveformViewport.zoomByFactor(
-      factor, anchoredAtX: cursorX, viewportWidth: viewportWidth, duration: totalSamples,
+      factor, anchoredAtX: cursorX, viewportWidth: viewportWidth, axis: navigableRange,
       samplesPerPixel: samplesPerPixel, visibleStartSample: visibleStartSample)
     samplesPerPixel = result.samplesPerPixel
     visibleStartSample = result.visibleStartSample
@@ -258,9 +287,9 @@ final class WaveformModel: ViewModel {
   // swiftlint:enable function_parameter_count
 
   func zoomToFitAll() {
-    guard viewportWidth > 0, totalSamples > 0 else { return }
+    guard viewportWidth > 0, navigableRange.count > 0 else { return }
     samplesPerPixel = clampedSamplesPerPixel(fitSamplesPerPixel())
-    visibleStartSample = clampedStart(0)
+    visibleStartSample = clampedStart(navigableRange.lowerBound)
   }
 
   /// Frames `range` in the viewport. `paddingFraction` leaves that fraction of the range as
@@ -274,7 +303,7 @@ final class WaveformModel: ViewModel {
     // manages `fitRestore` itself, so it must not be cleared here.
     if paddingFraction > 0 { fitRestore = nil }
     let result = WaveformViewport.zoomToFit(
-      range, paddingFraction: paddingFraction, viewportWidth: viewportWidth, duration: totalSamples)
+      range, paddingFraction: paddingFraction, viewportWidth: viewportWidth, axis: navigableRange)
     samplesPerPixel = result.samplesPerPixel
     visibleStartSample = result.visibleStartSample
   }
@@ -300,29 +329,40 @@ final class WaveformModel: ViewModel {
     guard viewportWidth > 0, totalSamples > 0 else { return }
     fitRestore = nil
     let result = WaveformViewport.zoom(
-      by: factor, viewportWidth: viewportWidth, duration: totalSamples,
+      by: factor, viewportWidth: viewportWidth, axis: navigableRange,
       samplesPerPixel: samplesPerPixel, visibleStartSample: visibleStartSample)
     samplesPerPixel = result.samplesPerPixel
     visibleStartSample = result.visibleStartSample
   }
 
+  /// The plan-sample range the viewport may cover: the pinned `contentRange` when set, else the
+  /// whole file. A set pin is clamped into `[0, totalSamples]` but is NEVER widened back to the
+  /// whole file when degenerate — a pinned lane that can't resolve a real window stays inert (empty)
+  /// rather than silently exposing the entire file, preserving the pin invariant.
+  private var navigableRange: Range<Int> {
+    guard let contentRange else { return 0..<max(0, totalSamples) }
+    let lower = max(0, min(contentRange.lowerBound, totalSamples))
+    let upper = max(lower, min(contentRange.upperBound, totalSamples))
+    return lower..<upper
+  }
+
   private func fitSamplesPerPixel() -> Double {
-    WaveformViewport.fitSamplesPerPixel(viewportWidth: viewportWidth, duration: totalSamples)
+    WaveformViewport.fitSamplesPerPixel(viewportWidth: viewportWidth, axis: navigableRange)
   }
 
   private func minEffectiveSamplesPerPixel() -> Double {
     WaveformViewport.minEffectiveSamplesPerPixel(
-      viewportWidth: viewportWidth, duration: totalSamples)
+      viewportWidth: viewportWidth, axis: navigableRange)
   }
 
   private func clampedSamplesPerPixel(_ spp: Double) -> Double {
     WaveformViewport.clampedSamplesPerPixel(
-      spp, viewportWidth: viewportWidth, duration: totalSamples)
+      spp, viewportWidth: viewportWidth, axis: navigableRange)
   }
 
   private func clampedStart(_ start: Int) -> Int {
     WaveformViewport.clampedStart(
-      start, viewportWidth: viewportWidth, samplesPerPixel: samplesPerPixel, duration: totalSamples)
+      start, viewportWidth: viewportWidth, samplesPerPixel: samplesPerPixel, axis: navigableRange)
   }
 
   private struct FitRestore {
@@ -343,6 +383,19 @@ final class WaveformModel: ViewModel {
       if Double(level.bucketSize) <= spp { chosen = level } else { break }
     }
     return chosen
+  }
+}
+
+/// A source-axis model drives ``WaveformLaneView`` directly in the slice-edit sheet (pinned to a
+/// slice's sub-range via `navigableRange`). There a source sample IS a plan sample, so the lane's
+/// `forSource:` requirements forward to the plain source-coordinate methods.
+extension WaveformModel: WaveformLaneDriving {
+  func laneSpan(forSource sourceRange: Range<Int>) -> WaveformSpan? {
+    span(for: sourceRange)
+  }
+
+  func lanePlayheadX(forSource sourceSample: Int) -> CGFloat? {
+    playheadX(for: sourceSample)
   }
 }
 
