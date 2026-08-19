@@ -14,6 +14,9 @@ protocol WaveformLaneDriving: AnyObject {
   var showsEmpty: Bool { get }
   var loadingMessage: String { get }
   var emptyMessage: String { get }
+  /// Vertical zoom: multiplies rendered peak height. Purely a rendering scale — see
+  /// ``WaveformModel/amplitudeScale``, which every conformer ultimately reads from.
+  var amplitudeScale: CGFloat { get }
   func viewportResized(width: CGFloat)
   func visibleColumns() -> [WaveformColumn]
   func laneSpan(forSource sourceRange: Range<Int>) -> WaveformSpan?
@@ -397,7 +400,9 @@ struct WaveformAmplitudeZoomButton: View {
         @unknown default: break
         }
       }
-      .accessibilityAction(named: Text(waveform.amplitudeZoomResetLabel)) { waveform.amplitudeZoomResetTapped() }
+      .accessibilityAction(named: Text(waveform.amplitudeZoomResetLabel)) {
+        waveform.amplitudeZoomResetTapped()
+      }
   }
 }
 

@@ -61,6 +61,7 @@ final class EditedWaveformAdapter {
   var showsEmpty: Bool { source.showsEmpty }
   var loadingMessage: String { source.loadingMessage }
   var emptyMessage: String { source.emptyMessage }
+  var amplitudeScale: CGFloat { source.amplitudeScale }
 
   func viewportResized(width: CGFloat) {
     let wasUnset = viewportWidth <= 0
