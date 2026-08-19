@@ -160,6 +160,16 @@ final class EditSliceModel: ViewModel, Identifiable {
     }
   }
 
+  /// A continuous ruler drag repositions the cursor ONLY — it never re-anchors playback, so
+  /// scrubbing the ruler doesn't restart the transport once per pointer move (that would be one
+  /// exclusive `play` per event). Re-anchoring stays on the discrete body click (``waveformSeeked``).
+  func waveformDragged(toX positionX: CGFloat) async {
+    guard waveform.hasUsableGeometry else { return }
+    let sample = min(
+      max(waveform.xToSample(positionX), overviewWindow.lowerBound), overviewWindow.upperBound)
+    await seekTapped(toSample: sample)
+  }
+
   func zoomInTapped() { waveform.zoomInTapped() }
   func zoomOutTapped() { waveform.zoomOutTapped() }
   /// Logic's `Z`: fit the whole slice (the lane's pinned extent) on the first press, restore the

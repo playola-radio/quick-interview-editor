@@ -61,7 +61,7 @@ private struct SliceWaveformLane: View {
         waveform: model.waveform,
         playhead: { model.playheadSample },
         highlightRange: model.waveformHighlightRange,
-        onRulerMove: { positionX in Task { await model.waveformSeeked(toX: positionX) } },
+        onRulerMove: { positionX in Task { await model.waveformDragged(toX: positionX) } },
         onBodyClick: { positionX, _ in Task { await model.waveformSeeked(toX: positionX) } },
         onAreaSelectBegan: { _, _ in },
         onAreaSelectChanged: { _ in },

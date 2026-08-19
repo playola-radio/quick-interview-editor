@@ -47,10 +47,11 @@ struct SliceEditKeyMonitor: NSViewRepresentable {
           forKeyCode: event.keyCode,
           modifiers: event.modifierFlags,
           characters: event.charactersIgnoringModifiers)
-        // Space (no modifiers, not auto-repeating) is the Play/Pause transport — keyCode 49, the
-        // same physical key ``AuditionKeyMonitor`` uses in the main editor.
+        // Space (no modifiers) is the Play/Pause transport — keyCode 49, the same physical key
+        // ``AuditionKeyMonitor`` uses in the main editor. Auto-repeat is classified here too (so it
+        // gets swallowed in `handle` rather than beeping) but only the first press acts.
         let isSpace =
-          event.keyCode == 49 && !event.isARepeat
+          event.keyCode == 49
           && event.modifierFlags.isDisjoint(with: [.command, .control, .option])
         guard zoomKey != nil || isSpace else { return event }
         let isARepeat = event.isARepeat
@@ -97,6 +98,8 @@ struct SliceEditKeyMonitor: NSViewRepresentable {
         // there — fire Play/Pause only when focus is on the sheet's content, matching how
         // ``AuditionKeyMonitor`` treats Space in the main editor.
         if window.firstResponder is NSControl { return false }
+        // Swallow auto-repeat so holding Space doesn't retrigger the transport (or beep).
+        if isARepeat { return true }
         Task { await model.playPauseTapped() }
         return true
       }

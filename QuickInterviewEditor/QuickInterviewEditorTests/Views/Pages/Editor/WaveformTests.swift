@@ -508,9 +508,13 @@ struct WaveformTests {
   // MARK: - contentRange pins the lane to the slice (only the slice is navigable)
 
   @Test func contentRangePinsZoomOutToTheSlice() {
+    // Seed a real pyramid so `showsWaveform` is true — otherwise `canZoomOut` is false for lack of a
+    // waveform, and the assertion wouldn't actually exercise the pin.
+    let fixture = Waveform.pyramid(
+      baseMins: [0, -0.5], baseMaxs: [0.1, 0.8], sampleRate: 44100, totalSamples: 1_000_000)
     let model = WaveformModel()
     model.adopt(
-      waveform: nil, totalSamples: 1_000_000, sampleRate: 44100,
+      waveform: fixture, totalSamples: 1_000_000, sampleRate: 44100,
       contentRange: 400_000..<600_000)
     model.viewportResized(width: 1000)  // fit the slice: spp 200
 

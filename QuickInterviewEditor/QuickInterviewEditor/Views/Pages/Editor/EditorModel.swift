@@ -783,10 +783,10 @@ final class EditorModel: ViewModel {
       // playhead" starts there rather than from a stale last-tick sample.
       editSlice?.updatePlayback(sample: playheadSample, isPlaying: isTransportPlaying)
     }
-    // R4: the transport always plays a whole range, never from an arbitrary point, so seeking
-    // inside the modal repositions the persistent cursor rather than re-anchoring playback.
-    // v1 decision: this does NOT re-anchor an active play — a click-to-seek during playback is a
-    // cursor reposition only, and the next position tick overwrites it. Deferred to a later pass.
+    // R4: the transport always plays a whole range, never from an arbitrary point. This callback is
+    // the CURSOR-ONLY path — it repositions the persistent cursor and starts nothing. A seek taken
+    // WHILE playing on the waveform body does not reach here: `EditSliceModel.waveformSeeked` routes
+    // that case to `onPlay`, which re-anchors playback from the click to the cut-out.
     child.onSeek = { [weak self] sample in
       guard let self else { return }
       playheadSample = sample

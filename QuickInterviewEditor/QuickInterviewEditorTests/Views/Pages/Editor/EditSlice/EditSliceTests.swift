@@ -146,6 +146,20 @@ struct EditSliceTests {
     #expect(played.isEmpty)  // does not re-anchor to an empty range
   }
 
+  @Test func rulerDragWhilePlayingRepositionsCursorWithoutReAnchoring() async {
+    let model = laneModel()  // slice 10_000..<20_000, spp 100, start 0
+    var played: [Range<Int>] = []
+    var sought: [Int] = []
+    model.onPlay = { played.append($0) }
+    model.onSeek = { sought.append($0) }
+    model.updatePlayback(sample: 12_000, isPlaying: true)
+
+    await model.waveformDragged(toX: 150)  // sample 15_000
+
+    expectNoDifference(sought, [15_000])  // cursor-only — a ruler scrub never restarts playback
+    #expect(played.isEmpty)
+  }
+
   @Test func seekWhilePausedRepositionsWithoutReplaying() async {
     let model = laneModel()  // slice 10_000..<20_000, spp 100, start 0
     var played: [Range<Int>] = []
