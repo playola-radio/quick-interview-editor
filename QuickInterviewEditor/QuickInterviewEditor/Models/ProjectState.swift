@@ -18,18 +18,23 @@ struct ProjectState: Codable, Equatable, Sendable {
   /// Paragraph/speaker spec: `SPEAKER_00` → "Host" display-name overrides. Reserved.
   var speakerDisplayNames: [String: String]
 
+  /// Remove-section + crossfade spec: user-defined timeline removals.
+  var timelineRemovals: IdentifiedArrayOf<TimelineRemoval>
+
   init(
     cutSuggestions: IdentifiedArrayOf<CutSuggestion> = [],
     speakerCountOverride: Int? = nil,
-    speakerDisplayNames: [String: String] = [:]
+    speakerDisplayNames: [String: String] = [:],
+    timelineRemovals: IdentifiedArrayOf<TimelineRemoval> = []
   ) {
     self.cutSuggestions = cutSuggestions
     self.speakerCountOverride = speakerCountOverride
     self.speakerDisplayNames = speakerDisplayNames
+    self.timelineRemovals = timelineRemovals
   }
 
   enum CodingKeys: String, CodingKey {
-    case cutSuggestions, speakerCountOverride, speakerDisplayNames
+    case cutSuggestions, speakerCountOverride, speakerDisplayNames, timelineRemovals
   }
 
   /// Lenient decode: every section is optional and defaults to empty. This store is
@@ -46,7 +51,9 @@ struct ProjectState: Codable, Equatable, Sendable {
       speakerCountOverride: try container.decodeIfPresent(
         Int.self, forKey: .speakerCountOverride),
       speakerDisplayNames: try container.decodeIfPresent(
-        [String: String].self, forKey: .speakerDisplayNames) ?? [:]
+        [String: String].self, forKey: .speakerDisplayNames) ?? [:],
+      timelineRemovals: try container.decodeIfPresent(
+        IdentifiedArrayOf<TimelineRemoval>.self, forKey: .timelineRemovals) ?? []
     )
   }
 }

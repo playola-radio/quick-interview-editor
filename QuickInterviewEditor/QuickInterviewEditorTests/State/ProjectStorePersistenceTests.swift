@@ -93,4 +93,30 @@ struct ProjectStorePersistenceTests {
       expectNoDifference(onDisk.cutSuggestions[id: suggestion.id]?.status, .accepted)
     }
   }
+
+  @Test func roundTripsTimelineRemovals() throws {
+    let fingerprint = "fp-removals"
+    let url = ProjectState.sidecarURL(fingerprint: fingerprint)
+    let seeded = ProjectState(timelineRemovals: [
+      TimelineRemoval(
+        id: Fixtures.uuid(7), removedRange: 1000..<2000,
+        crossfade: Crossfade(lengthSamples: 480, curve: .equalPower))
+    ])
+    let seededData = try JSONEncoder().encode(seeded)
+    let fileSystem = LockIsolated<[URL: Data]>([url: seededData])
+
+    withDependencies {
+      $0.defaultFileStorage = FileStorage.inMemory(fileSystem: fileSystem)
+    } operation: {
+      @Shared(.projectState(fingerprint: fingerprint)) var state = ProjectState()
+      expectNoDifference(state.timelineRemovals, seeded.timelineRemovals)
+    }
+  }
+
+  @Test func decodesLegacySidecarWithoutRemovalsSection() throws {
+    // A sidecar written before this feature has no "timelineRemovals" key; must decode to [].
+    let json = Data(#"{"cutSuggestions":[],"speakerDisplayNames":{}}"#.utf8)
+    let state = try JSONDecoder().decode(ProjectState.self, from: json)
+    expectNoDifference(state.timelineRemovals, [])
+  }
 }
