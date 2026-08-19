@@ -220,4 +220,43 @@ struct EditedWaveformAdapterTests {
     expectNoDifference(adapter.samplesPerPixel, 50)
     expectNoDifference(adapter.visibleStartSample, 300_000)
   }
+
+  // MARK: - zoomToFitSource (source range → edited fit)
+
+  @Test func zoomToFitSourceConvertsThroughTheTimelineThenFits() {
+    let adapter = makeAdapter(
+      sourceDuration: 1_000_000, removedRange: 400_000..<600_000, crossfadeLength: 50_000,
+      viewportWidth: 1000, samplesPerPixel: 50, start: 300_000, base: ([0], [0]))
+    // K1 edited span starts at 350_000: source 700_000 -> edited 450_000, source 900_000 ->
+    // edited 650_000. Width 200_000 over 1000 px -> spp 200, centered -> start 450_000.
+    adapter.zoomToFitSource(700_000..<900_000)
+    expectNoDifference(adapter.samplesPerPixel, 200)
+    expectNoDifference(adapter.visibleStartSample, 450_000)
+  }
+
+  // MARK: - timelineChanged re-clamps into the new edited duration
+
+  @Test func timelineChangedReclampsViewportIntoTheNewEditedDuration() {
+    let source = WaveformModel()
+    source.totalSamples = 1_000_000
+    source.waveform = Waveform.pyramid(
+      baseMins: [0], baseMaxs: [0], sampleRate: 44100, totalSamples: 1_000_000, baseBucketSize: 4)
+    let adapter = EditedWaveformAdapter(
+      source: source, timeline: EditedTimeline(sourceDurationSamples: 1_000_000, removals: []))
+    adapter.viewportWidth = 1000
+    adapter.samplesPerPixel = 100  // visibleSampleCount 100_000
+    adapter.visibleStartSample = 850_000  // valid on a 1_000_000-sample edited timeline
+
+    // A large removal collapses the edited duration to 150_000 (K0 100_000 + K1 50_000).
+    let removal = TimelineRemoval(
+      id: UUID(), removedRange: 100_000..<950_000, crossfade: Crossfade(lengthSamples: 0))
+    adapter.timeline = EditedTimeline(sourceDurationSamples: 1_000_000, removals: [removal])
+    adapter.timelineChanged()
+
+    expectNoDifference(adapter.editedDurationSamples, 150_000)
+    // maxStart = 150_000 - 100_000 = 50_000; the stale 850_000 clamps back into range.
+    expectNoDifference(adapter.visibleStartSample, 50_000)
+    // spp 100 is still within [min, fit=150], so the zoom level is preserved (not reset).
+    expectNoDifference(adapter.samplesPerPixel, 100)
+  }
 }

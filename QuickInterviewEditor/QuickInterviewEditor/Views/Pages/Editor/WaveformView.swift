@@ -12,7 +12,7 @@ struct WaveformView: View {
     VStack(alignment: .leading, spacing: 8) {
       header
       WaveformLaneView(
-        waveform: model.waveform,
+        waveform: model.editedWaveform,
         playhead: { model.playheadSample },
         highlightRange: model.activeEditingRange,
         onRulerMove: { model.rulerMovedPlayhead(toX: $0) },
@@ -20,7 +20,7 @@ struct WaveformView: View {
         onAreaSelectBegan: { model.waveformAreaSelectBegan(atX: $0, extending: $1) },
         onAreaSelectChanged: { model.waveformAreaSelectChanged(toX: $0) },
         onAreaSelectEnded: { model.waveformAreaSelectEnded(toX: $0) },
-        seams: [],  // 7b computes edited seam spans once the axis collapses
+        seams: model.seamSpans,
         auditionOverlay: { span in
           if model.canAudition { AuditionEdgeButtons(model: model, span: span) }
         }
@@ -44,18 +44,18 @@ struct WaveformView: View {
       }
       Spacer()
       Button {
-        model.waveform.zoomOutTapped()
+        model.editedWaveform.zoomOutTapped()
       } label: {
         Image(systemName: "minus.magnifyingglass")
       }
-      .disabled(!model.waveform.canZoomOut)
+      .disabled(!model.editedWaveform.canZoomOut)
       .help(model.waveform.zoomOutLabel)
       Button {
-        model.waveform.zoomInTapped()
+        model.editedWaveform.zoomInTapped()
       } label: {
         Image(systemName: "plus.magnifyingglass")
       }
-      .disabled(!model.waveform.canZoomIn)
+      .disabled(!model.editedWaveform.canZoomIn)
       .help(model.waveform.zoomInLabel)
     }
     .buttonStyle(.borderless)

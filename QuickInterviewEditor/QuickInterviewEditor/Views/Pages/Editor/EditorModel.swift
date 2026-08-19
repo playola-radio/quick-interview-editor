@@ -44,6 +44,11 @@ final class EditorModel: ViewModel {
   let sourceFingerprint: String
   var transcript: TranscriptPageModel
   var waveform: WaveformModel
+  /// The EDITED (collapsed) waveform the main lane renders and hit-tests on: it owns its own
+  /// viewport and maps view-x ↔ source/edited samples through `editedTimeline`. `waveform` stays
+  /// source-pure (fine-tune insets + the slice-edit modal still read it). With zero removals the
+  /// timeline is identity, so this is behaviorally identical to the source axis.
+  var editedWaveform: EditedWaveformAdapter
   var fineTune: FineTuneModel
   var cutSuggestions: CutSuggestionsPageModel
   /// The slice-detail edit modal, presented when non-nil. A separate, scoped model — distinct
@@ -58,7 +63,12 @@ final class EditorModel: ViewModel {
     let fingerprint = sourceFingerprint ?? ("path:" + sourceURL.standardizedFileURL.path)
     self.sourceFingerprint = fingerprint
     self.transcript = TranscriptPageModel(editPlan: editPlan)
-    self.waveform = WaveformModel()
+    let waveformModel = WaveformModel()
+    self.waveform = waveformModel
+    self.editedWaveform = EditedWaveformAdapter(
+      source: waveformModel,
+      timeline: EditedTimeline(
+        sourceDurationSamples: editPlan.source.durationSamples, removals: []))
     self.fineTune = FineTuneModel(
       sampleRate: editPlan.source.sampleRate, durationSamples: editPlan.source.durationSamples,
       silences: editPlan.silences)
@@ -69,6 +79,7 @@ final class EditorModel: ViewModel {
     _projectState = Shared(.projectState(fingerprint: fingerprint))
     super.init()
     self.timelineRemovals = projectState.timelineRemovals
+    syncEditedTimeline()
     // Accepting a suggestion adds its slice here (idempotently), through the shared
     // mutation funnel so it's exportable and undoable like any other slice.
     cutSuggestions.onAcceptSlice = { [weak self] slice in
@@ -180,6 +191,15 @@ final class EditorModel: ViewModel {
   /// The undoable document snapshot: `slices` and `timelineRemovals` together.
   private var documentState: EditorDocumentState {
     EditorDocumentState(slices: slices, timelineRemovals: timelineRemovals)
+  }
+
+  /// Rebuilds the edited timeline the collapsed waveform renders on from the current removals,
+  /// then re-clamps the adapter's viewport into the new edited duration (never resetting zoom).
+  /// Called from every path that changes `timelineRemovals` (the mutation funnel, undo/redo, and
+  /// the initial sidecar seed), so the axis and the document can never drift apart.
+  private func syncEditedTimeline() {
+    editedWaveform.timeline = editedTimeline
+    editedWaveform.timelineChanged()
   }
 
   // MARK: - Display Text
@@ -303,13 +323,17 @@ final class EditorModel: ViewModel {
     return approved + suggested
   }
 
-  /// Waveform render data, geometry delegated to the child (the view reads these; it decides
-  /// nothing). The highlight tracks `activeEditingRange`, so it follows a fine-tune drag live.
-  var waveformHighlightSpan: WaveformSpan? { activeEditingRange.flatMap(waveform.span(for:)) }
+  /// Waveform render data, geometry delegated to the edited adapter (the view reads these; it
+  /// decides nothing). The highlight tracks `activeEditingRange` — a SOURCE range — so it follows
+  /// a fine-tune drag live and collapses correctly around any removed spans it straddles.
+  var waveformHighlightSpan: WaveformSpan? {
+    activeEditingRange.flatMap { editedWaveform.span(forSource: $0) }
+  }
 
-  /// View-x of the persistent cursor, or nil when it's scrolled out of the viewport. The model
-  /// owns the cursor sample; the waveform supplies the geometry, so the view stays logic-free.
-  var playheadX: CGFloat? { waveform.playheadX(for: playheadSample) }
+  /// View-x of the persistent cursor on the edited axis, or nil when it's scrolled out of the
+  /// viewport. The model owns the cursor's SOURCE sample; the adapter supplies the geometry, so
+  /// the view stays logic-free.
+  var playheadX: CGFloat? { editedWaveform.playheadX(forSource: playheadSample) }
 
   // MARK: - Seam overlays
   /// One crossfaded cut point between two kept segments, in the coordinates the waveform lane
@@ -328,6 +352,11 @@ final class EditorModel: ViewModel {
         id: $0.id, editedCenterSample: $0.editedCenter, crossfadeLength: $0.crossfadeLength)
     }
   }
+
+  /// The bowtie spans the lane draws at each seam, mapped to edited view coordinates by the
+  /// adapter (nil, and so dropped, for a fully-clamped or off-screen seam). A model computed
+  /// prop so the view only binds — it never derives waveform geometry.
+  var seamSpans: [WaveformSpan] { editedTimeline.seams.compactMap(editedWaveform.spanForSeam) }
 
   // MARK: - View Helpers
   /// The panel's plain "Add slice" builds from the raw selection, so it's disabled whenever any
@@ -415,6 +444,13 @@ final class EditorModel: ViewModel {
     await waveform.load(
       url: canonicalAudioURL, planSampleRate: editPlan.source.sampleRate,
       durationSamples: editPlan.source.durationSamples)
+    // The lane's `.onGeometryChange` fits the adapter once the viewport is measured, but a load
+    // that completes AFTER layout must re-settle the viewport too — mirror `WaveformModel.load`.
+    // `viewportResized` only (re)fits when no zoom is set yet, so a user zoom during the decode
+    // window survives.
+    if editedWaveform.viewportWidth > 0 {
+      editedWaveform.viewportResized(width: editedWaveform.viewportWidth)
+    }
   }
 
   /// Streams playback positions from the (shared) player into the persistent playhead cursor.
@@ -488,7 +524,7 @@ final class EditorModel: ViewModel {
   /// point; Shift extends the current selection to it. A click landing in a gap selects
   /// nothing and leaves the selection untouched.
   func waveformClicked(atX positionX: CGFloat, extending: Bool) {
-    let sample = waveform.xToSample(positionX)
+    let sample = editedWaveform.xToSourceSample(positionX)
     guard let wordID = wordID(atSample: sample) else { return }
     if extending {
       transcript.wordClicked(wordID, extending: true)
@@ -511,13 +547,13 @@ final class EditorModel: ViewModel {
   /// selection immediately so the transcript + waveform highlight track the drag. A no-op until the
   /// geometry is loaded (the x→sample mapping is meaningless before then).
   func waveformAreaSelectBegan(atX startX: CGFloat, extending: Bool) {
-    guard waveform.hasUsableGeometry else { return }
+    guard editedWaveform.hasUsableGeometry else { return }
     cancelAutoScroll()
     areaSelectGeneration &+= 1
     let existingAnchorID = extending ? transcript.selectionAnchorID : nil
     let existingAnchorSample = existingAnchorID.flatMap(anchorSample(forWord:))
     areaSelectDrag = WaveformAreaSelectDrag(
-      anchorSample: clampedSample(waveform.xToSample(startX)),
+      anchorSample: clampedSample(editedWaveform.xToSourceSample(startX)),
       currentX: startX,
       existingAnchorID: existingAnchorSample == nil ? nil : existingAnchorID,
       existingAnchorSample: existingAnchorSample)
@@ -579,8 +615,8 @@ final class EditorModel: ViewModel {
   private func marqueeAnchorFocus() -> (anchor: Word.ID, focus: Word.ID)? {
     guard let drag = areaSelectDrag else { return nil }
     let fixedSample = drag.existingAnchorSample ?? drag.anchorSample
-    let clampedX = min(max(0, drag.currentX), waveform.viewportWidth)
-    let focusSample = clampedSample(waveform.xToSample(clampedX))
+    let clampedX = min(max(0, drag.currentX), editedWaveform.viewportWidth)
+    let focusSample = clampedSample(editedWaveform.xToSourceSample(clampedX))
     let lower = min(fixedSample, focusSample)
     let upper = max(max(fixedSample, focusSample), lower + 1)  // never an empty range
     let ids = wordIDs(overlapping: lower..<upper, words: editPlan.words)
@@ -602,7 +638,7 @@ final class EditorModel: ViewModel {
   }
 
   private func isPointerPastEdge(_ positionX: CGFloat) -> Bool {
-    positionX < 0 || positionX > waveform.viewportWidth
+    positionX < 0 || positionX > editedWaveform.viewportWidth
   }
 
   private func startAutoScrollIfNeeded() {
@@ -630,14 +666,14 @@ final class EditorModel: ViewModel {
   /// the newly revealed edge. Skips the selection update when the viewport didn't move (already at a
   /// document bound) so a pinned pointer doesn't emit redundant selection writes.
   private func autoScrollTick() {
-    guard isWaveformAreaSelecting, let drag = areaSelectDrag, waveform.hasUsableGeometry
+    guard isWaveformAreaSelecting, let drag = areaSelectDrag, editedWaveform.hasUsableGeometry
     else { return }
     let pixelsPerTick = autoScrollPixelsPerTick(currentX: drag.currentX)
     guard pixelsPerTick != 0 else { return }
-    let before = waveform.visibleStartSample
-    let deltaSamples = Int((Double(pixelsPerTick) * waveform.samplesPerPixel).rounded())
-    waveform.scrolled(toStartSample: before + deltaSamples)
-    guard waveform.visibleStartSample != before else { return }
+    let before = editedWaveform.visibleStartSample
+    let deltaSamples = Int((Double(pixelsPerTick) * editedWaveform.samplesPerPixel).rounded())
+    editedWaveform.scrolled(toStartEditedSample: before + deltaSamples)
+    guard editedWaveform.visibleStartSample != before else { return }
     updateMarqueeSelection()
   }
 
@@ -650,8 +686,8 @@ final class EditorModel: ViewModel {
     if currentX < 0 {
       overshoot = -currentX
       direction = -1
-    } else if currentX > waveform.viewportWidth {
-      overshoot = currentX - waveform.viewportWidth
+    } else if currentX > editedWaveform.viewportWidth {
+      overshoot = currentX - editedWaveform.viewportWidth
       direction = 1
     } else {
       return 0
@@ -680,7 +716,7 @@ final class EditorModel: ViewModel {
     deltaX: CGFloat, deltaY: CGFloat, hasPreciseDeltas: Bool,
     optionDown: Bool, commandDown: Bool, atX positionX: CGFloat
   ) {
-    waveform.scrolled(
+    editedWaveform.scrolled(
       deltaX: deltaX, deltaY: deltaY, hasPreciseDeltas: hasPreciseDeltas,
       optionDown: optionDown, commandDown: commandDown, atX: positionX)
   }
@@ -688,9 +724,9 @@ final class EditorModel: ViewModel {
 
   func editorKeyDown(_ key: EditorKey) -> Bool {
     switch key {
-    case .zoomIn: waveform.zoomInTapped()
-    case .zoomOut: waveform.zoomOutTapped()
-    case .zoomFit: waveform.zoomFitToggled(selection: transcript.selectedSampleRange)
+    case .zoomIn: editedWaveform.zoomInTapped()
+    case .zoomOut: editedWaveform.zoomOutTapped()
+    case .zoomFit: editedWaveform.zoomFitToggled(sourceSelection: transcript.selectedSampleRange)
     case .speedUp: transcript.speedUpTapped()
     case .speedDown: transcript.speedDownTapped()
     case .removeSection:
@@ -716,6 +752,7 @@ final class EditorModel: ViewModel {
     timelineRemovals = new.timelineRemovals
     documentUndo.record(before: old, after: new)
     persistTimelineRemovals()
+    syncEditedTimeline()
   }
 
   /// `slices`-only convenience over `mutateDocument`, kept so every existing slice
@@ -793,7 +830,7 @@ final class EditorModel: ViewModel {
   /// when nothing is selected.
   func zoomWaveformToSelection() {
     guard let range = transcript.selectedSampleRange else { return }
-    waveform.zoomToFit(range, paddingFraction: waveformFramePadding)
+    editedWaveform.zoomToFitSource(range, paddingFraction: waveformFramePadding)
   }
 
   // MARK: - Slice-detail edit modal
@@ -965,6 +1002,7 @@ final class EditorModel: ViewModel {
     slices = restored.slices
     timelineRemovals = restored.timelineRemovals
     persistTimelineRemovals()
+    syncEditedTimeline()
     await reconcilePlayback()
   }
 
@@ -975,6 +1013,7 @@ final class EditorModel: ViewModel {
     slices = restored.slices
     timelineRemovals = restored.timelineRemovals
     persistTimelineRemovals()
+    syncEditedTimeline()
     await reconcilePlayback()
   }
 
@@ -1253,7 +1292,7 @@ final class EditorModel: ViewModel {
   /// session so a delayed cleanup can't kill newer or global playback. A no-op until the waveform
   /// geometry is loaded — before that the x→sample mapping is meaningless.
   func rulerMovedPlayhead(toX positionX: CGFloat) {
-    guard waveform.hasUsableGeometry else { return }
+    guard editedWaveform.hasUsableGeometry else { return }
     stopTransportForRuler()
     playheadSample = clampedRulerSample(positionX)
     cursorMoveGeneration &+= 1
@@ -1280,7 +1319,7 @@ final class EditorModel: ViewModel {
   /// The ruler's view-x mapped to a plan sample, clamped to a valid cursor position. `durationSamples`
   /// (end-of-audio) is inclusive: it's a legal resting cursor where Play is a correct no-op.
   private func clampedRulerSample(_ positionX: CGFloat) -> Int {
-    min(max(0, waveform.xToSample(positionX)), editPlan.source.durationSamples)
+    min(max(0, editedWaveform.xToSourceSample(positionX)), editPlan.source.durationSamples)
   }
 
   // MARK: - Fine-tune editing

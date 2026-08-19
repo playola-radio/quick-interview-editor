@@ -19,10 +19,19 @@ struct EditorRulerTests {
     _ model: EditorModel, samplesPerPixel: Double = 100, start: Int = 0,
     viewportWidth: CGFloat = 1000
   ) {
-    model.waveform.totalSamples = model.editPlan.source.durationSamples
+    let duration = model.editPlan.source.durationSamples
+    model.waveform.totalSamples = duration
+    // The editor now hit-tests on the EDITED adapter, whose `hasUsableGeometry` requires a loaded
+    // source waveform — install a trivial pyramid so ruler moves aren't gated off.
+    model.waveform.waveform = Waveform.pyramid(
+      baseMins: [0], baseMaxs: [0], sampleRate: model.editPlan.source.sampleRate,
+      totalSamples: duration, baseBucketSize: 4)
     model.waveform.viewportWidth = viewportWidth
     model.waveform.samplesPerPixel = samplesPerPixel
     model.waveform.visibleStartSample = start
+    model.editedWaveform.viewportWidth = viewportWidth
+    model.editedWaveform.samplesPerPixel = samplesPerPixel
+    model.editedWaveform.visibleStartSample = start
   }
 
   private func settle(until condition: () -> Bool) async {

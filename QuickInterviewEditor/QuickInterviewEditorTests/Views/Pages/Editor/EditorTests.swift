@@ -758,6 +758,11 @@ struct EditorTests {
     model.waveform.viewportWidth = viewportWidth
     model.waveform.samplesPerPixel = 1
     model.waveform.visibleStartSample = 0
+    // The editor hit-tests clicks/highlight on the EDITED adapter now; with no removals its
+    // timeline is identity, so mirror the same identity geometry onto it.
+    model.editedWaveform.viewportWidth = viewportWidth
+    model.editedWaveform.samplesPerPixel = 1
+    model.editedWaveform.visibleStartSample = 0
   }
 
   @Test func waveformTapSelectsContainingWord() {
@@ -1219,35 +1224,42 @@ struct EditorTests {
     model.waveform.viewportWidth = 1000
     model.waveform.samplesPerPixel = 100
     model.waveform.visibleStartSample = 400_000
+    // Zoom/pan now drive the EDITED adapter. Point its timeline at the same faked 100M-sample file
+    // (no removals ⇒ identity) so the fit/clamp math is identical to the old source-axis behavior.
+    model.editedWaveform.timeline = EditedTimeline(
+      sourceDurationSamples: 100_000_000, removals: [])
+    model.editedWaveform.viewportWidth = 1000
+    model.editedWaveform.samplesPerPixel = 100
+    model.editedWaveform.visibleStartSample = 400_000
     return model
   }
 
   @Test func optionCommandScrollZoomsWaveform() {
     let model = geometryReadyEditor()
-    let before = model.waveform.samplesPerPixel
+    let before = model.editedWaveform.samplesPerPixel
     model.waveformScrolled(
       deltaX: 0, deltaY: 30, hasPreciseDeltas: true,
       optionDown: true, commandDown: true, atX: 500)
-    #expect(model.waveform.samplesPerPixel != before)  // zoom changed
+    #expect(model.editedWaveform.samplesPerPixel != before)  // zoom changed
   }
 
   @Test func plainScrollPansWaveformNotZoom() {
     let model = geometryReadyEditor()
-    let sppBefore = model.waveform.samplesPerPixel
+    let sppBefore = model.editedWaveform.samplesPerPixel
     model.waveformScrolled(
       deltaX: 0, deltaY: 20, hasPreciseDeltas: true,
       optionDown: false, commandDown: false, atX: 500)
-    expectNoDifference(model.waveform.samplesPerPixel, sppBefore)  // zoom untouched
-    #expect(model.waveform.visibleStartSample != 400_000)  // panned
+    expectNoDifference(model.editedWaveform.samplesPerPixel, sppBefore)  // zoom untouched
+    #expect(model.editedWaveform.visibleStartSample != 400_000)  // panned
   }
 
   @Test func commandScrollZoomsWaveform() {
     let model = geometryReadyEditor()
-    let before = model.waveform.samplesPerPixel
+    let before = model.editedWaveform.samplesPerPixel
     model.waveformScrolled(
       deltaX: 0, deltaY: 30, hasPreciseDeltas: true,
       optionDown: false, commandDown: true, atX: 500)
-    #expect(model.waveform.samplesPerPixel != before)  // ⌘+scroll zooms
+    #expect(model.editedWaveform.samplesPerPixel != before)  // ⌘+scroll zooms
   }
 
   @Test func lineBasedScrollNormalizesToFortyPixelsPerLine() {
@@ -1263,22 +1275,23 @@ struct EditorTests {
       optionDown: false, commandDown: false, atX: 500)
 
     expectNoDifference(
-      lineModel.waveform.visibleStartSample, preciseModel.waveform.visibleStartSample)
+      lineModel.editedWaveform.visibleStartSample, preciseModel.editedWaveform.visibleStartSample)
 
     // Zoom: 1 line == 40 precise px under ⌥⌘.
     let lineZoom = geometryReadyEditor()
-    lineZoom.waveform.visibleStartSample = 0
+    lineZoom.editedWaveform.visibleStartSample = 0
     lineZoom.waveformScrolled(
       deltaX: 0, deltaY: 1, hasPreciseDeltas: false,
       optionDown: true, commandDown: true, atX: 500)
 
     let preciseZoom = geometryReadyEditor()
-    preciseZoom.waveform.visibleStartSample = 0
+    preciseZoom.editedWaveform.visibleStartSample = 0
     preciseZoom.waveformScrolled(
       deltaX: 0, deltaY: 40, hasPreciseDeltas: true,
       optionDown: true, commandDown: true, atX: 500)
 
-    expectNoDifference(lineZoom.waveform.samplesPerPixel, preciseZoom.waveform.samplesPerPixel)
+    expectNoDifference(
+      lineZoom.editedWaveform.samplesPerPixel, preciseZoom.editedWaveform.samplesPerPixel)
   }
 
   @Test func waveformClickExtendingExtendsSelection() {
@@ -1287,6 +1300,10 @@ struct EditorTests {
     model.waveform.viewportWidth = 1000
     model.waveform.samplesPerPixel = 1
     model.waveform.visibleStartSample = 0
+    // Clicks hit-test on the EDITED adapter (identity timeline, no removals); mirror the geometry.
+    model.editedWaveform.viewportWidth = 1000
+    model.editedWaveform.samplesPerPixel = 1
+    model.editedWaveform.visibleStartSample = 0
     // With spp 1 / start 0, view-x == plan sample, so x = startSample+1 lands inside a word.
     let words = Fixtures.editPlan().words
     let first = words[0]
@@ -1302,13 +1319,20 @@ struct EditorTests {
     model.waveform.viewportWidth = 1000
     model.waveform.samplesPerPixel = 50
     model.waveform.visibleStartSample = 0
+    // Zoom-fit drives the EDITED adapter; point its timeline at the same faked file (no removals ⇒
+    // identity) and mirror the geometry.
+    model.editedWaveform.timeline = EditedTimeline(
+      sourceDurationSamples: 100_000_000, removals: [])
+    model.editedWaveform.viewportWidth = 1000
+    model.editedWaveform.samplesPerPixel = 50
+    model.editedWaveform.visibleStartSample = 0
     selectWords(model.transcript, 0, 1)  // a real, resolvable selection
     let consumed = model.editorKeyDown(.zoomFit)  // fit selection (stores 50/0)
     expectNoDifference(consumed, true)
-    #expect(model.waveform.samplesPerPixel != 50)  // it fit to something
+    #expect(model.editedWaveform.samplesPerPixel != 50)  // it fit to something
     _ = model.editorKeyDown(.zoomFit)  // restore
-    expectNoDifference(model.waveform.samplesPerPixel, 50)
-    expectNoDifference(model.waveform.visibleStartSample, 0)
+    expectNoDifference(model.editedWaveform.samplesPerPixel, 50)
+    expectNoDifference(model.editedWaveform.visibleStartSample, 0)
   }
 
   @Test func editorKeyDownZoomInOut() {
@@ -1317,10 +1341,16 @@ struct EditorTests {
     model.waveform.viewportWidth = 1000
     model.waveform.samplesPerPixel = 100
     model.waveform.visibleStartSample = 0
+    // Zoom drives the EDITED adapter; match its timeline + geometry to the faked file.
+    model.editedWaveform.timeline = EditedTimeline(
+      sourceDurationSamples: 100_000_000, removals: [])
+    model.editedWaveform.viewportWidth = 1000
+    model.editedWaveform.samplesPerPixel = 100
+    model.editedWaveform.visibleStartSample = 0
     _ = model.editorKeyDown(.zoomIn)
-    #expect(model.waveform.samplesPerPixel < 100)
-    let zoomedIn = model.waveform.samplesPerPixel
+    #expect(model.editedWaveform.samplesPerPixel < 100)
+    let zoomedIn = model.editedWaveform.samplesPerPixel
     _ = model.editorKeyDown(.zoomOut)
-    #expect(model.waveform.samplesPerPixel > zoomedIn)
+    #expect(model.editedWaveform.samplesPerPixel > zoomedIn)
   }
 }

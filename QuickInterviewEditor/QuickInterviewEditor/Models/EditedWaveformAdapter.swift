@@ -55,10 +55,26 @@ final class EditedWaveformAdapter {
   }
   var canZoomOut: Bool { hasUsableGeometry && samplesPerPixel < fitSamplesPerPixel() - .ulpOfOne }
 
+  /// The lane renders the SOURCE waveform's load/empty state on the edited axis — the edited
+  /// waveform is loading/empty exactly when its source is — so these pass straight through.
+  var showsLoading: Bool { source.showsLoading }
+  var showsEmpty: Bool { source.showsEmpty }
+  var loadingMessage: String { source.loadingMessage }
+  var emptyMessage: String { source.emptyMessage }
+
   func viewportResized(width: CGFloat) {
     let wasUnset = viewportWidth <= 0
     viewportWidth = width
     if wasUnset || samplesPerPixel <= 0 { samplesPerPixel = fitSamplesPerPixel() }
+    samplesPerPixel = clampedSamplesPerPixel(samplesPerPixel)
+    visibleStartSample = clampedStart(visibleStartSample)
+  }
+
+  /// Re-clamps the viewport into the freshly rebuilt timeline's edited duration after removals
+  /// change, WITHOUT resetting zoom: only pins `samplesPerPixel` and `visibleStartSample` back
+  /// into the valid range so a collapse (or restore) can't strand the viewport past the new end.
+  func timelineChanged() {
+    guard viewportWidth > 0, editedDurationSamples > 0, samplesPerPixel > 0 else { return }
     samplesPerPixel = clampedSamplesPerPixel(samplesPerPixel)
     visibleStartSample = clampedStart(visibleStartSample)
   }
@@ -211,6 +227,14 @@ final class EditedWaveformAdapter {
       duration: editedDurationSamples)
     samplesPerPixel = result.samplesPerPixel
     visibleStartSample = result.visibleStartSample
+  }
+
+  /// Frames a SOURCE range on the edited axis: maps its bounds through the timeline into edited
+  /// coordinates (clamped into kept space), then fits that edited range. "Reveal" reasons in
+  /// source coordinates, so it hands a source range here rather than pre-converting.
+  func zoomToFitSource(_ sourceRange: Range<Int>, paddingFraction: Double = 0) {
+    guard let editedRange = editedRange(forSource: sourceRange) else { return }
+    zoomToFitEdited(editedRange, paddingFraction: paddingFraction)
   }
 
   /// Logic's `Z`: fit on the first press (the source selection if any, else the whole edited

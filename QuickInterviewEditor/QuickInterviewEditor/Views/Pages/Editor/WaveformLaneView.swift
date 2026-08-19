@@ -2,11 +2,11 @@ import AppKit
 import SwiftUI
 
 /// The reusable waveform lane: a Logic-style ruler strip stacked over the read-only waveform band.
-/// It is driven entirely by a ``WaveformModel`` plus injected values and callbacks — it decides
-/// nothing. The main editor and the modal both mount this same lane, differing only in the values
-/// and adapters they pass (their own `EditorModel` methods for clicks/marquee/ruler, their own
-/// audition overlay). ⌘+scroll zoom and plain-scroll pan are handled by the interaction layers,
-/// which call ``WaveformModel/scrolled(deltaX:deltaY:hasPreciseDeltas:optionDown:commandDown:atX:)``
+/// It is driven entirely by an ``EditedWaveformAdapter`` (the EDITED/collapsed axis) plus injected
+/// values and callbacks — it decides nothing. The editor mounts it with its own `EditorModel`
+/// methods for clicks/marquee/ruler and its own audition overlay. ⌘+scroll zoom and plain-scroll
+/// pan are handled by the interaction layers, which call
+/// ``EditedWaveformAdapter/scrolled(deltaX:deltaY:hasPreciseDeltas:optionDown:commandDown:atX:)``
 /// directly.
 ///
 /// Redraw isolation is preserved from the original in-editor waveform: the expensive
@@ -15,7 +15,7 @@ import SwiftUI
 /// equality), while the moving ``WaveformPlayhead``/``RulerPlayhead`` read
 /// `waveform.playheadX(for:)` in their own bodies so only they reposition on a tick.
 struct WaveformLaneView<Overlay: View>: View {
-  let waveform: WaveformModel
+  let waveform: EditedWaveformAdapter
   let playhead: () -> Int?
   let highlightRange: Range<Int>?
   let onRulerMove: (CGFloat) -> Void
@@ -33,7 +33,7 @@ struct WaveformLaneView<Overlay: View>: View {
   private let stripHeight: CGFloat = 18
 
   var body: some View {
-    let highlight = highlightRange.flatMap(waveform.span(for:))
+    let highlight = highlightRange.flatMap { waveform.span(forSource: $0) }
     VStack(alignment: .leading, spacing: 8) {
       rulerStrip
       ZStack(alignment: .leading) {
@@ -101,7 +101,7 @@ struct WaveformLaneView<Overlay: View>: View {
 /// Draws the min/max columns plus the highlight rect. Reads only geometry + the injected highlight
 /// (never the playhead), so playhead ticks don't force it to redraw.
 private struct WaveformCanvas: View {
-  let waveform: WaveformModel
+  let waveform: EditedWaveformAdapter
   let highlight: WaveformSpan?
 
   private let waveColor = Color(white: 0.62)
@@ -157,11 +157,11 @@ private struct SeamBowtieOverlay: View {
 /// The playback playhead over the band, isolated in its own view so it redraws without touching the
 /// waveform canvas.
 private struct WaveformPlayhead: View {
-  let waveform: WaveformModel
+  let waveform: EditedWaveformAdapter
   let playhead: () -> Int?
 
   var body: some View {
-    if let sample = playhead(), let positionX = waveform.playheadX(for: sample) {
+    if let sample = playhead(), let positionX = waveform.playheadX(forSource: sample) {
       Rectangle()
         .fill(Color(red: 0.96, green: 0.86, blue: 0.4))
         .frame(width: 1.5)
@@ -175,11 +175,11 @@ private struct WaveformPlayhead: View {
 /// playback don't invalidate the strip background or the interaction layer. Reads the same cursor
 /// geometry as the band's playhead, so the two read as one continuous line.
 private struct RulerPlayhead: View {
-  let waveform: WaveformModel
+  let waveform: EditedWaveformAdapter
   let playhead: () -> Int?
 
   var body: some View {
-    if let sample = playhead(), let positionX = waveform.playheadX(for: sample) {
+    if let sample = playhead(), let positionX = waveform.playheadX(forSource: sample) {
       Rectangle()
         .fill(Color(red: 0.96, green: 0.86, blue: 0.4))
         .frame(width: 1.5)
@@ -195,7 +195,7 @@ private struct RulerPlayhead: View {
 /// so `mouseDown` and `mouseDragged` route to the same callback. Scroll is forwarded to the shared
 /// zoom/pan handler on the model so the gesture stays continuous across the strip and the body.
 private struct WaveformRulerInteractionLayer: NSViewRepresentable {
-  let waveform: WaveformModel
+  let waveform: EditedWaveformAdapter
   let onRulerMove: (CGFloat) -> Void
 
   func makeNSView(context: Context) -> RulerView {
@@ -214,7 +214,7 @@ private struct WaveformRulerInteractionLayer: NSViewRepresentable {
   }
 
   final class RulerView: NSView {
-    var waveform: WaveformModel?
+    var waveform: EditedWaveformAdapter?
     var onRulerMove: ((CGFloat) -> Void)?
 
     override var acceptsFirstResponder: Bool { false }
@@ -258,7 +258,7 @@ private struct WaveformRulerInteractionLayer: NSViewRepresentable {
 /// scroll/swipe (matching Logic, where a workspace drag marquee-selects rather than pans). The
 /// `Canvas` beneath stays a pure renderer.
 private struct WaveformInteractionLayer: NSViewRepresentable {
-  let waveform: WaveformModel
+  let waveform: EditedWaveformAdapter
   let onBodyClick: (CGFloat, Bool) -> Void
   let onAreaSelectBegan: (CGFloat, Bool) -> Void
   let onAreaSelectChanged: (CGFloat) -> Void
@@ -283,7 +283,7 @@ private struct WaveformInteractionLayer: NSViewRepresentable {
   }
 
   final class InteractionView: NSView {
-    var waveform: WaveformModel?
+    var waveform: EditedWaveformAdapter?
     var onBodyClick: ((CGFloat, Bool) -> Void)?
     var onAreaSelectBegan: ((CGFloat, Bool) -> Void)?
     var onAreaSelectChanged: ((CGFloat) -> Void)?

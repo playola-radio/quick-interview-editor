@@ -37,14 +37,24 @@ struct EditorAreaSelectTests {
     }
   }
 
+  /// Installs matching source + edited geometry (identity timeline, no removals) plus a trivial
+  /// source pyramid so `editedWaveform.hasUsableGeometry` is true — the editor now hit-tests on the
+  /// EDITED adapter, whose usable-geometry gate requires a loaded source waveform.
   private func geometry(
     _ model: EditorModel, samplesPerPixel: Double = 200, start: Int = 0,
     viewportWidth: CGFloat = 1000
   ) {
-    model.waveform.totalSamples = model.editPlan.source.durationSamples
+    let duration = model.editPlan.source.durationSamples
+    model.waveform.totalSamples = duration
+    model.waveform.waveform = Waveform.pyramid(
+      baseMins: [0], baseMaxs: [0], sampleRate: model.editPlan.source.sampleRate,
+      totalSamples: duration, baseBucketSize: 4)
     model.waveform.viewportWidth = viewportWidth
     model.waveform.samplesPerPixel = samplesPerPixel
     model.waveform.visibleStartSample = start
+    model.editedWaveform.viewportWidth = viewportWidth
+    model.editedWaveform.samplesPerPixel = samplesPerPixel
+    model.editedWaveform.visibleStartSample = start
   }
 
   // MARK: - Word mapping + direction
@@ -145,7 +155,7 @@ struct EditorAreaSelectTests {
       model.waveformAreaSelectChanged(toX: 1100)
       expectNoDifference(model.transcript.orderedSelectedWordIDs, [10])
       await clock.advance(by: .milliseconds(16))  // one auto-scroll tick
-      #expect(model.waveform.visibleStartSample > 0)  // the viewport scrolled right
+      #expect(model.editedWaveform.visibleStartSample > 0)  // the viewport scrolled right
       // The scroll revealed word 11, and the marquee extended to include it.
       #expect(model.transcript.orderedSelectedWordIDs.contains(11))
       model.waveformAreaSelectEnded(toX: 1100)
@@ -159,11 +169,12 @@ struct EditorAreaSelectTests {
     await withMainSerialExecutor {
       model.waveformAreaSelectBegan(atX: 500, extending: false)  // anchor sample 200000
       model.waveformAreaSelectChanged(toX: -50)  // past the left edge → scroll left
-      let before = model.waveform.visibleStartSample
+      let before = model.editedWaveform.visibleStartSample
       await clock.advance(by: .milliseconds(16))  // one tick
-      #expect(model.waveform.visibleStartSample < before)  // scrolled toward the start
+      #expect(model.editedWaveform.visibleStartSample < before)  // scrolled toward the start
       await clock.advance(by: .seconds(1))  // many ticks — must clamp, not overrun
-      expectNoDifference(model.waveform.visibleStartSample, 0)  // pinned at the document start
+      // Pinned at the document start.
+      expectNoDifference(model.editedWaveform.visibleStartSample, 0)
       #expect(model.transcript.orderedSelectedWordIDs.contains(1))  // reached the first word
       model.waveformAreaSelectEnded(toX: -50)
     }
@@ -190,7 +201,7 @@ struct EditorAreaSelectTests {
       model.waveformAreaSelectBegan(atX: 350, extending: false)
       model.waveformAreaSelectChanged(toX: 600)  // fully inside the viewport
       await clock.advance(by: .milliseconds(64))
-      expectNoDifference(model.waveform.visibleStartSample, 0)  // no scroll task ever started
+      expectNoDifference(model.editedWaveform.visibleStartSample, 0)  // no scroll task ever started
       model.waveformAreaSelectEnded(toX: 600)
     }
   }
