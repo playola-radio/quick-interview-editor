@@ -115,6 +115,60 @@ struct EditorRemovalTests {
     }
   }
 
+  @Test func pendingRemovalGatesExportAndSurfacesNote() {
+    let fileSystem = LockIsolated<[URL: Data]>([:])
+    withDependencies {
+      $0.defaultFileStorage = FileStorage.inMemory(fileSystem: fileSystem)
+    } operation: {
+      let model = editor(fingerprint: "fp-export-gate")
+      model.slices.append(
+        Slice(
+          id: Fixtures.uuid(20), name: "A", startSample: 0, endSample: 100, wordIDs: [],
+          snippet: "x", warnings: []))
+      expectNoDifference(model.canExportAll, true)
+      expectNoDifference(model.canExportSlice, true)
+      expectNoDifference(model.exportBlockedByRemovalsNote, nil)
+
+      model.mutateDocument { doc in
+        doc.timelineRemovals.append(
+          TimelineRemoval(
+            id: Fixtures.uuid(6), removedRange: 1000..<2000,
+            crossfade: Crossfade(lengthSamples: 48, curve: .equalPower)))
+      }
+
+      expectNoDifference(model.canExportAll, false)
+      expectNoDifference(model.canExportSlice, false)
+      #expect(model.exportBlockedByRemovalsNote != nil)
+    }
+  }
+
+  @Test func undoingRemovalRestoresExportGate() async {
+    let fileSystem = LockIsolated<[URL: Data]>([:])
+    await withDependencies {
+      $0.defaultFileStorage = FileStorage.inMemory(fileSystem: fileSystem)
+    } operation: {
+      let model = editor(fingerprint: "fp-export-gate-undo")
+      model.slices.append(
+        Slice(
+          id: Fixtures.uuid(21), name: "A", startSample: 0, endSample: 100, wordIDs: [],
+          snippet: "x", warnings: []))
+      model.mutateDocument { doc in
+        doc.timelineRemovals.append(
+          TimelineRemoval(
+            id: Fixtures.uuid(8), removedRange: 1000..<2000,
+            crossfade: Crossfade(lengthSamples: 48, curve: .equalPower)))
+      }
+      expectNoDifference(model.canExportAll, false)
+      expectNoDifference(model.canExportSlice, false)
+
+      await model.undoTapped()
+
+      expectNoDifference(model.canExportAll, true)
+      expectNoDifference(model.canExportSlice, true)
+      expectNoDifference(model.exportBlockedByRemovalsNote, nil)
+    }
+  }
+
   @Test func seamOverlaysDerivedFromTimeline() {
     let fileSystem = LockIsolated<[URL: Data]>([:])
     withDependencies {

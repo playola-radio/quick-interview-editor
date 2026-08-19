@@ -385,8 +385,12 @@ final class EditorModel: ViewModel {
     if case .exporting = exportPhase { return true }
     return false
   }
-  var canExportAll: Bool { !slices.isEmpty && !isExporting && !hasUncommittedSliceEdit }
-  var canExportSlice: Bool { !isExporting && !hasUncommittedSliceEdit }
+  var canExportAll: Bool {
+    !slices.isEmpty && !isExporting && !hasUncommittedSliceEdit && timelineRemovals.isEmpty
+  }
+  var canExportSlice: Bool {
+    !isExporting && !hasUncommittedSliceEdit && timelineRemovals.isEmpty
+  }
 
   var exportStatusMessage: String {
     switch exportPhase {
@@ -415,6 +419,16 @@ final class EditorModel: ViewModel {
 
   var showsExportStatus: Bool { !exportStatusMessage.isEmpty }
   var showsCancelExport: Bool { isExporting }
+
+  /// Surfaces why export is disabled while a timeline removal is pending: cuts collapse
+  /// the waveform and transcript but aren't applied to the rendered audio yet (that's
+  /// PR 2), so exporting now would silently ship the removed section. `nil` when there's
+  /// nothing to warn about.
+  var exportBlockedByRemovalsNote: String? {
+    timelineRemovals.isEmpty
+      ? nil
+      : "Export is paused while a removed section is pending — cuts aren't applied to exports yet (coming next)."
+  }
 
   var sliceRows: IdentifiedArrayOf<SliceRowState> {
     let sampleRate = editPlan.source.sampleRate
@@ -1571,12 +1585,16 @@ final class EditorModel: ViewModel {
 
   // MARK: - Export Actions
   func exportSliceTapped(_ id: Slice.ID) {
-    guard !isExporting, !hasUncommittedSliceEdit, let slice = slices[id: id] else { return }
+    guard !isExporting, !hasUncommittedSliceEdit, timelineRemovals.isEmpty,
+      let slice = slices[id: id]
+    else { return }
     startExport([slice])
   }
 
   func exportAllTapped() {
-    guard !isExporting, !hasUncommittedSliceEdit, !slices.isEmpty else { return }
+    guard !isExporting, !hasUncommittedSliceEdit, timelineRemovals.isEmpty, !slices.isEmpty else {
+      return
+    }
     startExport(Array(slices))
   }
 
