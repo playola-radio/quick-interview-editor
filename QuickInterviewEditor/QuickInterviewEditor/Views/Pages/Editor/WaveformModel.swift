@@ -59,6 +59,7 @@ final class WaveformModel: ViewModel {
   let zoomInLabel = "Zoom in"
   let zoomOutLabel = "Zoom out"
   let amplitudeZoomLabel = "Waveform zoom (drag to adjust, double-click to reset)"
+  let amplitudeZoomResetLabel = "Reset"
 
   // MARK: - Constants
   private let minSamplesPerPixel = 8.0

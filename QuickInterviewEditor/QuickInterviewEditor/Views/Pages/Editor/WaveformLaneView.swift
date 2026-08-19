@@ -397,7 +397,7 @@ struct WaveformAmplitudeZoomButton: View {
         @unknown default: break
         }
       }
-      .accessibilityAction(named: Text("Reset")) { waveform.amplitudeZoomResetTapped() }
+      .accessibilityAction(named: Text(waveform.amplitudeZoomResetLabel)) { waveform.amplitudeZoomResetTapped() }
   }
 }
 
