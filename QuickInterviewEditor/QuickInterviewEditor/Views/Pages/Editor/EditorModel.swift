@@ -346,27 +346,15 @@ final class EditorModel: ViewModel {
   var playheadX: CGFloat? { editedWaveform.playheadX(forSource: playheadSample) }
 
   // MARK: - Seam overlays
-  /// One crossfaded cut point between two kept segments, in the coordinates the waveform lane
-  /// needs to draw its bowtie: where it sits and how wide the crossfade is. Positioning it on a
-  /// collapsed edited waveform is a later step (7b) — this is just the data.
-  struct SeamOverlay: Equatable, Identifiable {
-    var id: UUID
-    var editedCenterSample: Int
-    var crossfadeLength: Int
-  }
-
-  /// The bowtie overlays for every removal, derived from `editedTimeline.seams`.
-  var seamOverlays: [SeamOverlay] {
-    editedTimeline.seams.map {
-      SeamOverlay(
-        id: $0.id, editedCenterSample: $0.editedCenter, crossfadeLength: $0.crossfadeLength)
-    }
-  }
-
   /// The bowtie spans the lane draws at each seam, mapped to edited view coordinates by the
   /// adapter (nil, and so dropped, for a fully-clamped or off-screen seam). A model computed
-  /// prop so the view only binds — it never derives waveform geometry.
-  var seamSpans: [WaveformSpan] { editedTimeline.seams.compactMap(editedWaveform.spanForSeam) }
+  /// prop so the view only binds — it never derives waveform geometry. Reads the adapter's
+  /// already-synced `editedTimeline` (kept current by `syncEditedTimeline()` on every removal
+  /// change) rather than rebuilding one, since `editedTimeline` constructs a fresh value on
+  /// every read.
+  var seamSpans: [WaveformSpan] {
+    editedWaveform.timeline.seams.compactMap(editedWaveform.spanForSeam)
+  }
 
   // MARK: - View Helpers
   /// The panel's plain "Add slice" builds from the raw selection, so it's disabled whenever any
@@ -765,9 +753,10 @@ final class EditorModel: ViewModel {
 
   /// The single funnel for every document mutation (`slices` + `timelineRemovals`):
   /// snapshots before/after and records the change on the undo stack (a no-op when
-  /// nothing changed), then persists the removals. Restoring history via
-  /// `undoTapped`/`redoTapped` deliberately bypasses this — it assigns the fields
-  /// directly so replaying the stack never records a new entry.
+  /// nothing changed), then persists the removals if they actually changed — a
+  /// slice-only mutation (rename, reorder, add/delete slice) never touches the sidecar.
+  /// Restoring history via `undoTapped`/`redoTapped` deliberately bypasses this — it
+  /// assigns the fields directly so replaying the stack never records a new entry.
   func mutateDocument(_ body: (inout EditorDocumentState) -> Void) {
     let old = documentState
     var new = old
@@ -775,7 +764,9 @@ final class EditorModel: ViewModel {
     slices = new.slices
     timelineRemovals = new.timelineRemovals
     documentUndo.record(before: old, after: new)
-    persistTimelineRemovals()
+    if new.timelineRemovals != old.timelineRemovals {
+      persistTimelineRemovals()
+    }
     syncEditedTimeline()
   }
 
@@ -1031,26 +1022,35 @@ final class EditorModel: ViewModel {
   /// Restores the previous document snapshot (`slices` + `timelineRemovals`), then
   /// reconciles playback. History stores only the document, so anything derived
   /// (selection, zoom, export phase, playback) is left as-is except where reconciliation
-  /// demands otherwise.
+  /// demands otherwise. Persists the sidecar only when the restored removals actually
+  /// differ from the current ones — undoing a slice-only edit (rename, reorder, add/delete
+  /// slice) never touches it.
   func undoTapped() async {
     // Guard here too, not just on `canUndo`: a menu item or keyboard shortcut could fire this
     // while an existing-slice edit is open, which would rewind `slices` under a live draft.
     guard !hasUncommittedSliceEdit, let restored = documentUndo.undo(current: documentState)
     else { return }
+    let removalsChanged = restored.timelineRemovals != timelineRemovals
     slices = restored.slices
     timelineRemovals = restored.timelineRemovals
-    persistTimelineRemovals()
+    if removalsChanged {
+      persistTimelineRemovals()
+    }
     syncEditedTimeline()
     await reconcilePlayback()
   }
 
-  /// Reapplies the next document snapshot on the redo branch, then reconciles playback.
+  /// Reapplies the next document snapshot on the redo branch, then reconciles playback. Same
+  /// persist-only-on-change behavior as `undoTapped`.
   func redoTapped() async {
     guard !hasUncommittedSliceEdit, let restored = documentUndo.redo(current: documentState)
     else { return }
+    let removalsChanged = restored.timelineRemovals != timelineRemovals
     slices = restored.slices
     timelineRemovals = restored.timelineRemovals
-    persistTimelineRemovals()
+    if removalsChanged {
+      persistTimelineRemovals()
+    }
     syncEditedTimeline()
     await reconcilePlayback()
   }
