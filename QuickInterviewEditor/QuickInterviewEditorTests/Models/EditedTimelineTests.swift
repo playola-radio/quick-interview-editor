@@ -25,7 +25,8 @@ struct EditedTimelineTests {
       sourceDurationSamples: 100, removals: [removal(40, 60, length: 10)])
     expectNoDifference(timeline.editedDurationSamples, 70)
     expectNoDifference(timeline.sourceToEdited(30), 30)  // left segment, before overlap
-    expectNoDifference(timeline.sourceToEdited(60), 30)  // right segment start sits at overlap start
+    // right segment start sits at overlap start
+    expectNoDifference(timeline.sourceToEdited(60), 30)
     expectNoDifference(timeline.sourceToEdited(70), 40)  // 10 into right segment
     expectNoDifference(timeline.sourceToEdited(100), 70)  // right segment end == editedDuration
     expectNoDifference(timeline.sourceToEdited(50), nil)  // inside removed range
@@ -36,7 +37,8 @@ struct EditedTimelineTests {
   @Test func editedToSourceResolvesOverlapToRightSide() {
     let timeline = EditedTimeline(
       sourceDurationSamples: 100, removals: [removal(40, 60, length: 10)])
-    expectNoDifference(timeline.editedToSource(35), 65)  // inside overlap → right (post-cut) source
+    // inside overlap → right (post-cut) source
+    expectNoDifference(timeline.editedToSource(35), 65)
     expectNoDifference(timeline.editedToSource(20), 20)  // pure left segment
     expectNoDifference(timeline.editedToSource(45), 75)  // right segment past overlap
   }
@@ -56,7 +58,8 @@ struct EditedTimelineTests {
     let timeline = EditedTimeline(
       sourceDurationSamples: 100, removals: [removal(5, 95, length: 20)])
     expectNoDifference(timeline.seams.first?.crossfadeLength, 5)
-    expectNoDifference(timeline.editedDurationSamples, 5)  // K0=[0,5)=5, K1=[95,100)=5, minus L=5 → 5
+    // K0=[0,5)=5, K1=[95,100)=5, minus L=5 → 5
+    expectNoDifference(timeline.editedDurationSamples, 5)
   }
 
   @Test func sourceRangesForEditedSpansSeam() {
