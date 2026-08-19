@@ -119,6 +119,21 @@ final class WaveformModel: ViewModel {
     return columns
   }
 
+  /// Min/max of the source peak pyramid across a SOURCE range at the given zoom, or nil if
+  /// unavailable. Source-only — the pyramid stays source-indexed; callers rendering an edited
+  /// axis compose this per kept-segment source sub-range.
+  func sourcePeak(in sourceRange: Range<Int>, samplesPerPixel: Double) -> (min: Float, max: Float)?
+  {
+    guard let waveform, waveform.baseLevel != nil, samplesPerPixel > 0,
+      sourceRange.lowerBound < sourceRange.upperBound
+    else { return nil }
+    let level = pyramidLevel(for: samplesPerPixel, in: waveform)
+    let lo = max(0, min(sourceRange.lowerBound, totalSamples))
+    let hi = max(0, min(sourceRange.upperBound, totalSamples))
+    guard hi > lo else { return nil }
+    return level.peak(in: lo..<hi)
+  }
+
   /// Horizontal extent of a plan-sample range in view coordinates, clipped to the
   /// viewport; nil when the range is empty or entirely off-screen.
   func span(for range: Range<Int>) -> WaveformSpan? {
