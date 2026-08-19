@@ -865,6 +865,46 @@ final class EditorModel: ViewModel {
     transcript.clearSelectionTapped()
   }
 
+  // MARK: - Timeline Removals
+  /// The default crossfade every new removal starts with — 20 ms at the plan's sample
+  /// rate. PR 2 makes it user-editable per removal.
+  var defaultCrossfadeSamples: Int { Int(0.020 * Double(editPlan.source.sampleRate)) }
+
+  /// The current selected SOURCE range. Named explicitly (rather than reading
+  /// `transcript.selectedSampleRange` inline) so a future marquee-only range can
+  /// slot in here without touching every call site.
+  private var selectedSourceRange: Range<Int>? { transcript.selectedSampleRange }
+
+  /// Whether `range` can become a removal: non-empty and not overlapping an
+  /// existing removal's source span (cross-seam rejection, spec §4.7).
+  func canRemove(sourceRange range: Range<Int>) -> Bool {
+    guard range.lowerBound < range.upperBound else { return false }
+    return !timelineRemovals.contains { $0.removedRange.overlaps(range) }
+  }
+
+  /// Drives ⌫ enablement and the Remove Section menu item.
+  var canRemoveSelectedSection: Bool {
+    guard let range = selectedSourceRange else { return false }
+    return canRemove(sourceRange: range)
+  }
+
+  /// Turns the current selection into a `TimelineRemoval` with the default 20 ms
+  /// equal-power crossfade, then clears the selection.
+  func removeSelectedSectionTapped() async {
+    guard let range = selectedSourceRange, canRemove(sourceRange: range) else { return }
+    let removal = TimelineRemoval(
+      id: UUID(), removedRange: range,
+      crossfade: Crossfade(lengthSamples: defaultCrossfadeSamples, curve: .equalPower))
+    mutateDocument { doc in
+      doc.timelineRemovals.append(removal)
+      doc.timelineRemovals = IdentifiedArray(
+        uniqueElements: TimelineRemovals.normalize(Array(doc.timelineRemovals))
+          ?? Array(doc.timelineRemovals))
+    }
+    transcript.clearSelectionTapped()
+    await reconcilePlayback()
+  }
+
   func renameSlice(_ id: Slice.ID, to name: String) {
     mutateSlices { $0[id: id]?.name = name }
   }
