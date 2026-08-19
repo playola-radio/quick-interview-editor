@@ -46,10 +46,6 @@ final class WaveformModel: ViewModel {
   let zoomInLabel = "Zoom in"
   let zoomOutLabel = "Zoom out"
 
-  // MARK: - Constants
-  private let minSamplesPerPixel = 8.0
-  private let zoomStep = 2.0
-
   // MARK: - View Helpers
   var hasWaveform: Bool { waveform != nil && totalSamples > 0 }
   var showsWaveform: Bool { hasWaveform && !isLoading }
@@ -70,8 +66,8 @@ final class WaveformModel: ViewModel {
 
   /// Plan samples currently visible across the viewport.
   var visibleSampleCount: Int {
-    guard viewportWidth > 0, samplesPerPixel > 0 else { return 0 }
-    return Int((Double(viewportWidth) * samplesPerPixel).rounded())
+    WaveformViewport.visibleSampleCount(
+      viewportWidth: viewportWidth, samplesPerPixel: samplesPerPixel)
   }
 
   /// One min/max column per horizontal pixel, read from the pyramid level whose bucket
@@ -144,14 +140,15 @@ final class WaveformModel: ViewModel {
 
   // MARK: - Coordinate transforms
   func sampleToX(_ sample: Int) -> CGFloat {
-    guard samplesPerPixel > 0 else { return 0 }
-    return CGFloat(Double(sample - visibleStartSample) / samplesPerPixel)
+    WaveformViewport.sampleToX(
+      sample, visibleStartSample: visibleStartSample, samplesPerPixel: samplesPerPixel)
   }
 
   /// Plan sample at the left edge of pixel `x`. Floor semantics: `x` covers
   /// `[floor(x·spp), floor((x+1)·spp))` offset by `visibleStartSample`.
   func xToSample(_ posX: CGFloat) -> Int {
-    visibleStartSample + Int((Double(posX) * samplesPerPixel).rounded(.down))
+    WaveformViewport.xToSample(
+      posX, visibleStartSample: visibleStartSample, samplesPerPixel: samplesPerPixel)
   }
 
   // MARK: - User Actions
@@ -184,8 +181,8 @@ final class WaveformModel: ViewModel {
     visibleStartSample = clampedStart(visibleStartSample)
   }
 
-  func zoomInTapped() { zoom(by: 1 / zoomStep) }
-  func zoomOutTapped() { zoom(by: zoomStep) }
+  func zoomInTapped() { zoom(by: 1 / WaveformViewport.zoomStep) }
+  func zoomOutTapped() { zoom(by: WaveformViewport.zoomStep) }
 
   func scrolled(toStartSample start: Int) {
     fitRestore = nil
@@ -198,7 +195,8 @@ final class WaveformModel: ViewModel {
   func dragScrolled(byPixels deltaX: CGFloat) {
     guard deltaX.isFinite else { return }
     scrolled(
-      toStartSample: dragAnchorStartSample - Int((Double(deltaX) * samplesPerPixel).rounded()))
+      toStartSample: WaveformViewport.panByPixels(
+        deltaX, samplesPerPixel: samplesPerPixel, visibleStartSample: dragAnchorStartSample))
   }
 
   /// Multiplies zoom by `factor` (clamped) while keeping the plan sample under view-x
@@ -207,16 +205,18 @@ final class WaveformModel: ViewModel {
   func zoomByFactor(_ factor: Double, anchoredAtX cursorX: CGFloat) {
     guard viewportWidth > 0, totalSamples > 0, factor > 0 else { return }
     fitRestore = nil
-    let oldSamplesPerPixel = samplesPerPixel
-    let sampleUnderCursor = Double(visibleStartSample) + Double(cursorX) * oldSamplesPerPixel
-    samplesPerPixel = clampedSamplesPerPixel(oldSamplesPerPixel * factor)
-    visibleStartSample = clampedStart(
-      Int((sampleUnderCursor - Double(cursorX) * samplesPerPixel).rounded()))
+    let result = WaveformViewport.zoomByFactor(
+      factor, anchoredAtX: cursorX, viewportWidth: viewportWidth, duration: totalSamples,
+      samplesPerPixel: samplesPerPixel, visibleStartSample: visibleStartSample)
+    samplesPerPixel = result.samplesPerPixel
+    visibleStartSample = result.visibleStartSample
   }
 
   /// Pans the viewport by `deltaX` pixels' worth of samples (clamped to the file).
   func panByPixels(_ deltaX: CGFloat) {
-    scrolled(toStartSample: visibleStartSample - Int((Double(deltaX) * samplesPerPixel).rounded()))
+    scrolled(
+      toStartSample: WaveformViewport.panByPixels(
+        deltaX, samplesPerPixel: samplesPerPixel, visibleStartSample: visibleStartSample))
   }
 
   // swiftlint:disable function_parameter_count
@@ -232,11 +232,12 @@ final class WaveformModel: ViewModel {
     guard deltaX.isFinite, deltaY.isFinite else { return }
     if commandDown {
       zoomByFactor(
-        Self.scrollZoomFactor(deltaY: deltaY, hasPreciseDeltas: hasPreciseDeltas),
+        WaveformViewport.scrollZoomFactor(deltaY: deltaY, hasPreciseDeltas: hasPreciseDeltas),
         anchoredAtX: positionX)
     } else {
       panByPixels(
-        Self.scrollPanPixels(deltaX: deltaX, deltaY: deltaY, hasPreciseDeltas: hasPreciseDeltas))
+        WaveformViewport.scrollPanPixels(
+          deltaX: deltaX, deltaY: deltaY, hasPreciseDeltas: hasPreciseDeltas))
     }
   }
   // swiftlint:enable function_parameter_count
@@ -257,10 +258,10 @@ final class WaveformModel: ViewModel {
     // of jumping back to a pre-fit viewport. The `Z` path calls this with paddingFraction 0 and
     // manages `fitRestore` itself, so it must not be cleared here.
     if paddingFraction > 0 { fitRestore = nil }
-    let padded = Double(range.count) * (1 + 2 * max(0, paddingFraction))
-    samplesPerPixel = clampedSamplesPerPixel(padded / Double(viewportWidth))
-    let center = range.lowerBound + range.count / 2
-    visibleStartSample = clampedStart(center - visibleSampleCount / 2)
+    let result = WaveformViewport.zoomToFit(
+      range, paddingFraction: paddingFraction, viewportWidth: viewportWidth, duration: totalSamples)
+    samplesPerPixel = result.samplesPerPixel
+    visibleStartSample = result.visibleStartSample
   }
 
   /// Logic's `Z`: fit on the first press (selection if any, else whole file), restore the
@@ -283,51 +284,36 @@ final class WaveformModel: ViewModel {
   private func zoom(by factor: Double) {
     guard viewportWidth > 0, totalSamples > 0 else { return }
     fitRestore = nil
-    let center = visibleStartSample + visibleSampleCount / 2
-    samplesPerPixel = clampedSamplesPerPixel(samplesPerPixel * factor)
-    visibleStartSample = clampedStart(center - visibleSampleCount / 2)
+    let result = WaveformViewport.zoom(
+      by: factor, viewportWidth: viewportWidth, duration: totalSamples,
+      samplesPerPixel: samplesPerPixel, visibleStartSample: visibleStartSample)
+    samplesPerPixel = result.samplesPerPixel
+    visibleStartSample = result.visibleStartSample
   }
 
   private func fitSamplesPerPixel() -> Double {
-    guard viewportWidth > 0, totalSamples > 0 else { return 1 }
-    return Double(totalSamples) / Double(viewportWidth)
+    WaveformViewport.fitSamplesPerPixel(viewportWidth: viewportWidth, duration: totalSamples)
   }
 
   private func minEffectiveSamplesPerPixel() -> Double {
-    min(minSamplesPerPixel, fitSamplesPerPixel())
+    WaveformViewport.minEffectiveSamplesPerPixel(
+      viewportWidth: viewportWidth, duration: totalSamples)
   }
 
   private func clampedSamplesPerPixel(_ spp: Double) -> Double {
-    min(max(spp, minEffectiveSamplesPerPixel()), fitSamplesPerPixel())
+    WaveformViewport.clampedSamplesPerPixel(
+      spp, viewportWidth: viewportWidth, duration: totalSamples)
   }
 
   private func clampedStart(_ start: Int) -> Int {
-    let maxStart = max(0, totalSamples - visibleSampleCount)
-    return min(max(start, 0), maxStart)
+    WaveformViewport.clampedStart(
+      start, viewportWidth: viewportWidth, samplesPerPixel: samplesPerPixel, duration: totalSamples)
   }
 
   private struct FitRestore {
     var samplesPerPixel: Double
     var visibleStartSample: Int
     var selection: Range<Int>?
-  }
-
-  /// Points a line-based mouse wheel "click" is worth (trackpads report pixel-precise deltas
-  /// already). Pan/zoom sensitivity constants; on-screen direction verified in QA.
-  private static let pointsPerScrollLine: CGFloat = 40
-  private static let pixelsPerZoomDouble = 300.0
-
-  private static func scrollPanPixels(
-    deltaX: CGFloat, deltaY: CGFloat, hasPreciseDeltas: Bool
-  ) -> CGFloat {
-    let primary = abs(deltaX) >= abs(deltaY) ? deltaX : deltaY
-    return hasPreciseDeltas ? primary : primary * pointsPerScrollLine
-  }
-
-  private static func scrollZoomFactor(deltaY: CGFloat, hasPreciseDeltas: Bool) -> Double {
-    let dy = Double(hasPreciseDeltas ? deltaY : deltaY * pointsPerScrollLine)
-    // spp *= factor; scrolling "away" should zoom in (spp < 1). Flip the sign in QA if inverted.
-    return pow(2.0, -dy / pixelsPerZoomDouble)
   }
 
   /// The coarsest level whose bucket size doesn't exceed `spp` (so each pixel aggregates
