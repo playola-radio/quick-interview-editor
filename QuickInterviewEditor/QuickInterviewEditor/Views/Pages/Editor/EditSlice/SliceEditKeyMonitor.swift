@@ -76,34 +76,38 @@ struct SliceEditKeyMonitor: NSViewRepresentable {
       // Stand down while a text field is being edited (e.g. renaming a slice inside the sheet).
       if let responder = window.firstResponder as? NSText, responder.isEditable { return false }
       guard let model else { return false }
-      if let zoomKey {
-        switch zoomKey {
-        case .zoomOut:
-          model.zoomOutTapped()
-          return true
-        case .zoomIn:
-          model.zoomInTapped()
-          return true
-        case .zoomFit:
-          // Z is a toggle; swallow auto-repeat so holding it doesn't flicker fit↔restore (or beep).
-          if isARepeat { return true }
-          model.zoomFitTapped()
-          return true
-        case .speedUp, .speedDown:
-          return false
-        }
-      }
-      if isSpace {
-        // Space activates a focused control (button) via Full Keyboard Access; don't hijack it
-        // there — fire Play/Pause only when focus is on the sheet's content, matching how
-        // ``AuditionKeyMonitor`` treats Space in the main editor.
-        if window.firstResponder is NSControl { return false }
-        // Swallow auto-repeat so holding Space doesn't retrigger the transport (or beep).
-        if isARepeat { return true }
-        Task { await model.playPauseTapped() }
-        return true
-      }
+      if let zoomKey { return handleZoom(zoomKey, isARepeat: isARepeat, model: model) }
+      if isSpace { return handleSpace(isARepeat: isARepeat, window: window, model: model) }
       return false
+    }
+
+    private func handleZoom(_ key: EditorKey, isARepeat: Bool, model: EditSliceModel) -> Bool {
+      switch key {
+      case .zoomOut:
+        model.zoomOutTapped()
+        return true
+      case .zoomIn:
+        model.zoomInTapped()
+        return true
+      case .zoomFit:
+        // Z is a toggle; swallow auto-repeat so holding it doesn't flicker fit↔restore (or beep).
+        if isARepeat { return true }
+        model.zoomFitTapped()
+        return true
+      case .speedUp, .speedDown:
+        return false
+      }
+    }
+
+    private func handleSpace(isARepeat: Bool, window: NSWindow, model: EditSliceModel) -> Bool {
+      // Space activates a focused control (button) via Full Keyboard Access; don't hijack it there —
+      // fire Play/Pause only when focus is on the sheet's content, matching how ``AuditionKeyMonitor``
+      // treats Space in the main editor.
+      if window.firstResponder is NSControl { return false }
+      // Swallow auto-repeat so holding Space doesn't retrigger the transport (or beep).
+      if isARepeat { return true }
+      Task { await model.playPauseTapped() }
+      return true
     }
   }
 }
