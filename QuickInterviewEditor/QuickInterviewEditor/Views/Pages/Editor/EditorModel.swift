@@ -127,8 +127,6 @@ final class EditorModel: ViewModel {
   }
   /// Where the transport last started playing; Stop returns the cursor here.
   var transportOriginSample: Int?
-  /// What the transport is currently playing, captured at Play. Non-observed — internal bookkeeping.
-  @ObservationIgnored private var transportRange: Range<Int>?
   /// Bumped whenever something authoritatively places the cursor outside the selection-snap path — a
   /// ruler move or a transport start. A deferred selection snap (`transportSelectionChanged`) captures
   /// this at selection-change time (via `cursorMoveToken`) and bails if it changed, so it can neither
@@ -370,6 +368,22 @@ final class EditorModel: ViewModel {
     await waveform.load(
       url: canonicalAudioURL, planSampleRate: editPlan.source.sampleRate,
       durationSamples: editPlan.source.durationSamples)
+    // A slice sheet opened WHILE the file was still decoding adopted a nil/empty waveform (a
+    // one-time snapshot, unlike the old live column closure). Now that the decode is done, seed
+    // that open sheet so its lane and insets fill in instead of staying blank for its lifetime.
+    reseedEditSliceWaveformIfNeeded()
+  }
+
+  /// Re-seeds an open slice sheet's lane from the now-decoded waveform, but only when that sheet's
+  /// lane is still empty (opened mid-decode). A sheet opened after the decode already shows its
+  /// waveform, so the guard skips it — a lane the user has zoomed/scrolled over real data is never
+  /// re-fit. (A mid-decode lane draws nothing, so snapping it to frame the slice when the audio
+  /// finally arrives is the intended reveal, not a lost interaction.)
+  private func reseedEditSliceWaveformIfNeeded() {
+    guard let editSlice, waveform.showsWaveform, !editSlice.waveform.showsWaveform else { return }
+    editSlice.waveform.adopt(
+      waveform: waveform.waveform, totalSamples: waveform.totalSamples,
+      sampleRate: waveform.sampleRate, contentRange: editSlice.overviewWindow)
   }
 
   /// Streams playback positions from the (shared) player into the persistent playhead cursor.
@@ -427,7 +441,6 @@ final class EditorModel: ViewModel {
     transportPhase = .stopped
     transportContext = .free
     transportOriginSample = nil
-    transportRange = nil
   }
 
   /// Stops the given session, or does nothing if it's nil. A nil session means THIS editor
@@ -741,28 +754,35 @@ final class EditorModel: ViewModel {
     // own Play has started a fresh `.sliceEdit` session, can never kill that newer session.
     stopActiveTransportSnapshotting()
     let child = EditSliceModel(slice: slice, editPlan: editPlan)
-    child.columnsProvider = { [weak self] window, width in
-      self?.waveform.columns(in: window, pixelWidth: width) ?? []
-    }
+    // Give the sheet its OWN lane, seeded from the already-decoded pyramid so nothing is re-decoded,
+    // pinned to this slice (you cannot scroll or zoom past its boundaries). It must not share the
+    // main editor's WaveformModel (that one is bound to the main viewport's zoom/scroll/width).
+    child.waveform.adopt(
+      waveform: waveform.waveform, totalSamples: waveform.totalSamples,
+      sampleRate: waveform.sampleRate, contentRange: slice.startSample..<slice.endSample)
     child.onCommit = { [weak self] range in self?.commitSliceEdit(id: id, range: range) }
     child.onPlay = { [weak self] range in
-      guard let self else { return }
-      // Resume the paused `.sliceEdit` session in place ONLY when its scheduled range still
-      // matches — a nudge while paused changes the draft, so a drifted range must start a fresh
-      // play from the new boundaries rather than resume the stale one. Any other phase (stopped,
-      // or some foreign paused context) begins a fresh `.sliceEdit` playback.
-      if isTransportPaused, case .sliceEdit = transportContext, transportRange == range {
-        await transportPlayTapped()
-        // Resume can fail (e.g. an engine restart) and leave the phase paused. The modal set
-        // `isPlaying` optimistically, so publish the TRUE phase back or its button would lie —
-        // showing Pause over silent, paused audio.
-        editSlice?.updatePlayback(sample: playheadSample, isPlaying: isTransportPlaying)
-      } else {
-        await beginTransportPlayback(range: range, context: .sliceEdit)
-      }
+      // Logic model: Play always plays `range` from the playhead as a fresh, exclusive `.sliceEdit`
+      // playback (the child derives `range` from the cursor). Pause merely freezes the cursor; the
+      // next Play re-plays from it, and seeking mid-play passes a new range here to re-anchor. There
+      // is no bespoke resume/drift branch — `beginTransportPlayback` supersedes any prior (playing or
+      // paused) session cleanly.
+      await self?.beginTransportPlayback(range: range, context: .sliceEdit)
     }
-    child.onPause = { [weak self] in await self?.transportPauseTapped() }
-    child.onStop = { [weak self] in await self?.transportStopTapped() }
+    child.onPause = { [weak self] in
+      guard let self else { return }
+      await transportPauseTapped()
+      // Publish the frozen cursor back to the sheet so its "play from the playhead" uses the exact
+      // pause point (the position loop stops ticking once paused, so it won't otherwise learn it).
+      editSlice?.updatePlayback(sample: playheadSample, isPlaying: isTransportPlaying)
+    }
+    child.onStop = { [weak self] in
+      guard let self else { return }
+      await transportStopTapped()
+      // Stop returns the cursor to the play origin; publish it so the sheet's next "play from the
+      // playhead" starts there rather than from a stale last-tick sample.
+      editSlice?.updatePlayback(sample: playheadSample, isPlaying: isTransportPlaying)
+    }
     // R4: the transport always plays a whole range, never from an arbitrary point, so seeking
     // inside the modal repositions the persistent cursor rather than re-anchoring playback.
     // v1 decision: this does NOT re-anchor an active play — a click-to-seek during playback is a
@@ -1015,7 +1035,6 @@ final class EditorModel: ViewModel {
     let session = PlaybackSessionID()
     transportContext = context
     transportOriginSample = range.lowerBound
-    transportRange = range
     playheadSample = range.lowerBound
     // A transport start authoritatively places the cursor, so it takes cursor authority too: a
     // selection snap deferred from before this Play must bail rather than stop us and snap back.

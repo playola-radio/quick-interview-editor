@@ -88,6 +88,60 @@ struct EditorEditSlicePresentationTests {
     #expect(model.editSlice == nil)
   }
 
+  /// A slice sheet opened WHILE the waveform is still decoding adopts an empty lane (a one-time
+  /// snapshot). Once the decode finishes, `loadWaveform` must re-seed that open sheet so its lane
+  /// and fine-tune insets fill in — not stay blank for the sheet's lifetime (the regression the old
+  /// live `columnsProvider` closure hid).
+  @Test func openingModalMidDecodeReseedsTheLaneOnceTheWaveformLoads() async {
+    let plan = Fixtures.editPlan()
+    let fixture = Waveform.pyramid(
+      baseMins: [0, -0.5], baseMaxs: [0.1, 0.8], sampleRate: plan.source.sampleRate,
+      totalSamples: plan.source.durationSamples)
+
+    await withDependencies {
+      $0.waveform = WaveformClient(loadWaveform: { _, _, _ in fixture })
+    } operation: {
+      let model = editor(plan)
+      addSlice(model, 0, 3)
+      let slice = model.slices[0]
+
+      model.editSliceTapped(slice.id)  // opened before the decode ran
+      #expect(model.editSlice?.waveform.showsWaveform == false)
+
+      await model.loadWaveform()  // decode completes
+
+      #expect(model.editSlice?.waveform.showsWaveform == true)
+      expectNoDifference(
+        model.editSlice?.waveform.totalSamples, plan.source.durationSamples)
+    }
+  }
+
+  /// The sheet's lane is pinned to the slice: once laid out it fits the slice edge-to-edge and
+  /// cannot zoom out or scroll past the slice boundaries (only the slice is navigable).
+  @Test func theSliceSheetLaneIsPinnedToTheSlice() async {
+    let plan = Fixtures.editPlan()
+    let fixture = Waveform.pyramid(
+      baseMins: [0, -0.5], baseMaxs: [0.1, 0.8], sampleRate: plan.source.sampleRate,
+      totalSamples: plan.source.durationSamples)
+
+    await withDependencies {
+      $0.waveform = WaveformClient(loadWaveform: { _, _, _ in fixture })
+    } operation: {
+      let model = editor(plan)
+      await model.loadWaveform()
+      addSlice(model, 0, 3)
+      let slice = model.slices[0]
+      model.editSliceTapped(slice.id)
+      let lane = model.editSlice!.waveform
+      lane.viewportResized(width: 1000)  // lay the lane out
+
+      #expect(lane.canZoomOut == false)  // fit already shows the whole slice
+      expectNoDifference(lane.visibleStartSample, slice.startSample)
+      lane.scrolled(toStartSample: 0)  // try to scroll before the slice
+      expectNoDifference(lane.visibleStartSample, slice.startSample)  // clamped to the slice start
+    }
+  }
+
   // MARK: - Save / cancel round-trip
 
   @Test func modalSaveCommitsThroughEditorAndDismisses() {
@@ -140,6 +194,29 @@ struct EditorEditSlicePresentationTests {
     expectNoDifference(model.transportPhase, .stopped)
   }
 
+  /// Stop returns the cursor to the play origin AND publishes it to the sheet, so the sheet's next
+  /// "play from the playhead" starts at the origin, not the stale last-tick sample.
+  @Test func stopPublishesTheOriginCursorBackToTheModal() async {
+    let model = editor()
+    addSlice(model, 0, 3)
+    let slice = model.slices[0]
+    model.editSliceTapped(slice.id)
+    let child = model.editSlice!
+    model.transportContext = .sliceEdit
+    model.transportPhase = .playing(PlaybackSessionID())
+    model.transportOriginSample = slice.startSample
+    child.updatePlayback(sample: slice.startSample + 5_000, isPlaying: true)  // ticked mid-slice
+
+    await withDependencies {
+      $0.audioPlayer.stop = { _ in }
+    } operation: {
+      await child.stopTapped()
+    }
+
+    expectNoDifference(child.playheadSample, slice.startSample)  // back at the origin, not mid-slice
+    #expect(child.isPlaying == false)
+  }
+
   // MARK: - Playhead push during `.sliceEdit` playback
 
   @Test func observePlaybackPushesPlayingPositionIntoTheModalDuringSliceEdit() async {
@@ -171,25 +248,26 @@ struct EditorEditSlicePresentationTests {
 
   // MARK: - Modal transport: resume, range-drift, natural finish, open-supersede
 
-  /// FIX 1 (P1): Pause then Play must RESUME the paused `.sliceEdit` session, not start a fresh
-  /// play from the draft start. Verifies `resume` is called exactly once and `play` is NOT
-  /// re-invoked.
-  @Test func modalPlayAfterPauseResumesRatherThanRestarting() async {
+  /// Logic model: Pause freezes the playhead; the next Play re-plays FROM THE PLAYHEAD (a fresh
+  /// exclusive play), never a bespoke resume. Verifies `play` is re-invoked at the pause point and
+  /// `resume` is never used.
+  @Test func modalPlayAfterPauseReplaysFromThePlayhead() async {
     let model = editor()
     addSlice(model, 0, 3)
     let slice = model.slices[0]
     model.editSliceTapped(slice.id)
     let child = model.editSlice!
     let gate = PlayGate()
-    let plays = LockIsolated(0)
+    let ranges = LockIsolated<[Range<Int>]>([])
     let resumes = LockIsolated(0)
+    let pausePoint = slice.startSample + 500
 
     await withDependencies {
-      $0.audioPlayer.play = { _, _, _, _, _ in
-        plays.withValue { $0 += 1 }
+      $0.audioPlayer.play = { _, range, _, _, _ in
+        ranges.withValue { $0.append(range) }
         return await gate.play()
       }
-      $0.audioPlayer.pause = { _ in 500 }
+      $0.audioPlayer.pause = { _ in pausePoint }  // pause lands the cursor mid-slice
       $0.audioPlayer.resume = { _ in
         resumes.withValue { $0 += 1 }
         return true
@@ -197,25 +275,25 @@ struct EditorEditSlicePresentationTests {
       $0.audioPlayer.stop = { _ in gate.release() }
     } operation: {
       let play = Task { await child.playPauseTapped() }  // begins the .sliceEdit play (suspends)
-      await settle { plays.value == 1 && child.isPlaying }
+      await settle { ranges.value.count == 1 && child.isPlaying }
 
-      await child.playPauseTapped()  // pause
+      await child.playPauseTapped()  // pause -> cursor frozen at pausePoint
       #expect(model.isTransportPaused)
       #expect(child.isPlaying == false)
 
-      await child.playPauseTapped()  // play again → resume, not restart
+      let replay = Task { await child.playPauseTapped() }  // play again -> fresh play from playhead
+      await settle { ranges.value.count == 2 }
 
-      expectNoDifference(resumes.value, 1)
-      expectNoDifference(plays.value, 1)  // no fresh play scheduled
-      #expect(model.isTransportPlaying)
+      expectNoDifference(resumes.value, 0)  // no bespoke resume path anymore
+      expectNoDifference(ranges.value.last?.lowerBound, pausePoint)  // re-plays from the playhead
 
-      gate.release()  // let the original suspended play unwind
+      gate.release()  // let both suspended plays unwind
       await play.value
+      await replay.value
     }
   }
 
-  /// FIX 1: if the draft boundaries change while paused, Play must start a FRESH play at the new
-  /// range rather than resume the stale scheduled range.
+  /// A draft nudge while paused likewise re-plays fresh (every Pause→Play restarts now).
   @Test func modalPlayAfterPauseWithADriftedDraftRestarts() async {
     let model = editor()
     addSlice(model, 0, 3)
@@ -272,38 +350,6 @@ struct EditorEditSlicePresentationTests {
 
       #expect(child.isPlaying == false)
       expectNoDifference(model.transportPhase, .stopped)
-    }
-  }
-
-  /// FIX 1 (resume failure): if `resume` fails (engine restart), the transport stays paused, so
-  /// the modal's optimistic `isPlaying` must be corrected back to false — its button can't lie.
-  @Test func modalPlayAfterPauseWhereResumeFailsClearsIsPlaying() async {
-    let model = editor()
-    addSlice(model, 0, 3)
-    let slice = model.slices[0]
-    model.editSliceTapped(slice.id)
-    let child = model.editSlice!
-    let gate = PlayGate()
-
-    await withDependencies {
-      $0.audioPlayer.play = { _, _, _, _, _ in await gate.play() }
-      $0.audioPlayer.pause = { _ in 500 }
-      $0.audioPlayer.resume = { _ in false }  // engine restart failed
-      $0.audioPlayer.stop = { _ in gate.release() }
-    } operation: {
-      let play = Task { await child.playPauseTapped() }
-      await settle { child.isPlaying }
-
-      await child.playPauseTapped()  // pause
-      #expect(model.isTransportPaused)
-
-      await child.playPauseTapped()  // play → resume fails, stays paused
-
-      #expect(model.isTransportPaused)
-      #expect(child.isPlaying == false)  // button reflects the still-paused truth
-
-      gate.release()
-      await play.value
     }
   }
 

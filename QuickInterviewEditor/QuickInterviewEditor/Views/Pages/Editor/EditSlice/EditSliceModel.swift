@@ -12,6 +12,12 @@ final class EditSliceModel: ViewModel, Identifiable {
   let title: String
   let overviewWindow: Range<Int>
   let transcript: TranscriptPageModel
+  /// The sheet's OWN waveform lane model — the same ``WaveformModel`` the main editor drives, so the
+  /// sheet gets identical zoom/scroll/ruler behavior. It is NOT the parent's instance (that one is
+  /// bound to the main editor's viewport); `EditorModel` seeds this one from the parent's already
+  /// decoded pyramid via ``WaveformModel/adopt(waveform:totalSamples:sampleRate:focusWindow:)`` so
+  /// nothing is re-decoded. Boundary editing stays on the fine-tune insets; the lane is navigation.
+  let waveform = WaveformModel()
 
   init(slice: Slice, editPlan: EditPlan) {
     sliceID = slice.id
@@ -38,7 +44,6 @@ final class EditSliceModel: ViewModel, Identifiable {
   // MARK: - Properties
   var onCommit: (Range<Int>) -> Void = { _ in }
   var onDismiss: () -> Void = {}
-  var columnsProvider: (Range<Int>, CGFloat) -> [WaveformColumn] = { _, _ in [] }
   var onPlay: (Range<Int>) async -> Void = { _ in }
   var onPause: () async -> Void = {}
   var onStop: () async -> Void = {}
@@ -56,52 +61,34 @@ final class EditSliceModel: ViewModel, Identifiable {
   var playPauseLabel: String { isPlaying ? "Pause" : "Play" }
   var playButtonSystemImage: String { isPlaying ? "pause.fill" : "play.fill" }
 
-  func overviewColumns(pixelWidth: CGFloat) -> [WaveformColumn] {
-    columnsProvider(overviewWindow, pixelWidth)
+  /// The live draft kept range, drawn as the lane's highlight band so the kept region reads clearly
+  /// against the discarded head/tail. Recomputed on every drag/nudge.
+  var waveformHighlightRange: Range<Int>? { fineTune.draftRange }
+
+  var canZoomIn: Bool { waveform.canZoomIn }
+  var canZoomOut: Bool { waveform.canZoomOut }
+  var zoomInLabel: String { waveform.zoomInLabel }
+  var zoomOutLabel: String { waveform.zoomOutLabel }
+
+  /// The slice's current playable bounds — the live draft while editing, the committed cut otherwise.
+  private var slicePlaybackRange: Range<Int>? { fineTune.draftRange ?? fineTune.committedRange }
+
+  /// What Play plays: from the playhead to the slice's cut-out (Logic parity — Play always starts at
+  /// the playhead). When the cursor sits outside the slice (before the cut-in or at/after the
+  /// cut-out) it falls back to the cut-in, so Play always previews something.
+  private var playFromCursorRange: Range<Int>? {
+    guard let slice = slicePlaybackRange, slice.lowerBound < slice.upperBound else { return nil }
+    if let cursor = playheadSample, slice.contains(cursor) { return cursor..<slice.upperBound }
+    return slice.lowerBound..<slice.upperBound
   }
+
   func cutInColumns() -> [WaveformColumn] {
-    fineTune.cutInWindow.map { columnsProvider($0, fineTune.insetWidthPixels) } ?? []
+    fineTune.cutInWindow.map { waveform.columns(in: $0, pixelWidth: fineTune.insetWidthPixels) }
+      ?? []
   }
   func cutOutColumns() -> [WaveformColumn] {
-    fineTune.cutOutWindow.map { columnsProvider($0, fineTune.insetWidthPixels) } ?? []
-  }
-
-  // MARK: - Overview geometry
-  // The model owns every sample↔position decision; the overview view only multiplies these
-  // 0...1 fractions by its pixel width. Keeping the math here (not in the view) matches the
-  // "views hold zero logic" rule and lets these be tested without a rendered geometry.
-
-  /// The playhead's position as a fraction (0...1) of the overview window, or `nil` when the
-  /// cursor sits outside the slice. Inclusive of the upper bound: the transport rests the cursor
-  /// at `range.upperBound` on a natural finish (and a right-edge seek resolves there too), so a
-  /// half-open check would wrongly hide the line exactly at the slice's end.
-  var overviewPlayheadFraction: Double? {
-    guard let sample = playheadSample,
-      (overviewWindow.lowerBound...overviewWindow.upperBound).contains(sample)
-    else { return nil }
-    return overviewFraction(ofSample: sample)
-  }
-
-  /// The live draft Cut-in boundary as a fraction (0...1) of the overview window — recomputed on
-  /// every drag/nudge so the overview shows where the cut currently sits.
-  var overviewCutInFraction: Double? {
-    fineTune.draftRange.map { overviewFraction(ofSample: $0.lowerBound) }
-  }
-  /// The live draft Cut-out boundary as a fraction (0...1) of the overview window.
-  var overviewCutOutFraction: Double? {
-    fineTune.draftRange.map { overviewFraction(ofSample: $0.upperBound) }
-  }
-
-  /// Maps a horizontal fraction (0...1) of the overview back to a sample, for tap-to-seek.
-  func overviewSeekSample(atFraction fraction: Double) -> Int {
-    let clamped = min(max(fraction, 0), 1)
-    return overviewWindow.lowerBound + Int(clamped * Double(overviewWindow.count))
-  }
-
-  private func overviewFraction(ofSample sample: Int) -> Double {
-    guard overviewWindow.count > 0 else { return 0 }
-    let raw = Double(sample - overviewWindow.lowerBound) / Double(overviewWindow.count)
-    return min(1, max(0, raw))
+    fineTune.cutOutWindow.map { waveform.columns(in: $0, pixelWidth: fineTune.insetWidthPixels) }
+      ?? []
   }
 
   // MARK: - User Actions
@@ -133,12 +120,11 @@ final class EditSliceModel: ViewModel, Identifiable {
       await onPause()
       isPlaying = false
     } else {
-      guard let range = fineTune.draftRange ?? fineTune.committedRange else { return }
-      // Reflect "playing" NOW, not after `onPlay` returns. The parent's play await stays suspended
-      // until playback truly ends (stop/finish/supersede) while the resume path returns
-      // immediately, so toggling after the await would either lag the whole playback or wrongly
-      // clear Play the instant a resume returns. Live ticks and the parent's stop-publish keep
-      // `isPlaying` honest from here (a natural finish is published back via `updatePlayback`).
+      guard let range = playFromCursorRange else { return }
+      // Reflect "playing" NOW, not after `onPlay` returns: the parent's play await stays suspended
+      // until playback truly ends (stop/finish/supersede), so toggling after the await would lag the
+      // whole playback. Live ticks and the parent's stop-publish keep `isPlaying` honest from here (a
+      // natural finish is published back via `updatePlayback`).
       isPlaying = true
       await onPlay(range)
     }
@@ -150,6 +136,29 @@ final class EditSliceModel: ViewModel, Identifiable {
   }
 
   func seekTapped(toSample sample: Int) async { await onSeek(sample) }
+
+  /// A ruler click/drag or a body click on the lane moves the playhead. Maps the view-x to a plan
+  /// sample via the lane's own geometry, clamped into the slice. While playing it re-anchors — audio
+  /// keeps going from the click to the cut-out (Logic parity); paused or stopped it just repositions
+  /// the cursor so the next Play starts there. No-ops until the lane geometry is usable (mirrors the
+  /// main editor's guard against storing a garbage cursor mid-decode).
+  func waveformSeeked(toX positionX: CGFloat) async {
+    guard waveform.hasUsableGeometry else { return }
+    let sample = min(
+      max(waveform.xToSample(positionX), overviewWindow.lowerBound), overviewWindow.upperBound)
+    if isPlaying, let slice = slicePlaybackRange, sample < slice.upperBound {
+      await onPlay(max(sample, slice.lowerBound)..<slice.upperBound)
+    } else {
+      await seekTapped(toSample: sample)
+    }
+  }
+
+  func zoomInTapped() { waveform.zoomInTapped() }
+  func zoomOutTapped() { waveform.zoomOutTapped() }
+  /// Logic's `Z`: fit the whole slice (the lane's pinned extent) on the first press, restore the
+  /// prior zoom on the next. Uses the committed slice window, not the live draft, so it always
+  /// frames exactly what the pinned lane can show.
+  func zoomFitTapped() { waveform.zoomFitToggled(selection: overviewWindow) }
 
   /// Called by EditorModel's position loop while `.sliceEdit` is the transport context.
   func updatePlayback(sample: Int?, isPlaying: Bool) {
