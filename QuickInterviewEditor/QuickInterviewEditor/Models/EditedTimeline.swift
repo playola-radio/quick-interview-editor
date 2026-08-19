@@ -45,7 +45,12 @@ struct EditedTimeline: Equatable {
   init(sourceDurationSamples: Int, removals: [TimelineRemoval]) {
     self.sourceDurationSamples = sourceDurationSamples
 
-    let normalizedOrNil = TimelineRemovals.normalize(removals)
+    // Defensive backstop (belt-and-suspenders with `EditorModel.validatedRemovals`): see
+    // `Self.boundedToSource` — never changes behavior for already in-bounds removals.
+    let boundedRemovals = Self.boundedToSource(
+      removals, sourceDurationSamples: sourceDurationSamples)
+
+    let normalizedOrNil = TimelineRemovals.normalize(boundedRemovals)
     self.isValid = normalizedOrNil != nil
     let normalized = normalizedOrNil ?? []
 
@@ -103,6 +108,25 @@ struct EditedTimeline: Equatable {
         sourceCut: normalized[index].removedRange.lowerBound,
         crossfadeLength: clampedLengths[index],
         editedCenter: keptSegments[index + 1].editedStart)
+    }
+  }
+
+  /// Clamps every removal's range to `0 ..< sourceDurationSamples`, dropping any that clamp to
+  /// empty (entirely outside the source). Guards against a stale/foreign removal — e.g. one
+  /// persisted against a longer recording — leaving `previousUpper > sourceDurationSamples` in
+  /// the init below, which would build a reversed kept-segment `Range` and trap. In-bounds
+  /// removals pass through unchanged, so this never changes behavior for valid input.
+  private static func boundedToSource(
+    _ removals: [TimelineRemoval], sourceDurationSamples: Int
+  ) -> [TimelineRemoval] {
+    let sourceBounds = 0..<sourceDurationSamples
+    return removals.compactMap { removal in
+      let clampedRange = removal.removedRange.clamped(to: sourceBounds)
+      guard !clampedRange.isEmpty else { return nil }
+      guard clampedRange != removal.removedRange else { return removal }
+      var clamped = removal
+      clamped.removedRange = clampedRange
+      return clamped
     }
   }
 

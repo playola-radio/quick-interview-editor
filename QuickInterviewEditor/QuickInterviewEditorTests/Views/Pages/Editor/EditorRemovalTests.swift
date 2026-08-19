@@ -35,6 +35,56 @@ struct EditorRemovalTests {
     }
   }
 
+  // MARK: - validatedRemovals
+
+  @Test func validatedRemovalsDropsOutOfBoundsRemoval() {
+    let duration = Fixtures.editPlan().source.durationSamples
+    let raw: IdentifiedArrayOf<TimelineRemoval> = [
+      TimelineRemoval(
+        id: Fixtures.uuid(1), removedRange: (duration - 10)..<(duration + 100),
+        crossfade: Crossfade(lengthSamples: 48, curve: .equalPower))
+    ]
+    let validated = EditorModel.validatedRemovals(raw, sourceDurationSamples: duration)
+    expectNoDifference(validated, [])
+  }
+
+  @Test func validatedRemovalsReducesOverlappingPairToNonOverlappingSubset() {
+    let duration = Fixtures.editPlan().source.durationSamples
+    let first = TimelineRemoval(
+      id: Fixtures.uuid(1), removedRange: 100..<300,
+      crossfade: Crossfade(lengthSamples: 48, curve: .equalPower))
+    let overlapping = TimelineRemoval(
+      id: Fixtures.uuid(2), removedRange: 200..<400,
+      crossfade: Crossfade(lengthSamples: 48, curve: .equalPower))
+    let validated = EditorModel.validatedRemovals(
+      [first, overlapping], sourceDurationSamples: duration)
+    expectNoDifference(validated, [first])
+  }
+
+  @Test func validatedRemovalsDropsEmptyRange() {
+    let duration = Fixtures.editPlan().source.durationSamples
+    let raw: IdentifiedArrayOf<TimelineRemoval> = [
+      TimelineRemoval(
+        id: Fixtures.uuid(1), removedRange: 500..<500,
+        crossfade: Crossfade(lengthSamples: 48, curve: .equalPower))
+    ]
+    let validated = EditorModel.validatedRemovals(raw, sourceDurationSamples: duration)
+    expectNoDifference(validated, [])
+  }
+
+  @Test func validatedRemovalsLeavesValidSetUnchanged() {
+    let duration = Fixtures.editPlan().source.durationSamples
+    let first = TimelineRemoval(
+      id: Fixtures.uuid(1), removedRange: 300..<400,
+      crossfade: Crossfade(lengthSamples: 48, curve: .equalPower))
+    let second = TimelineRemoval(
+      id: Fixtures.uuid(2), removedRange: 1000..<2000,
+      crossfade: Crossfade(lengthSamples: 48, curve: .equalPower))
+    let validated = EditorModel.validatedRemovals(
+      [second, first], sourceDurationSamples: duration)
+    expectNoDifference(validated, [first, second])
+  }
+
   @Test func seedsTimelineRemovalsFromSidecar() throws {
     let fingerprint = "fp-seed"
     let url = ProjectState.sidecarURL(fingerprint: fingerprint)
@@ -51,6 +101,39 @@ struct EditorRemovalTests {
     } operation: {
       let model = editor(fingerprint: fingerprint)
       expectNoDifference(model.timelineRemovals, seeded.timelineRemovals)
+    }
+  }
+
+  /// Regression: a sidecar written by a foreign/older/hand-edited process (or the same source
+  /// re-analyzed to a shorter duration) can carry an out-of-bounds or overlapping removal.
+  /// Seeding from it must not crash, and the seeded `timelineRemovals` must stay consistent with
+  /// `editedTimeline` — no split-brain (strike-through/export-gate on with no waveform collapse).
+  @Test func seedingFromCorruptSidecarDoesNotCrashAndStaysConsistent() throws {
+    let fingerprint = "fp-seed-corrupt"
+    let url = ProjectState.sidecarURL(fingerprint: fingerprint)
+    let duration = Fixtures.editPlan().source.durationSamples
+    let valid = TimelineRemoval(
+      id: Fixtures.uuid(1), removedRange: 300..<400,
+      crossfade: Crossfade(lengthSamples: 48, curve: .equalPower))
+    let outOfBounds = TimelineRemoval(
+      id: Fixtures.uuid(2), removedRange: (duration - 10)..<(duration + 1000),
+      crossfade: Crossfade(lengthSamples: 48, curve: .equalPower))
+    let overlapping = TimelineRemoval(
+      id: Fixtures.uuid(3), removedRange: 350..<500,
+      crossfade: Crossfade(lengthSamples: 48, curve: .equalPower))
+    let seeded = ProjectState(timelineRemovals: [valid, outOfBounds, overlapping])
+    let seededData = try JSONEncoder().encode(seeded)
+    let fileSystem = LockIsolated<[URL: Data]>([url: seededData])
+    withDependencies {
+      $0.defaultFileStorage = FileStorage.inMemory(fileSystem: fileSystem)
+    } operation: {
+      let model = editor(fingerprint: fingerprint)
+
+      // Out-of-bounds dropped; overlapping loses to the earlier `valid` removal.
+      expectNoDifference(model.timelineRemovals, [valid])
+      // `editedTimeline` agrees with the stored removals: no split-brain.
+      expectNoDifference(model.editedTimeline.removals.map(\.id), Array(model.timelineRemovals.ids))
+      #expect(model.editedTimeline.isValid)
     }
   }
 

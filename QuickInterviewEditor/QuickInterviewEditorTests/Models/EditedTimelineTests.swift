@@ -128,4 +128,26 @@ struct EditedTimelineTests {
     expectNoDifference(timeline.sourceToEdited(50), 30)  // 0 + (50-20)
     expectNoDifference(timeline.editedToSource(30), 50)  // 20 + (30-0)
   }
+
+  /// Regression: a persisted removal whose `upperBound` outlives a shorter/re-analyzed source
+  /// (e.g. `[90,150)` against `sourceDurationSamples: 100`) must not build a reversed kept-segment
+  /// `Range` and trap. It's clamped to `[90,100)`, equivalent to a removal that reaches the end.
+  @Test func outOfBoundsRemovalClampsInsteadOfCrashing() {
+    let timeline = EditedTimeline(
+      sourceDurationSamples: 100, removals: [removal(90, 150, length: 5)])
+    expectNoDifference(timeline.keptSegments.count, 2)
+    // K0=[0,90) len90, K1=[100,100) len0 → no handle on the right, crossfade clamps to 0.
+    expectNoDifference(timeline.seams.first?.crossfadeLength, 0)
+    expectNoDifference(timeline.editedDurationSamples, 90)
+  }
+
+  /// A removal entirely outside the source (both bounds past the end) clamps to empty and is
+  /// dropped, leaving the timeline identity.
+  @Test func removalEntirelyOutOfBoundsIsDropped() {
+    let timeline = EditedTimeline(
+      sourceDurationSamples: 100, removals: [removal(150, 200, length: 5)])
+    expectNoDifference(timeline.keptSegments, [KeptSegment(source: 0..<100, editedStart: 0)])
+    expectNoDifference(timeline.editedDurationSamples, 100)
+    expectNoDifference(timeline.seams, [])
+  }
 }

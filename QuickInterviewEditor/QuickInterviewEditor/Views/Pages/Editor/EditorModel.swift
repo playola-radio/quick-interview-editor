@@ -78,7 +78,8 @@ final class EditorModel: ViewModel {
       editPlan: editPlan, sourceFingerprint: fingerprint)
     _projectState = Shared(.projectState(fingerprint: fingerprint))
     super.init()
-    self.timelineRemovals = projectState.timelineRemovals
+    self.timelineRemovals = Self.validatedRemovals(
+      projectState.timelineRemovals, sourceDurationSamples: editPlan.source.durationSamples)
     syncEditedTimeline()
     // Accepting a suggestion adds its slice here (idempotently), through the shared
     // mutation funnel so it's exportable and undoable like any other slice.
@@ -1610,6 +1611,38 @@ final class EditorModel: ViewModel {
   }
 
   // MARK: - Private Helpers
+  /// Sanitizes a raw (e.g. just-decoded-from-sidecar) removal set before it becomes the
+  /// document's source of truth: drops removals with an empty or out-of-`0
+  /// ..< sourceDurationSamples` range, then keeps only a sorted, non-overlapping subset (the
+  /// first-by-`lowerBound` removal wins any overlap). This keeps `timelineRemovals` always
+  /// consistent with `editedTimeline` (`EditedTimeline` silently falls back to an empty removal
+  /// set on overlap, so an unsanitized store would split-brain: strike-through/export-gate on,
+  /// but no waveform collapse) — guards against a foreign, older, or hand-edited sidecar, or the
+  /// same source re-analyzed to a shorter duration.
+  ///
+  /// Deliberately not `private`: `EditorRemovalTests` calls it directly via `@testable import`.
+  static func validatedRemovals(
+    _ raw: IdentifiedArrayOf<TimelineRemoval>, sourceDurationSamples: Int
+  ) -> IdentifiedArrayOf<TimelineRemoval> {
+    let inBounds = raw.filter { removal in
+      let range = removal.removedRange
+      return range.lowerBound < range.upperBound
+        && range.lowerBound >= 0
+        && range.upperBound <= sourceDurationSamples
+    }
+    let sorted = inBounds.sorted { $0.removedRange.lowerBound < $1.removedRange.lowerBound }
+    var nonOverlapping: [TimelineRemoval] = []
+    for removal in sorted {
+      if let last = nonOverlapping.last,
+        removal.removedRange.lowerBound < last.removedRange.upperBound
+      {
+        continue
+      }
+      nonOverlapping.append(removal)
+    }
+    return IdentifiedArray(uniqueElements: nonOverlapping)
+  }
+
   /// The word whose half-open sample range `[startSample, endSample)` contains `sample`.
   /// Words missing sample bounds are skipped, never guessed from seconds.
   private func wordID(atSample sample: Int) -> Word.ID? {
