@@ -146,9 +146,16 @@ final class EditSliceModel: ViewModel, Identifiable {
     guard waveform.hasUsableGeometry else { return }
     let sample = min(
       max(waveform.xToSample(positionX), overviewWindow.lowerBound), overviewWindow.upperBound)
-    if isPlaying, let slice = slicePlaybackRange, sample < slice.upperBound {
-      await onPlay(max(sample, slice.lowerBound)..<slice.upperBound)
+    guard isPlaying, let slice = slicePlaybackRange else {
+      await seekTapped(toSample: sample)  // paused or stopped: just reposition the cursor
+      return
+    }
+    if sample < slice.upperBound {
+      await onPlay(max(sample, slice.lowerBound)..<slice.upperBound)  // re-anchor, keep playing
     } else {
+      // Clicked at/after the cut-out while playing — nothing left to play. Stop (so the next
+      // position tick can't snap the playhead back), then park the cursor at the click.
+      await onStop()
       await seekTapped(toSample: sample)
     }
   }

@@ -199,6 +199,9 @@ final class WaveformModel: ViewModel {
     self.sampleRate = sampleRate
     self.contentRange = contentRange
     isLoading = false
+    // A fresh seed invalidates any armed Z-restore: a snapshot taken against the pre-adopt (often
+    // empty, mid-decode) geometry must not be restorable after the real waveform is framed.
+    fitRestore = nil
     if viewportWidth > 0 { zoomToFitAll() }
   }
 

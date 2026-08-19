@@ -213,7 +213,8 @@ struct EditorEditSlicePresentationTests {
       await child.stopTapped()
     }
 
-    expectNoDifference(child.playheadSample, slice.startSample)  // back at the origin, not mid-slice
+    // back at the origin, not the mid-slice sample the last tick reported
+    expectNoDifference(child.playheadSample, slice.startSample)
     #expect(child.isPlaying == false)
   }
 

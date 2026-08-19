@@ -555,7 +555,8 @@ struct WaveformTests {
       baseMins: mins, baseMaxs: maxs, sampleRate: 44100, totalSamples: 8, baseBucketSize: 1)
     let model = WaveformModel()
     model.adopt(waveform: fixture, totalSamples: 8, sampleRate: 44100, contentRange: 0..<5)
-    model.viewportWidth = 6  // ceil -> 6 columns; the 6th pixel would spill to sample 5 (post-slice)
+    // ceil -> 6 columns; the 6th pixel's range would spill to sample 5 (just past the slice)
+    model.viewportWidth = 6
     model.samplesPerPixel = 1
     model.visibleStartSample = 0
 
@@ -563,6 +564,24 @@ struct WaveformTests {
 
     #expect(columns.count == 5)  // the out-of-slice spill column is dropped, not clamped-and-drawn
     #expect(columns.allSatisfy { $0.min >= -0.5 })  // never reads bucket 5+ (mins -0.6…-0.8)
+  }
+
+  @Test func adoptClearsAnArmedZoomFitRestore() {
+    let model = WaveformModel()
+    model.totalSamples = 1_000_000
+    model.viewportResized(width: 1000)  // fit whole file: spp 1000
+    model.zoomFitToggled(selection: 400_000..<600_000)  // fits (spp 200), arms restore of spp 1000
+
+    // A fresh reseed must invalidate that armed restore — its snapshot is pre-adopt geometry.
+    model.adopt(
+      waveform: nil, totalSamples: 1_000_000, sampleRate: 44100,
+      contentRange: 400_000..<600_000)
+    let sppAfterAdopt = model.samplesPerPixel  // adopt fit the slice: spp 200
+
+    // must fit fresh, NOT restore the stale pre-adopt spp of 1000
+    model.zoomFitToggled(selection: 400_000..<600_000)
+
+    expectNoDifference(model.samplesPerPixel, sppAfterAdopt)
   }
 
   @Test func contentRangeLeavesAbsoluteSampleMappingIntact() {

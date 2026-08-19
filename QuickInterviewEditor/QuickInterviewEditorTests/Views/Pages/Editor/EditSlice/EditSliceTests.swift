@@ -129,6 +129,23 @@ struct EditSliceTests {
     #expect(sought.isEmpty)  // it re-anchors, it does not merely reposition
   }
 
+  @Test func seekAtTheCutOutWhilePlayingStopsInsteadOfLeavingPlaybackRunning() async {
+    let model = laneModel()  // slice 10_000..<20_000, spp 100, start 0
+    var played: [Range<Int>] = []
+    var sought: [Int] = []
+    var stops = 0
+    model.onPlay = { played.append($0) }
+    model.onSeek = { sought.append($0) }
+    model.onStop = { stops += 1 }
+    model.updatePlayback(sample: 12_000, isPlaying: true)
+
+    await model.waveformSeeked(toX: 1000)  // clamps to the cut-out (20_000)
+
+    #expect(stops == 1)  // stops rather than leaving playback running past the click
+    expectNoDifference(sought, [20_000])  // parks the cursor at the cut-out
+    #expect(played.isEmpty)  // does not re-anchor to an empty range
+  }
+
   @Test func seekWhilePausedRepositionsWithoutReplaying() async {
     let model = laneModel()  // slice 10_000..<20_000, spp 100, start 0
     var played: [Range<Int>] = []
