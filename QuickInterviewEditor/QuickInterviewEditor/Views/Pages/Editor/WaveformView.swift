@@ -20,6 +20,7 @@ struct WaveformView: View {
         onAreaSelectBegan: { model.waveformAreaSelectBegan(atX: $0, extending: $1) },
         onAreaSelectChanged: { model.waveformAreaSelectChanged(toX: $0) },
         onAreaSelectEnded: { model.waveformAreaSelectEnded(toX: $0) },
+        seams: [],  // 7b computes edited seam spans once the axis collapses
         auditionOverlay: { span in
           if model.canAudition { AuditionEdgeButtons(model: model, span: span) }
         }

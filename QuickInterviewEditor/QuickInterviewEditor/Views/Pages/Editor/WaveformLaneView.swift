@@ -23,6 +23,10 @@ struct WaveformLaneView<Overlay: View>: View {
   let onAreaSelectBegan: (CGFloat, Bool) -> Void
   let onAreaSelectChanged: (CGFloat) -> Void
   let onAreaSelectEnded: (CGFloat) -> Void
+  /// Crossfade seams to draw as bowtie X's over the band. Defaults to `[]` so every existing call
+  /// site compiles unchanged. Positioning these on the collapsed edited waveform is a later step —
+  /// this lane only draws whatever spans it's handed.
+  var seams: [WaveformSpan] = []
   @ViewBuilder let auditionOverlay: (WaveformSpan) -> Overlay
 
   private let bandHeight: CGFloat = 148
@@ -81,6 +85,7 @@ struct WaveformLaneView<Overlay: View>: View {
     } else {
       ZStack(alignment: .leading) {
         WaveformCanvas(waveform: waveform, highlight: highlight)
+        SeamBowtieOverlay(seams: seams)
         WaveformPlayhead(waveform: waveform, playhead: playhead)
       }
     }
@@ -122,6 +127,29 @@ private struct WaveformCanvas: View {
         path.addLine(to: CGPoint(x: column.positionX + 0.5, y: Swift.max(bottom, top + 0.75)))
       }
       context.stroke(path, with: .color(waveColor), lineWidth: 1)
+    }
+  }
+}
+
+/// Draws a Logic-style crossfade "bowtie" — two crossing lines — inside each given span rect.
+/// Purely a renderer: it decides nothing about which seams exist or where they sit: the model
+/// hands it spans, this draws them.
+private struct SeamBowtieOverlay: View {
+  let seams: [WaveformSpan]
+
+  private let strokeColor = Color.white.opacity(0.4)
+
+  var body: some View {
+    Canvas { context, size in
+      var path = Path()
+      for seam in seams {
+        let rect = CGRect(x: seam.positionX, y: 0, width: seam.width, height: size.height)
+        path.move(to: CGPoint(x: rect.minX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+        path.move(to: CGPoint(x: rect.minX, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+      }
+      context.stroke(path, with: .color(strokeColor), lineWidth: 1)
     }
   }
 }

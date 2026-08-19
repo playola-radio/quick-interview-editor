@@ -12,6 +12,7 @@ enum EditorKey {
   case zoomFit
   case speedUp
   case speedDown
+  case removeSection
 }
 
 @MainActor
@@ -309,6 +310,24 @@ final class EditorModel: ViewModel {
   /// View-x of the persistent cursor, or nil when it's scrolled out of the viewport. The model
   /// owns the cursor sample; the waveform supplies the geometry, so the view stays logic-free.
   var playheadX: CGFloat? { waveform.playheadX(for: playheadSample) }
+
+  // MARK: - Seam overlays
+  /// One crossfaded cut point between two kept segments, in the coordinates the waveform lane
+  /// needs to draw its bowtie: where it sits and how wide the crossfade is. Positioning it on a
+  /// collapsed edited waveform is a later step (7b) — this is just the data.
+  struct SeamOverlay: Equatable, Identifiable {
+    var id: UUID
+    var editedCenterSample: Int
+    var crossfadeLength: Int
+  }
+
+  /// The bowtie overlays for every removal, derived from `editedTimeline.seams`.
+  var seamOverlays: [SeamOverlay] {
+    editedTimeline.seams.map {
+      SeamOverlay(
+        id: $0.id, editedCenterSample: $0.editedCenter, crossfadeLength: $0.crossfadeLength)
+    }
+  }
 
   // MARK: - View Helpers
   /// The panel's plain "Add slice" builds from the raw selection, so it's disabled whenever any
@@ -674,6 +693,12 @@ final class EditorModel: ViewModel {
     case .zoomFit: waveform.zoomFitToggled(selection: transcript.selectedSampleRange)
     case .speedUp: transcript.speedUpTapped()
     case .speedDown: transcript.speedDownTapped()
+    case .removeSection:
+      // Falls through (returns false) when nothing removable is selected, so the event still
+      // reaches a focused slice row's List `.onDelete` — the intended arbitration between the
+      // two delete targets.
+      guard canRemoveSelectedSection else { return false }
+      Task { await removeSelectedSectionTapped() }
     }
     return true
   }

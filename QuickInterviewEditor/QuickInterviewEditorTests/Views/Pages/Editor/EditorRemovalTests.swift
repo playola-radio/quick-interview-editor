@@ -90,4 +90,25 @@ struct EditorRemovalTests {
       #expect(model.canRemove(sourceRange: 700..<700) == false)
     }
   }
+
+  @Test func seamOverlaysDerivedFromTimeline() {
+    let fileSystem = LockIsolated<[URL: Data]>([:])
+    withDependencies {
+      $0.defaultFileStorage = FileStorage.inMemory(fileSystem: fileSystem)
+    } operation: {
+      let model = editor(fingerprint: "fp-seams")
+      model.mutateDocument { doc in
+        doc.timelineRemovals.append(
+          TimelineRemoval(
+            id: Fixtures.uuid(4), removedRange: 1000..<2000,
+            crossfade: Crossfade(lengthSamples: 96, curve: .equalPower)))
+      }
+      expectNoDifference(model.seamOverlays.count, 1)
+      expectNoDifference(model.seamOverlays.first?.crossfadeLength, 96)
+      // EditedTimeline's editedCenter is the right kept-segment's editedStart, which already
+      // nets out this seam's own crossfade overlap (see EditedTimelineTests.seamLookup):
+      // 1000 (nothing removed before it) - 96 (this seam's crossfade) = 904.
+      expectNoDifference(model.seamOverlays.first?.editedCenterSample, 904)
+    }
+  }
 }
