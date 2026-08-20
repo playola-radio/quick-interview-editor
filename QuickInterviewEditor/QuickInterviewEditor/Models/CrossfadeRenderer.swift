@@ -36,8 +36,8 @@ enum CrossfadeRenderer {
       let outChannel = out[channel]
       let inChannel = incoming[channel]
       var blended = [Float](repeating: 0, count: count)
-      for i in 0..<count {
-        blended[i] = outChannel[i] * gOut[i] + inChannel[i] * gIn[i]
+      for index in 0..<count {
+        blended[index] = outChannel[index] * gOut[index] + inChannel[index] * gIn[index]
       }
       result.append(blended)
     }
