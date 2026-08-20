@@ -235,7 +235,8 @@ struct EditorEditSlicePresentationTests {
     } operation: {
       let task = Task { await model.observePlayback() }
       continuation.yield(
-        PlaybackPosition(sessionID: session, sample: slice.startSample + 200, isPlaying: true))
+        PlaybackPosition(
+          sessionID: session, sample: .source(slice.startSample + 200), isPlaying: true))
       await settle { model.editSlice?.playheadSample == slice.startSample + 200 }
 
       expectNoDifference(model.playheadEditedSample, slice.startSample + 200)
@@ -268,7 +269,7 @@ struct EditorEditSlicePresentationTests {
         ranges.withValue { $0.append(range) }
         return await gate.play()
       }
-      $0.audioPlayer.pause = { _ in pausePoint }  // pause lands the cursor mid-slice
+      $0.audioPlayer.pause = { _ in .source(pausePoint) }  // pause lands the cursor mid-slice
       $0.audioPlayer.resume = { _ in
         resumes.withValue { $0 += 1 }
         return true
@@ -310,7 +311,7 @@ struct EditorEditSlicePresentationTests {
         plays.withValue { $0 += 1 }
         return await gate.play()
       }
-      $0.audioPlayer.pause = { _ in 500 }
+      $0.audioPlayer.pause = { _ in .source(500) }
       $0.audioPlayer.resume = { _ in
         resumes.withValue { $0 += 1 }
         return true
@@ -416,11 +417,13 @@ struct EditorEditSlicePresentationTests {
     } operation: {
       let task = Task { await model.observePlayback() }
       continuation.yield(
-        PlaybackPosition(sessionID: session, sample: slice.startSample + 200, isPlaying: true))
+        PlaybackPosition(
+          sessionID: session, sample: .source(slice.startSample + 200), isPlaying: true))
       await settle { model.editSlice?.playheadSample == slice.startSample + 200 }
 
       continuation.yield(
-        PlaybackPosition(sessionID: session, sample: slice.startSample + 200, isPlaying: false))
+        PlaybackPosition(
+          sessionID: session, sample: .source(slice.startSample + 200), isPlaying: false))
       await settle { model.editSlice?.isPlaying == false }
 
       #expect(model.editSlice?.isPlaying == false)

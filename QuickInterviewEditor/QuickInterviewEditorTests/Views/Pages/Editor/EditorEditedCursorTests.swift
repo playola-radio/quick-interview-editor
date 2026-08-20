@@ -57,7 +57,8 @@ struct EditorEditedCursorTests {
       $0.audioPlayer.positions = { stream }
     } operation: {
       let observe = Task { await model.observePlayback() }
-      continuation.yield(PlaybackPosition(sessionID: session, sample: 70_000, isPlaying: true))
+      continuation.yield(
+        PlaybackPosition(sessionID: session, sample: .source(70_000), isPlaying: true))
       continuation.finish()
       await observe.value
     }
@@ -72,11 +73,44 @@ struct EditorEditedCursorTests {
     let session = PlaybackSessionID()
     model.transportPhase = .playing(session)
     await withDependencies {
-      $0.audioPlayer.pause = { _ in 70_000 }
+      $0.audioPlayer.pause = { _ in .source(70_000) }
     } operation: {
       await model.transportPauseTapped()
     }
     expectNoDifference(model.playheadEditedSample, 45_200)
+  }
+
+  @Test func editedAxisTickMovesCursorDirectly() async {
+    let model = editor()
+    addRemoval(model, 40_000, 60_000, length: 4_800)
+    let session = PlaybackSessionID()
+    model.transportPhase = .playing(session)
+    let (stream, continuation) = AsyncStream.makeStream(of: PlaybackPosition.self)
+    await withDependencies {
+      $0.audioPlayer.positions = { stream }
+    } operation: {
+      let observe = Task { await model.observePlayback() }
+      continuation.yield(
+        PlaybackPosition(sessionID: session, sample: .edited(45_200), isPlaying: true))
+      continuation.finish()
+      await observe.value
+    }
+    // An edited tick is already on the cursor's axis — stored as-is, no conversion.
+    expectNoDifference(model.playheadEditedSample, 45_200)
+  }
+
+  @Test func editedAxisPauseFreezesCursorDirectly() async {
+    let model = editor()
+    addRemoval(model, 40_000, 60_000, length: 4_800)
+    let session = PlaybackSessionID()
+    model.transportPhase = .playing(session)
+    await withDependencies {
+      $0.audioPlayer.pause = { _ in .edited(45_200) }
+    } operation: {
+      await model.transportPauseTapped()
+    }
+    expectNoDifference(model.playheadEditedSample, 45_200)
+    expectNoDifference(model.transportPhase, .paused(session))
   }
 
   /// Installs explicit waveform geometry (no audio decode) so the edited adapter's

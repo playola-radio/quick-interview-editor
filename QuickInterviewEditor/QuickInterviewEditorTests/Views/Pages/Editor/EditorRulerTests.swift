@@ -160,7 +160,7 @@ struct EditorRulerTests {
     model.playheadEditedSample = 1000
     await withDependencies {
       $0.audioPlayer.play = gatedPlay(gate)
-      $0.audioPlayer.pause = { _ in 4321 }
+      $0.audioPlayer.pause = { _ in .source(4321) }
       $0.audioPlayer.stop = { _ in
         stopped.setValue(true)
         gate.release()

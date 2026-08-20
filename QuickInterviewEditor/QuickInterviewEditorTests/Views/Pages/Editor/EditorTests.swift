@@ -547,7 +547,7 @@ struct EditorTests {
     } operation: {
       let task = Task { await model.observePlayback() }
       continuation.yield(
-        PlaybackPosition(sessionID: session, sample: 1000, isPlaying: true))
+        PlaybackPosition(sessionID: session, sample: .source(1000), isPlaying: true))
       await settle { model.playheadEditedSample == 1000 }
       #expect(model.playheadEditedSample == 1000)  // maps the live position
       continuation.finish()  // stands in for the task being cancelled / stream ending
@@ -564,7 +564,7 @@ struct EditorTests {
     } operation: {
       let task = Task { await model.observePlayback() }
       continuation.yield(
-        PlaybackPosition(sessionID: PlaybackSessionID(), sample: 5000, isPlaying: true))
+        PlaybackPosition(sessionID: PlaybackSessionID(), sample: .source(5000), isPlaying: true))
       await settle { false }  // let the tick be processed
       #expect(model.playheadEditedSample == 0)  // never adopts another tab's position
       continuation.finish()
@@ -583,11 +583,11 @@ struct EditorTests {
     } operation: {
       let task = Task { await model.observePlayback() }
       continuation.yield(
-        PlaybackPosition(sessionID: session, sample: 1000, isPlaying: true))
+        PlaybackPosition(sessionID: session, sample: .source(1000), isPlaying: true))
       await settle { model.playheadEditedSample == 1000 }
       // A false/final tick ends transcript follow but must NOT move the persistent cursor.
       continuation.yield(
-        PlaybackPosition(sessionID: session, sample: 1200, isPlaying: false))
+        PlaybackPosition(sessionID: session, sample: .source(1200), isPlaying: false))
       await settle { false }  // let the false tick be processed
       #expect(model.playheadEditedSample == 1000)  // cursor stays where the audio last played
       continuation.finish()
@@ -606,11 +606,11 @@ struct EditorTests {
     } operation: {
       let task = Task { await model.observePlayback() }
       continuation.yield(
-        PlaybackPosition(sessionID: session, sample: 1000, isPlaying: true))
+        PlaybackPosition(sessionID: session, sample: .source(1000), isPlaying: true))
       await settle { model.playheadEditedSample == 1000 }
       // A straggler tick from a superseded/foreign session must NOT move the cursor.
       continuation.yield(
-        PlaybackPosition(sessionID: PlaybackSessionID(), sample: 9999, isPlaying: true))
+        PlaybackPosition(sessionID: PlaybackSessionID(), sample: .source(9999), isPlaying: true))
       await settle { false }  // let the foreign tick be processed
       #expect(model.playheadEditedSample == 1000)  // unchanged — foreign tick ignored
       continuation.finish()

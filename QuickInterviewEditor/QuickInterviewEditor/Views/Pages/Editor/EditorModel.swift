@@ -645,21 +645,30 @@ final class EditorModel: ViewModel {
       // returned; a buffered straggler tick for that session must not thaw it.
       if isTransportPaused { continue }
       if position.isPlaying {
-        // Ticks arrive in SOURCE samples (the range-playback path); the cursor lives on the
-        // EDITED axis, so convert on arrival. The modal/transcript boundaries keep source.
-        playheadEditedSample = editedCursor(forSource: position.sample)
+        // The cursor lives on the EDITED axis: an edited tick (playlist playback) is stored
+        // as-is; a source tick (range playback) converts on arrival. The modal/transcript
+        // boundaries keep reading SOURCE samples either way.
+        let sourceSample: Int
+        switch position.sample {
+        case .edited(let editedSample):
+          playheadEditedSample = editedSample
+          sourceSample = playheadSourceSample
+        case .source(let source):
+          playheadEditedSample = editedCursor(forSource: source)
+          sourceSample = source
+        }
         // The slice-detail edit modal owns its own scoped playhead/transcript while it's the
         // playback context, so push the live position into it here — the modal has no other way
         // to see ticks from the shared player.
         if case .sliceEdit = transportContext {
-          editSlice?.updatePlayback(sample: position.sample, isPlaying: true)
+          editSlice?.updatePlayback(sample: sourceSample, isPlaying: true)
         }
         // The listen contexts (a plain Play and slice playback) drive transcript auto-scroll
         // follow, so reading along works during a plain Play, not only slice playback. Preview/
         // audition update the cursor (and thus the highlight) but must not yank the transcript
         // from where the user scrolled.
         transcript.playheadChanged(
-          sample: position.sample, isPlaying: transportContext.followsTranscript)
+          sample: sourceSample, isPlaying: transportContext.followsTranscript)
       } else {
         if transportContext.followsTranscript {
           // A false tick ends transcript follow (so the next playback reads as a rising edge) but
@@ -1629,7 +1638,11 @@ final class EditorModel: ViewModel {
     guard case .playing(let session) = transportPhase else { return }
     let sample = await audioPlayer.pause(session)
     guard transportPhase.session == session else { return }
-    if let sample { playheadEditedSample = editedCursor(forSource: sample) }
+    switch sample {
+    case .edited(let editedSample): playheadEditedSample = editedSample
+    case .source(let source): playheadEditedSample = editedCursor(forSource: source)
+    case nil: break
+    }
     transportPhase = .paused(session)
   }
 

@@ -284,7 +284,7 @@ struct EditorAuditionTests {
     } operation: {
       let task = Task { await model.observePlayback() }
       continuation.yield(
-        PlaybackPosition(sessionID: session, sample: 2000, isPlaying: true))
+        PlaybackPosition(sessionID: session, sample: .source(2000), isPlaying: true))
       await settle { model.playheadEditedSample == 2000 }
       #expect(model.playheadEditedSample == 2000)
       continuation.finish()

@@ -242,7 +242,7 @@ struct EditorTransportTests {
     model.playheadEditedSample = 1000
     await withDependencies {
       $0.audioPlayer.play = { _, _, _, _, _ in await gate.play() }
-      $0.audioPlayer.pause = { _ in 4321 }
+      $0.audioPlayer.pause = { _ in .source(4321) }
       $0.audioPlayer.stop = { _ in gate.release() }
     } operation: {
       let task = Task { await model.transportPlayTapped() }
@@ -269,7 +269,8 @@ struct EditorTransportTests {
     } operation: {
       let task = Task { await model.observePlayback() }
       // A buffered straggler tick for the paused session must NOT thaw the frozen cursor.
-      continuation.yield(PlaybackPosition(sessionID: session, sample: 9000, isPlaying: true))
+      continuation.yield(
+        PlaybackPosition(sessionID: session, sample: .source(9000), isPlaying: true))
       await settle { false }  // let the tick be processed
       expectNoDifference(model.playheadEditedSample, 4321)
       continuation.finish()
@@ -284,7 +285,7 @@ struct EditorTransportTests {
     model.playheadEditedSample = 1000
     await withDependencies {
       $0.audioPlayer.play = { _, _, _, _, _ in await gate.play() }
-      $0.audioPlayer.pause = { _ in 4321 }
+      $0.audioPlayer.pause = { _ in .source(4321) }
       $0.audioPlayer.resume = { _ in
         resumed.setValue(true)
         return true
@@ -310,7 +311,7 @@ struct EditorTransportTests {
     model.playheadEditedSample = 1000
     await withDependencies {
       $0.audioPlayer.play = { _, _, _, _, _ in await gate.play() }
-      $0.audioPlayer.pause = { _ in 4321 }
+      $0.audioPlayer.pause = { _ in .source(4321) }
       $0.audioPlayer.resume = { _ in false }  // engine restart failed
       $0.audioPlayer.stop = { _ in gate.release() }
     } operation: {
