@@ -104,6 +104,10 @@ final class EditorModel: ViewModel {
     transcript.onPlaybackRateChanged = { [weak self] _ in
       Task { await self?.applyPlaybackRate() }
     }
+    // Seed the freeform `audioSelection` from the transcript whenever the selection changes. Wired
+    // here (not in a view `.onChange`) so the model stays self-contained and headless model tests
+    // see the seed. One-directional: the model never writes back to the transcript through this.
+    transcript.onSelectionChanged = { [weak self] in self?.seedSelectionFromTranscript() }
   }
 
   // MARK: - Export Phase
@@ -390,7 +394,7 @@ final class EditorModel: ViewModel {
   /// The panel's plain "Add slice" builds from the raw selection, so it's disabled whenever any
   /// fine-tune draft is unsaved — a tuned pending selection (whose adjustments it would discard)
   /// or a dirty existing-slice edit with a held selection (which requires Save/Cancel first).
-  var canAddSlice: Bool { transcript.selectedSampleRange != nil && !fineTune.hasUnsavedChange }
+  var canAddSlice: Bool { selectedSourceRange != nil && !fineTune.hasUnsavedChange }
   // Undo/redo restore `slices` wholesale; doing that under an open cut edit would leave the
   // draft anchored to a stale committed range, so gate on Save/Cancel first.
   var canUndo: Bool { documentUndo.canUndo && !hasUncommittedSliceEdit }
@@ -911,7 +915,7 @@ final class EditorModel: ViewModel {
   /// Zooms and scrolls the waveform to frame the current transcript selection (padded). A no-op
   /// when nothing is selected.
   func zoomWaveformToSelection() {
-    guard let range = transcript.selectedSampleRange else { return }
+    guard let range = selectedSourceRange else { return }
     editedWaveform.zoomToFitSource(range, paddingFraction: waveformFramePadding)
   }
 
@@ -997,7 +1001,7 @@ final class EditorModel: ViewModel {
   }
 
   func addSliceTapped() {
-    guard canAddSlice, let range = transcript.selectedSampleRange else { return }
+    guard canAddSlice, let range = selectedSourceRange else { return }
     let wordIDs = transcript.orderedSelectedWordIDs
     guard !wordIDs.isEmpty else { return }
     let slice = Slice(
@@ -1052,7 +1056,7 @@ final class EditorModel: ViewModel {
   /// `isPendingRemovalSessionCurrent`, so a boundary nudge (Task 9) actually changes what gets
   /// removed; the raw selection otherwise.
   private var pendingRemovalSourceRange: Range<Int>? {
-    isPendingRemovalSessionCurrent ? fineTune.draftRange : transcript.selectedSampleRange
+    isPendingRemovalSessionCurrent ? fineTune.draftRange : selectedSourceRange
   }
 
   /// Whether `range` can become a removal: non-empty and not overlapping an

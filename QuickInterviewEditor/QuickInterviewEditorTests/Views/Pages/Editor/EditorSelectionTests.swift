@@ -31,4 +31,22 @@ struct EditorSelectionTests {
     expectNoDifference(
       model.activeOrSelectedRange, model.selectedSourceRange ?? model.activeSliceRange)
   }
+
+  @Test func canAddAndCanRemoveReadTheFacade() {
+    let model = editor()
+    model.transcript.selectWords(anchorID: 2, focusID: 4)
+    model.seedSelectionFromTranscript()
+    #expect(model.canAddSlice)
+    #expect(model.canRemoveSelectedSection)
+  }
+
+  @Test func transcriptSelectionSeedsAudioSelectionWithoutView() {
+    // Regression: readers now read `selectedSourceRange` (= audioSelection). The model must seed
+    // itself from a transcript selection change via `transcript.onSelectionChanged`, with no view
+    // `.onChange` — otherwise every headless model test that sets a selection reads nil.
+    let model = editor()
+    model.transcript.selectWords(anchorID: 2, focusID: 4)
+    expectNoDifference(model.audioSelection, model.transcript.selectedSampleRange)
+    expectNoDifference(model.audioSelection, 70648..<119202)
+  }
 }

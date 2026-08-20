@@ -55,6 +55,12 @@ class TranscriptPageModel: ViewModel {
   /// owner) can apply it to the shared player — live if playing, and for the next play otherwise.
   @ObservationIgnored var onPlaybackRateChanged: ((Double) -> Void)?
 
+  /// Fired whenever the selection changes, so `EditorModel` (which owns the freeform
+  /// `audioSelection`) can seed it from the transcript. One-directional — the model seeds from
+  /// the transcript and never writes back through here — so there is no feedback loop. This lives
+  /// on the model (not a view `.onChange`) so headless model tests see the seed without a view.
+  @ObservationIgnored var onSelectionChanged: (() -> Void)?
+
   // MARK: - Initialization
   let planURL: URL?
   init(planURL: URL? = Bundle.main.url(forResource: "edit-plan", withExtension: "json")) {
@@ -88,8 +94,8 @@ class TranscriptPageModel: ViewModel {
   let runTogetherMaxGapMs: Double = 30
   @ObservationIgnored private var gaps: [WordGap] = []
   var isLoading = false
-  var selectionAnchorID: Word.ID?
-  var selectionFocusID: Word.ID?
+  var selectionAnchorID: Word.ID? { didSet { onSelectionChanged?() } }
+  var selectionFocusID: Word.ID? { didSet { onSelectionChanged?() } }
   var document = TranscriptDocument(words: [])
   var plainTranscriptText: String { document.text }
   let minFontSize = 11.0
