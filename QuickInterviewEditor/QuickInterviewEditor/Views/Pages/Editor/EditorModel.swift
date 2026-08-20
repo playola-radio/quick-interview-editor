@@ -104,10 +104,18 @@ final class EditorModel: ViewModel {
     transcript.onPlaybackRateChanged = { [weak self] _ in
       Task { await self?.applyPlaybackRate() }
     }
-    // Seed the freeform `audioSelection` from the transcript whenever the selection changes. Wired
-    // here (not in a view `.onChange`) so the model stays self-contained and headless model tests
-    // see the seed. One-directional: the model never writes back to the transcript through this.
-    transcript.onSelectionChanged = { [weak self] in self?.seedSelectionFromTranscript() }
+    // Text-selection gestures are now intents: the transcript resolves which words the gesture hit
+    // and hands them here, and THIS model writes the authoritative freeform `audioSelection`. Wired
+    // on the model (not a view `.onChange`) so headless model tests apply intents without a view.
+    // One-directional — the model never writes the transcript's selection back through this.
+    transcript.onSelectionIntent = { [weak self] intent in
+      guard let self else { return }
+      switch intent {
+      case .words(let anchor, let focus): self.selectWords(anchorID: anchor, focusID: focus)
+      case .word(let id, let extending): self.selectWord(id, extending: extending)
+      case .clear: self.clearSelection()
+      }
+    }
   }
 
   // MARK: - Export Phase
@@ -265,10 +273,43 @@ final class EditorModel: ViewModel {
   /// Read facade every downstream reader migrates onto (spec §6). Backed by `audioSelection`.
   var selectedSourceRange: Range<Int>? { audioSelection }
 
-  /// Migration seam (step 1): keep `audioSelection` mirrored from the transcript selection until
-  /// the writers flip (Task 6/7). Called from `EditorView`'s selection `onChange`.
-  func seedSelectionFromTranscript() {
-    audioSelection = transcript.selectedSampleRange
+  /// A text-view selection intent: the covered word span (first word's start → last word's end,
+  /// ordered by transcript position) becomes an exact source range and seeds the freeform selection.
+  func selectWords(anchorID: Word.ID, focusID: Word.ID) {
+    guard let range = sourceRange(coveringWords: anchorID, focusID) else { return }
+    selectionAnchorSample = range.lowerBound
+    selectSourceRange(range, snapPlayhead: true)
+  }
+
+  /// A single-word intent: select the word's exact `[startSample, endSample)`. `extending` (Shift)
+  /// stretches the current selection from its held anchor to the clicked word instead of replacing.
+  func selectWord(_ id: Word.ID, extending: Bool) {
+    if extending, let anchor = selectionAnchorSample ?? audioSelection?.lowerBound,
+      let wordRange = sourceRange(ofWord: id)
+    {
+      selectSourceRange(
+        min(anchor, wordRange.lowerBound)..<max(anchor, wordRange.upperBound), snapPlayhead: false)
+    } else if let wordRange = sourceRange(ofWord: id) {
+      selectionAnchorSample = wordRange.lowerBound
+      selectSourceRange(wordRange, snapPlayhead: true)
+    }
+  }
+
+  /// The exact source range of one word, or nil if it has no monotonic sample bounds.
+  private func sourceRange(ofWord id: Word.ID) -> Range<Int>? {
+    guard let word = editPlan.words.first(where: { $0.id == id }),
+      let start = word.startSample, let end = word.endSample, start < end
+    else { return nil }
+    return start..<end
+  }
+
+  /// The source range spanning two words — the earlier word's start to the later word's end — so a
+  /// selection from `a` to `b` covers everything between them regardless of drag direction.
+  private func sourceRange(coveringWords lhs: Word.ID, _ rhs: Word.ID) -> Range<Int>? {
+    guard let left = sourceRange(ofWord: lhs), let right = sourceRange(ofWord: rhs) else {
+      return nil
+    }
+    return min(left.lowerBound, right.lowerBound)..<max(left.upperBound, right.upperBound)
   }
 
   /// What the fine-tune pane binds to: a live transcript selection takes precedence (a fresh

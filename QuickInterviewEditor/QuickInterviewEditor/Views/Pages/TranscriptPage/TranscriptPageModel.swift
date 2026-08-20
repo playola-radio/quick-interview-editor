@@ -55,11 +55,22 @@ class TranscriptPageModel: ViewModel {
   /// owner) can apply it to the shared player — live if playing, and for the next play otherwise.
   @ObservationIgnored var onPlaybackRateChanged: ((Double) -> Void)?
 
-  /// Fired whenever the selection changes, so `EditorModel` (which owns the freeform
-  /// `audioSelection`) can seed it from the transcript. One-directional — the model seeds from
-  /// the transcript and never writes back through here — so there is no feedback loop. This lives
-  /// on the model (not a view `.onChange`) so headless model tests see the seed without a view.
-  @ObservationIgnored var onSelectionChanged: (() -> Void)?
+  /// A text-selection gesture, expressed as which words it hit. The transcript no longer owns the
+  /// selection: it resolves the gesture to word IDs and hands this intent to `EditorModel`, which
+  /// writes the authoritative freeform `audioSelection`. One-directional — nothing writes back
+  /// through here. Lives on the model (not a view `.onChange`) so headless tests apply intents.
+  @ObservationIgnored var onSelectionIntent: ((SelectionIntent) -> Void)?
+
+  /// What a transcript selection gesture resolved to, in transcript terms (word IDs). `EditorModel`
+  /// turns each into a source-sample range on the authoritative `audioSelection`.
+  enum SelectionIntent: Equatable, Sendable {
+    /// A span from an anchor word to a focus word (drag, or a resolved multi-word selection).
+    case words(anchor: Word.ID, focus: Word.ID)
+    /// A single word; `extending` (Shift) stretches the current selection to it.
+    case word(Word.ID, extending: Bool)
+    /// Clear the selection entirely.
+    case clear
+  }
 
   // MARK: - Initialization
   let planURL: URL?
@@ -94,8 +105,12 @@ class TranscriptPageModel: ViewModel {
   let runTogetherMaxGapMs: Double = 30
   @ObservationIgnored private var gaps: [WordGap] = []
   var isLoading = false
-  var selectionAnchorID: Word.ID? { didSet { onSelectionChanged?() } }
-  var selectionFocusID: Word.ID? { didSet { onSelectionChanged?() } }
+  /// Transcript-local selection endpoints, kept only to render the text highlight while later tasks
+  /// migrate the transcript to derive its highlight from the authoritative `audioSelection`. No
+  /// longer the selection's source of truth — the gesture handlers emit `onSelectionIntent` and
+  /// `EditorModel.audioSelection` is authoritative. Retired in a later task.
+  var selectionAnchorID: Word.ID?
+  var selectionFocusID: Word.ID?
   var document = TranscriptDocument(words: [])
   var plainTranscriptText: String { document.text }
   let minFontSize = 11.0
@@ -307,6 +322,7 @@ class TranscriptPageModel: ViewModel {
   func clearSelectionTapped() {
     selectionAnchorID = nil
     selectionFocusID = nil
+    onSelectionIntent?(.clear)
   }
 
   /// Selects exactly one word (anchor == focus). Used by the waveform→transcript sync
@@ -314,6 +330,7 @@ class TranscriptPageModel: ViewModel {
   func selectWord(_ id: Word.ID) {
     selectionAnchorID = id
     selectionFocusID = id
+    onSelectionIntent?(.word(id, extending: false))
   }
 
   /// Selects the contiguous run between two words (a suggestion's or clip's endpoints).
@@ -327,6 +344,7 @@ class TranscriptPageModel: ViewModel {
     else { return false }
     selectionAnchorID = anchorID
     selectionFocusID = focusID
+    onSelectionIntent?(.words(anchor: anchorID, focus: focusID))
     return true
   }
 
@@ -358,8 +376,9 @@ class TranscriptPageModel: ViewModel {
     guard let plan = editPlan, plan.words.contains(where: { $0.id == id }) else { return }
     let anchorIsValid =
       selectionAnchorID.map { anchor in plan.words.contains { $0.id == anchor } } ?? false
-    if extending, anchorIsValid {
+    if extending, anchorIsValid, let anchor = selectionAnchorID {
       selectionFocusID = id  // keep anchor, move focus
+      onSelectionIntent?(.words(anchor: anchor, focus: id))
     } else if extending {
       selectWord(id)  // no valid anchor -> plain select
     } else if selectionAnchorID == id, selectionFocusID == id {
@@ -373,11 +392,15 @@ class TranscriptPageModel: ViewModel {
     guard let id = document.wordID(atUTF16Offset: offset) else { return }
     selectionAnchorID = id
     selectionFocusID = id
+    onSelectionIntent?(.word(id, extending: false))
   }
 
   func transcriptDragged(toUTF16Offset offset: Int) {
-    guard let id = document.wordID(atUTF16Offset: offset) else { return }
+    guard let id = document.wordID(atUTF16Offset: offset), let anchor = selectionAnchorID else {
+      return
+    }
     selectionFocusID = id
+    onSelectionIntent?(.words(anchor: anchor, focus: id))
   }
 
   func transcriptDragEnded() {}

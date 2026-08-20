@@ -73,7 +73,6 @@ struct EditorView: View {
       model.transcript.removedWordIDs = ids
     }
     .onChange(of: model.transcript.selectedSampleRange) { _, newRange in
-      model.seedSelectionFromTranscript()
       // Capture the cursor token synchronously at the moment the selection changes, so a ruler click
       // landing before this snap runs is seen as the newer cursor action and the snap yields to it.
       let cursorToken = model.cursorMoveToken
