@@ -49,8 +49,16 @@ struct EditedTimelineTests {
     let seam = timeline.seam(containingEdited: 33)
     expectNoDifference(seam?.sourceCut, 40)
     expectNoDifference(seam?.crossfadeLength, 10)
-    expectNoDifference(seam?.editedCenter, 30)
+    expectNoDifference(seam?.editedCrossfadeStart, 30)
     #expect(timeline.seam(containingEdited: 5) == nil)
+  }
+
+  @Test func editedCrossfadeCenterIsMidpointOfCrossfadeStartAndLength() {
+    // editedCrossfadeStart=30, crossfadeLength=10 -> center = 30 + 10/2 = 35.
+    let timeline = EditedTimeline(
+      sourceDurationSamples: 100, removals: [removal(40, 60, length: 10)])
+    let seam = timeline.seams[0]
+    expectNoDifference(seam.editedCrossfadeCenter, 35)
   }
 
   @Test func crossfadeClampsToAvailableHandle() {
@@ -92,6 +100,21 @@ struct EditedTimelineTests {
     expectNoDifference(timeline.editedToSource(20), 20)  // in K0's edited span
     expectNoDifference(timeline.editedToSource(70), 100)  // in K1's edited span
     expectNoDifference(timeline.editedToSource(120), 180)  // in K2's edited span
+  }
+
+  @Test func seamsSharingAShortIslandNeverOverClaimIt() {
+    // Remove [40,48) and [52,60), both requesting L=10; they share the 4-sample
+    // island K1=[48,52). Adjacent claims on one segment must never sum past its
+    // length — otherwise both seams cover the same edited span and the rendered
+    // stream outgrows editedDurationSamples. The earlier seam wins the island
+    // (clamped to 4); the later seam collapses to a hard cut.
+    // K0=[0,40) len40, K1=[48,52) len4, K2=[60,100) len40.
+    // editedDuration = (40+4+40) - (4+0) = 80.
+    let timeline = EditedTimeline(
+      sourceDurationSamples: 100,
+      removals: [removal(40, 48, length: 10, id: 1), removal(52, 60, length: 10, id: 2)])
+    expectNoDifference(timeline.seams.map(\.crossfadeLength), [4, 0])
+    expectNoDifference(timeline.editedDurationSamples, 80)
   }
 
   @Test func adjacentRemovalsCollapseKeptSegmentToZeroLength() {
@@ -149,5 +172,37 @@ struct EditedTimelineTests {
     expectNoDifference(timeline.keptSegments, [KeptSegment(source: 0..<100, editedStart: 0)])
     expectNoDifference(timeline.editedDurationSamples, 100)
     expectNoDifference(timeline.seams, [])
+  }
+
+  // MARK: - editedSample(forSource:)
+
+  @Test func editedSampleForSourceMapsWithinAKeptSegment() {
+    let timeline = EditedTimeline(
+      sourceDurationSamples: 100, removals: [removal(40, 60, length: 10)])
+    expectNoDifference(timeline.editedSample(forSource: 30), 30)  // in K0
+    expectNoDifference(timeline.editedSample(forSource: 70), 40)  // in K1: 30 + (70-60)
+  }
+
+  @Test func editedSampleForSourceIsNilInsideARemoval() {
+    let timeline = EditedTimeline(
+      sourceDurationSamples: 100, removals: [removal(40, 60, length: 10)])
+    expectNoDifference(timeline.editedSample(forSource: 50), nil)
+  }
+
+  @Test func editedSampleForSourceAtASegmentBoundaryBelongsToWhateverFollows() {
+    let timeline = EditedTimeline(
+      sourceDurationSamples: 100, removals: [removal(40, 60, length: 10)])
+    // source 40 is K0's upperBound / the removal's lowerBound: half-open, so it belongs to
+    // the removal, not K0 -> nil.
+    expectNoDifference(timeline.editedSample(forSource: 40), nil)
+    // source 60 is the removal's upperBound / K1's lowerBound: half-open, so it belongs to
+    // K1 -> its editedStart, 30.
+    expectNoDifference(timeline.editedSample(forSource: 60), 30)
+  }
+
+  @Test func editedSampleForSourcePastSourceEndIsNil() {
+    let timeline = EditedTimeline(sourceDurationSamples: 100, removals: [])
+    expectNoDifference(timeline.editedSample(forSource: 100), nil)
+    expectNoDifference(timeline.editedSample(forSource: 150), nil)
   }
 }

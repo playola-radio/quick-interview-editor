@@ -137,10 +137,11 @@ final class EditedWaveformAdapter {
     return WaveformSpan(positionX: clippedStart, width: clippedEnd - clippedStart)
   }
 
-  /// The bowtie span for a crossfaded seam: `editedCenter..<(editedCenter + crossfadeLength)`,
-  /// mapped to view-x. Nil for a zero-length (fully clamped) crossfade — there's nothing to draw.
+  /// The bowtie span for a crossfaded seam:
+  /// `editedCrossfadeStart..<(editedCrossfadeStart + crossfadeLength)`, mapped to view-x. Nil for
+  /// a zero-length (fully clamped) crossfade — there's nothing to draw.
   func spanForSeam(_ seam: TimelineSeam) -> WaveformSpan? {
-    span(forEdited: seam.editedCenter..<(seam.editedCenter + seam.crossfadeLength))
+    span(forEdited: seam.editedCrossfadeStart..<(seam.editedCrossfadeStart + seam.crossfadeLength))
   }
 
   // MARK: - Coordinate transforms

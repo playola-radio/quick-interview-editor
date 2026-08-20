@@ -100,7 +100,7 @@ struct EditedWaveformAdapterTests {
   @Test func spanForSeamCoversTheCrossfadeWindow() {
     let adapter = makeAdapter(viewportWidth: 15, samplesPerPixel: 2)
     let seam = adapter.timeline.seams[0]
-    expectNoDifference(seam.editedCenter, 16)
+    expectNoDifference(seam.editedCrossfadeStart, 16)
     expectNoDifference(seam.crossfadeLength, 8)
     // edited [16,24) -> x [8,12).
     expectNoDifference(adapter.spanForSeam(seam), WaveformSpan(positionX: 8, width: 4))

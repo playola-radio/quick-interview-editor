@@ -17,12 +17,17 @@ struct KeptSegment: Equatable {
 }
 
 /// A crossfaded cut point between two kept segments, expressed in both
-/// SOURCE (`sourceCut`) and EDITED (`editedCenter`) coordinates.
+/// SOURCE (`sourceCut`) and EDITED (`editedCrossfadeStart`) coordinates.
 struct TimelineSeam: Equatable, Identifiable {
   var id: UUID
   var sourceCut: Int
   var crossfadeLength: Int
-  var editedCenter: Int
+  /// EDITED-axis start of the crossfade overlap region — NOT its center, despite the
+  /// name of the deprecated `editedCenter` this replaced.
+  var editedCrossfadeStart: Int
+
+  /// The visual/edit center of the crossfade region, used by fade editing (PR5).
+  var editedCrossfadeCenter: Int { editedCrossfadeStart + crossfadeLength / 2 }
 }
 
 /// Maps between SOURCE sample coordinates (the original recording) and EDITED
@@ -74,15 +79,23 @@ struct EditedTimeline: Equatable {
     // it can never eat more than the kept segment immediately to its left or
     // immediately to its right.
     //
-    // Known limitation (spec §4.2): each removal is clamped independently, so
-    // two seams sharing a kept island shorter than both requested crossfades
-    // can each claim the full island, over-claiming it in edited space. This
-    // is spec-mandated behavior for a rare edge case; PR2's audio blending
-    // will revisit it.
-    let clampedLengths: [Int] = normalized.indices.map { index in
-      let leftHandle = sourceRangesList[index].count
+    // Clamping is sequential (left to right): a seam's left handle is reduced
+    // by whatever the PREVIOUS seam already claimed of that shared segment, so
+    // adjacent claims on one kept island can never sum past its length. Two
+    // seams over-claiming a short island would otherwise cover the same edited
+    // span, making the rendered stream longer than `editedDurationSamples`
+    // (duplicated audio, backward cursor jumps). The earlier seam wins the
+    // island; the later one shrinks — collapsing to a hard cut when nothing is
+    // left. (Revises spec §4.2's independent clamping, which PR2's audio
+    // blending was slated to revisit.)
+    var clampedLengths: [Int] = []
+    clampedLengths.reserveCapacity(normalized.count)
+    for index in normalized.indices {
+      let claimedByPreviousSeam = index > 0 ? clampedLengths[index - 1] : 0
+      let leftHandle = sourceRangesList[index].count - claimedByPreviousSeam
       let rightHandle = sourceRangesList[index + 1].count
-      return max(0, min(normalized[index].crossfade.lengthSamples, leftHandle, rightHandle))
+      clampedLengths.append(
+        max(0, min(normalized[index].crossfade.lengthSamples, leftHandle, rightHandle)))
     }
 
     self.removals = zip(normalized, clampedLengths).map { removal, length in
@@ -107,7 +120,7 @@ struct EditedTimeline: Equatable {
         id: normalized[index].id,
         sourceCut: normalized[index].removedRange.lowerBound,
         crossfadeLength: clampedLengths[index],
-        editedCenter: keptSegments[index + 1].editedStart)
+        editedCrossfadeStart: keptSegments[index + 1].editedStart)
     }
   }
 
@@ -189,9 +202,25 @@ struct EditedTimeline: Equatable {
     return ranges
   }
 
+  /// Maps a SOURCE sample to its EDITED position, for marker mapping (PR6 export). Returns nil
+  /// when the sample falls inside a removed range (the plan's `.nilInsideRemoval` policy) or is
+  /// outside every kept segment (e.g. past the end of the source). Segments and removals are
+  /// half-open, so a sample exactly at a kept segment's `source.upperBound` belongs to whatever
+  /// region follows, never the segment that ends there.
+  func editedSample(forSource sourceSample: Int) -> Int? {
+    if removals.contains(where: { $0.removedRange.contains(sourceSample) }) {
+      return nil
+    }
+    guard let segment = keptSegments.first(where: { $0.source.contains(sourceSample) }) else {
+      return nil
+    }
+    return segment.editedStart + (sourceSample - segment.source.lowerBound)
+  }
+
   func seam(containingEdited editedSample: Int) -> TimelineSeam? {
     seams.first {
-      editedSample >= $0.editedCenter && editedSample < $0.editedCenter + $0.crossfadeLength
+      editedSample >= $0.editedCrossfadeStart
+        && editedSample < $0.editedCrossfadeStart + $0.crossfadeLength
     }
   }
 

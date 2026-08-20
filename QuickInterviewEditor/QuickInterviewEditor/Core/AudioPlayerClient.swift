@@ -152,6 +152,10 @@ private actor LivePlayerBox {
   private var tickTask: Task<Void, Never>?
   private var startPlanSample = 0
   private var playRatio = 1.0
+  /// Set only while an *edited-timeline* playlist plays (`playEdited`); maps the node's
+  /// played input frames straight to EDITED samples. When set, position reporting uses it
+  /// instead of the single-offset `startPlanSample`/`playRatio` math the slice path uses.
+  private var editedFrameTimeline: PlaylistFrameTimeline?
   /// The session of the current play (nil when stopped). Tags every tick and gates
   /// `pause`/`resume`/`stop` so a stale session's call is a no-op.
   private var currentSession: PlaybackSessionID?
@@ -238,6 +242,191 @@ private actor LivePlayerBox {
     }
   }
 
+  /// SPIKE (PR2): plays an edited-timeline `plan` as one gapless stream on the shared node —
+  /// kept-segment interiors scheduled straight from `file`, seam crossfades pre-rendered into PCM
+  /// buffers and blended by `CrossfadeRenderer` — proving the playlist scheduler + edited-position
+  /// bookkeeping before the transport migrates to edited coordinates. Positions report EDITED
+  /// samples (`editedFrameTimeline`). Not exposed on `AudioPlayerClient` yet (PR3 wires the
+  /// transport); exercised by manual verification only.
+  func playEdited(
+    url: URL, plan: AudioEditRenderPlan, planSampleRate: Int, rate: Double,
+    session: PlaybackSessionID
+  ) async throws -> PlaybackEnd {
+    currentRate = Self.clampedRate(rate)
+    let file = try AVAudioFile(forReading: url)
+    let format = file.processingFormat
+    let ratio = format.sampleRate / Double(max(1, planSampleRate))
+
+    // Nothing playable (empty plan from a seek past the end, or everything clamped away
+    // against a short file): no-op without disturbing any current playback, mirroring the
+    // empty-range guard in `play`.
+    let scheduledEntries = try resolvedEntries(for: plan, file: file, ratio: ratio)
+    guard !scheduledEntries.isEmpty else { return .stopped }
+
+    supersede(broadcastStop: false)
+    currentSession = session
+    startPlanSample = 0
+    playRatio = ratio
+    // The cursor table is built from the RESOLVED entries — the frame counts that truly
+    // reach the node — never from a second rounding of the plan. A clamped or dropped
+    // item would otherwise leave every later entry's frame offset ahead of the audio.
+    editedFrameTimeline = PlaylistFrameTimeline(
+      scheduled: scheduledEntries.map {
+        PlaylistFrameTimeline.ScheduledSpan(
+          editedSpan: $0.editedSpan, nativeFrameCount: $0.nativeFrameCount)
+      },
+      ratio: ratio)
+
+    if node.engine == nil { engine.attach(node) }
+    if timePitch.engine == nil { engine.attach(timePitch) }
+    engine.connect(node, to: timePitch, format: format)
+    engine.connect(timePitch, to: engine.mainMixerNode, format: format)
+    timePitch.rate = Float(currentRate)
+    try engine.start()
+
+    let myGeneration = generation
+    // Only the final scheduled entry carries the completion callback; the queued entries
+    // ahead of it play back-to-back with `at: nil`, so the stream is gapless and completes
+    // exactly once.
+    let onLast: @Sendable (AVAudioPlayerNodeCompletionCallbackType) -> Void = {
+      @Sendable [weak self] _ in Task { await self?.complete(generation: myGeneration) }
+    }
+    let lastIndex = scheduledEntries.count - 1
+    for (index, entry) in scheduledEntries.enumerated() {
+      let completion = index == lastIndex ? onLast : nil
+      switch entry.payload {
+      case .segment(let start, let count):
+        node.scheduleSegment(
+          file, startingFrame: start, frameCount: count, at: nil,
+          completionCallbackType: .dataPlayedBack, completionHandler: completion)
+      case .buffer(let buffer):
+        node.scheduleBuffer(
+          buffer, at: nil, options: [], completionCallbackType: .dataPlayedBack,
+          completionHandler: completion)
+      }
+    }
+    node.play()
+    startTicking()
+    return await withCheckedContinuation { (cont: CheckedContinuation<PlaybackEnd, Never>) in
+      continuation = cont
+    }
+  }
+
+  /// What one plan item becomes on the node — the schedulable payload plus the edited span
+  /// it reproduces and the native frames genuinely scheduled, so the cursor table can be
+  /// built from the same counts the node plays (one rounding, one source of truth).
+  private struct ScheduledEntry {
+    enum Payload {
+      case segment(start: AVAudioFramePosition, count: AVAudioFrameCount)
+      case buffer(AVAudioPCMBuffer)
+    }
+
+    var payload: Payload
+    var editedSpan: Range<Int>
+    var nativeFrameCount: Int
+  }
+
+  /// Resolves every plan item that will ACTUALLY reach the node, before `playEdited` touches
+  /// any playback state. Segments clamp both ends to `file.length` (like `play`) so a
+  /// stale/short canonical file can't schedule audio that doesn't exist; items that resolve
+  /// to nothing (rounded-to-zero counts, EOF-empty seams) are dropped here — which is why
+  /// `playEdited` can safely attach its completion callback to the LAST resolved entry.
+  /// Attaching it by plan index instead would strand the suspended waiter forever if the
+  /// plan's final item happened to be one of the dropped ones.
+  private func resolvedEntries(
+    for plan: AudioEditRenderPlan, file: AVAudioFile, ratio: Double
+  ) throws -> [ScheduledEntry] {
+    var entries: [ScheduledEntry] = []
+    for item in plan.items {
+      switch item {
+      case .segment(let source, _):
+        let startFrame = AVAudioFramePosition((Double(source.lowerBound) * ratio).rounded())
+        let endFrame = AVAudioFramePosition((Double(source.upperBound) * ratio).rounded())
+        let clampedStart = min(max(0, startFrame), file.length)
+        let clampedEnd = min(endFrame, file.length)
+        let frameCount = AVAudioFrameCount(max(0, clampedEnd - clampedStart))
+        guard frameCount > 0 else { continue }
+        entries.append(
+          ScheduledEntry(
+            payload: .segment(start: clampedStart, count: frameCount),
+            editedSpan: item.editedSpan,
+            nativeFrameCount: Int(frameCount)))
+      case .seam(_, let leftTail, let rightHead, _, _, let fadeOffset):
+        guard
+          let buffer = try seamBuffer(
+            file: file, leftTail: leftTail, rightHead: rightHead,
+            fadeOffset: fadeOffset, ratio: ratio)
+        else { continue }
+        entries.append(
+          ScheduledEntry(
+            payload: .buffer(buffer),
+            editedSpan: item.editedSpan,
+            nativeFrameCount: Int(buffer.frameLength)))
+      }
+    }
+    return entries
+  }
+
+  /// Pre-renders one seam's crossfade into a PCM buffer: reads the outgoing tail and incoming head
+  /// from `file`, blends them with equal-power gains (the spike's fixed curve — PR5 threads the
+  /// per-seam curve through the plan), and packs the result into `file.processingFormat`.
+  /// `fadeOffset` (plan samples skipped by a seek into the crossfade) keeps the gains continuing
+  /// the original fade instead of restarting it. The overlap length is `leftTail.count` (the
+  /// plan's seam `length` always equals its trimmed tail/head range counts).
+  private func seamBuffer(
+    file: AVAudioFile, leftTail: Range<Int>, rightHead: Range<Int>, fadeOffset: Int,
+    ratio: Double
+  ) throws -> AVAudioPCMBuffer? {
+    let nativeCount = AVAudioFrameCount(max(0, (Double(leftTail.count) * ratio).rounded()))
+    guard nativeCount > 0 else { return nil }
+    let leftStart = AVAudioFramePosition((Double(leftTail.lowerBound) * ratio).rounded())
+    let rightStart = AVAudioFramePosition((Double(rightHead.lowerBound) * ratio).rounded())
+    let out = try readFloats(file: file, startFrame: leftStart, frameCount: nativeCount)
+    let incoming = try readFloats(file: file, startFrame: rightStart, frameCount: nativeCount)
+    let nativeFadeOffset = Int((Double(fadeOffset) * ratio).rounded())
+    let blended = CrossfadeRenderer.blend(
+      out: out, incoming: incoming, curve: .equalPower,
+      fadeOffset: nativeFadeOffset, fadeTotal: nativeFadeOffset + Int(nativeCount))
+    guard
+      let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: nativeCount),
+      let channels = buffer.floatChannelData
+    else { return nil }
+    buffer.frameLength = nativeCount
+    let channelCount = Int(file.processingFormat.channelCount)
+    for channel in 0..<channelCount {
+      let source = blended[min(channel, blended.count - 1)]
+      let destination = channels[channel]
+      for frame in 0..<Int(nativeCount) {
+        destination[frame] = frame < source.count ? source[frame] : 0
+      }
+    }
+    return buffer
+  }
+
+  /// Reads `frameCount` frames from `startFrame` into per-channel float arrays, zero-padding any
+  /// frames past EOF so the caller always gets exactly `frameCount` samples per channel.
+  private func readFloats(
+    file: AVAudioFile, startFrame: AVAudioFramePosition, frameCount: AVAudioFrameCount
+  ) throws -> [[Float]] {
+    let channelCount = Int(file.processingFormat.channelCount)
+    var result = Array(
+      repeating: [Float](repeating: 0, count: Int(frameCount)), count: channelCount)
+    let clampedStart = max(0, min(startFrame, file.length))
+    let available = AVAudioFrameCount(max(0, min(Int64(frameCount), file.length - clampedStart)))
+    guard available > 0,
+      let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: available)
+    else { return result }
+    file.framePosition = clampedStart
+    try file.read(into: buffer, frameCount: available)
+    guard let channels = buffer.floatChannelData else { return result }
+    let read = Int(buffer.frameLength)
+    for channel in 0..<channelCount {
+      let source = channels[channel]
+      for frame in 0..<read { result[channel][frame] = source[frame] }
+    }
+    return result
+  }
+
   func stop(session: PlaybackSessionID?) {
     guard let session else {
       supersede(reason: .stopped)  // nil = stop whatever is playing
@@ -256,18 +445,17 @@ private actor LivePlayerBox {
     // exact render time isn't available yet. `lastRenderTime`/`playerTime` are nil in the
     // brief window after `play()` before the first render cycle — fall back to the range
     // start there so an early Pause still stops and freezes at a valid sample.
-    let planSample: Int
+    let restingSample: Int
     if let nodeTime = node.lastRenderTime,
       let playerTime = node.playerTime(forNodeTime: nodeTime)
     {
-      let framesPlayed = max(0, playerTime.sampleTime)
-      planSample = startPlanSample + Int(Double(framesPlayed) / max(playRatio, .ulpOfOne))
+      restingSample = positionSample(forFramesPlayed: Int(max(0, playerTime.sampleTime)))
     } else {
-      planSample = startPlanSample
+      restingSample = positionSample(forFramesPlayed: 0)
     }
     stopTicking(broadcastStop: false)  // stop polling; keep session + node position
     node.pause()  // pauses without discarding the scheduled segment
-    return planSample
+    return restingSample
   }
 
   /// Resumes a paused session: restart the node and the tick loop. Returns whether the session
@@ -348,7 +536,9 @@ private actor LivePlayerBox {
     tickTask?.cancel()
     tickTask = nil
     if broadcastStop, let session = currentSession {
-      broadcast(PlaybackPosition(sessionID: session, sample: startPlanSample, isPlaying: false))
+      broadcast(
+        PlaybackPosition(
+          sessionID: session, sample: positionSample(forFramesPlayed: 0), isPlaying: false))
     }
   }
 
@@ -363,13 +553,25 @@ private actor LivePlayerBox {
       node.isPlaying, let nodeTime = node.lastRenderTime,
       let playerTime = node.playerTime(forNodeTime: nodeTime)
     else { return }
-    let framesPlayed = max(0, playerTime.sampleTime)
-    let planSample = startPlanSample + Int(Double(framesPlayed) / max(playRatio, .ulpOfOne))
-    broadcast(PlaybackPosition(sessionID: session, sample: planSample, isPlaying: true))
+    let framesPlayed = Int(max(0, playerTime.sampleTime))
+    let sample = positionSample(forFramesPlayed: framesPlayed)
+    broadcast(PlaybackPosition(sessionID: session, sample: sample, isPlaying: true))
+  }
+
+  /// Converts the node's played input-frame count to the reported position sample: an EDITED
+  /// sample while a `playEdited` playlist runs (via `editedFrameTimeline`), otherwise the
+  /// slice path's plan sample from the single start offset.
+  private func positionSample(forFramesPlayed framesPlayed: Int) -> Int {
+    if let editedFrameTimeline {
+      return editedFrameTimeline.editedSample(forFramesPlayed: framesPlayed)
+    }
+    return startPlanSample + Int(Double(framesPlayed) / max(playRatio, .ulpOfOne))
   }
 
   private func stopNode() {
     node.stop()
+    editedFrameTimeline = nil  // back to slice-path position math until the next `playEdited`
+
     // Clear the time-pitch unit's internal overlap/latency buffers so a stop, supersede, or slice
     // switch can't smear the tail of the old segment into the start of the next one.
     if timePitch.engine != nil { timePitch.reset() }
