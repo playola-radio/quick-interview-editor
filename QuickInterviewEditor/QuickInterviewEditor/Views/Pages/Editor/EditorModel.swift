@@ -668,8 +668,10 @@ final class EditorModel: ViewModel {
   /// (no word contains it) clears the selection.
   func waveformClicked(atX positionX: CGFloat, extending: Bool) {
     let sample = editedWaveform.xToSourceSample(positionX)
-    if extending {
-      let anchor = selectionAnchorSample ?? audioSelection?.lowerBound ?? sample
+    // Shift-click extends from an existing anchor. With no anchor and no live selection there is
+    // nothing to extend, so fall through to plain-click behavior (select the containing word) —
+    // matching Logic, and avoiding a degenerate `sample..<sample` that would clear instead.
+    if extending, let anchor = selectionAnchorSample ?? audioSelection?.lowerBound {
       selectSourceRange(min(anchor, sample)..<max(anchor, sample), snapPlayhead: false)
       return
     }
@@ -775,14 +777,20 @@ final class EditorModel: ViewModel {
   /// clobbering this placement. An empty/degenerate range clears. This is the single write path the
   /// waveform (marquee + click) uses.
   func selectSourceRange(_ range: Range<Int>, snapPlayhead: Bool) {
-    guard range.lowerBound < range.upperBound else {
+    // Clamp to the file's real extent so a selection built from bad word bounds (a word whose
+    // `endSample` overruns the audio) can never persist an out-of-file removal that revalidation
+    // silently drops on reload. `selectSourceRange` is the single write path, so clamping here
+    // guards every caller; in-bounds selections are unchanged.
+    let lower = max(0, range.lowerBound)
+    let upper = min(range.upperBound, editPlan.source.durationSamples)
+    guard lower < upper else {
       audioSelection = nil
       return
     }
-    audioSelection = range
+    audioSelection = lower..<upper
     if snapPlayhead {
       stopTransportForRuler()
-      playheadSample = range.lowerBound
+      playheadSample = lower
       cursorMoveGeneration &+= 1
     }
   }

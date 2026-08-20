@@ -152,6 +152,47 @@ struct EditorSelectionTests {
     expectNoDifference(model.selectionSummary, "No selection")
   }
 
+  /// A selection built from bad word bounds must not persist past the file's end. `selectSourceRange`
+  /// is the single write path, so it clamps to `[0, durationSamples]`; a range fully past EOF collapses
+  /// to no selection. Regression: an out-of-file range flowed straight into a removal that revalidation
+  /// silently dropped on reload, so the edit vanished.
+  @Test func selectSourceRangeClampsToFileExtent() {
+    let model = editor()
+    let duration = model.editPlan.source.durationSamples
+    model.selectSourceRange((duration - 10_000)..<(duration + 50_000), snapPlayhead: false)
+    expectNoDifference(model.audioSelection, (duration - 10_000)..<duration)
+
+    model.selectSourceRange((duration + 100_000)..<(duration + 200_000), snapPlayhead: false)
+    expectNoDifference(model.audioSelection, nil)
+  }
+
+  /// A Shift-click in the waveform with no anchor and no live selection has nothing to extend, so it
+  /// behaves as a plain click (selects the containing word) instead of collapsing to an empty range
+  /// that clears. Word 3 ("young", 77704..<98916) contains sample 88000 (x=440 at spp 200).
+  @Test func firstWaveformShiftClickPlainSelectsContainingWord() {
+    let model = editor()
+    installGeometry(model)
+    #expect(model.audioSelection == nil)
+    model.waveformClicked(atX: 440, extending: true)
+    expectNoDifference(model.audioSelection, 77704..<98916)
+  }
+
+  /// Identity source + edited geometry (no removals) so `editedWaveform.xToSourceSample(x) == x * 200`
+  /// and `hasUsableGeometry` is true — mirrors `EditorAreaSelectTests.geometry`.
+  private func installGeometry(_ model: EditorModel, samplesPerPixel: Double = 200) {
+    let duration = model.editPlan.source.durationSamples
+    model.waveform.totalSamples = duration
+    model.waveform.waveform = Waveform.pyramid(
+      baseMins: [0], baseMaxs: [0], sampleRate: model.editPlan.source.sampleRate,
+      totalSamples: duration, baseBucketSize: 4)
+    model.waveform.viewportWidth = 1000
+    model.waveform.samplesPerPixel = samplesPerPixel
+    model.waveform.visibleStartSample = 0
+    model.editedWaveform.viewportWidth = 1000
+    model.editedWaveform.samplesPerPixel = samplesPerPixel
+    model.editedWaveform.visibleStartSample = 0
+  }
+
   @Test func addSliceWordIDsAreOverlapDerivedAtCommit() {
     let model = editor()
     let words = model.editPlan.words
