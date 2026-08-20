@@ -62,7 +62,7 @@ struct AudioEditRenderPlan: Equatable, Sendable {
           leftTail: (segment.source.upperBound - length)..<segment.source.upperBound,
           rightHead: rightSegment.source.lowerBound..<(rightSegment.source.lowerBound + length),
           length: length,
-          editedStart: seam.editedCenter))
+          editedStart: seam.editedCrossfadeStart))
     }
 
     self.items = Self.trimmed(full, toStartEdited: max(0, startEditedSample))

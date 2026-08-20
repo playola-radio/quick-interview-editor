@@ -49,8 +49,16 @@ struct EditedTimelineTests {
     let seam = timeline.seam(containingEdited: 33)
     expectNoDifference(seam?.sourceCut, 40)
     expectNoDifference(seam?.crossfadeLength, 10)
-    expectNoDifference(seam?.editedCenter, 30)
+    expectNoDifference(seam?.editedCrossfadeStart, 30)
     #expect(timeline.seam(containingEdited: 5) == nil)
+  }
+
+  @Test func editedCrossfadeCenterIsMidpointOfCrossfadeStartAndLength() {
+    // editedCrossfadeStart=30, crossfadeLength=10 -> center = 30 + 10/2 = 35.
+    let timeline = EditedTimeline(
+      sourceDurationSamples: 100, removals: [removal(40, 60, length: 10)])
+    let seam = timeline.seams[0]
+    expectNoDifference(seam.editedCrossfadeCenter, 35)
   }
 
   @Test func crossfadeClampsToAvailableHandle() {

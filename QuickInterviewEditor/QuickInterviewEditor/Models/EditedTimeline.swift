@@ -17,12 +17,17 @@ struct KeptSegment: Equatable {
 }
 
 /// A crossfaded cut point between two kept segments, expressed in both
-/// SOURCE (`sourceCut`) and EDITED (`editedCenter`) coordinates.
+/// SOURCE (`sourceCut`) and EDITED (`editedCrossfadeStart`) coordinates.
 struct TimelineSeam: Equatable, Identifiable {
   var id: UUID
   var sourceCut: Int
   var crossfadeLength: Int
-  var editedCenter: Int
+  /// EDITED-axis start of the crossfade overlap region — NOT its center, despite the
+  /// name of the deprecated `editedCenter` this replaced.
+  var editedCrossfadeStart: Int
+
+  /// The visual/edit center of the crossfade region, used by fade editing (PR5).
+  var editedCrossfadeCenter: Int { editedCrossfadeStart + crossfadeLength / 2 }
 }
 
 /// Maps between SOURCE sample coordinates (the original recording) and EDITED
@@ -107,7 +112,7 @@ struct EditedTimeline: Equatable {
         id: normalized[index].id,
         sourceCut: normalized[index].removedRange.lowerBound,
         crossfadeLength: clampedLengths[index],
-        editedCenter: keptSegments[index + 1].editedStart)
+        editedCrossfadeStart: keptSegments[index + 1].editedStart)
     }
   }
 
@@ -191,7 +196,8 @@ struct EditedTimeline: Equatable {
 
   func seam(containingEdited editedSample: Int) -> TimelineSeam? {
     seams.first {
-      editedSample >= $0.editedCenter && editedSample < $0.editedCenter + $0.crossfadeLength
+      editedSample >= $0.editedCrossfadeStart
+        && editedSample < $0.editedCrossfadeStart + $0.crossfadeLength
     }
   }
 
