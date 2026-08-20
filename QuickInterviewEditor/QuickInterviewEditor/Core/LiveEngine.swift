@@ -347,32 +347,37 @@ enum LiveEngine {
       currentDirectory: launch.workingDirectory,
       extraEnvironment: launch.environment
     )
-    if Task.isCancelled {
+    // The render path cancels its child through the stream's `onTermination`; this is a
+    // plain async function, so the equivalent hook is a cancellation handler. Killing the
+    // process group on cancel means a Cancel/tab-close never waits for — or hangs on —
+    // the subprocess; the awaits below then unwind via EOF + exit.
+    try await withTaskCancellationHandler {
+      async let stdoutData = proc.readStdoutToEnd()
+      async let exitCode = proc.waitForExit()
+
+      // No QIE_EVENT progress is emitted here; drain and discard every stderr line
+      // anyway so the child can't stall on a full pipe.
+      for await _ in proc.stderrLines() {}
+
+      let out = await stdoutData
+      let code = await exitCode
+      let logURL = writeJobLog(
+        kind: "inject-markers", audio: files[0].url, exitCode: code, stdout: out,
+        stderr: proc.stderrTail())
+
+      // A cancel-triggered kill surfaces as a nonzero exit; report it as cancellation,
+      // not an engine failure.
+      if Task.isCancelled {
+        throw CancellationError()
+      }
+      guard code == 0 else {
+        throw EngineClientError.injectFailed(proc.stderrTail() + logHint(logURL))
+      }
+      let expectedPaths = Set(files.map(\.url.path))
+      try decodeInjectResult(out, expectedPaths: expectedPaths, logURL: logURL)
+    } onCancel: {
       proc.terminate()
-      throw CancellationError()
     }
-
-    async let stdoutData = proc.readStdoutToEnd()
-    async let exitCode = proc.waitForExit()
-
-    // No QIE_EVENT progress is emitted here; drain and discard every stderr line
-    // anyway so the child can't stall on a full pipe.
-    for await _ in proc.stderrLines() {}
-
-    let out = await stdoutData
-    let code = await exitCode
-    let logURL = writeJobLog(
-      kind: "inject-markers", audio: files[0].url, exitCode: code, stdout: out,
-      stderr: proc.stderrTail())
-
-    if Task.isCancelled {
-      throw CancellationError()
-    }
-    guard code == 0 else {
-      throw EngineClientError.injectFailed(proc.stderrTail() + logHint(logURL))
-    }
-    let expectedPaths = Set(files.map(\.url.path))
-    try decodeInjectResult(out, expectedPaths: expectedPaths, logURL: logURL)
   }
 
   /// The request as the snake-cased JSON `logic_markers.cli inject-markers` reads.

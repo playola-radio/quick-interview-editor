@@ -28,8 +28,16 @@ struct ExportRenderClient: Sendable {
 extension ExportRenderClient: DependencyKey {
   static let liveValue = ExportRenderClient(
     renderSlice: { job in
-      // Reading and writing whole slices must never run on the main actor.
-      try await Task.detached { try ExportAudioRenderer.render(job) }.value
+      // Reading and writing whole slices must never run on the main actor — but a bare
+      // detached task also severs cancellation: the renderer's `Task.checkCancellation()`
+      // would consult the detached task, never the cancelled export. Forward it
+      // explicitly so Cancel/tab-close interrupts a long render at the next chunk.
+      let render = Task.detached { try ExportAudioRenderer.render(job) }
+      return try await withTaskCancellationHandler {
+        try await render.value
+      } onCancel: {
+        render.cancel()
+      }
     }
   )
 }
