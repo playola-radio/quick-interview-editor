@@ -156,8 +156,9 @@ struct EditorFineTuneTests {
     model.commitEditTapped()
     let committed = model.slices[id: slice.id]!
     expectNoDifference(committed.startSample..<committed.endSample, draft)
-    // Word membership + snippet are re-derived from the new range, not the stale selection.
-    expectNoDifference(committed.wordIDs, wordIDs(overlapping: draft, words: model.editPlan.words))
+    // Word membership + snippet are re-derived from the new range by the spec's overlap rule,
+    // not the stale selection.
+    expectNoDifference(committed.wordIDs, wordIDs(anyOverlap: draft, words: model.editPlan.words))
     #expect(!committed.snippet.isEmpty)
 
     // Exactly one undo entry for the whole drag: undoing restores the original cut in one step.

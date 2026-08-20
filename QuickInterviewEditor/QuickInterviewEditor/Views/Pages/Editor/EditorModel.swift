@@ -1938,13 +1938,15 @@ final class EditorModel: ViewModel {
   }
 
   /// Re-derives a slice's word membership, snippet, and warnings for a new sample range once
-  /// the cut points move. Word membership is by midpoint — the old, selection-time word IDs go
-  /// stale under an arbitrary cut.
+  /// the cut points move. Membership is by overlap ("a word is in a clip iff any of its audio
+  /// overlaps the range" — the spec's single clip-membership rule), matching how a clip is built
+  /// from a freeform selection so editing a clip's boundaries can never silently drop a word that
+  /// creating it included.
   private func updatedSlice(_ slice: Slice, to range: Range<Int>) -> Slice {
     var updated = slice
     updated.startSample = range.lowerBound
     updated.endSample = range.upperBound
-    updated.wordIDs = wordIDs(overlapping: range, words: editPlan.words)
+    updated.wordIDs = wordIDs(anyOverlap: range, words: editPlan.words)
     updated.snippet = displaySnippet(sliceSnippet(for: updated.wordIDs, words: editPlan.words))
     updated.warnings = sliceWarnings(
       startSample: range.lowerBound, endSample: range.upperBound,
