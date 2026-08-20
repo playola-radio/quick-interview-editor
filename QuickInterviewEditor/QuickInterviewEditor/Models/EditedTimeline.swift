@@ -194,6 +194,21 @@ struct EditedTimeline: Equatable {
     return ranges
   }
 
+  /// Maps a SOURCE sample to its EDITED position, for marker mapping (PR6 export). Returns nil
+  /// when the sample falls inside a removed range (the plan's `.nilInsideRemoval` policy) or is
+  /// outside every kept segment (e.g. past the end of the source). Segments and removals are
+  /// half-open, so a sample exactly at a kept segment's `source.upperBound` belongs to whatever
+  /// region follows, never the segment that ends there.
+  func editedSample(forSource sourceSample: Int) -> Int? {
+    if removals.contains(where: { $0.removedRange.contains(sourceSample) }) {
+      return nil
+    }
+    guard let segment = keptSegments.first(where: { $0.source.contains(sourceSample) }) else {
+      return nil
+    }
+    return segment.editedStart + (sourceSample - segment.source.lowerBound)
+  }
+
   func seam(containingEdited editedSample: Int) -> TimelineSeam? {
     seams.first {
       editedSample >= $0.editedCrossfadeStart

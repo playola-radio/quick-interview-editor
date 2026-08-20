@@ -158,4 +158,36 @@ struct EditedTimelineTests {
     expectNoDifference(timeline.editedDurationSamples, 100)
     expectNoDifference(timeline.seams, [])
   }
+
+  // MARK: - editedSample(forSource:)
+
+  @Test func editedSampleForSourceMapsWithinAKeptSegment() {
+    let timeline = EditedTimeline(
+      sourceDurationSamples: 100, removals: [removal(40, 60, length: 10)])
+    expectNoDifference(timeline.editedSample(forSource: 30), 30)  // in K0
+    expectNoDifference(timeline.editedSample(forSource: 70), 40)  // in K1: 30 + (70-60)
+  }
+
+  @Test func editedSampleForSourceIsNilInsideARemoval() {
+    let timeline = EditedTimeline(
+      sourceDurationSamples: 100, removals: [removal(40, 60, length: 10)])
+    expectNoDifference(timeline.editedSample(forSource: 50), nil)
+  }
+
+  @Test func editedSampleForSourceAtASegmentBoundaryBelongsToWhateverFollows() {
+    let timeline = EditedTimeline(
+      sourceDurationSamples: 100, removals: [removal(40, 60, length: 10)])
+    // source 40 is K0's upperBound / the removal's lowerBound: half-open, so it belongs to
+    // the removal, not K0 -> nil.
+    expectNoDifference(timeline.editedSample(forSource: 40), nil)
+    // source 60 is the removal's upperBound / K1's lowerBound: half-open, so it belongs to
+    // K1 -> its editedStart, 30.
+    expectNoDifference(timeline.editedSample(forSource: 60), 30)
+  }
+
+  @Test func editedSampleForSourcePastSourceEndIsNil() {
+    let timeline = EditedTimeline(sourceDurationSamples: 100, removals: [])
+    expectNoDifference(timeline.editedSample(forSource: 100), nil)
+    expectNoDifference(timeline.editedSample(forSource: 150), nil)
+  }
 }
