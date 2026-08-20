@@ -12,6 +12,12 @@ struct EditorSelectionTests {
       canonicalAudioURL: Fixtures.canonicalAudioURL, editPlan: plan)
   }
 
+  /// The overflow-safe sample midpoint of a word with real bounds — used to build ranges that
+  /// clip a word at its edge (start past its start / end before its end).
+  private func mid(_ word: Word) -> Int {
+    word.startSample! + (word.endSample! - word.startSample!) / 2
+  }
+
   @Test func transcriptSelectionWritesAudioSelectionViaIntent() {
     let model = editor()
     // Word 2 ("a", samples 70648..<74176) has real sample bounds — see EditorAreaSelectTests.
@@ -90,5 +96,39 @@ struct EditorSelectionTests {
     model.selectionEdgeDraggedToSource(.start, target)
     #expect(model.audioSelection?.upperBound == 40_000)
     #expect(abs((model.audioSelection?.lowerBound ?? 0) - target) <= 1)
+  }
+
+  @Test func selectedWordIDsHighlightsPartiallyOverlappedWords() {
+    let model = editor()
+    let words = model.editPlan.words
+    // A selection from mid-word[1] to mid-word[3] clips the edges of word[1]/word[3] and fully
+    // covers word[2]. Overlap highlights all three; full-containment would highlight only word[2].
+    let range = mid(words[1])..<mid(words[3])
+    model.selectSourceRange(range, snapPlayhead: false)
+    expectNoDifference(
+      model.selectedWordIDs, Set([words[1].id, words[2].id, words[3].id]))
+  }
+
+  @Test func strikethroughIsOnlyFullyRemovedWords() async {
+    let model = editor()
+    let words = model.editPlan.words
+    // Range spans mid-word[1] to just past mid-word[3]: it fully contains word[2] but only clips
+    // word[1] and word[3]. Midpoint membership (the old rule) would strike all three; the spec's
+    // full-containment rule strikes only word[2].
+    let range = mid(words[1])..<(mid(words[3]) + 1)
+    model.selectSourceRange(range, snapPlayhead: false)
+    await model.removeSelectedSectionTapped()
+    expectNoDifference(model.removedWordIDs, Set([words[2].id]))
+  }
+
+  @Test func addSliceWordIDsAreOverlapDerivedAtCommit() {
+    let model = editor()
+    let words = model.editPlan.words
+    // A selection anchored mid-word[1] to mid-word[3] clips the edges of word[1]/word[3]; slice
+    // membership is overlap-derived from the RANGE, not the transcript's own (empty) selection.
+    let range = mid(words[1])..<mid(words[3])
+    model.selectSourceRange(range, snapPlayhead: false)
+    model.addSliceTapped()
+    expectNoDifference(model.slices.last?.wordIDs, wordIDs(anyOverlap: range, words: words))
   }
 }

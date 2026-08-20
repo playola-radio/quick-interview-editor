@@ -291,9 +291,11 @@ struct EditorRemovalTests {
     }
   }
 
-  /// Word 3's midpoint (77704 + (98916-77704)/2 = 88310) falls inside the removal below;
-  /// words 1, 2, and 4's midpoints do not.
-  @Test func removedWordIDsTracksMidpointMembershipAndClearsOnUndo() async {
+  /// The removal `72_000..<114_000` fully contains only word 3 ("young", 77704..<98916); it clips
+  /// word 2 ("a", 70648..<74176) and word 4 ("Hayes", 107736..<119202) at their edges. Strikethrough
+  /// is full-containment, not midpoint — the clipped neighbors keep sounding, so only word 3 is
+  /// struck. (Midpoint membership would wrongly strike words 2 and 4 too.)
+  @Test func removedWordIDsTracksFullContainmentAndClearsOnUndo() async {
     let fileSystem = LockIsolated<[URL: Data]>([:])
     await withDependencies {
       $0.defaultFileStorage = FileStorage.inMemory(fileSystem: fileSystem)
@@ -305,7 +307,7 @@ struct EditorRemovalTests {
       model.mutateDocument { doc in
         doc.timelineRemovals.append(
           TimelineRemoval(
-            id: Fixtures.uuid(5), removedRange: 80_000..<100_000,
+            id: Fixtures.uuid(5), removedRange: 72_000..<114_000,
             crossfade: Crossfade(lengthSamples: 48, curve: .equalPower)))
       }
       expectNoDifference(model.removedWordIDs, [word3])

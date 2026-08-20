@@ -374,12 +374,25 @@ final class EditorModel: ViewModel {
   var redRanges: [Range<Int>] { transcript.runTogetherSampleRanges }
 
   // MARK: - Removed words (transcript)
-  /// Words struck through in the transcript because their MIDPOINT falls inside ANY removed
-  /// section, reusing the same midpoint-membership rule as marquee selection
-  /// (`wordIDs(overlapping:words:)`). Derived from `timelineRemovals`, so a removal or its
-  /// undo both update this without any separate bookkeeping.
+  /// Words struck through in the transcript because their ENTIRE `[startSample, endSample)` lies
+  /// inside a removed section — the spec's strikethrough predicate ("no audio of this word
+  /// survives the removal"). A word only partially clipped by a removal is NOT struck (it still
+  /// sounds). Derived from `timelineRemovals`, so a removal or its undo both update this without
+  /// any separate bookkeeping.
   var removedWordIDs: Set<Word.ID> {
-    Set(timelineRemovals.flatMap { wordIDs(overlapping: $0.removedRange, words: editPlan.words) })
+    Set(
+      timelineRemovals.flatMap { wordIDs(fullyContainedIn: $0.removedRange, words: editPlan.words) }
+    )
+  }
+
+  // MARK: - Selection highlight (transcript)
+  /// Words the transcript highlights because any of their audio intersects the freeform
+  /// `audioSelection` — the spec's overlap predicate ("is any of this word still heard?"). Derived
+  /// from the authoritative selection and pushed into `transcript` by the view, so a freeform
+  /// (non-word-aligned) selection highlights the partially-covered words at its edges too. Empty
+  /// when there's no selection.
+  var selectedWordIDs: Set<Word.ID> {
+    audioSelection.map { Set(wordIDs(anyOverlap: $0, words: editPlan.words)) } ?? []
   }
 
   // MARK: - Clip containers (transcript)
@@ -1111,7 +1124,10 @@ final class EditorModel: ViewModel {
 
   func addSliceTapped() {
     guard canAddSlice, let range = selectedSourceRange else { return }
-    let wordIDs = transcript.orderedSelectedWordIDs
+    // Clip membership is derived from the selection RANGE (overlap), not the transcript's own
+    // selection — a freeform selection has no transcript words, and an edge-clipped word still
+    // belongs to the clip.
+    let wordIDs = wordIDs(anyOverlap: range, words: editPlan.words)
     guard !wordIDs.isEmpty else { return }
     let slice = Slice(
       id: UUID(),
@@ -1119,7 +1135,7 @@ final class EditorModel: ViewModel {
       startSample: range.lowerBound,
       endSample: range.upperBound,
       wordIDs: wordIDs,
-      snippet: displaySnippet(transcript.selectionSnippet),
+      snippet: displaySnippet(sliceSnippet(for: wordIDs, words: editPlan.words)),
       warnings: sliceWarnings(
         startSample: range.lowerBound, endSample: range.upperBound,
         durationSamples: editPlan.source.durationSamples, silences: editPlan.silences)

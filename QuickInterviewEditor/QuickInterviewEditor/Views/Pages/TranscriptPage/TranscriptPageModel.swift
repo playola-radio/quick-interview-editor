@@ -139,6 +139,10 @@ class TranscriptPageModel: ViewModel {
   /// from `timelineRemovals` and pushed in by the view — mirrors `clipBands`. The transcript
   /// stays layout-local and only renders what it's handed.
   var removedWordIDs: Set<Word.ID> = []
+  /// Words to highlight, derived by `EditorModel` from the authoritative `audioSelection` (overlap
+  /// predicate) and pushed in by the view — mirrors `removedWordIDs`/`clipBands`. This is what the
+  /// renderer draws; the transcript's own `selectedWordIDSet` shadow is retired in a later task.
+  var highlightedWordIDs: Set<Word.ID> = []
   /// The latest explicit reveal request (from clicking a suggestion or clip). The view scrolls
   /// to it regardless of `followMode`; nil until the first reveal.
   var reveal: TranscriptReveal?
