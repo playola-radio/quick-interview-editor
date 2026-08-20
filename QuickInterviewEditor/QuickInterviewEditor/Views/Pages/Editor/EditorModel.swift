@@ -807,6 +807,25 @@ final class EditorModel: ViewModel {
       return
     }
     audioSelection = lower..<upper
+    // Keep the Shift-extend pivot on a stored edge. Snap it to the NEAREST stored boundary — not just
+    // clamp into range — for two reasons: (1) callers pin the anchor to an *unclamped* selection edge
+    // that the range above may have clamped into `[0, durationSamples]` (bad word bounds); (2) a
+    // Shift-extend whose target word straddles the anchor yields a range that contains the anchor on
+    // both sides, which a plain clamp would leave as an interior sample. Snapping keeps the invariant
+    // that the anchor is always one of the two stored edges — funnel-enforced, not caller discipline —
+    // which is what lets `applyEdgeEdit`'s exact-boundary repair stay exhaustive. For an anchor already
+    // on a boundary (the common case) this is identity.
+    if let anchor = selectionAnchorSample {
+      if anchor <= lower {
+        selectionAnchorSample = lower
+      } else if anchor >= upper {
+        selectionAnchorSample = upper
+      } else {
+        // Interior anchor: both differences are within the stored range, so this can't overflow even
+        // for a wildly out-of-file `anchor` (those hit the guards above before any subtraction).
+        selectionAnchorSample = (anchor - lower <= upper - anchor) ? lower : upper
+      }
+    }
     if origin == .external {
       // A non-transcript write replaced the selection without a transcript gesture, so the
       // transcript's private anchor/focus still identify the *previous* selection. Drop them, or a
@@ -896,6 +915,13 @@ final class EditorModel: ViewModel {
   /// the held anchor sat on the edited edge, it follows that edge to its new sample. Otherwise a later
   /// Shift-extend would pivot from the pre-edit boundary and silently restore audio the user just
   /// trimmed. When the anchor tracks the untouched edge (or is nil), it stays valid and is left alone.
+  ///
+  /// The exact-boundary test is exhaustive because `selectionAnchorSample` is *always* a boundary of
+  /// the current selection (or nil): every selection-replacing writer pins it to an edge, Shift-extend
+  /// keeps it as the fixed edge, and `selectSourceRange` snaps it onto the nearest stored boundary
+  /// (covering clamped ranges and extends whose target word straddles the anchor). So the anchor sits
+  /// on either the edited edge (follow it) or the untouched edge (leave it) — it can never be a stale
+  /// interior sample the repair would miss.
   private func applyEdgeEdit(_ edge: SelectionEdge, of old: Range<Int>, to updated: Range<Int>) {
     let anchorTracksEditedEdge =
       edge == .start
@@ -905,6 +931,11 @@ final class EditorModel: ViewModel {
     if anchorTracksEditedEdge {
       selectionAnchorSample = edge == .start ? updated.lowerBound : updated.upperBound
     }
+    // An edge edit replaces the freeform selection without a transcript gesture, so the transcript's
+    // private toggle/extend anchor still identifies the *pre-edit* word (same staleness the `.external`
+    // branch of `selectSourceRange` drops). Invalidate it here too, or a later transcript re-click of
+    // that word toggles the edited selection off, and a Shift-click extends from the stale word.
+    transcript.invalidateSelectionAnchor()
   }
 
   /// Release: the edge is no longer live, so transport-snap resumes tracking selection changes.
@@ -1118,7 +1149,16 @@ final class EditorModel: ViewModel {
       let lower = positions.min(), let upper = positions.max(),
       let range = sourceRange(coveringWords: editPlan.words[lower].id, editPlan.words[upper].id)
     else { return }
+    // Pin the Shift-extend anchor to the new selection's start edge, like every other
+    // selection-replacing writer (plain click, marquee, transcript select). A reveal that skipped this
+    // would leave `selectionAnchorSample` on the *previous* selection, so a later Shift-extend or edge
+    // edit would pivot from a boundary this selection no longer has and re-extend over unselected audio.
+    selectionAnchorSample = range.lowerBound
     selectSourceRange(range, snapPlayhead: true)
+    // Only frame the reveal if the selection actually resolved. A range built from out-of-file word
+    // bounds collapses to no selection in the funnel; scrolling to that phantom word anyway would
+    // leave the panes inconsistent (highlight gone, transcript jumped). Matches this method's contract.
+    guard audioSelection != nil else { return }
     revealSourceRange(range, zoomWaveform: true)
   }
 

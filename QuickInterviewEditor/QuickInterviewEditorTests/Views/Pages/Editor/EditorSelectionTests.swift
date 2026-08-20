@@ -266,6 +266,79 @@ struct EditorSelectionTests {
     #expect(model.audioSelection?.upperBound == 119_202)
   }
 
+  /// An edge edit (nudge or drag) writes `audioSelection` directly, bypassing `selectSourceRange`'s
+  /// `.external` transcript-anchor invalidation. It must still drop the transcript's toggle anchor, or
+  /// re-clicking the originally-selected word hits the toggle branch (anchor == focus == X) and clears
+  /// the edited selection instead of reselecting X. Regression for the edge-edit sibling of the
+  /// "stale transcript toggle state" finding.
+  @Test func edgeEditInvalidatesTranscriptToggleAnchor() {
+    let model = editor()
+    model.transcript.wordClicked(2, extending: false)
+    let word2 = model.editPlan.words.first { $0.id == 2 }!
+    expectNoDifference(model.audioSelection, word2.startSample!..<word2.endSample!)
+
+    // Trim the start edge: the freeform selection no longer equals word 2's exact bounds.
+    model.selectionNudged(.start, byMs: -10)
+    #expect(model.audioSelection != word2.startSample!..<word2.endSample!)
+
+    // Re-clicking word 2 must reselect it (anchor was dropped), not toggle the edited selection off.
+    model.transcript.wordClicked(2, extending: false)
+    expectNoDifference(model.audioSelection, word2.startSample!..<word2.endSample!)
+  }
+
+  /// A slice/suggestion reveal *replaces* the selection, so it must repin `selectionAnchorSample` to
+  /// the revealed range's start like every other replacing writer. Otherwise the anchor lingers on the
+  /// previous selection and a later Shift-extend pivots from a boundary the reveal no longer covers,
+  /// dragging never-revealed audio back in. Regression for the "anchor repair only handles anchors
+  /// exactly matching the edited boundary" finding — its root cause is a stale anchor left by reveals.
+  @Test func revealRepinsExtendAnchorToRevealedRangeStart() {
+    let model = editor()
+    let word2 = model.editPlan.words.first { $0.id == 2 }!
+    let word4 = model.editPlan.words.first { $0.id == 4 }!
+
+    // A transcript selection of word 2 pins the extend anchor at word 2's start.
+    model.transcript.wordClicked(2, extending: false)
+    expectNoDifference(model.selectionAnchorSample, word2.startSample!)
+
+    // Revealing a later suggestion (words 4..5) replaces the selection; the extend anchor must move to
+    // the revealed range's start, not linger on word 2 (which a later Shift-extend would resurrect).
+    model.cutSuggestionSelected(
+      Fixtures.cutSuggestion(id: Fixtures.uuid(1), wordIDs: [4, 5]))
+    expectNoDifference(model.selectionAnchorSample, word4.startSample!)
+  }
+
+  /// `selectSourceRange` clamps the stored range into `[0, durationSamples]`; the Shift-extend anchor
+  /// must land on that stored boundary too. A caller that pins the anchor to an out-of-file edge (bad
+  /// word bounds) would otherwise leave the pivot off the selection, breaking the "anchor is always a
+  /// boundary" invariant `applyEdgeEdit` relies on. Funnel-enforced, not per-caller.
+  @Test func selectSourceRangeSnapsExtendAnchorOntoStoredBoundary() {
+    let model = editor()
+    let duration = model.editPlan.source.durationSamples
+    model.selectionAnchorSample = duration + 50_000
+    model.selectSourceRange((duration - 10_000)..<(duration + 50_000), snapPlayhead: false)
+    expectNoDifference(model.audioSelection, (duration - 10_000)..<duration)
+    expectNoDifference(model.selectionAnchorSample, duration)
+  }
+
+  /// A Shift-extend whose target word fully *straddles* the pivot (anchor interior to that word)
+  /// produces a range wider than the anchor on both sides. The funnel must snap the pivot back onto a
+  /// stored edge, or it lingers as an interior sample that `applyEdgeEdit`'s exact-boundary repair
+  /// silently misses. Regression: a marquee started mid-word then Shift-clicking that same word.
+  @Test func extendWhoseTargetWordStraddlesAnchorLeavesAnchorOnABoundary() {
+    let model = editor()
+    let word2 = model.editPlan.words.first { $0.id == 2 }!  // 70648..<74176
+    // Simulate a prior sub-word selection whose pivot sits interior to word 2.
+    model.audioSelection = 71_000..<73_000
+    model.selectionAnchorSample = 72_000
+    // Extend to cover all of word 2 — the new range straddles the 72000 pivot on both sides.
+    model.selectWord(2, extending: true)
+    let sel = model.audioSelection!
+    expectNoDifference(sel, word2.startSample!..<word2.endSample!)
+    #expect(
+      model.selectionAnchorSample == sel.lowerBound
+        || model.selectionAnchorSample == sel.upperBound)
+  }
+
   /// A marquee over a gap that overlaps no word must not enable "Mark as Clip": `addSliceTapped()`
   /// would derive no word IDs and no-op, so the button would be enabled yet inert. Regression:
   /// `canAddSlice` keyed only on the selection being non-nil, ignoring whether it covered any word.
