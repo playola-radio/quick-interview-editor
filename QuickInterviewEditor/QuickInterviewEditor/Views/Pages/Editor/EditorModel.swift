@@ -2478,6 +2478,38 @@ final class EditorModel: ViewModel {
       return
     }
 
+    do {
+      let rendered = try await renderTargets(targets, scratchDir: scratchDir)
+      if Task.isCancelled {
+        await removeWorkDir(scratchDir)
+        exportPhase = .failed(cancelMessage(copied: 0, total: targets.count))
+        return
+      }
+      try await engine.injectMarkers(rendered.injectionFiles)
+      await finishExport(
+        targets: targets, outputsByID: rendered.outputsByID, scratchDir: scratchDir,
+        destination: destination)
+    } catch is CancellationError {
+      await removeWorkDir(scratchDir)
+      exportPhase = .failed(cancelMessage(copied: 0, total: targets.count))
+    } catch {
+      await removeWorkDir(scratchDir)
+      exportPhase = .failed(error.localizedDescription)
+    }
+  }
+
+  /// One render pass's output: each target's rendered file, plus the SAME-order marker
+  /// list `injectMarkers` will stamp into those files.
+  private struct RenderedTargets {
+    var outputsByID: [Slice.ID: URL]
+    var injectionFiles: [MarkerInjectionFile]
+  }
+
+  /// Renders each target slice from the canonical AIFF into `scratchDir`. Each slice gets
+  /// its own local `EditedTimeline`/`AudioEditRenderPlan` (built from the SAME
+  /// `timelineRemovals` every other export-gating check uses), so a removal is rendered
+  /// out rather than silently shipped.
+  private func renderTargets(_ targets: [Slice], scratchDir: URL) async throws -> RenderedTargets {
     let removals = Array(timelineRemovals)
     let sampleRate = editPlan.source.sampleRate
     let sourceDurationSamples = editPlan.source.durationSamples
@@ -2489,62 +2521,53 @@ final class EditorModel: ViewModel {
         position: word.startSample ?? Int(word.start * Double(sampleRate)), name: word.text)
     }
 
-    do {
-      var outputsByID: [Slice.ID: URL] = [:]
-      var injectionFiles: [MarkerInjectionFile] = []
-      for (offset, slice) in targets.enumerated() {
-        try Task.checkCancellation()
-        exportPhase = .exporting(current: offset + 1, total: targets.count)
-        let sliceRange = slice.startSample..<slice.endSample
-        let plan = SliceRenderPlanBuilder.plan(sliceRange: sliceRange, removals: removals)
-        let outputURL = scratchDir.appendingPathComponent("\(slice.id.uuidString).aiff")
-        let job = ExportRenderJob(
-          canonicalAudioURL: canonicalAudioURL, plan: plan.plan,
-          editedDurationSamples: plan.editedDurationSamples, sampleRate: sampleRate,
-          sourceDurationSamples: sourceDurationSamples, outputURL: outputURL)
-        try await exportRender.renderSlice(job)
-        outputsByID[slice.id] = outputURL
-        let markers = SliceRenderPlanBuilder.markers(
-          sourceMarkers, sliceRange: sliceRange, localTimeline: plan.localTimeline)
-        injectionFiles.append(MarkerInjectionFile(url: outputURL, markers: markers))
-      }
+    var outputsByID: [Slice.ID: URL] = [:]
+    var injectionFiles: [MarkerInjectionFile] = []
+    for (offset, slice) in targets.enumerated() {
+      try Task.checkCancellation()
+      exportPhase = .exporting(current: offset + 1, total: targets.count)
+      let sliceRange = slice.startSample..<slice.endSample
+      let plan = SliceRenderPlanBuilder.plan(sliceRange: sliceRange, removals: removals)
+      let outputURL = scratchDir.appendingPathComponent("\(slice.id.uuidString).aiff")
+      let job = ExportRenderJob(
+        canonicalAudioURL: canonicalAudioURL, plan: plan.plan,
+        editedDurationSamples: plan.editedDurationSamples, sampleRate: sampleRate,
+        sourceDurationSamples: sourceDurationSamples, outputURL: outputURL)
+      try await exportRender.renderSlice(job)
+      outputsByID[slice.id] = outputURL
+      let markers = SliceRenderPlanBuilder.markers(
+        sourceMarkers, sliceRange: sliceRange, localTimeline: plan.localTimeline)
+      injectionFiles.append(MarkerInjectionFile(url: outputURL, markers: markers))
+    }
+    return RenderedTargets(outputsByID: outputsByID, injectionFiles: injectionFiles)
+  }
 
-      if Task.isCancelled {
-        await removeWorkDir(scratchDir)
-        exportPhase = .failed(cancelMessage(copied: 0, total: targets.count))
-        return
-      }
+  /// Copies the rendered files to `destination` and sets the terminal `exportPhase` —
+  /// success, a copy failure, a mid-copy cancel, or (defensively) a count mismatch.
+  private func finishExport(
+    targets: [Slice], outputsByID: [Slice.ID: URL], scratchDir: URL, destination: URL
+  ) async {
+    // Copy off the main actor — copying many/large AIFFs (or to a slow/network
+    // folder) must not freeze the UI or block the cancel control.
+    let stem = sourceURL.deletingPathExtension().lastPathComponent
+    let outcome = await Self.copyRenderedSlices(
+      stem: stem, targets: targets, renderedByID: outputsByID, destination: destination)
+    await removeWorkDir(scratchDir)
 
-      try await engine.injectMarkers(injectionFiles)
-
-      // Copy off the main actor — copying many/large AIFFs (or to a slow/network
-      // folder) must not freeze the UI or block the cancel control.
-      let stem = sourceURL.deletingPathExtension().lastPathComponent
-      let outcome = await Self.copyRenderedSlices(
-        stem: stem, targets: targets, renderedByID: outputsByID, destination: destination)
-      await removeWorkDir(scratchDir)
-
-      if outcome.cancelled || Task.isCancelled {
-        // A cancel landing during the final copy also lands here, so the cancel
-        // button can never report success.
-        exportPhase = .failed(cancelMessage(copied: outcome.copied.count, total: targets.count))
-      } else if let message = outcome.errorMessage {
-        exportPhase = .failed(message)
-      } else if outcome.copied.count != targets.count {
-        // Defense-in-depth: `outputsByID` is built 1:1 with `targets` above, so this
-        // shouldn't be reachable — but report a short result rather than claim success.
-        exportPhase = .failed("Rendered \(outcome.copied.count) of \(targets.count) slices.")
-      } else {
-        workspace.reveal(outcome.copied)
-        lastExportTightNames = targets.filter { !exportWarnings(for: $0).isEmpty }.map(\.name)
-        exportPhase = .done(count: outcome.copied.count)
-      }
-    } catch is CancellationError {
-      await removeWorkDir(scratchDir)
-      exportPhase = .failed(cancelMessage(copied: 0, total: targets.count))
-    } catch {
-      await removeWorkDir(scratchDir)
-      exportPhase = .failed(error.localizedDescription)
+    if outcome.cancelled || Task.isCancelled {
+      // A cancel landing during the final copy also lands here, so the cancel
+      // button can never report success.
+      exportPhase = .failed(cancelMessage(copied: outcome.copied.count, total: targets.count))
+    } else if let message = outcome.errorMessage {
+      exportPhase = .failed(message)
+    } else if outcome.copied.count != targets.count {
+      // Defense-in-depth: `outputsByID` is built 1:1 with `targets` above, so this
+      // shouldn't be reachable — but report a short result rather than claim success.
+      exportPhase = .failed("Rendered \(outcome.copied.count) of \(targets.count) slices.")
+    } else {
+      workspace.reveal(outcome.copied)
+      lastExportTightNames = targets.filter { !exportWarnings(for: $0).isEmpty }.map(\.name)
+      exportPhase = .done(count: outcome.copied.count)
     }
   }
 
