@@ -152,12 +152,30 @@ final class EditorModel: ViewModel {
   /// the derived display props (row highlight, preview/audition labels, status text) reflect it.
   /// Always reset to `.free` when the transport returns to `.stopped`.
   var transportContext: TransportContext = .free
-  /// THE persistent, always-visible playhead cursor, in plan samples. Follows audio during
-  /// playback and stays put when stopped/paused (never hidden). Kept a SEPARATE observed property
-  /// (not folded into a transport struct) so its ~30 Hz updates don't invalidate views that read
-  /// `transportPhase`/`transportContext` (the panel, the slice list).
-  var playheadSample = 0 {
+  /// THE persistent, always-visible playhead cursor, in EDITED-timeline samples — the collapsed
+  /// axis the main lane renders. Always edited: with zero removals the timeline is the identity
+  /// map, so the value equals the plan/source sample; consumers that need source data convert via
+  /// `playheadSourceSample`. Follows audio during playback and stays put when stopped/paused
+  /// (never hidden). Kept a SEPARATE observed property (not folded into a transport struct) so its
+  /// ~30 Hz updates don't invalidate views that read `transportPhase`/`transportContext` (the
+  /// panel, the slice list).
+  var playheadEditedSample = 0 {
     didSet { syncCurrentWordToCursor() }
+  }
+
+  /// The SOURCE sample under the cursor — the boundary value for anything that reasons about the
+  /// original recording (word lookup, transcript follow, the slice-edit modal). In a seam's
+  /// overlap zone this resolves to the incoming (post-cut) side, matching what is audible.
+  var playheadSourceSample: Int { editedWaveform.timeline.editedToSource(playheadEditedSample) }
+
+  /// The edited-axis cursor position for a SOURCE sample. Total: outside removals it is the exact
+  /// mapped position; inside a removed span the `.rightEdge` bias resolves to the seam's crossfade
+  /// start — the edited moment the audio after the cut first becomes audible. The fallback only
+  /// fires for a defensively out-of-range input.
+  func editedCursor(forSource sourceSample: Int) -> Int {
+    let timeline = editedWaveform.timeline
+    return timeline.sourceToEdited(sourceSample, bias: .rightEdge)
+      ?? min(max(0, sourceSample), timeline.editedDurationSamples)
   }
 
   /// Keeps the transcript's current-word highlight on the word under the cursor, so it tracks
@@ -165,13 +183,12 @@ final class EditorModel: ViewModel {
   /// last-heard word. Keeps the last word in a gap (never lose your place) and only writes on a
   /// real change so a 30 Hz cursor doesn't churn the transcript view.
   private func syncCurrentWordToCursor() {
-    guard let word = wordID(atSample: playheadSample), word != transcript.currentWordID else {
-      return
-    }
+    guard let word = wordID(atSample: playheadSourceSample), word != transcript.currentWordID
+    else { return }
     transcript.currentWordID = word
   }
-  /// Where the transport last started playing; Stop returns the cursor here.
-  var transportOriginSample: Int?
+  /// Where the transport last started playing, in EDITED samples; Stop returns the cursor here.
+  var transportOriginEditedSample: Int?
   /// Bumped whenever something authoritatively places the cursor outside the selection-snap path — a
   /// ruler move or a transport start. A deferred selection snap (`transportSelectionChanged`) captures
   /// this at selection-change time (via `cursorMoveToken`) and bails if it changed, so it can neither
@@ -215,9 +232,18 @@ final class EditorModel: ViewModel {
   /// then re-clamps the adapter's viewport into the new edited duration (never resetting zoom).
   /// Called from every path that changes `timelineRemovals` (the mutation funnel, undo/redo, and
   /// the initial sidecar seed), so the axis and the document can never drift apart.
+  ///
+  /// The cursor (and the transport origin, if one is live) is stored in EDITED samples, so a
+  /// timeline change would silently re-point the same number at different audio. Remap both
+  /// through the SOURCE moment they marked — captured against the old timeline, re-resolved
+  /// against the new — so they keep pointing at the same instant of the recording.
   private func syncEditedTimeline() {
+    let sourceCursor = playheadSourceSample
+    let sourceOrigin = transportOriginEditedSample.map(editedWaveform.timeline.editedToSource)
     editedWaveform.timeline = editedTimeline
     editedWaveform.timelineChanged()
+    playheadEditedSample = editedCursor(forSource: sourceCursor)
+    transportOriginEditedSample = sourceOrigin.map(editedCursor(forSource:))
   }
 
   // MARK: - Display Text
@@ -449,9 +475,9 @@ final class EditorModel: ViewModel {
   }
 
   /// View-x of the persistent cursor on the edited axis, or nil when it's scrolled out of the
-  /// viewport. The model owns the cursor's SOURCE sample; the adapter supplies the geometry, so
+  /// viewport. The model owns the cursor's EDITED sample; the adapter supplies the geometry, so
   /// the view stays logic-free.
-  var playheadX: CGFloat? { editedWaveform.playheadX(forSource: playheadSample) }
+  var playheadX: CGFloat? { editedWaveform.playheadX(forEdited: playheadEditedSample) }
 
   // MARK: - Seam overlays
   /// The bowtie spans the lane draws at each seam, mapped to edited view coordinates by the
@@ -619,7 +645,9 @@ final class EditorModel: ViewModel {
       // returned; a buffered straggler tick for that session must not thaw it.
       if isTransportPaused { continue }
       if position.isPlaying {
-        playheadSample = position.sample
+        // Ticks arrive in SOURCE samples (the range-playback path); the cursor lives on the
+        // EDITED axis, so convert on arrival. The modal/transcript boundaries keep source.
+        playheadEditedSample = editedCursor(forSource: position.sample)
         // The slice-detail edit modal owns its own scoped playhead/transcript while it's the
         // playback context, so push the live position into it here — the modal has no other way
         // to see ticks from the shared player.
@@ -639,7 +667,7 @@ final class EditorModel: ViewModel {
           endTranscriptFollow()
         }
         if case .sliceEdit = transportContext {
-          editSlice?.updatePlayback(sample: playheadSample, isPlaying: false)
+          editSlice?.updatePlayback(sample: playheadSourceSample, isPlaying: false)
         }
       }
     }
@@ -648,20 +676,20 @@ final class EditorModel: ViewModel {
   /// Clears the transport owner so a new playback can take over: it resets the phase/context/range
   /// to stopped (dropping the previous session, so the old suspended `play`'s post-await guard fails
   /// and its cleanup no-ops) and resets transcript follow so the new play reads as a rising edge. It
-  /// never resets `playheadSample` — the persistent cursor survives supersession. Callers set the
-  /// new session/context *after* this, via `beginTransportPlayback`.
+  /// never resets `playheadEditedSample` — the persistent cursor survives supersession. Callers set
+  /// the new session/context *after* this, via `beginTransportPlayback`.
   private func beginExclusivePlayback() {
     endTranscriptFollow()
     resetTransportState()
   }
 
   /// Clears every field of the transport's ownership state (phase/context/origin/range) back to the
-  /// stopped/`.free` baseline — never touching `playheadSample`. The single place transport state
-  /// resets, so a future field can't be missed by one of the several cleanup paths.
+  /// stopped/`.free` baseline — never touching `playheadEditedSample`. The single place transport
+  /// state resets, so a future field can't be missed by one of the several cleanup paths.
   private func resetTransportState() {
     transportPhase = .stopped
     transportContext = .free
-    transportOriginSample = nil
+    transportOriginEditedSample = nil
   }
 
   /// Stops the given session, or does nothing if it's nil. A nil session means THIS editor
@@ -841,7 +869,7 @@ final class EditorModel: ViewModel {
     }
     if snapPlayhead {
       stopTransportForRuler()
-      playheadSample = lower
+      playheadEditedSample = editedCursor(forSource: lower)
       cursorMoveGeneration &+= 1
     }
   }
@@ -1207,14 +1235,14 @@ final class EditorModel: ViewModel {
       await transportPauseTapped()
       // Publish the frozen cursor back to the sheet so its "play from the playhead" uses the exact
       // pause point (the position loop stops ticking once paused, so it won't otherwise learn it).
-      editSlice?.updatePlayback(sample: playheadSample, isPlaying: isTransportPlaying)
+      editSlice?.updatePlayback(sample: playheadSourceSample, isPlaying: isTransportPlaying)
     }
     child.onStop = { [weak self] in
       guard let self else { return }
       await transportStopTapped()
       // Stop returns the cursor to the play origin; publish it so the sheet's next "play from the
       // playhead" starts there rather than from a stale last-tick sample.
-      editSlice?.updatePlayback(sample: playheadSample, isPlaying: isTransportPlaying)
+      editSlice?.updatePlayback(sample: playheadSourceSample, isPlaying: isTransportPlaying)
     }
     // R4: the transport always plays a whole range, never from an arbitrary point. This callback is
     // the CURSOR-ONLY path — it repositions the persistent cursor and starts nothing. A seek taken
@@ -1222,7 +1250,8 @@ final class EditorModel: ViewModel {
     // that case to `onPlay`, which re-anchors playback from the click to the cut-out.
     child.onSeek = { [weak self] sample in
       guard let self else { return }
-      playheadSample = sample
+      // The modal reasons in SOURCE samples; the persistent cursor lives on the EDITED axis.
+      playheadEditedSample = editedCursor(forSource: sample)
       editSlice?.updatePlayback(sample: sample, isPlaying: isTransportPlaying)
     }
     child.onDismiss = { [weak self] in
@@ -1239,7 +1268,7 @@ final class EditorModel: ViewModel {
   /// a no-op when nothing is playing, so overlapping open/dismiss stop paths can all call it.
   func stopActiveTransportSnapshotting() {
     guard let session = transportPhase.session else { return }
-    if let origin = transportOriginSample { playheadSample = origin }
+    if let origin = transportOriginEditedSample { playheadEditedSample = origin }
     resetTransportState()
     endTranscriptFollow()
     Task { [weak self] in await self?.stopOwnedPlayback(session) }
@@ -1502,9 +1531,14 @@ final class EditorModel: ViewModel {
   private var transportPlayableRange: Range<Int>? {
     // Play is a straight listen-through: it runs from the cursor to the END OF THE FILE and never
     // stops at a selection boundary. A selection is for marking a clip, not for scoping playback.
+    // The cursor lives on the EDITED axis; the range-playback path still wants SOURCE samples, so
+    // the start is the source sample under the cursor — and an edited cursor resting at the edited
+    // end must read as "nowhere to play" even though its source mapping sits before a removed tail.
     let end = editPlan.source.durationSamples
-    let start = playheadSample
-    guard start >= 0, start < end else { return nil }
+    let start = playheadSourceSample
+    guard start >= 0, start < end,
+      playheadEditedSample < editedWaveform.timeline.editedDurationSamples
+    else { return nil }
     return start..<end
   }
 
@@ -1546,8 +1580,8 @@ final class EditorModel: ViewModel {
     beginExclusivePlayback()
     let session = PlaybackSessionID()
     transportContext = context
-    transportOriginSample = range.lowerBound
-    playheadSample = range.lowerBound
+    transportOriginEditedSample = editedCursor(forSource: range.lowerBound)
+    playheadEditedSample = editedCursor(forSource: range.lowerBound)
     // A transport start authoritatively places the cursor, so it takes cursor authority too: a
     // selection snap deferred from before this Play must bail rather than stop us and snap back.
     cursorMoveGeneration &+= 1
@@ -1569,7 +1603,7 @@ final class EditorModel: ViewModel {
     // touched it — so reset the transport WITHOUT jumping the cursor to the end. A failed play
     // (`.stopped`) likewise leaves the cursor put.
     guard transportPhase.session == session else { return }
-    if outcome == .finished { playheadSample = range.upperBound }
+    if outcome == .finished { playheadEditedSample = editedCursor(forSource: range.upperBound) }
     // Capture the slice-edit child (if this playback was the modal's) BEFORE the reset clears the
     // context — reaching here past the session guard means the modal wasn't torn down, so this IS
     // the owning modal. A natural finish / cross-tab supersede must publish "stopped" back to it.
@@ -1585,7 +1619,7 @@ final class EditorModel: ViewModel {
     // The position loop drops the trailing false tick on a natural finish (the reset above cleared
     // the session it guards on), so the modal would never learn it stopped without this explicit
     // publish. `stopTapped`/dismiss handle their own paths; this covers finish + cross-tab supersede.
-    owningSliceEdit?.updatePlayback(sample: playheadSample, isPlaying: false)
+    owningSliceEdit?.updatePlayback(sample: playheadSourceSample, isPlaying: false)
   }
 
   /// Pause button. Freezes the cursor at the exact sample the player reports and holds the
@@ -1595,7 +1629,7 @@ final class EditorModel: ViewModel {
     guard case .playing(let session) = transportPhase else { return }
     let sample = await audioPlayer.pause(session)
     guard transportPhase.session == session else { return }
-    if let sample { playheadSample = sample }
+    if let sample { playheadEditedSample = editedCursor(forSource: sample) }
     transportPhase = .paused(session)
   }
 
@@ -1603,7 +1637,7 @@ final class EditorModel: ViewModel {
   /// Clearing the session (in `endTransportPlayback`) before awaiting the stop means the suspended
   /// `play`'s natural-end cleanup won't run and overwrite the origin.
   func transportStopTapped() async {
-    if let origin = transportOriginSample { playheadSample = origin }
+    if let origin = transportOriginEditedSample { playheadEditedSample = origin }
     await endTransportPlayback()
   }
 
@@ -1660,7 +1694,7 @@ final class EditorModel: ViewModel {
         cursorMoveGeneration == cursorToken
       else { return }
     }
-    playheadSample = newRange.lowerBound
+    playheadEditedSample = editedCursor(forSource: newRange.lowerBound)
   }
 
   // MARK: - Ruler
@@ -1675,7 +1709,7 @@ final class EditorModel: ViewModel {
   func rulerMovedPlayhead(toX positionX: CGFloat) {
     guard editedWaveform.hasUsableGeometry else { return }
     stopTransportForRuler()
-    playheadSample = clampedRulerSample(positionX)
+    playheadEditedSample = clampedRulerEditedSample(positionX)
     cursorMoveGeneration &+= 1
   }
 
@@ -1697,10 +1731,13 @@ final class EditorModel: ViewModel {
     Task { await stopOwnedPlayback(session) }
   }
 
-  /// The ruler's view-x mapped to a plan sample, clamped to a valid cursor position. `durationSamples`
-  /// (end-of-audio) is inclusive: it's a legal resting cursor where Play is a correct no-op.
-  private func clampedRulerSample(_ positionX: CGFloat) -> Int {
-    min(max(0, editedWaveform.xToSourceSample(positionX)), editPlan.source.durationSamples)
+  /// The ruler's view-x mapped to an EDITED sample, clamped to a valid cursor position.
+  /// `editedDurationSamples` (end-of-timeline) is inclusive: a legal resting cursor where Play is
+  /// a correct no-op.
+  private func clampedRulerEditedSample(_ positionX: CGFloat) -> Int {
+    min(
+      max(0, editedWaveform.xToEditedSample(positionX)),
+      editedWaveform.timeline.editedDurationSamples)
   }
 
   // MARK: - Fine-tune editing

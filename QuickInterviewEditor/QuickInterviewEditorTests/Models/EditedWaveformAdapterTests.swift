@@ -63,16 +63,16 @@ struct EditedWaveformAdapterTests {
     let adapter = makeAdapter(viewportWidth: 15, samplesPerPixel: 2)
     // source 10 is pure K0 -> edited 10 -> x 5, on-screen.
     expectNoDifference(adapter.sourceSampleToX(10), 5)
-    expectNoDifference(adapter.playheadX(forSource: 10), 5)
+    expectNoDifference(adapter.viewX(forSource: 10), 5)
 
     // source 30 is inside the removal [24,40); nearest bias (default) is closer to the cut
     // start (distance 6) than the cut end (distance 10) -> edited 24 -> x 12, on-screen.
     expectNoDifference(adapter.sourceSampleToX(30), 12)
-    expectNoDifference(adapter.playheadX(forSource: 30), 12)
+    expectNoDifference(adapter.viewX(forSource: 30), 12)
 
     // source 63 (K1, past the crossfade) -> edited 39 -> x 19.5, past the 15pt viewport.
     expectNoDifference(adapter.sourceSampleToX(63), 19.5)
-    #expect(adapter.playheadX(forSource: 63) == nil)
+    #expect(adapter.viewX(forSource: 63) == nil)
   }
 
   // MARK: - span

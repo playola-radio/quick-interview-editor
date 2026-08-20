@@ -434,15 +434,20 @@ final class WaveformModel: ViewModel {
 }
 
 /// A source-axis model drives ``WaveformLaneView`` directly in the slice-edit sheet (pinned to a
-/// slice's sub-range via `navigableRange`). There a source sample IS a plan sample, so the lane's
-/// `forSource:` requirements forward to the plain source-coordinate methods.
+/// slice's sub-range via `navigableRange`). There a source sample IS a plan sample — including the
+/// cursor's presentation axis — so the lane's requirements forward to the plain source-coordinate
+/// methods.
 extension WaveformModel: WaveformLaneDriving {
   func laneSpan(forSource sourceRange: Range<Int>) -> WaveformSpan? {
     span(for: sourceRange)
   }
 
-  func lanePlayheadX(forSource sourceSample: Int) -> CGFloat? {
+  func laneX(forSource sourceSample: Int) -> CGFloat? {
     playheadX(for: sourceSample)
+  }
+
+  func lanePlayheadX(forCursor cursorSample: Int) -> CGFloat? {
+    playheadX(for: cursorSample)
   }
 }
 

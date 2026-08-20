@@ -57,22 +57,22 @@ struct EditorRulerTests {
     let model = editor()
     geometry(model, samplesPerPixel: 100, start: 0)
     model.rulerMovedPlayhead(toX: 5)  // 0 + floor(5 * 100) = 500
-    expectNoDifference(model.playheadSample, 500)
+    expectNoDifference(model.playheadEditedSample, 500)
   }
 
   @Test func rulerClickHonorsScrolledStartAndZoom() {
     let model = editor()
     geometry(model, samplesPerPixel: 50, start: 2000)
     model.rulerMovedPlayhead(toX: 10)  // 2000 + floor(10 * 50) = 2500
-    expectNoDifference(model.playheadSample, 2500)
+    expectNoDifference(model.playheadEditedSample, 2500)
   }
 
   @Test func rulerClickClampsNegativeXToZero() {
     let model = editor()
     geometry(model, samplesPerPixel: 100, start: 0)
-    model.playheadSample = 4321
+    model.playheadEditedSample = 4321
     model.rulerMovedPlayhead(toX: -25)  // would map below 0
-    expectNoDifference(model.playheadSample, 0)
+    expectNoDifference(model.playheadEditedSample, 0)
   }
 
   @Test func rulerClickClampsPastEndToDurationSamples() {
@@ -80,24 +80,24 @@ struct EditorRulerTests {
     let duration = model.editPlan.source.durationSamples
     geometry(model, samplesPerPixel: 100, start: 0)
     model.rulerMovedPlayhead(toX: 100_000)  // 10,000,000 samples, well past EOF
-    expectNoDifference(model.playheadSample, duration)  // EOF is a valid resting cursor
+    expectNoDifference(model.playheadEditedSample, duration)  // EOF is a valid resting cursor
   }
 
   @Test func rulerMoveIsNoOpWithoutWaveformGeometry() {
     let model = editor()
-    model.playheadSample = 777  // no geometry loaded → totalSamples == 0
+    model.playheadEditedSample = 777  // no geometry loaded → totalSamples == 0
     model.rulerMovedPlayhead(toX: 40)
-    expectNoDifference(model.playheadSample, 777)  // unchanged: the mapping would be meaningless
+    expectNoDifference(model.playheadEditedSample, 777)  // unchanged: the mapping would be meaningless
   }
 
   @Test func rulerMoveIsNoOpWhenViewportNotYetMeasured() {
     let model = editor()
     model.waveform.totalSamples = model.editPlan.source.durationSamples  // file length known...
     model.waveform.viewportWidth = 0  // ...but layout hasn't measured the viewport yet
-    model.playheadSample = 555
+    model.playheadEditedSample = 555
     model.rulerMovedPlayhead(toX: 40)  // spp is still the default 1; the mapping would be garbage
     // Guarded on usable geometry, not just totalSamples.
-    expectNoDifference(model.playheadSample, 555)
+    expectNoDifference(model.playheadEditedSample, 555)
   }
 
   @Test func rulerMoveIsNoOpWhileWaveformLoading() {
@@ -106,10 +106,10 @@ struct EditorRulerTests {
     model.waveform.viewportWidth = 1000
     model.waveform.samplesPerPixel = 1  // still the default; the real fit isn't set until load ends
     model.waveform.isLoading = true  // mid-decode
-    model.playheadSample = 555
+    model.playheadEditedSample = 555
     model.rulerMovedPlayhead(toX: 40)
     // Guarded on !isLoading: mapping with the default spp during the decode window is garbage.
-    expectNoDifference(model.playheadSample, 555)
+    expectNoDifference(model.playheadEditedSample, 555)
   }
 
   // MARK: - Interaction with the transport
@@ -118,7 +118,7 @@ struct EditorRulerTests {
     let model = editor()
     geometry(model, samplesPerPixel: 100, start: 0)
     model.rulerMovedPlayhead(toX: 3)
-    expectNoDifference(model.playheadSample, 300)
+    expectNoDifference(model.playheadEditedSample, 300)
     expectNoDifference(model.transportPhase, .stopped)
   }
 
@@ -127,7 +127,7 @@ struct EditorRulerTests {
     let stoppedSession = LockIsolated<PlaybackSessionID?>(nil)
     let model = editor()
     geometry(model, samplesPerPixel: 100, start: 0)
-    model.playheadSample = 1000
+    model.playheadEditedSample = 1000
     await withDependencies {
       $0.audioPlayer.play = gatedPlay(gate)
       $0.audioPlayer.stop = { session in
@@ -139,16 +139,16 @@ struct EditorRulerTests {
       await gate.awaitStarted()
       #expect(model.isTransportPlaying)
       let session = model.transportPhase.session
-      model.playheadSample = 8000  // audio "advanced" the cursor during playback
+      model.playheadEditedSample = 8000  // audio "advanced" the cursor during playback
 
       model.rulerMovedPlayhead(toX: 6)  // stops the transport, then snaps to floor(6*100)=600
       expectNoDifference(model.transportPhase, .stopped)  // reset synchronously
-      expectNoDifference(model.playheadSample, 600)  // where the user clicked, not the range end
+      expectNoDifference(model.playheadEditedSample, 600)  // where the user clicked, not the range end
 
       await settle { stoppedSession.value != nil }
       expectNoDifference(stoppedSession.value, session)  // stopped OUR session, not stop(nil)
       await task.value
-      expectNoDifference(model.playheadSample, 600)  // the superseded play never moved it
+      expectNoDifference(model.playheadEditedSample, 600)  // the superseded play never moved it
     }
   }
 
@@ -157,7 +157,7 @@ struct EditorRulerTests {
     let stopped = LockIsolated(false)
     let model = editor()
     geometry(model, samplesPerPixel: 100, start: 0)
-    model.playheadSample = 1000
+    model.playheadEditedSample = 1000
     await withDependencies {
       $0.audioPlayer.play = gatedPlay(gate)
       $0.audioPlayer.pause = { _ in 4321 }
@@ -173,7 +173,7 @@ struct EditorRulerTests {
 
       model.rulerMovedPlayhead(toX: 2)  // must tear down the paused session, then move
       expectNoDifference(model.transportPhase, .stopped)
-      expectNoDifference(model.playheadSample, 200)
+      expectNoDifference(model.playheadEditedSample, 200)
 
       await settle { stopped.value }
       #expect(stopped.value)
@@ -188,7 +188,7 @@ struct EditorRulerTests {
     model.rulerMovedPlayhead(toX: 1)
     model.rulerMovedPlayhead(toX: 4)
     model.rulerMovedPlayhead(toX: 9)
-    expectNoDifference(model.playheadSample, 900)
+    expectNoDifference(model.playheadEditedSample, 900)
   }
 
   @Test func rulerMoveDoesNotClearTheSelection() {
@@ -199,7 +199,7 @@ struct EditorRulerTests {
     #expect(selection != nil)
 
     model.rulerMovedPlayhead(toX: 3)
-    expectNoDifference(model.playheadSample, 300)
+    expectNoDifference(model.playheadEditedSample, 300)
     // Ruling D: a ruler move never clears the selection.
     expectNoDifference(model.audioSelection, selection)
   }
@@ -221,11 +221,11 @@ struct EditorRulerTests {
       let snap = Task { await model.transportSelectionChanged(rangeA, cursorToken: token) }
       await stopGate.awaitStarted()  // the snap is suspended awaiting the stop
       model.rulerMovedPlayhead(toX: 7)  // ruler click lands during the suspension → 700
-      expectNoDifference(model.playheadSample, 700)
+      expectNoDifference(model.playheadEditedSample, 700)
       stopGate.release()  // the snap resumes and must NOT clobber the ruler position
       await snap.value
       // Still where the ruler put it, not snapped to rangeA's start.
-      expectNoDifference(model.playheadSample, 700)
+      expectNoDifference(model.playheadEditedSample, 700)
     }
   }
 
@@ -240,7 +240,7 @@ struct EditorRulerTests {
     model.rulerMovedPlayhead(toX: 7)  // ruler click lands before the deferred snap runs → 700
     // The deferred snap runs late; the ruler is the later action and wins.
     await model.transportSelectionChanged(rangeA, cursorToken: token)
-    expectNoDifference(model.playheadSample, 700)
+    expectNoDifference(model.playheadEditedSample, 700)
   }
 
   /// A deferred selection snap must not stop a transport the user started AFTER changing the
@@ -254,7 +254,7 @@ struct EditorRulerTests {
     selectWords(model.transcript, 1, 3)  // selection A; the view would capture the token here
     let rangeA = model.audioSelection!
     let token = model.cursorMoveToken
-    model.playheadSample = rangeA.lowerBound  // a valid play start within the selection
+    model.playheadEditedSample = rangeA.lowerBound  // a valid play start within the selection
     await withDependencies {
       $0.audioPlayer.play = gatedPlay(gate)
       $0.audioPlayer.stop = { _ in

@@ -20,7 +20,12 @@ protocol WaveformLaneDriving: AnyObject {
   func viewportResized(width: CGFloat)
   func visibleColumns() -> [WaveformColumn]
   func laneSpan(forSource sourceRange: Range<Int>) -> WaveformSpan?
-  func lanePlayheadX(forSource sourceSample: Int) -> CGFloat?
+  /// View-x of a SOURCE sample — for source-anchored geometry like the selection edge handles.
+  func laneX(forSource sourceSample: Int) -> CGFloat?
+  /// View-x of the persistent cursor. `cursorSample` is in the DRIVER's presentation axis —
+  /// EDITED samples for ``EditedWaveformAdapter`` (the main editor), plan/source samples for
+  /// ``WaveformModel`` (the slice-edit sheet, where source IS the presented axis).
+  func lanePlayheadX(forCursor cursorSample: Int) -> CGFloat?
   // swiftlint:disable:next function_parameter_count
   func scrolled(
     deltaX: CGFloat, deltaY: CGFloat, hasPreciseDeltas: Bool,
@@ -87,8 +92,8 @@ struct WaveformLaneView<Overlay: View>: View {
       // an edge grab starts a boundary drag while every other mouse-down falls through to the marquee.
       .overlay(
         WaveformEdgeHandleLayer(
-          startX: highlightRange.flatMap { waveform.lanePlayheadX(forSource: $0.lowerBound) },
-          endX: highlightRange.flatMap { waveform.lanePlayheadX(forSource: $0.upperBound) },
+          startX: highlightRange.flatMap { waveform.laneX(forSource: $0.lowerBound) },
+          endX: highlightRange.flatMap { waveform.laneX(forSource: $0.upperBound) },
           onEdgeDragBegan: onEdgeDragBegan,
           onEdgeDragged: onEdgeDragged,
           onEdgeDragEnded: onEdgeDragEnded)
@@ -205,7 +210,7 @@ private struct WaveformPlayhead: View {
   let playhead: () -> Int?
 
   var body: some View {
-    if let sample = playhead(), let positionX = waveform.lanePlayheadX(forSource: sample) {
+    if let sample = playhead(), let positionX = waveform.lanePlayheadX(forCursor: sample) {
       Rectangle()
         .fill(Color(red: 0.96, green: 0.86, blue: 0.4))
         .frame(width: 1.5)
@@ -223,7 +228,7 @@ private struct RulerPlayhead: View {
   let playhead: () -> Int?
 
   var body: some View {
-    if let sample = playhead(), let positionX = waveform.lanePlayheadX(forSource: sample) {
+    if let sample = playhead(), let positionX = waveform.lanePlayheadX(forCursor: sample) {
       Rectangle()
         .fill(Color(red: 0.96, green: 0.86, blue: 0.4))
         .frame(width: 1.5)

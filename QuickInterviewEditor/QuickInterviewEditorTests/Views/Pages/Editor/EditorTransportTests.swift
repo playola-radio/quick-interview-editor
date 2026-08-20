@@ -107,7 +107,7 @@ struct EditorTransportTests {
 
   @Test func panelFlagsWhenStoppedWithPlayableCursor() {
     let model = editor()
-    model.playheadSample = 1000  // mid-file, no selection → a playable range exists
+    model.playheadEditedSample = 1000  // mid-file, no selection → a playable range exists
     #expect(model.canTransportPlay)
     #expect(!model.canTransportPause)
     #expect(!model.canTransportStop)
@@ -117,7 +117,7 @@ struct EditorTransportTests {
 
   @Test func playDisabledWhenCursorAtEndOfAudio() {
     let model = editor()
-    model.playheadSample = model.editPlan.source.durationSamples  // nothing left to play
+    model.playheadEditedSample = model.editPlan.source.durationSamples  // nothing left to play
     #expect(!model.canTransportPlay)
   }
 
@@ -145,7 +145,7 @@ struct EditorTransportTests {
     let gate = TransportGate()
     let recorded = LockIsolated<(URL, Range<Int>, Int)?>(nil)
     let model = editor()
-    model.playheadSample = 1000
+    model.playheadEditedSample = 1000
     await withDependencies {
       $0.audioPlayer.play = recordingPlay(recorded, gate)
       $0.audioPlayer.stop = { _ in gate.release() }
@@ -153,7 +153,7 @@ struct EditorTransportTests {
       let task = Task { await model.transportPlayTapped() }
       await gate.awaitStarted()
       #expect(model.isTransportPlaying)
-      expectNoDifference(model.transportOriginSample, 1000)
+      expectNoDifference(model.transportOriginEditedSample, 1000)
       expectNoDifference(recorded.value?.0, model.canonicalAudioURL)
       expectNoDifference(recorded.value?.1, 1000..<model.editPlan.source.durationSamples)
       expectNoDifference(recorded.value?.2, model.editPlan.source.sampleRate)
@@ -168,7 +168,7 @@ struct EditorTransportTests {
     let model = editor()
     selectWords(model.transcript, 1, 4)
     let selection = model.audioSelection!
-    model.playheadSample = selection.lowerBound
+    model.playheadEditedSample = selection.lowerBound
     await withDependencies {
       $0.audioPlayer.play = recordingPlay(recorded, gate)
       $0.audioPlayer.stop = { _ in gate.release() }
@@ -186,7 +186,7 @@ struct EditorTransportTests {
   @Test func playIsNoOpWhenCursorPastPlayableEnd() async {
     let played = LockIsolated(false)
     let model = editor()
-    model.playheadSample = model.editPlan.source.durationSamples
+    model.playheadEditedSample = model.editPlan.source.durationSamples
     await withDependencies {
       $0.audioPlayer.play = { _, _, _, _, _ in
         played.setValue(true)
@@ -202,7 +202,7 @@ struct EditorTransportTests {
 
   @Test func playFailureLeavesCursorPutAndResetsTransport() async {
     let model = editor()
-    model.playheadSample = 1000
+    model.playheadEditedSample = 1000
     await withDependencies {
       $0.audioPlayer.play = { _, _, _, _, _ in throw EngineClientError.engineFailed("boom") }
     } operation: {
@@ -210,7 +210,7 @@ struct EditorTransportTests {
         await model.transportPlayTapped()
       }
     }
-    expectNoDifference(model.playheadSample, 1000)  // a failed play must not jump to the range end
+    expectNoDifference(model.playheadEditedSample, 1000)  // a failed play must not jump to the range end
     expectNoDifference(model.transportPhase, .stopped)
     #expect(model.transportPhase.session == nil)
   }
@@ -218,7 +218,7 @@ struct EditorTransportTests {
   @Test func naturalCompletionLeavesCursorAtRangeEnd() async {
     let gate = TransportGate()
     let model = editor()
-    model.playheadSample = 1000
+    model.playheadEditedSample = 1000
     let end = model.editPlan.source.durationSamples
     await withDependencies {
       $0.audioPlayer.play = { _, _, _, _, _ in await gate.play() }
@@ -229,7 +229,7 @@ struct EditorTransportTests {
       gate.release()  // natural completion (no Stop)
       await task.value
       expectNoDifference(model.transportPhase, .stopped)
-      expectNoDifference(model.playheadSample, end)  // left where the audio ended
+      expectNoDifference(model.playheadEditedSample, end)  // left where the audio ended
       #expect(model.transportPhase.session == nil)
     }
   }
@@ -239,7 +239,7 @@ struct EditorTransportTests {
   @Test func pauseFreezesCursorAtReportedSampleAndHoldsPlay() async {
     let gate = TransportGate()
     let model = editor()
-    model.playheadSample = 1000
+    model.playheadEditedSample = 1000
     await withDependencies {
       $0.audioPlayer.play = { _, _, _, _, _ in await gate.play() }
       $0.audioPlayer.pause = { _ in 4321 }
@@ -249,7 +249,7 @@ struct EditorTransportTests {
       await gate.awaitStarted()
       let session = model.transportPhase.session
       await model.transportPauseTapped()
-      expectNoDifference(model.playheadSample, 4321)  // frozen at the exact reported sample
+      expectNoDifference(model.playheadEditedSample, 4321)  // frozen at the exact reported sample
       #expect(model.isTransportPaused)
       expectNoDifference(model.transportPhase, .paused(session!))
       #expect(!task.isCancelled)  // the play call is still in flight
@@ -262,7 +262,7 @@ struct EditorTransportTests {
     let model = editor()
     let session = PlaybackSessionID()
     model.transportPhase = .paused(session)  // the session is carried by the phase now
-    model.playheadSample = 4321  // the exact sample `pause` froze the cursor at
+    model.playheadEditedSample = 4321  // the exact sample `pause` froze the cursor at
     let (stream, continuation) = AsyncStream.makeStream(of: PlaybackPosition.self)
     await withDependencies {
       $0.audioPlayer.positions = { stream }
@@ -271,7 +271,7 @@ struct EditorTransportTests {
       // A buffered straggler tick for the paused session must NOT thaw the frozen cursor.
       continuation.yield(PlaybackPosition(sessionID: session, sample: 9000, isPlaying: true))
       await settle { false }  // let the tick be processed
-      expectNoDifference(model.playheadSample, 4321)
+      expectNoDifference(model.playheadEditedSample, 4321)
       continuation.finish()
       await task.value
     }
@@ -281,7 +281,7 @@ struct EditorTransportTests {
     let gate = TransportGate()
     let resumed = LockIsolated(false)
     let model = editor()
-    model.playheadSample = 1000
+    model.playheadEditedSample = 1000
     await withDependencies {
       $0.audioPlayer.play = { _, _, _, _, _ in await gate.play() }
       $0.audioPlayer.pause = { _ in 4321 }
@@ -307,7 +307,7 @@ struct EditorTransportTests {
   @Test func resumeFailureLeavesTransportPaused() async {
     let gate = TransportGate()
     let model = editor()
-    model.playheadSample = 1000
+    model.playheadEditedSample = 1000
     await withDependencies {
       $0.audioPlayer.play = { _, _, _, _, _ in await gate.play() }
       $0.audioPlayer.pause = { _ in 4321 }
@@ -332,7 +332,7 @@ struct EditorTransportTests {
     let gate = TransportGate()
     let stoppedSession = LockIsolated<PlaybackSessionID?>(nil)
     let model = editor()
-    model.playheadSample = 1000
+    model.playheadEditedSample = 1000
     await withDependencies {
       $0.audioPlayer.play = { _, _, _, _, _ in await gate.play() }
       $0.audioPlayer.stop = { session in
@@ -343,10 +343,10 @@ struct EditorTransportTests {
       let task = Task { await model.transportPlayTapped() }
       await gate.awaitStarted()
       let session = model.transportPhase.session
-      model.playheadSample = 8000  // simulate the cursor having advanced during playback
+      model.playheadEditedSample = 8000  // simulate the cursor having advanced during playback
       await model.transportStopTapped()
       await task.value
-      expectNoDifference(model.playheadSample, 1000)  // back to the origin
+      expectNoDifference(model.playheadEditedSample, 1000)  // back to the origin
       expectNoDifference(model.transportPhase, .stopped)
       #expect(model.transportPhase.session == nil)
       expectNoDifference(stoppedSession.value, session)  // stopped OUR session, not stop(nil)
@@ -358,7 +358,7 @@ struct EditorTransportTests {
   @Test func startingASliceSupersedesTheTransport() async {
     let gate = TransportGate()
     let model = editor()
-    model.playheadSample = 1000
+    model.playheadEditedSample = 1000
     selectWords(model.transcript, 0, 2)
     model.addSliceTapped()
     let slice = model.slices[0]
@@ -384,7 +384,7 @@ struct EditorTransportTests {
     let gate = TransportGate()
     let recorded = LockIsolated<(URL, Range<Int>, Int)?>(nil)
     let model = editor()
-    model.playheadSample = 7777
+    model.playheadEditedSample = 7777
     selectWords(model.transcript, 0, 2)
     model.addSliceTapped()
     let slice = model.slices[0]
@@ -397,13 +397,13 @@ struct EditorTransportTests {
       // The shortcut selects the clip (context), positions the cursor + origin at its start, and
       // plays its range through the one transport.
       expectNoDifference(model.transportContext, .slice(slice.id))
-      expectNoDifference(model.playheadSample, slice.startSample)
-      expectNoDifference(model.transportOriginSample, slice.startSample)
+      expectNoDifference(model.playheadEditedSample, slice.startSample)
+      expectNoDifference(model.transportOriginEditedSample, slice.startSample)
       expectNoDifference(recorded.value?.1, slice.startSample..<slice.endSample)
       #expect(model.isTransportPlaying)
       await model.transportStopTapped()
       await task.value
-      expectNoDifference(model.playheadSample, slice.startSample)  // Stop → origin (slice start)
+      expectNoDifference(model.playheadEditedSample, slice.startSample)  // Stop → origin (slice start)
     }
   }
 
@@ -412,7 +412,7 @@ struct EditorTransportTests {
   @Test func spaceStartsTransportWhenIdle() async {
     let gate = TransportGate()
     let model = editor()
-    model.playheadSample = 1000
+    model.playheadEditedSample = 1000
     await withDependencies {
       $0.audioPlayer.play = { _, _, _, _, _ in await gate.play() }
       $0.audioPlayer.stop = { _ in gate.release() }
@@ -428,18 +428,18 @@ struct EditorTransportTests {
   @Test func spaceStopsTransportWhenPlaying() async {
     let gate = TransportGate()
     let model = editor()
-    model.playheadSample = 1000
+    model.playheadEditedSample = 1000
     await withDependencies {
       $0.audioPlayer.play = { _, _, _, _, _ in await gate.play() }
       $0.audioPlayer.stop = { _ in gate.release() }
     } operation: {
       let task = Task { await model.transportPlayTapped() }
       await gate.awaitStarted()
-      model.playheadSample = 8000
+      model.playheadEditedSample = 8000
       await model.transportPlayStopTapped()  // playing → stop to origin
       await task.value
       expectNoDifference(model.transportPhase, .stopped)
-      expectNoDifference(model.playheadSample, 1000)
+      expectNoDifference(model.playheadEditedSample, 1000)
     }
   }
 
@@ -471,18 +471,18 @@ struct EditorTransportTests {
 
   @Test func selectionSnapsCursorToSelectionStart() async {
     let model = editor()
-    model.playheadSample = 9999
+    model.playheadEditedSample = 9999
     selectWords(model.transcript, 2, 4)
     let selection = model.audioSelection!
     await model.transportSelectionChanged(selection, cursorToken: model.cursorMoveToken)
-    expectNoDifference(model.playheadSample, selection.lowerBound)
+    expectNoDifference(model.playheadEditedSample, selection.lowerBound)
   }
 
   @Test func clearingSelectionLeavesCursorPut() async {
     let model = editor()
-    model.playheadSample = 5000
+    model.playheadEditedSample = 5000
     await model.transportSelectionChanged(nil, cursorToken: model.cursorMoveToken)
-    expectNoDifference(model.playheadSample, 5000)  // clearing the selection never moves the cursor
+    expectNoDifference(model.playheadEditedSample, 5000)  // clearing the selection never moves the cursor
   }
 
   @Test func staleSelectionTaskDoesNotOverwriteNewerCursor() async {
@@ -502,10 +502,10 @@ struct EditorTransportTests {
       let rangeB = model.audioSelection!
       // B snaps immediately (no owner left)
       await model.transportSelectionChanged(rangeB, cursorToken: model.cursorMoveToken)
-      expectNoDifference(model.playheadSample, rangeB.lowerBound)
+      expectNoDifference(model.playheadEditedSample, rangeB.lowerBound)
       stopGate.release()  // A resumes and must bail on the stale selection
       await taskA.value
-      expectNoDifference(model.playheadSample, rangeB.lowerBound)  // A did NOT clobber B
+      expectNoDifference(model.playheadEditedSample, rangeB.lowerBound)  // A did NOT clobber B
     }
   }
 
@@ -513,7 +513,7 @@ struct EditorTransportTests {
     let gate = TransportGate()
     let stopped = LockIsolated(false)
     let model = editor()
-    model.playheadSample = 1000
+    model.playheadEditedSample = 1000
     await withDependencies {
       $0.audioPlayer.play = { _, _, _, _, _ in await gate.play() }
       $0.audioPlayer.stop = { _ in
@@ -531,7 +531,7 @@ struct EditorTransportTests {
       await task.value
       #expect(stopped.value)
       expectNoDifference(model.transportPhase, .stopped)
-      expectNoDifference(model.playheadSample, selection.lowerBound)
+      expectNoDifference(model.playheadEditedSample, selection.lowerBound)
     }
   }
 
@@ -556,11 +556,11 @@ struct EditorTransportTests {
       let taskB = Task { await model.playSliceTapped(slice.id) }
       await playGate.awaitStarted()
       expectNoDifference(model.transportContext.sliceID, slice.id)
-      let cursorUnderB = model.playheadSample  // B positioned the cursor at its start
+      let cursorUnderB = model.playheadEditedSample  // B positioned the cursor at its start
       #expect(cursorUnderB != rangeA.lowerBound)
       stopGate.release()  // A resumes and must bail — B is playing now
       await taskA.value
-      expectNoDifference(model.playheadSample, cursorUnderB)  // NOT yanked to selection A's start
+      expectNoDifference(model.playheadEditedSample, cursorUnderB)  // NOT yanked to selection A's start
       playGate.release()
       await taskB.value
     }
@@ -571,7 +571,7 @@ struct EditorTransportTests {
   @Test func supersededPlayLeavesCursorPutNotAtRangeEnd() async {
     let gate = TransportGate()
     let model = editor()
-    model.playheadSample = 1000
+    model.playheadEditedSample = 1000
     await withDependencies {
       // Another tab took over the shared player: `play` returns `.superseded` while our own session
       // is still set (the other tab can't touch it). The transport must reset without jumping the
@@ -587,7 +587,7 @@ struct EditorTransportTests {
       #expect(model.isTransportPlaying)
       gate.release()  // resolves play() → .superseded
       await task.value
-      expectNoDifference(model.playheadSample, 1000)  // NOT durationSamples
+      expectNoDifference(model.playheadEditedSample, 1000)  // NOT durationSamples
       expectNoDifference(model.transportPhase, .stopped)
       #expect(model.transportPhase.session == nil)
     }
@@ -601,8 +601,8 @@ struct EditorTransportTests {
       stop: { _ in }, setRate: { _ in }, positions: { AsyncStream { $0.finish() } })
     let tabA = editor()
     let tabB = editor()
-    tabA.playheadSample = 1000
-    tabB.playheadSample = 5000
+    tabA.playheadEditedSample = 1000
+    tabB.playheadEditedSample = 5000
     let durationB = tabB.editPlan.source.durationSamples
     await withDependencies {
       $0.audioPlayer = client
@@ -614,13 +614,13 @@ struct EditorTransportTests {
       await shared.awaitStarted()  // B supersedes A on the shared player
       await playA.value
       // Background tab A: superseded, not completed — cursor stays put, transport resets.
-      expectNoDifference(tabA.playheadSample, 1000)
+      expectNoDifference(tabA.playheadEditedSample, 1000)
       expectNoDifference(tabA.transportPhase, .stopped)
       #expect(tabA.transportPhase.session == nil)
       #expect(tabB.isTransportPlaying)
       await shared.finishCurrent()  // B finishes naturally
       await playB.value
-      expectNoDifference(tabB.playheadSample, durationB)  // foreground tab lands at the range end
+      expectNoDifference(tabB.playheadEditedSample, durationB)  // foreground tab lands at the range end
     }
   }
 
@@ -653,7 +653,7 @@ struct EditorTransportTests {
       @Shared(.playbackRate) var playbackRate
       $playbackRate.withLock { $0 = 2.0 }  // the persisted speed the model should start at
       let model = editor()
-      model.playheadSample = 1000
+      model.playheadEditedSample = 1000
       let task = Task { await model.transportPlayTapped() }
       await gate.awaitStarted()
       expectNoDifference(playedRate.value, 2.0)  // the rate rides along with the play call
@@ -672,7 +672,7 @@ struct EditorTransportTests {
       $0.audioPlayer.stop = { _ in gate.release() }
     } operation: {
       let model = editor()
-      model.playheadSample = 1000
+      model.playheadEditedSample = 1000
       let task = Task { await model.transportPlayTapped() }
       await gate.awaitStarted()
       model.transcript.speedSelected(1.5)  // routed through the transcript → EditorModel callback
