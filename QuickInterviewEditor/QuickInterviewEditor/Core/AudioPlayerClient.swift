@@ -257,9 +257,11 @@ private actor LivePlayerBox {
     let format = file.processingFormat
     let ratio = format.sampleRate / Double(max(1, planSampleRate))
 
-    // A plan with no items (e.g. a seek past the edited end) can't play; no-op without disturbing
-    // any current playback, mirroring the empty-range guard in `play`.
-    guard !plan.items.isEmpty else { return .stopped }
+    // Nothing playable (empty plan from a seek past the end, or everything clamped away
+    // against a short file): no-op without disturbing any current playback, mirroring the
+    // empty-range guard in `play`.
+    let scheduledEntries = try resolvedEntries(for: plan, file: file, ratio: ratio)
+    guard !scheduledEntries.isEmpty else { return .stopped }
 
     supersede(broadcastStop: false)
     currentSession = session
@@ -275,28 +277,21 @@ private actor LivePlayerBox {
     try engine.start()
 
     let myGeneration = generation
-    // Only the final scheduled item carries the completion callback; the queued items ahead of it
-    // play back-to-back with `at: nil`, so the stream is gapless and completes exactly once.
+    // Only the final scheduled entry carries the completion callback; the queued entries
+    // ahead of it play back-to-back with `at: nil`, so the stream is gapless and completes
+    // exactly once.
     let onLast: @Sendable (AVAudioPlayerNodeCompletionCallbackType) -> Void = {
       @Sendable [weak self] _ in Task { await self?.complete(generation: myGeneration) }
     }
-    let lastIndex = plan.items.count - 1
-    for (index, item) in plan.items.enumerated() {
+    let lastIndex = scheduledEntries.count - 1
+    for (index, entry) in scheduledEntries.enumerated() {
       let completion = index == lastIndex ? onLast : nil
-      switch item {
-      case .segment(let source, _):
-        let startFrame = AVAudioFramePosition((Double(source.lowerBound) * ratio).rounded())
-        let frameCount = AVAudioFrameCount(max(0, (Double(source.count) * ratio).rounded()))
-        guard frameCount > 0 else { continue }
+      switch entry {
+      case .segment(let start, let count):
         node.scheduleSegment(
-          file, startingFrame: min(startFrame, file.length), frameCount: frameCount, at: nil,
+          file, startingFrame: start, frameCount: count, at: nil,
           completionCallbackType: .dataPlayedBack, completionHandler: completion)
-      case .seam(_, let leftTail, let rightHead, _, _, let fadeOffset):
-        guard
-          let buffer = try seamBuffer(
-            file: file, leftTail: leftTail, rightHead: rightHead,
-            fadeOffset: fadeOffset, ratio: ratio)
-        else { continue }
+      case .buffer(let buffer):
         node.scheduleBuffer(
           buffer, at: nil, options: [], completionCallbackType: .dataPlayedBack,
           completionHandler: completion)
@@ -307,6 +302,45 @@ private actor LivePlayerBox {
     return await withCheckedContinuation { (cont: CheckedContinuation<PlaybackEnd, Never>) in
       continuation = cont
     }
+  }
+
+  /// What one plan item becomes on the node: a file segment or a pre-rendered buffer.
+  private enum ScheduledEntry {
+    case segment(start: AVAudioFramePosition, count: AVAudioFrameCount)
+    case buffer(AVAudioPCMBuffer)
+  }
+
+  /// Resolves every plan item that will ACTUALLY reach the node, before `playEdited` touches
+  /// any playback state. Segments clamp both ends to `file.length` (like `play`) so a
+  /// stale/short canonical file can't schedule audio that doesn't exist; items that resolve
+  /// to nothing (rounded-to-zero counts, EOF-empty seams) are dropped here — which is why
+  /// `playEdited` can safely attach its completion callback to the LAST resolved entry.
+  /// Attaching it by plan index instead would strand the suspended waiter forever if the
+  /// plan's final item happened to be one of the dropped ones.
+  private func resolvedEntries(
+    for plan: AudioEditRenderPlan, file: AVAudioFile, ratio: Double
+  ) throws -> [ScheduledEntry] {
+    var entries: [ScheduledEntry] = []
+    for item in plan.items {
+      switch item {
+      case .segment(let source, _):
+        let startFrame = AVAudioFramePosition((Double(source.lowerBound) * ratio).rounded())
+        let endFrame = AVAudioFramePosition((Double(source.upperBound) * ratio).rounded())
+        let clampedStart = min(max(0, startFrame), file.length)
+        let clampedEnd = min(endFrame, file.length)
+        let frameCount = AVAudioFrameCount(max(0, clampedEnd - clampedStart))
+        guard frameCount > 0 else { continue }
+        entries.append(.segment(start: clampedStart, count: frameCount))
+      case .seam(_, let leftTail, let rightHead, _, _, let fadeOffset):
+        guard
+          let buffer = try seamBuffer(
+            file: file, leftTail: leftTail, rightHead: rightHead,
+            fadeOffset: fadeOffset, ratio: ratio)
+        else { continue }
+        entries.append(.buffer(buffer))
+      }
+    }
+    return entries
   }
 
   /// Pre-renders one seam's crossfade into a PCM buffer: reads the outgoing tail and incoming head

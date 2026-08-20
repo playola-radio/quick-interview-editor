@@ -30,11 +30,15 @@ struct Crossfade: Equatable, Codable, Sendable {
   }
 
   /// Lenient decode: a sidecar persisted before `curveAmount`/`centerOffsetSamples` existed is
-  /// missing those keys — default them to 0 rather than failing the whole decode.
+  /// missing those keys — default them to 0 rather than failing the whole decode. Likewise an
+  /// unknown or missing `curve` (a future app version's value, or a hand-edited sidecar) falls
+  /// back to `.equalPower` instead of poisoning the entire `ProjectState` decode.
   init(from decoder: any Decoder) throws {
     let container = try decoder.container(keyedBy: CodingKeys.self)
     self.lengthSamples = max(0, try container.decode(Int.self, forKey: .lengthSamples))
-    self.curve = try container.decode(CrossfadeCurve.self, forKey: .curve)
+    self.curve =
+      (try? container.decodeIfPresent(String.self, forKey: .curve))
+      .flatMap { CrossfadeCurve(rawValue: $0) } ?? .equalPower
     self.curveAmount = try container.decodeIfPresent(Double.self, forKey: .curveAmount) ?? 0
     self.centerOffsetSamples =
       try container.decodeIfPresent(Int.self, forKey: .centerOffsetSamples) ?? 0

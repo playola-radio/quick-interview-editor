@@ -54,7 +54,9 @@ struct PlaylistFrameTimeline: Equatable {
       let localFrames = frames - entry.nodeFrameStart
       guard localFrames >= 0, localFrames < entry.nativeFrameCount else { continue }
       let editedOffset = Int((Double(localFrames) / ratio).rounded())
-      return entry.editedStart + min(editedOffset, entry.editedLength)
+      // While native frames of this item remain, the cursor is INSIDE it — rounding
+      // at a non-1 ratio must never report the item's (half-open) upper bound early.
+      return entry.editedStart + min(editedOffset, max(0, entry.editedLength - 1))
     }
     return last.editedStart + last.editedLength
   }

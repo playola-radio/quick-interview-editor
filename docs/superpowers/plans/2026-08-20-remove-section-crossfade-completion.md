@@ -121,6 +121,12 @@ center, ⌃⌥X, inspector); no way to delete a removal except whole-document un
   deliberately migrated.
 - Manual verify: play across a seam at 1x and at altered rates; pause/resume
   mid-crossfade; seek into a seam; ruler/playhead agree with the ear.
+- Codex challenge note (PR 2 review): `playEdited` reports EDITED-axis samples,
+  but today's position consumers (`EditorModel.playheadSample`, transcript
+  follow, waveform adapter) treat `position.sample` as SOURCE samples. The
+  transport migration MUST convert every consumer before wiring `playEdited`,
+  or the cursor/current-word/pause-resume positions are wrong after the first
+  removal.
 
 ### PR 4 — Seam selection + Restore Removed Audio (small, ships fast)
 - `selectedSeamID` + mutual exclusion with `audioSelection` (decision 6);
@@ -154,6 +160,11 @@ center, ⌃⌥X, inspector); no way to delete a removal except whole-document un
 - Tight-join warning copy becomes crossfade-aware.
 - Integration tests: rendered sample counts, marker positions, audition ==
   export determinism.
+- Codex challenge note (PR 2 review): `EditedTimeline` silently degrades to the
+  IDENTITY timeline when removals fail normalization (`isValid == false`,
+  removals dropped). The export path MUST check `isValid` before rendering —
+  otherwise corrupt persisted removals would silently reintroduce removed
+  sections into the exported audio.
 
 Deferred (unchanged from spec): slice-local removals (old spec PR 4 scope),
 cut-suggester warning reconciliation beyond copy changes.

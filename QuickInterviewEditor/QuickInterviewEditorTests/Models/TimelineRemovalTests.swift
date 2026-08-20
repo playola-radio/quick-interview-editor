@@ -55,6 +55,19 @@ struct CrossfadeDecodingTests {
     expectNoDifference(crossfade.centerOffsetSamples, 120)
   }
 
+  @Test func unknownOrMissingCurveFallsBackToEqualPower() throws {
+    // A curve value written by a future app version (or a hand-edited sidecar)
+    // must not poison the whole ProjectState decode — fall back to equalPower.
+    let unknown = Data(#"{"lengthSamples":480,"curve":"sCurve"}"#.utf8)
+    let fromUnknown = try JSONDecoder().decode(Crossfade.self, from: unknown)
+    expectNoDifference(fromUnknown.curve, .equalPower)
+    expectNoDifference(fromUnknown.lengthSamples, 480)
+
+    let missing = Data(#"{"lengthSamples":480}"#.utf8)
+    let fromMissing = try JSONDecoder().decode(Crossfade.self, from: missing)
+    expectNoDifference(fromMissing.curve, .equalPower)
+  }
+
   @Test func encodeDecodeRoundTripPreservesAllFields() throws {
     let original = Crossfade(
       lengthSamples: 240, curve: .linear, curveAmount: -0.3, centerOffsetSamples: -50)
