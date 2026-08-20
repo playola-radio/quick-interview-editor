@@ -136,6 +136,17 @@ struct EditorEditedCursorTests {
     expectNoDifference(model.transportPhase, .paused(session))
   }
 
+  private actor EditedPlayGate {
+    private var continuation: CheckedContinuation<PlaybackEnd, Never>?
+    func play() async -> PlaybackEnd {
+      await withCheckedContinuation { continuation = $0 }
+    }
+    func finish(_ end: PlaybackEnd) {
+      continuation?.resume(returning: end)
+      continuation = nil
+    }
+  }
+
   private struct RecordedPlayEdited: Equatable {
     var url: URL
     var plan: AudioEditRenderPlan
@@ -264,6 +275,48 @@ struct EditorEditedCursorTests {
     model.editedWaveform.viewportWidth = viewportWidth
     model.editedWaveform.samplesPerPixel = samplesPerPixel
     model.editedWaveform.visibleStartSample = visibleStartSample
+  }
+
+  @Test func pauseInCrossfadeTailKeepsExactSourceSample() async {
+    let model = editor()
+    addRemoval(model, 40_000, 60_000, length: 4_800)
+    let session = PlaybackSessionID()
+    model.transportPhase = .playing(session)
+    await withDependencies {
+      $0.audioPlayer.pause = { _ in .source(38_000) }
+    } operation: {
+      await model.transportPauseTapped()
+    }
+    // The cursor renders inside the seam's overlap zone (edited 38_000), but the SOURCE
+    // boundary value keeps the EXACT paused sample — the modal's "play from the playhead"
+    // must resume at 38_000, not the post-cut side (62_800) the round trip resolves to.
+    expectNoDifference(model.playheadEditedSample, 38_000)
+    expectNoDifference(model.playheadSourceSample, 38_000)
+  }
+
+  @Test func addingRemovalStopsFreeEditedPlayback() async {
+    let model = editor()
+    let gate = EditedPlayGate()
+    let stopped = LockIsolated(false)
+    await withDependencies {
+      $0.audioPlayer.playEdited = { _, _, _, _, _ in await gate.play() }
+      $0.audioPlayer.stop = { _ in stopped.setValue(true) }
+    } operation: {
+      let play = Task { await model.transportPlayTapped() }
+      await settle(until: model.isTransportPlaying)
+      // The running playlist was built from the identity timeline; a removal rebuilds the
+      // edited axis, so the stale session must stop rather than let audio and cursor diverge.
+      addRemoval(model, 40_000, 60_000, length: 4_800)
+      #expect(!model.isTransportPlaying)
+      await gate.finish(.superseded)
+      await play.value
+      await settle(until: stopped.value)
+    }
+    #expect(stopped.value)
+  }
+
+  private func settle(until condition: @autoclosure () -> Bool) async {
+    for _ in 0..<1000 where !condition() { await Task.yield() }
   }
 
   @Test func rulerMapsThroughEditedAxis() {

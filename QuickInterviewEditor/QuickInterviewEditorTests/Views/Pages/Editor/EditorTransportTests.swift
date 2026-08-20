@@ -265,7 +265,7 @@ struct EditorTransportTests {
     model.playheadEditedSample = 1000
     await withDependencies {
       $0.audioPlayer.playEdited = { _, _, _, _, _ in await gate.play() }
-      $0.audioPlayer.pause = { _ in .source(4321) }
+      $0.audioPlayer.pause = { _ in .edited(4321) }
       $0.audioPlayer.stop = { _ in gate.release() }
     } operation: {
       let task = Task { await model.transportPlayTapped() }
@@ -308,7 +308,7 @@ struct EditorTransportTests {
     model.playheadEditedSample = 1000
     await withDependencies {
       $0.audioPlayer.playEdited = { _, _, _, _, _ in await gate.play() }
-      $0.audioPlayer.pause = { _ in .source(4321) }
+      $0.audioPlayer.pause = { _ in .edited(4321) }
       $0.audioPlayer.resume = { _ in
         resumed.setValue(true)
         return true
@@ -334,7 +334,7 @@ struct EditorTransportTests {
     model.playheadEditedSample = 1000
     await withDependencies {
       $0.audioPlayer.playEdited = { _, _, _, _, _ in await gate.play() }
-      $0.audioPlayer.pause = { _ in .source(4321) }
+      $0.audioPlayer.pause = { _ in .edited(4321) }
       $0.audioPlayer.resume = { _ in false }  // engine restart failed
       $0.audioPlayer.stop = { _ in gate.release() }
     } operation: {

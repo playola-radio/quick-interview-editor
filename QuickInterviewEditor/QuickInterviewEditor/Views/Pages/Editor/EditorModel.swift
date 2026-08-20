@@ -160,13 +160,20 @@ final class EditorModel: ViewModel {
   /// ~30 Hz updates don't invalidate views that read `transportPhase`/`transportContext` (the
   /// panel, the slice list).
   var playheadEditedSample = 0 {
-    didSet { syncCurrentWordToCursor() }
+    didSet {
+      cursorSourceAnchor = placingSourceSample
+      syncCurrentWordToCursor()
+    }
   }
 
   /// The SOURCE sample under the cursor — the boundary value for anything that reasons about the
-  /// original recording (word lookup, transcript follow, the slice-edit modal). In a seam's
-  /// overlap zone this resolves to the incoming (post-cut) side, matching what is audible.
-  var playheadSourceSample: Int { editedWaveform.timeline.editedToSource(playheadEditedSample) }
+  /// original recording (word lookup, transcript follow, the slice-edit modal). A source-axis
+  /// cursor placement remembers its EXACT sample (`cursorSourceAnchor`); otherwise the edited
+  /// position maps through the timeline, where a seam's overlap zone resolves to the incoming
+  /// (post-cut) side — matching what edited playback makes audible.
+  var playheadSourceSample: Int {
+    cursorSourceAnchor ?? editedWaveform.timeline.editedToSource(playheadEditedSample)
+  }
 
   /// The edited-axis cursor position for a SOURCE sample. Total: outside removals it is the exact
   /// mapped position; inside a removed span the `.rightEdge` bias resolves to the seam's crossfade
@@ -178,19 +185,23 @@ final class EditorModel: ViewModel {
       ?? min(max(0, sourceSample), timeline.editedDurationSamples)
   }
 
-  /// The EXACT source sample for an in-flight source-axis cursor write (nil otherwise), read by
-  /// `syncCurrentWordToCursor` instead of the lossy `playheadSourceSample` round trip: inside a
-  /// crossfade's outgoing tail the edited→source round trip resolves to the post-cut side, which
-  /// would highlight a word the source playback hasn't reached.
-  @ObservationIgnored private var cursorSourceOverride: Int?
+  /// The EXACT source sample of the most recent SOURCE-axis cursor placement, nil after any
+  /// edited-axis write (`didSet` maintains it). Read through `playheadSourceSample` instead of
+  /// the lossy edited→source round trip: inside a crossfade's outgoing tail (or a removed span)
+  /// the round trip resolves to the post-cut side, which would hand the word highlight and the
+  /// slice-edit modal a position the source playback hasn't reached.
+  @ObservationIgnored private var cursorSourceAnchor: Int?
+  /// Set only for the duration of a `placeCursor(atSource:)` assignment so the cursor's `didSet`
+  /// can distinguish a source-axis placement (anchor kept) from an edited-axis write (cleared).
+  @ObservationIgnored private var placingSourceSample: Int?
 
-  /// Places the cursor for a SOURCE-axis position: stores the mapped edited sample while the
-  /// current-word sync reads the exact source sample rather than round-tripping through the
-  /// edited axis. Every consumer that knows its true source position (ticks, pause freezes,
-  /// selection snaps, the modal's seek) funnels through here.
+  /// Places the cursor for a SOURCE-axis position: stores the mapped edited sample while
+  /// remembering the exact source sample rather than round-tripping through the edited axis.
+  /// Every consumer that knows its true source position (ticks, pause freezes, selection snaps,
+  /// the modal's seek) funnels through here.
   private func placeCursor(atSource sourceSample: Int) {
-    cursorSourceOverride = sourceSample
-    defer { cursorSourceOverride = nil }
+    placingSourceSample = sourceSample
+    defer { placingSourceSample = nil }
     playheadEditedSample = editedCursor(forSource: sourceSample)
   }
 
@@ -199,8 +210,7 @@ final class EditorModel: ViewModel {
   /// last-heard word. Keeps the last word in a gap (never lose your place) and only writes on a
   /// real change so a 30 Hz cursor doesn't churn the transcript view.
   private func syncCurrentWordToCursor() {
-    let sourceSample = cursorSourceOverride ?? playheadSourceSample
-    guard let word = wordID(atSample: sourceSample), word != transcript.currentWordID
+    guard let word = wordID(atSample: playheadSourceSample), word != transcript.currentWordID
     else { return }
     transcript.currentWordID = word
   }
@@ -254,10 +264,23 @@ final class EditorModel: ViewModel {
   /// timeline change would silently re-point the same number at different audio. Remap both
   /// through the SOURCE moment they marked — captured against the old timeline, re-resolved
   /// against the new — so they keep pointing at the same instant of the recording.
+  ///
+  /// A live free-play session is playing a playlist built from the OLD timeline: letting it run
+  /// would reinterpret its edited-axis ticks against the new axis, so audio and cursor diverge
+  /// (and a paused one would resume stale audio). Stop it — the mirror of the ruler/selection
+  /// "stop, then act" rule — leaving the cursor where the remap puts it. Source-range sessions
+  /// (slice, preview, audition, modal) play original audio, which a removal doesn't change.
   private func syncEditedTimeline() {
+    let newTimeline = editedTimeline
+    guard newTimeline != editedWaveform.timeline else { return }
+    if case .free = transportContext, let session = transportPhase.session {
+      resetTransportState()
+      endTranscriptFollow()
+      Task { await stopOwnedPlayback(session) }
+    }
     let sourceCursor = playheadSourceSample
     let sourceOrigin = transportOriginEditedSample.map(editedWaveform.timeline.editedToSource)
-    editedWaveform.timeline = editedTimeline
+    editedWaveform.timeline = newTimeline
     editedWaveform.timelineChanged()
     placeCursor(atSource: sourceCursor)
     transportOriginEditedSample = sourceOrigin.map(editedCursor(forSource:))
