@@ -68,8 +68,8 @@ struct LiveEngineInjectTests {
     return url
   }
 
-  private func resultJSON(paths: [String]) throws -> Data {
-    let files = paths.map { ["path": $0, "marker_count": 2] as [String: Any] }
+  private func resultJSON(paths: [String], markerCount: Int = 2) throws -> Data {
+    let files = paths.map { ["path": $0, "marker_count": markerCount] as [String: Any] }
     let object = ["files": files]
     return try JSONSerialization.data(withJSONObject: object)
   }
@@ -79,7 +79,7 @@ struct LiveEngineInjectTests {
     defer { try? FileManager.default.removeItem(at: url) }
 
     let out = try resultJSON(paths: [url.path])
-    try LiveEngine.decodeInjectResult(out, expectedPaths: [url.path])
+    try LiveEngine.decodeInjectResult(out, expectedMarkerCounts: [url.path: 2])
   }
 
   @Test func decodeThrowsWhenAFileIsMissingFromTheResult() throws {
@@ -93,7 +93,33 @@ struct LiveEngineInjectTests {
     // The engine only reports back the first file — the second is silently missing.
     let out = try resultJSON(paths: [first.path])
     #expect(throws: EngineClientError.self) {
-      try LiveEngine.decodeInjectResult(out, expectedPaths: [first.path, second.path])
+      try LiveEngine.decodeInjectResult(
+        out, expectedMarkerCounts: [first.path: 2, second.path: 2])
+    }
+  }
+
+  @Test func decodeThrowsWhenAFilesReportedMarkerCountDiffersFromTheRequest() throws {
+    let url = try makeTempFile()
+    defer { try? FileManager.default.removeItem(at: url) }
+
+    // The engine reports success but claims it wrote 2 markers where 3 were requested —
+    // a silent drop that must not pass as success.
+    let out = try resultJSON(paths: [url.path], markerCount: 2)
+    #expect(throws: EngineClientError.self) {
+      try LiveEngine.decodeInjectResult(out, expectedMarkerCounts: [url.path: 3])
+    }
+  }
+
+  @Test func decodeThrowsWhenAResultOmitsTheMarkerCountField() throws {
+    let url = try makeTempFile()
+    defer { try? FileManager.default.removeItem(at: url) }
+
+    // `marker_count` is a required key of the wire contract; a result without it can't
+    // vouch for what was written, so the decode itself must fail.
+    let object = ["files": [["path": url.path]]]
+    let out = try JSONSerialization.data(withJSONObject: object)
+    #expect(throws: EngineClientError.self) {
+      try LiveEngine.decodeInjectResult(out, expectedMarkerCounts: [url.path: 2])
     }
   }
 
@@ -104,14 +130,14 @@ struct LiveEngineInjectTests {
 
     let out = try resultJSON(paths: [missing.path])
     #expect(throws: EngineClientError.self) {
-      try LiveEngine.decodeInjectResult(out, expectedPaths: [missing.path])
+      try LiveEngine.decodeInjectResult(out, expectedMarkerCounts: [missing.path: 2])
     }
   }
 
   @Test func decodeThrowsOnMalformedJSON() throws {
     let out = Data("not json".utf8)
     #expect(throws: EngineClientError.self) {
-      try LiveEngine.decodeInjectResult(out, expectedPaths: ["/tmp/anything.aiff"])
+      try LiveEngine.decodeInjectResult(out, expectedMarkerCounts: ["/tmp/anything.aiff": 2])
     }
   }
 }

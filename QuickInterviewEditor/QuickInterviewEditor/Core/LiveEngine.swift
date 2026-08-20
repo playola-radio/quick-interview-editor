@@ -373,8 +373,9 @@ enum LiveEngine {
       guard code == 0 else {
         throw EngineClientError.injectFailed(proc.stderrTail() + logHint(logURL))
       }
-      let expectedPaths = Set(files.map(\.url.path))
-      try decodeInjectResult(out, expectedPaths: expectedPaths, logURL: logURL)
+      let expectedMarkerCounts = Dictionary(
+        files.map { ($0.url.path, $0.markers.count) }, uniquingKeysWith: { first, _ in first })
+      try decodeInjectResult(out, expectedMarkerCounts: expectedMarkerCounts, logURL: logURL)
     } onCancel: {
       proc.terminate()
     }
@@ -400,15 +401,19 @@ enum LiveEngine {
     try encodedInjectRequest(files).write(to: url)
   }
 
-  /// Decodes and validates the engine's inject-markers result. Exposed (not private)
-  /// so this is unit-tested without spawning a subprocess. A clean exit that
-  /// silently drops/duplicates a requested file must not pass as success — the
-  /// result's path set must equal `expectedPaths` exactly, and every path must still
-  /// exist on disk (injection modifies the AIFF in place; a missing file after a
-  /// reported success means something went wrong).
+  /// Decodes and validates the engine's inject-markers result against
+  /// `expectedMarkerCounts` (path → the number of markers that path was asked to receive).
+  /// Exposed (not private) so this is unit-tested without spawning a subprocess.
+  ///
+  /// A clean exit that silently drops/duplicates a requested file — or silently drops
+  /// markers from one — must not pass as success: the result's path set must equal the
+  /// requested one exactly, each file's reported `marker_count` must match what was
+  /// requested, and every path must still exist on disk (injection modifies the AIFF in
+  /// place; a missing file after a reported success means something went wrong).
   static func decodeInjectResult(
-    _ out: Data, expectedPaths: Set<String>, logURL: URL? = nil
+    _ out: Data, expectedMarkerCounts: [String: Int], logURL: URL? = nil
   ) throws {
+    let expectedPaths = Set(expectedMarkerCounts.keys)
     let wire: InjectWireResult
     do {
       wire = try JSONDecoder().decode(InjectWireResult.self, from: out)
@@ -424,6 +429,14 @@ enum LiveEngine {
       let missing = expectedPaths.subtracting(resultPaths).sorted()
       throw EngineClientError.injectDecodeFailed(
         "engine returned an incomplete inject-markers result; missing [\(missing.joined(separator: ", "))]"
+          + logHint(logURL))
+    }
+    for file in wire.files.sorted(by: { $0.path < $1.path }) {
+      guard let expected = expectedMarkerCounts[file.path], file.markerCount != expected else {
+        continue
+      }
+      throw EngineClientError.injectDecodeFailed(
+        "engine reported \(file.markerCount) markers for \(file.path), but \(expected) were requested"
           + logHint(logURL))
     }
     for path in expectedPaths.sorted() {
