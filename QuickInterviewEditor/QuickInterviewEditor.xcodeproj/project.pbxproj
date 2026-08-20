@@ -30,6 +30,7 @@
 		19816B662D00B87791953879 /* CutSuggesterResolverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 466C66ADC9D7820A10DA3279 /* CutSuggesterResolverTests.swift */; };
 		1C33FAA7D602889FC8F8C348 /* EditPlanDecodingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B0A5D7C62A370DE8DD21807 /* EditPlanDecodingTests.swift */; };
 		1DA6160F26D3935018786C8B /* QuickInterviewEditorApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75C599ECDAD50A6F0A522C6B /* QuickInterviewEditorApp.swift */; };
+		1EED7302434296F29B72F47F /* ExportAudioRendererTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F429395D526960661FF5BFAF /* ExportAudioRendererTests.swift */; };
 		1EF5B6842385C9F208906247 /* ProjectStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9D1FF7731379F40B7D9A8C8 /* ProjectStore.swift */; };
 		1FDCD5A562E7D5D71D0520EC /* UndoStackTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E8C670A36FEE48ECE336F3D /* UndoStackTests.swift */; };
 		2238F1BAA3FE18846A8B3937 /* SourceFingerprint.swift in Sources */ = {isa = PBXBuildFile; fileRef = C940BB5A197C986FAF096F93 /* SourceFingerprint.swift */; };
@@ -76,6 +77,7 @@
 		50DC45152877EC4196AE477F /* TranscriptCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADD0C5965956A60913513C7C /* TranscriptCache.swift */; };
 		51666548577B391FC8BB6E0D /* AppLaunchModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 237246D26C6AC1E25A5A279E /* AppLaunchModel.swift */; };
 		5622120D454A251A0B53D8FE /* AudioEditRenderPlanTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFB6CB7C78382B26D59405D7 /* AudioEditRenderPlanTests.swift */; };
+		57E7CE4E04E838BB555833B1 /* ExportRenderClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F51ECD2BE0F5620A029517A6 /* ExportRenderClient.swift */; };
 		5A3FA7A5CB3395E469F8AB41 /* TranscriptHash.swift in Sources */ = {isa = PBXBuildFile; fileRef = B68B31FFA3C1AC71D9B3F38A /* TranscriptHash.swift */; };
 		5AC41B706EA38AC787D5B6F3 /* CutSuggestionWireTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E34FE3178ED4AA61F8E90A7 /* CutSuggestionWireTests.swift */; };
 		5B699D4EDE23CD8B4000B9CC /* EnvironmentClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E1604DA03CAD39389DFEF65 /* EnvironmentClient.swift */; };
@@ -402,6 +404,8 @@
 		F120260251DEBF3A9BC28ED2 /* RenderTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RenderTypes.swift; sourceTree = "<group>"; };
 		F1E29A237821D79F1F395D04 /* WaveformModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WaveformModel.swift; sourceTree = "<group>"; };
 		F36D8D6731290D44D40E36C7 /* EditorKeyMonitorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorKeyMonitorTests.swift; sourceTree = "<group>"; };
+		F429395D526960661FF5BFAF /* ExportAudioRendererTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportAudioRendererTests.swift; sourceTree = "<group>"; };
+		F51ECD2BE0F5620A029517A6 /* ExportRenderClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportRenderClient.swift; sourceTree = "<group>"; };
 		F892E381E98FE9A9A7A9369E /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		F8BDD55E22A85C18219A2A42 /* AuditionKeyMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuditionKeyMonitor.swift; sourceTree = "<group>"; };
 		FA08AD54DC59B6F59481D196 /* KeychainClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainClient.swift; sourceTree = "<group>"; };
@@ -518,6 +522,7 @@
 				470CF49FC658B4E9FDD4AD51 /* EngineEventTests.swift */,
 				6DD5C8C964D5F67EDE57C896 /* EngineFingerprintTests.swift */,
 				1422158D8ABF80DBD66E618C /* EngineResolverTests.swift */,
+				F429395D526960661FF5BFAF /* ExportAudioRendererTests.swift */,
 				585569A1C2EC0BD7561633EB /* InstallLocationTests.swift */,
 				4BC6DC8A2BCFFA4802444B2F /* KeychainClientTests.swift */,
 				BD589A8C977E5632F59741A9 /* LiveCutSuggesterTests.swift */,
@@ -737,6 +742,7 @@
 				6FBD543BFAB28A7B6F0B6A83 /* EngineFingerprint.swift */,
 				4F3B3549446B80CE6BA09245 /* EngineResolution.swift */,
 				0E1604DA03CAD39389DFEF65 /* EnvironmentClient.swift */,
+				F51ECD2BE0F5620A029517A6 /* ExportRenderClient.swift */,
 				755FC4B915A3C8060A9C0179 /* InstallLocation.swift */,
 				FA08AD54DC59B6F59481D196 /* KeychainClient.swift */,
 				A0DEF39E5B43A75E1E9A1639 /* LiveCutSuggester.swift */,
@@ -1092,6 +1098,7 @@
 				038212BF79FD2E31A9778BE6 /* EngineEventTests.swift in Sources */,
 				B81C856F188F2C1A18514794 /* EngineFingerprintTests.swift in Sources */,
 				AB7BC4CE0D6D2FED506AEBDF /* EngineResolverTests.swift in Sources */,
+				1EED7302434296F29B72F47F /* ExportAudioRendererTests.swift in Sources */,
 				E01515F04116C5606DA2224C /* ExportNamingTests.swift in Sources */,
 				C7758C80DB9BBE2699C015A5 /* FineTuneGeometryTests.swift in Sources */,
 				227D6F7F6905446643F42287 /* FineTuneTests.swift in Sources */,
@@ -1183,6 +1190,7 @@
 				9981CF15926B616AA1B3BFBA /* EngineResolution.swift in Sources */,
 				5B699D4EDE23CD8B4000B9CC /* EnvironmentClient.swift in Sources */,
 				612400EB7125669478AA6BED /* ExportNaming.swift in Sources */,
+				57E7CE4E04E838BB555833B1 /* ExportRenderClient.swift in Sources */,
 				0AEBF0DB3F4B7F18B18BF4B1 /* FineTuneGeometry.swift in Sources */,
 				36862DD72E5319C2366AD84E /* FineTuneModel.swift in Sources */,
 				C82BE12B865F30F2C5F6623C /* FineTuneView.swift in Sources */,
