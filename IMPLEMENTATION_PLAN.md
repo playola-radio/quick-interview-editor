@@ -39,10 +39,19 @@ Plan source: `docs/superpowers/plans/2026-08-20-remove-section-crossfade-complet
 
 ### Stage 7: Green + format/lint + Codex review/challenge + PR + /fix-review.
 
-## Status — Stages 1–6 COMPLETE
-- 24 tests in `EditorSeamSelectionTests` + 2 escape-key tests in `EditorKeyMonitorTests`; full
-  suite 952 tests pass. `make format-check` + `make lint` clean.
-- Stage 7: pending Codex review/challenge, PR, /fix-review.
+## Status — Stages 1–7 (in progress)
+- 27 tests in `EditorSeamSelectionTests` + 2 escape-key tests in `EditorKeyMonitorTests`; full
+  suite 956 tests pass. `make format-check` + `make lint` clean.
+- Codex review fix (commit d76c7b6): hard-cut (zero-length) seams now render a zero-width bowtie
+  marker so they stay selectable/restorable rather than becoming an invisible dead-end.
+- Codex challenge remediation (commit 3be0839):
+  - `seamID(atX:)` resolves to the nearest bowtie center among overlapping widened targets, so
+    abutting/close seams no longer let the earlier one shadow the later. Regression test added.
+  - Edge-handle layer forwards `menu(for:)` to a shared `waveformContextMenu` builder, so a
+    right-click on a bowtie hugging a selection edge stays restorable.
+  - `selectSeam` documents leaving fine-tune reconciliation to the centralized `syncEditSession`
+    (matches `selectSourceRange`; avoids the unsaved-slice hazard).
+- Stage 7 remaining: Codex challenge re-run (fixes were non-trivial), manual verify, PR, /fix-review.
 
 ## Interface parity note
 Logic: clicking a crossfade selects it (no playhead move); Delete on a selected crossfade removes
