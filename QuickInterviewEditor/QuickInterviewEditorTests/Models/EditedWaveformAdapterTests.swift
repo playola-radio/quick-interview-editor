@@ -106,6 +106,26 @@ struct EditedWaveformAdapterTests {
     expectNoDifference(adapter.spanForSeam(seam), WaveformSpan(positionX: 8, width: 4))
   }
 
+  @Test func spanForSeamIsAZeroWidthMarkerForAHardCut() {
+    // Removal to EOF -> the right kept island is empty -> crossfade clamps to 0. The seam still
+    // sits at the join (edited 24 -> x 12) and must render/hit as a zero-width marker, not vanish.
+    let adapter = makeAdapter(
+      removedRange: 24..<64, crossfadeLength: 8, viewportWidth: 15, samplesPerPixel: 2)
+    let seam = adapter.timeline.seams[0]
+    expectNoDifference(seam.crossfadeLength, 0)
+    expectNoDifference(seam.editedCrossfadeStart, 24)
+    expectNoDifference(adapter.spanForSeam(seam), WaveformSpan(positionX: 12, width: 0))
+  }
+
+  @Test func spanForSeamIsNilWhenTheHardCutIsOffscreen() {
+    // Same hard cut at edited 24 -> x 12, but the viewport is only 10pt wide -> off-screen -> nil.
+    let adapter = makeAdapter(
+      removedRange: 24..<64, crossfadeLength: 8, viewportWidth: 10, samplesPerPixel: 2)
+    let seam = adapter.timeline.seams[0]
+    expectNoDifference(seam.crossfadeLength, 0)
+    #expect(adapter.spanForSeam(seam) == nil)
+  }
+
   // MARK: - visibleColumns across a seam
 
   @Test func visibleColumnsMergePeaksAcrossASeam() {

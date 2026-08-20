@@ -313,6 +313,32 @@ struct EditorSeamSelectionTests {
     }
   }
 
+  @Test func hardCutSeamIsSelectableAndRestorable() {
+    withStorage {
+      let model = editor(fingerprint: "fp-hardcut-restore")
+      model.editedWaveform.viewportWidth = 1000
+      model.editedWaveform.samplesPerPixel = 200
+      model.editedWaveform.visibleStartSample = 1_500_000
+      // Removal running to EOF: the trailing kept island is empty, so the crossfade clamps to 0 —
+      // a hard cut with a zero-width bowtie. It must still be clickable (and therefore restorable);
+      // otherwise a head/tail trim would be an un-restorable dead-end that permanently blocks export.
+      let id = addRemoval(model, range: 1_600_000..<1_855_488, length: 600)
+      let seam = model.editedWaveform.timeline.seams[0]
+      expectNoDifference(seam.crossfadeLength, 0)
+
+      let span = model.seamOverlays[0].span
+      expectNoDifference(span.width, 0)
+      expectNoDifference(model.seamID(atX: span.positionX), id)
+
+      model.waveformClicked(atX: span.positionX, extending: false)
+      expectNoDifference(model.selectedSeamID, id)
+
+      model.restoreRemovalTapped()
+      expectNoDifference(model.timelineRemovals[id: id], nil)
+      expectNoDifference(model.selectedSeamID, nil)
+    }
+  }
+
   @Test func waveformClickOnSeamSelectsItWithoutMovingPlayhead() {
     withStorage {
       let (model, id) = hitTestEditor("fp-click-seam")

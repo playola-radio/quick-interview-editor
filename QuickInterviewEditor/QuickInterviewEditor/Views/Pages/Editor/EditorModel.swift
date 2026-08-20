@@ -583,7 +583,8 @@ final class EditorModel: ViewModel {
 
   // MARK: - Seam overlays
   /// The bowtie spans the lane draws at each seam, mapped to edited view coordinates by the
-  /// adapter (nil, and so dropped, for a fully-clamped or off-screen seam). A model computed
+  /// adapter (nil, and so dropped, only for an off-screen seam; a fully-clamped hard cut still
+  /// yields a zero-width marker so it stays visible and selectable). A model computed
   /// prop so the view only binds — it never derives waveform geometry. Reads the adapter's
   /// already-synced `editedTimeline` (kept current by `syncEditedTimeline()` on every removal
   /// change) rather than rebuilding one, since `editedTimeline` constructs a fresh value on
@@ -600,8 +601,9 @@ final class EditorModel: ViewModel {
   private static let seamHitTolerance: CGFloat = 4
 
   /// Hit-testing lives here (the view only reports x): the removal id whose bowtie the view-x
-  /// lands on, or nil. Walks the same drawn seams the lane renders — a zero-length or off-screen
-  /// seam has no span, so it isn't hittable.
+  /// lands on, or nil. Walks the same drawn seams the lane renders; a zero-length hard cut has a
+  /// zero-width span, so the tolerance below is what makes it clickable. Only a fully off-screen
+  /// seam has no span and so isn't hittable.
   func seamID(atX positionX: CGFloat) -> TimelineRemoval.ID? {
     editedWaveform.timeline.seams.first { seam in
       guard let span = editedWaveform.spanForSeam(seam) else { return false }
