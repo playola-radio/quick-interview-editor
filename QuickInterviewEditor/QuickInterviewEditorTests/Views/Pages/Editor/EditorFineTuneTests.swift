@@ -696,12 +696,13 @@ struct EditorFineTuneTests {
       await gate.awaitStarted()
       // The shortcut tags the context, positions the cursor at the draft start, and plays the draft.
       expectNoDifference(model.transportContext, .draftPreview)
-      expectNoDifference(model.playheadSample, draft.lowerBound)
+      expectNoDifference(model.playheadEditedSample, draft.lowerBound)
       expectNoDifference(recorded.value, draft)
       #expect(model.isTransportPlaying)
       await model.transportStopTapped()
       await task.value
-      expectNoDifference(model.playheadSample, draft.lowerBound)  // Stop → origin (draft start)
+      // Stop → origin (draft start)
+      expectNoDifference(model.playheadEditedSample, draft.lowerBound)
     }
   }
 }

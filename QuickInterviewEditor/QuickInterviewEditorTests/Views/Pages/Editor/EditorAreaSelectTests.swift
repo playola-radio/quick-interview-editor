@@ -130,7 +130,8 @@ struct EditorAreaSelectTests {
     model.waveformAreaSelectChanged(toX: 600)
     expectNoDifference(model.transcript.reveal, nil)  // no transcript scroll mid-drag
     model.waveformAreaSelectEnded(toX: 600)
-    expectNoDifference(model.playheadSample, 70000)  // exact range start (not word-snapped 70648)
+    // Exact range start (not word-snapped 70648)
+    expectNoDifference(model.playheadEditedSample, 70000)
     expectNoDifference(model.transportPhase, .stopped)
     // Release scrolls the transcript to the range's first overlapping word (word 2).
     expectNoDifference(model.transcript.reveal?.wordID, 2)
@@ -139,15 +140,15 @@ struct EditorAreaSelectTests {
   @Test func playheadSnapIsSuppressedMidDragThenCommittedOnRelease() async {
     let model = editor()
     geometry(model)
-    model.playheadSample = 999
+    model.playheadEditedSample = 999
     model.waveformAreaSelectBegan(atX: 350, extending: false)
     model.waveformAreaSelectChanged(toX: 600)  // audioSelection 70000..<120000
     // Simulate the view's deferred selection→playhead snap firing mid-drag: it must bail.
     let token = model.cursorMoveToken
     await model.transportSelectionChanged(model.audioSelection, cursorToken: token)
-    expectNoDifference(model.playheadSample, 999)  // still suppressed
+    expectNoDifference(model.playheadEditedSample, 999)  // still suppressed
     model.waveformAreaSelectEnded(toX: 600)
-    expectNoDifference(model.playheadSample, 70000)  // committed once on release
+    expectNoDifference(model.playheadEditedSample, 70000)  // committed once on release
   }
 
   // MARK: - Auto-scroll past the visible edge

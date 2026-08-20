@@ -387,7 +387,7 @@ struct EditorRemovalTests {
       model.editedWaveform.viewportWidth = 1000
       model.editedWaveform.samplesPerPixel = 300  // shows edited [0, 300_000)
       model.editedWaveform.visibleStartSample = 0
-      model.playheadSample = 220_000  // a source sample just past the removal
+      model.playheadEditedSample = 220_000  // a source sample just past the removal
       let beforePlayheadX = model.playheadX  // identity axis: 220_000 / 300 = 733.3…
 
       // Remove [10_000, 210_000) (200_000 samples) with a 96-sample crossfade.

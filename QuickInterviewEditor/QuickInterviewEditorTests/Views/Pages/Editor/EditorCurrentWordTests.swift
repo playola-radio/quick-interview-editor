@@ -36,7 +36,7 @@ struct EditorCurrentWordTests {
   /// the playhead whether that came from playback or a manual move.
   @Test func cursorHighlightsTheWordUnderIt() {
     withEditor { editor in
-      editor.playheadSample = 1500
+      editor.playheadEditedSample = 1500
       expectNoDifference(editor.transcript.currentWordID, 2)
     }
   }
@@ -45,9 +45,9 @@ struct EditorCurrentWordTests {
   /// never left stale on the last-heard word.
   @Test func movingTheCursorMovesTheHighlight() {
     withEditor { editor in
-      editor.playheadSample = 2500
+      editor.playheadEditedSample = 2500
       expectNoDifference(editor.transcript.currentWordID, 3)
-      editor.playheadSample = 0  // e.g. Stop returns the cursor to the origin
+      editor.playheadEditedSample = 0  // e.g. Stop returns the cursor to the origin
       expectNoDifference(editor.transcript.currentWordID, 1)
     }
   }
@@ -55,8 +55,8 @@ struct EditorCurrentWordTests {
   /// A cursor in a gap / past the end keeps the last word, so you never lose your place.
   @Test func cursorInAGapKeepsTheLastWord() {
     withEditor { editor in
-      editor.playheadSample = 500
-      editor.playheadSample = 9999  // past the last word
+      editor.playheadEditedSample = 500
+      editor.playheadEditedSample = 9999  // past the last word
       expectNoDifference(editor.transcript.currentWordID, 1)
     }
   }

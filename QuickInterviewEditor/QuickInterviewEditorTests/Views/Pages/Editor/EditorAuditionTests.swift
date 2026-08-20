@@ -149,7 +149,7 @@ struct EditorAuditionTests {
       await gate.awaitStarted()
       // The shortcut tags the context, positions the cursor at the region start, and plays the range.
       expectNoDifference(model.transportContext.auditionMode, .cutIn)
-      expectNoDifference(model.playheadSample, region.lowerBound)
+      expectNoDifference(model.playheadEditedSample, region.lowerBound)
       expectNoDifference(
         recorded.value?.1, region.lowerBound..<model.editPlan.source.durationSamples)
       gate.release()
@@ -284,12 +284,13 @@ struct EditorAuditionTests {
     } operation: {
       let task = Task { await model.observePlayback() }
       continuation.yield(
-        PlaybackPosition(sessionID: session, sample: 2000, isPlaying: true))
-      await settle { model.playheadSample == 2000 }
-      #expect(model.playheadSample == 2000)
+        PlaybackPosition(sessionID: session, sample: .source(2000), isPlaying: true))
+      await settle { model.playheadEditedSample == 2000 }
+      #expect(model.playheadEditedSample == 2000)
       continuation.finish()
       await task.value
-      #expect(model.playheadSample == 2000)  // persists after exit — the cursor is never cleared
+      // Persists after exit — the cursor is never cleared.
+      #expect(model.playheadEditedSample == 2000)
     }
   }
 

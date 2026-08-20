@@ -189,7 +189,7 @@ struct EditorEditSlicePresentationTests {
 
     await child.seekTapped(toSample: target)
 
-    expectNoDifference(model.playheadSample, target)
+    expectNoDifference(model.playheadEditedSample, target)
     expectNoDifference(model.editSlice?.playheadSample, target)
     expectNoDifference(model.transportPhase, .stopped)
   }
@@ -204,7 +204,7 @@ struct EditorEditSlicePresentationTests {
     let child = model.editSlice!
     model.transportContext = .sliceEdit
     model.transportPhase = .playing(PlaybackSessionID())
-    model.transportOriginSample = slice.startSample
+    model.transportOriginEditedSample = slice.startSample
     child.updatePlayback(sample: slice.startSample + 5_000, isPlaying: true)  // ticked mid-slice
 
     await withDependencies {
@@ -235,10 +235,11 @@ struct EditorEditSlicePresentationTests {
     } operation: {
       let task = Task { await model.observePlayback() }
       continuation.yield(
-        PlaybackPosition(sessionID: session, sample: slice.startSample + 200, isPlaying: true))
+        PlaybackPosition(
+          sessionID: session, sample: .source(slice.startSample + 200), isPlaying: true))
       await settle { model.editSlice?.playheadSample == slice.startSample + 200 }
 
-      expectNoDifference(model.playheadSample, slice.startSample + 200)
+      expectNoDifference(model.playheadEditedSample, slice.startSample + 200)
       expectNoDifference(model.editSlice?.playheadSample, slice.startSample + 200)
       #expect(model.editSlice?.isPlaying == true)
 
@@ -268,7 +269,7 @@ struct EditorEditSlicePresentationTests {
         ranges.withValue { $0.append(range) }
         return await gate.play()
       }
-      $0.audioPlayer.pause = { _ in pausePoint }  // pause lands the cursor mid-slice
+      $0.audioPlayer.pause = { _ in .source(pausePoint) }  // pause lands the cursor mid-slice
       $0.audioPlayer.resume = { _ in
         resumes.withValue { $0 += 1 }
         return true
@@ -310,7 +311,7 @@ struct EditorEditSlicePresentationTests {
         plays.withValue { $0 += 1 }
         return await gate.play()
       }
-      $0.audioPlayer.pause = { _ in 500 }
+      $0.audioPlayer.pause = { _ in .source(500) }
       $0.audioPlayer.resume = { _ in
         resumes.withValue { $0 += 1 }
         return true
@@ -386,7 +387,7 @@ struct EditorEditSlicePresentationTests {
     let mainSession = PlaybackSessionID()
     model.transportContext = .free
     model.transportPhase = .paused(mainSession)
-    model.transportOriginSample = 100
+    model.transportOriginEditedSample = 100
     let stopped = LockIsolated<PlaybackSessionID?>(nil)
 
     await withDependencies {
@@ -416,15 +417,17 @@ struct EditorEditSlicePresentationTests {
     } operation: {
       let task = Task { await model.observePlayback() }
       continuation.yield(
-        PlaybackPosition(sessionID: session, sample: slice.startSample + 200, isPlaying: true))
+        PlaybackPosition(
+          sessionID: session, sample: .source(slice.startSample + 200), isPlaying: true))
       await settle { model.editSlice?.playheadSample == slice.startSample + 200 }
 
       continuation.yield(
-        PlaybackPosition(sessionID: session, sample: slice.startSample + 200, isPlaying: false))
+        PlaybackPosition(
+          sessionID: session, sample: .source(slice.startSample + 200), isPlaying: false))
       await settle { model.editSlice?.isPlaying == false }
 
       #expect(model.editSlice?.isPlaying == false)
-      expectNoDifference(model.editSlice?.playheadSample, model.playheadSample)
+      expectNoDifference(model.editSlice?.playheadSample, model.playheadEditedSample)
 
       continuation.finish()
       await task.value

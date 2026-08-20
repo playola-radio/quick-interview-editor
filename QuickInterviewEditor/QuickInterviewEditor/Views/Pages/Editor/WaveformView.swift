@@ -13,7 +13,7 @@ struct WaveformView: View {
       header
       WaveformLaneView(
         waveform: model.editedWaveform,
-        playhead: { model.playheadSample },
+        playhead: { model.playheadEditedSample },
         highlightRange: model.activeEditingRange,
         onRulerMove: { model.rulerMovedPlayhead(toX: $0) },
         onBodyClick: { model.waveformClicked(atX: $0, extending: $1) },
@@ -44,11 +44,6 @@ struct WaveformView: View {
         Text(status)
           .font(.system(size: 11, weight: .medium))
           .foregroundStyle(Color(red: 0.96, green: 0.86, blue: 0.4))
-      }
-      if let note = model.removalPlaybackNote {
-        Text(note)
-          .font(.system(size: 11, weight: .medium))
-          .foregroundStyle(Color(white: 0.44))
       }
       Spacer()
       WaveformAmplitudeZoomButton(waveform: model.waveform)

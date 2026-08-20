@@ -28,9 +28,17 @@ struct AudioPlayerClient: Sendable {
   /// atomically with the start, so no suspension point sits between it and `session` becoming
   /// current. `session` tags this playback's ticks.
   var play: @Sendable (URL, Range<Int>, Int, Double, PlaybackSessionID) async throws -> PlaybackEnd
+  /// Plays an edited-timeline render plan as ONE gapless stream — kept-segment interiors
+  /// scheduled from `url`, seam crossfades pre-rendered and blended — at `rate`
+  /// (pitch-preserving), reporting positions/pause samples on the EDITED axis
+  /// (`PlaybackSample.edited`). Mirrors `play`'s session/rate contract.
+  var playEdited:
+    @Sendable (URL, AudioEditRenderPlan, Int, Double, PlaybackSessionID) async throws
+      -> PlaybackEnd
   /// Pauses `session` if it is the current playback, freezing the node in place; returns the
-  /// exact resting plan sample (nil if `session` is not current). Does not end the `play` call.
-  var pause: @Sendable (PlaybackSessionID) async -> Int?
+  /// exact resting sample, tagged with its coordinate axis (nil if `session` is not current).
+  /// Does not end the `play` call.
+  var pause: @Sendable (PlaybackSessionID) async -> PlaybackSample?
   /// Resumes `session` if it is the current paused playback. Returns whether it is now playing,
   /// so a caller can keep its UI honest when a restart fails (e.g. the engine stopped mid-pause).
   var resume: @Sendable (PlaybackSessionID) async -> Bool
@@ -41,17 +49,26 @@ struct AudioPlayerClient: Sendable {
   /// so it takes no session. Does not disturb the plan-sample position math: the player node's
   /// `sampleTime` still counts input frames, so the playhead stays aligned at any rate.
   var setRate: @Sendable (Double) async -> Void
-  /// A stream of playback positions in PLAN samples while a slice plays, terminated by an
-  /// `isPlaying: false` tick on stop/finish. Additive to `play`/`stop` so the waveform
+  /// A stream of playback positions (axis-tagged samples) while something plays, terminated by
+  /// an `isPlaying: false` tick on stop/finish. Additive to `play`/`stop` so the waveform
   /// playhead gets real positions without disturbing the tuned slice-playback path.
   var positions: @Sendable () -> AsyncStream<PlaybackPosition>
 }
 
-/// A playback position sampled from the audio node, expressed in PLAN samples so it lands
-/// in the same coordinate system as the waveform (the native→plan conversion is internal).
+/// A playback position's sample tagged with its coordinate axis, so a consumer can never mistake
+/// one axis for the other. `.source` = plan samples of the canonical file — every
+/// `play(url:range:)` session (slice, preview, audition, slice-edit modal). `.edited` =
+/// edited-timeline samples — every `playEdited` playlist session.
+enum PlaybackSample: Sendable, Equatable {
+  case source(Int)
+  case edited(Int)
+}
+
+/// A playback position sampled from the audio node, expressed as an axis-tagged sample so it
+/// lands in an unambiguous coordinate system (the native-frame conversion is internal).
 struct PlaybackPosition: Sendable, Equatable {
   var sessionID: PlaybackSessionID
-  var sample: Int
+  var sample: PlaybackSample
   var isPlaying: Bool
 }
 
@@ -64,6 +81,10 @@ extension AudioPlayerClient: TestDependencyKey {
     play: { _, _, _, _, _ -> PlaybackEnd in
       reportIssue("AudioPlayerClient.play called without a test override")
       throw EngineClientError.unimplemented("AudioPlayerClient.play")
+    },
+    playEdited: { _, _, _, _, _ -> PlaybackEnd in
+      reportIssue("AudioPlayerClient.playEdited called without a test override")
+      throw EngineClientError.unimplemented("AudioPlayerClient.playEdited")
     },
     pause: { _ in
       reportIssue("AudioPlayerClient.pause called without a test override")
@@ -81,7 +102,8 @@ extension AudioPlayerClient: TestDependencyKey {
   )
 
   static let previewValue = AudioPlayerClient(
-    play: { _, _, _, _, _ in .finished }, pause: { _ in nil }, resume: { _ in true },
+    play: { _, _, _, _, _ in .finished }, playEdited: { _, _, _, _, _ in .finished },
+    pause: { _ in nil }, resume: { _ in true },
     stop: { _ in }, setRate: { _ in }, positions: { AsyncStream { $0.finish() } })
 }
 
@@ -101,6 +123,10 @@ extension AudioPlayerClient {
       play: { url, range, sampleRate, rate, session in
         try await box.play(
           url: url, range: range, planSampleRate: sampleRate, rate: rate, session: session)
+      },
+      playEdited: { url, plan, sampleRate, rate, session in
+        try await box.playEdited(
+          url: url, plan: plan, planSampleRate: sampleRate, rate: rate, session: session)
       },
       pause: { session in await box.pause(session: session) },
       resume: { session in await box.resume(session: session) },
@@ -242,12 +268,12 @@ private actor LivePlayerBox {
     }
   }
 
-  /// SPIKE (PR2): plays an edited-timeline `plan` as one gapless stream on the shared node —
-  /// kept-segment interiors scheduled straight from `file`, seam crossfades pre-rendered into PCM
-  /// buffers and blended by `CrossfadeRenderer` — proving the playlist scheduler + edited-position
-  /// bookkeeping before the transport migrates to edited coordinates. Positions report EDITED
-  /// samples (`editedFrameTimeline`). Not exposed on `AudioPlayerClient` yet (PR3 wires the
-  /// transport); exercised by manual verification only.
+  /// The transport's edited-playback engine: plays an edited-timeline `plan` as one gapless
+  /// stream on the shared node — kept-segment interiors scheduled straight from `file`, seam
+  /// crossfades pre-rendered into PCM buffers and blended by `CrossfadeRenderer`. Positions
+  /// report EDITED samples (`editedFrameTimeline`). The whole plan is scheduled up front
+  /// (retained per the PR 2 deviation note: the seam buffers are the only PCM held, one short
+  /// crossfade per removal, so bounded lookahead isn't warranted).
   func playEdited(
     url: URL, plan: AudioEditRenderPlan, planSampleRate: Int, rate: Double,
     session: PlaybackSessionID
@@ -436,16 +462,17 @@ private actor LivePlayerBox {
     supersede(reason: .stopped)
   }
 
-  /// Freezes the node in place and returns the exact plan sample it stopped at. No
-  /// `isPlaying: false` broadcast — the playhead must stay where paused. Does not resume
-  /// the suspended `play` waiter, so the `play` call stays in flight until resume/stop.
-  func pause(session: PlaybackSessionID) -> Int? {
+  /// Freezes the node in place and returns the exact axis-tagged sample it stopped at (an
+  /// EDITED sample from the playlist frame timeline during `playEdited`, a source plan sample
+  /// otherwise). No `isPlaying: false` broadcast — the playhead must stay where paused. Does not
+  /// resume the suspended `play` waiter, so the `play` call stays in flight until resume/stop.
+  func pause(session: PlaybackSessionID) -> PlaybackSample? {
     guard currentSession == session, node.isPlaying else { return nil }
     // Pause the CURRENT session unconditionally; never leave audio running because the
     // exact render time isn't available yet. `lastRenderTime`/`playerTime` are nil in the
     // brief window after `play()` before the first render cycle — fall back to the range
     // start there so an early Pause still stops and freezes at a valid sample.
-    let restingSample: Int
+    let restingSample: PlaybackSample
     if let nodeTime = node.lastRenderTime,
       let playerTime = node.playerTime(forNodeTime: nodeTime)
     {
@@ -558,14 +585,14 @@ private actor LivePlayerBox {
     broadcast(PlaybackPosition(sessionID: session, sample: sample, isPlaying: true))
   }
 
-  /// Converts the node's played input-frame count to the reported position sample: an EDITED
+  /// Converts the node's played input-frame count to the reported axis-tagged sample: an EDITED
   /// sample while a `playEdited` playlist runs (via `editedFrameTimeline`), otherwise the
-  /// slice path's plan sample from the single start offset.
-  private func positionSample(forFramesPlayed framesPlayed: Int) -> Int {
+  /// slice path's SOURCE plan sample from the single start offset.
+  private func positionSample(forFramesPlayed framesPlayed: Int) -> PlaybackSample {
     if let editedFrameTimeline {
-      return editedFrameTimeline.editedSample(forFramesPlayed: framesPlayed)
+      return .edited(editedFrameTimeline.editedSample(forFramesPlayed: framesPlayed))
     }
-    return startPlanSample + Int(Double(framesPlayed) / max(playRatio, .ulpOfOne))
+    return .source(startPlanSample + Int(Double(framesPlayed) / max(playRatio, .ulpOfOne)))
   }
 
   private func stopNode() {

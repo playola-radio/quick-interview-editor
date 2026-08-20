@@ -103,10 +103,19 @@ final class EditedWaveformAdapter {
     return columns
   }
 
-  /// View-x of the persistent playhead cursor for a SOURCE sample, or nil when it falls outside
-  /// the viewport (or maps nowhere at all).
-  func playheadX(forSource sourceSample: Int) -> CGFloat? {
+  /// View-x of a SOURCE sample, or nil when it falls outside the viewport (or maps nowhere at
+  /// all) — for source-anchored geometry like the selection edge handles.
+  func viewX(forSource sourceSample: Int) -> CGFloat? {
     guard viewportWidth > 0, let posX = sourceSampleToX(sourceSample) else { return nil }
+    guard posX >= 0, posX <= viewportWidth else { return nil }
+    return posX
+  }
+
+  /// View-x of the persistent playhead cursor for an EDITED sample, or nil when it falls outside
+  /// the viewport.
+  func playheadX(forEdited editedSample: Int) -> CGFloat? {
+    guard viewportWidth > 0 else { return nil }
+    let posX = editedSampleToX(editedSample)
     guard posX >= 0, posX <= viewportWidth else { return nil }
     return posX
   }
@@ -329,13 +338,18 @@ final class EditedWaveformAdapter {
 }
 
 /// The edited/collapsed axis drives ``WaveformLaneView`` in the main editor. The lane's
-/// `forSource:` requirements are literal here — every read maps SOURCE↔EDITED through the timeline.
+/// `forSource:` requirements are literal here — every read maps SOURCE↔EDITED through the
+/// timeline — and the cursor axis is EDITED, so the playhead reads need no mapping at all.
 extension EditedWaveformAdapter: WaveformLaneDriving {
   func laneSpan(forSource sourceRange: Range<Int>) -> WaveformSpan? {
     span(forSource: sourceRange)
   }
 
-  func lanePlayheadX(forSource sourceSample: Int) -> CGFloat? {
-    playheadX(forSource: sourceSample)
+  func laneX(forSource sourceSample: Int) -> CGFloat? {
+    viewX(forSource: sourceSample)
+  }
+
+  func lanePlayheadX(forCursor cursorSample: Int) -> CGFloat? {
+    playheadX(forEdited: cursorSample)
   }
 }

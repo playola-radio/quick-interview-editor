@@ -242,21 +242,6 @@ struct EditorTests {
     expectNoDifference(model.timelineRemovals.count, 1)
   }
 
-  @Test func removalPlaybackNoteAppearsOnlyWithRemovals() {
-    let model = editor()
-    expectNoDifference(model.removalPlaybackNote, nil)
-
-    model.mutateDocument { doc in
-      doc.timelineRemovals.append(
-        TimelineRemoval(
-          id: Fixtures.uuid(3), removedRange: 1000..<2000,
-          crossfade: Crossfade(lengthSamples: 480, curve: .equalPower)))
-    }
-    expectNoDifference(
-      model.removalPlaybackNote,
-      "Playback preview does not yet blend cuts (coming next).")
-  }
-
   @Test func undoRemovingPlayingSliceReconcilesPlayback() async {
     let gate = PlayerGate()
     let stopped = LockIsolated(false)
@@ -547,12 +532,13 @@ struct EditorTests {
     } operation: {
       let task = Task { await model.observePlayback() }
       continuation.yield(
-        PlaybackPosition(sessionID: session, sample: 1000, isPlaying: true))
-      await settle { model.playheadSample == 1000 }
-      #expect(model.playheadSample == 1000)  // maps the live position
+        PlaybackPosition(sessionID: session, sample: .source(1000), isPlaying: true))
+      await settle { model.playheadEditedSample == 1000 }
+      #expect(model.playheadEditedSample == 1000)  // maps the live position
       continuation.finish()  // stands in for the task being cancelled / stream ending
       await task.value
-      #expect(model.playheadSample == 1000)  // persists after exit — the cursor is never cleared
+      // Persists after exit — the cursor is never cleared.
+      #expect(model.playheadEditedSample == 1000)
     }
   }
 
@@ -564,9 +550,9 @@ struct EditorTests {
     } operation: {
       let task = Task { await model.observePlayback() }
       continuation.yield(
-        PlaybackPosition(sessionID: PlaybackSessionID(), sample: 5000, isPlaying: true))
+        PlaybackPosition(sessionID: PlaybackSessionID(), sample: .source(5000), isPlaying: true))
       await settle { false }  // let the tick be processed
-      #expect(model.playheadSample == 0)  // never adopts another tab's position
+      #expect(model.playheadEditedSample == 0)  // never adopts another tab's position
       continuation.finish()
       await task.value
     }
@@ -583,13 +569,13 @@ struct EditorTests {
     } operation: {
       let task = Task { await model.observePlayback() }
       continuation.yield(
-        PlaybackPosition(sessionID: session, sample: 1000, isPlaying: true))
-      await settle { model.playheadSample == 1000 }
+        PlaybackPosition(sessionID: session, sample: .source(1000), isPlaying: true))
+      await settle { model.playheadEditedSample == 1000 }
       // A false/final tick ends transcript follow but must NOT move the persistent cursor.
       continuation.yield(
-        PlaybackPosition(sessionID: session, sample: 1200, isPlaying: false))
+        PlaybackPosition(sessionID: session, sample: .source(1200), isPlaying: false))
       await settle { false }  // let the false tick be processed
-      #expect(model.playheadSample == 1000)  // cursor stays where the audio last played
+      #expect(model.playheadEditedSample == 1000)  // cursor stays where the audio last played
       continuation.finish()
       await task.value
     }
@@ -606,13 +592,13 @@ struct EditorTests {
     } operation: {
       let task = Task { await model.observePlayback() }
       continuation.yield(
-        PlaybackPosition(sessionID: session, sample: 1000, isPlaying: true))
-      await settle { model.playheadSample == 1000 }
+        PlaybackPosition(sessionID: session, sample: .source(1000), isPlaying: true))
+      await settle { model.playheadEditedSample == 1000 }
       // A straggler tick from a superseded/foreign session must NOT move the cursor.
       continuation.yield(
-        PlaybackPosition(sessionID: PlaybackSessionID(), sample: 9999, isPlaying: true))
+        PlaybackPosition(sessionID: PlaybackSessionID(), sample: .source(9999), isPlaying: true))
       await settle { false }  // let the foreign tick be processed
-      #expect(model.playheadSample == 1000)  // unchanged — foreign tick ignored
+      #expect(model.playheadEditedSample == 1000)  // unchanged — foreign tick ignored
       continuation.finish()
       await task.value
     }
