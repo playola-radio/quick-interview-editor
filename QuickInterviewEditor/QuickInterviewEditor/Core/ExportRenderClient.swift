@@ -65,6 +65,8 @@ enum ExportRenderError: Error, Equatable, LocalizedError {
   case frameCountMismatch(actual: Int, expected: Int)
   case sampleRateMismatch(actual: Int, expected: Int)
   case shortRender(written: Int, expected: Int)
+  case shortRead(requested: Int, got: Int, atFrame: Int)
+  case invalidSliceRange(name: String, start: Int, end: Int, duration: Int)
   case bufferAllocationFailed
 
   var errorDescription: String? {
@@ -75,6 +77,11 @@ enum ExportRenderError: Error, Equatable, LocalizedError {
       return "canonical audio sample rate \(actual) Hz != requested \(expected) Hz"
     case .shortRender(let written, let expected):
       return "rendered \(written) frames but the edited timeline is \(expected) frames"
+    case .shortRead(let requested, let got, let atFrame):
+      return "read \(got) of \(requested) frames at frame \(atFrame) of the canonical audio"
+    case .invalidSliceRange(let name, let start, let end, let duration):
+      return
+        "\"\(name)\" spans samples \(start)..<\(end), which is not a valid range in a \(duration)-sample recording"
     case .bufferAllocationFailed:
       return "Could not allocate an audio buffer for the export."
     }
@@ -140,7 +147,15 @@ enum ExportAudioRenderer {
       try Task.checkCancellation()
       let count = AVAudioFrameCount(min(remaining, chunkFrames))
       try file.read(into: buffer, frameCount: count)
-      guard buffer.frameLength > 0 else { break }
+      // Every segment range is in bounds of a file already verified to match the plan's
+      // frame count, so a short read means the file changed under us. Fail loud rather
+      // than stopping early — a silent break would ship a truncated slice that only the
+      // `shortRender` backstop could catch, and only when it changed the total.
+      guard buffer.frameLength == count else {
+        throw ExportRenderError.shortRead(
+          requested: Int(count), got: Int(buffer.frameLength),
+          atFrame: source.lowerBound + written)
+      }
       try output.write(from: buffer)
       written += Int(buffer.frameLength)
       remaining -= Int(buffer.frameLength)
@@ -151,38 +166,55 @@ enum ExportAudioRenderer {
   /// Renders one seam's crossfade. The overlap length is `leftTail.count` — the plan's
   /// seam `length` always equals its (possibly trimmed) tail/head range counts, the
   /// same invariant `LivePlayerBox.seamBuffer` relies on.
+  ///
+  /// Rendered in `chunkFrames` chunks like a kept segment, so a pathological persisted
+  /// crossfade length can't allocate the whole overlap (times three: two reads plus the
+  /// blend) at once, and a cancel lands within a chunk instead of after the whole fade.
+  /// Chunking is sample-identical: `CrossfadeRenderer.gains` positions each chunk inside
+  /// the FULL fade via `fadeOffset + chunkStart` against an unchanged `fadeTotal`, which
+  /// is the same continuation math a seek into a seam already uses.
   private static func writeSeam(
     leftTail: Range<Int>, rightHead: Range<Int>, fadeOffset: Int,
     from file: AVAudioFile, to output: AVAudioFile
   ) throws -> Int {
     let length = leftTail.count
     guard length > 0 else { return 0 }
-    let out = try readFloats(file: file, startFrame: leftTail.lowerBound, frameCount: length)
-    let incoming = try readFloats(file: file, startFrame: rightHead.lowerBound, frameCount: length)
-    // Same call shape as `LivePlayerBox.seamBuffer`, so export == audition. The curve
-    // is fixed equal-power on both paths until PR5 threads per-seam curves through.
-    let blended = CrossfadeRenderer.blend(
-      out: out, incoming: incoming, curve: .equalPower,
-      fadeOffset: fadeOffset, fadeTotal: fadeOffset + length)
     let format = file.processingFormat
-    let count = AVAudioFrameCount(length)
-    guard !blended.isEmpty,
-      let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: count),
-      let channels = buffer.floatChannelData
-    else { throw ExportRenderError.bufferAllocationFailed }
-    buffer.frameLength = count
-    for channel in 0..<Int(format.channelCount) {
-      let source = blended[min(channel, blended.count - 1)]
-      let destination = channels[channel]
-      for frame in 0..<length { destination[frame] = source[frame] }
+    var chunkStart = 0
+    while chunkStart < length {
+      try Task.checkCancellation()
+      let chunkLength = min(chunkFrames, length - chunkStart)
+      let out = try readFloats(
+        file: file, startFrame: leftTail.lowerBound + chunkStart, frameCount: chunkLength)
+      let incoming = try readFloats(
+        file: file, startFrame: rightHead.lowerBound + chunkStart, frameCount: chunkLength)
+      // Same call shape as `LivePlayerBox.seamBuffer`, so export == audition. The curve
+      // is fixed equal-power on both paths until PR5 threads per-seam curves through.
+      let blended = CrossfadeRenderer.blend(
+        out: out, incoming: incoming, curve: .equalPower,
+        fadeOffset: fadeOffset + chunkStart, fadeTotal: fadeOffset + length)
+      let count = AVAudioFrameCount(chunkLength)
+      guard !blended.isEmpty,
+        let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: count),
+        let channels = buffer.floatChannelData
+      else { throw ExportRenderError.bufferAllocationFailed }
+      buffer.frameLength = count
+      for channel in 0..<Int(format.channelCount) {
+        let source = blended[min(channel, blended.count - 1)]
+        let destination = channels[channel]
+        for frame in 0..<chunkLength { destination[frame] = source[frame] }
+      }
+      try output.write(from: buffer)
+      chunkStart += chunkLength
     }
-    try output.write(from: buffer)
     return length
   }
 
   /// Reads exactly `frameCount` frames from `startFrame` into per-channel float arrays.
-  /// The ratio-1 guarantee plus the plan's in-bounds ranges mean no clamping or
-  /// zero-padding is needed here (unlike the playback path's tolerant reader).
+  /// The ratio-1 guarantee plus the plan's in-bounds ranges mean a short read can only
+  /// come from a malformed plan or a file that changed under us, so it is a hard error
+  /// here — this reader never clamps or zero-pads (unlike the playback path's tolerant
+  /// one), because padded silence in an export is indistinguishable from kept audio.
   private static func readFloats(
     file: AVAudioFile, startFrame: Int, frameCount: Int
   ) throws -> [[Float]] {
@@ -190,13 +222,19 @@ enum ExportAudioRenderer {
     let channelCount = Int(format.channelCount)
     var result = Array(
       repeating: [Float](repeating: 0, count: frameCount), count: channelCount)
-    guard frameCount > 0,
-      let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(frameCount))
-    else { return result }
+    guard frameCount > 0 else { return result }
+    guard
+      let buffer = AVAudioPCMBuffer(
+        pcmFormat: format, frameCapacity: AVAudioFrameCount(frameCount)),
+      let channels = buffer.floatChannelData
+    else { throw ExportRenderError.bufferAllocationFailed }
     file.framePosition = AVAudioFramePosition(startFrame)
     try file.read(into: buffer, frameCount: AVAudioFrameCount(frameCount))
-    guard let channels = buffer.floatChannelData else { return result }
     let read = Int(buffer.frameLength)
+    guard read == frameCount else {
+      throw ExportRenderError.shortRead(
+        requested: frameCount, got: read, atFrame: startFrame)
+    }
     for channel in 0..<channelCount {
       let source = channels[channel]
       for frame in 0..<read { result[channel][frame] = source[frame] }

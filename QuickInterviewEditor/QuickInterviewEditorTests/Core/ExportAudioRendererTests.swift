@@ -283,6 +283,78 @@ struct ExportAudioRendererTests {
     }
   }
 
+  /// A malformed plan whose seam reads past the file's last frame used to be zero-padded
+  /// silently: `readFloats` filled the tail with zeros and `writeSeam` still reported a full
+  /// seam, so `framesWritten` matched `editedDurationSamples` and the export "succeeded" with
+  /// silence spliced into kept audio. The read is strict now, so it fails loud instead.
+  @Test func aSeamReadingPastTheEndOfTheFileFailsLoudInsteadOfPaddingSilence() throws {
+    let dir = try makeSandbox()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let source = dir.appendingPathComponent("canonical.aiff")
+    let output = dir.appendingPathComponent("slice.aiff")
+    try writeFixture(to: source)
+
+    // Frame-count and rate checks both pass; only the seam's incoming range is bogus, and it
+    // straddles EOF so the frame totals still add up to the declared 5800.
+    var plan = AudioEditRenderPlan(
+      timeline: EditedTimeline(sourceDurationSamples: Self.sourceFrames, removals: []))
+    plan.items = [
+      .segment(source: 0..<2800, editedStart: 0),
+      .seam(
+        id: UUID(uuidString: "00000000-0000-0000-0000-000000000003")!,
+        leftTail: 2800..<3000, rightHead: 7900..<8100, length: 200, editedStart: 2800,
+        fadeOffset: 0),
+      .segment(source: 5200..<8000, editedStart: 3000),
+    ]
+    #expect(throws: ExportRenderError.shortRead(requested: 200, got: 100, atFrame: 7900)) {
+      try ExportAudioRenderer.render(
+        job(source: source, output: output, plan: plan, editedDuration: 5800))
+    }
+  }
+
+  /// A crossfade longer than one read chunk is rendered in pieces, and each piece must
+  /// CONTINUE the fade rather than restart it. Chunked output has to be identical to a
+  /// single unchunked blend of the whole overlap — that equivalence is what lets the
+  /// renderer bound its memory without changing a single sample.
+  @Test func aCrossfadeLongerThanOneReadChunkMatchesAnUnchunkedBlend() throws {
+    let dir = try makeSandbox()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let source = dir.appendingPathComponent("canonical.aiff")
+    let output = dir.appendingPathComponent("slice.aiff")
+    let frames = 300_000
+    try writeFixture(to: source, frames: frames)
+
+    // 70_000 samples of overlap — more than the renderer's 65_536-frame chunk.
+    let fadeLength = 70_000
+    let removal = TimelineRemoval(
+      id: UUID(uuidString: "00000000-0000-0000-0000-000000000002")!,
+      removedRange: 100_000..<150_000,
+      crossfade: Crossfade(lengthSamples: fadeLength, curve: .equalPower))
+    let built = SliceRenderPlanBuilder.plan(sliceRange: 0..<frames, removals: [removal])
+    let editedDuration = frames - 50_000 - fadeLength
+    expectNoDifference(built.editedDurationSamples, editedDuration)
+
+    try ExportAudioRenderer.render(
+      job(
+        source: source, output: output, plan: built.plan, editedDuration: editedDuration,
+        sourceDuration: frames))
+
+    let actual = try parseAIFF(output)
+    expectNoDifference(actual.frameCount, editedDuration)
+
+    // Kept [0, 30_000) → seam over [30_000, 100_000) x [150_000, 220_000) → kept [220_000, …).
+    let outgoing = (30_000..<100_000).map { Float(sourceSample(at: $0)) / 32768 }
+    let incoming = (150_000..<220_000).map { Float(sourceSample(at: $0)) / 32768 }
+    let blended = CrossfadeRenderer.blend(
+      out: [outgoing], incoming: [incoming], curve: .equalPower, fadeOffset: 0,
+      fadeTotal: fadeLength)[0]
+    let rendered = try readFrames(output, from: 30_000, count: fadeLength)
+    expectNoDifference(rendered.count, blended.count)
+    let tolerance: Float = 1.0 / 32768
+    let worst = zip(rendered, blended).map { abs($0 - $1) }.max() ?? 0
+    #expect(worst <= tolerance)
+  }
+
   @Test func aPlanShorterThanItsEditedDurationFailsLoud() throws {
     let dir = try makeSandbox()
     defer { try? FileManager.default.removeItem(at: dir) }
