@@ -719,7 +719,11 @@ final class EditorModel: ViewModel {
   /// Whether `slice` has any audio left to export once removals collapse the timeline —
   /// false only when the slice's entire source range sits inside one or more removals.
   func sliceIsExportable(_ slice: Slice) -> Bool {
-    SliceRenderPlanBuilder.localTimeline(
+    // A malformed slice (reversed bounds) must read as unexportable, not trap forming the
+    // range — this runs from `sliceRows` on every render, long before `renderTargets`
+    // reaches its own `invalidSliceRange` check.
+    guard slice.startSample < slice.endSample else { return false }
+    return SliceRenderPlanBuilder.localTimeline(
       sliceRange: slice.startSample..<slice.endSample, removals: Array(timelineRemovals)
     ).editedDurationSamples > 0
   }
@@ -2743,6 +2747,9 @@ final class EditorModel: ViewModel {
   /// that was tight against a silence originally can land somewhere entirely different
   /// (or nowhere at all, if the whole slice was removed) once the timeline collapses.
   func exportWarnings(for slice: Slice) -> [SliceWarning] {
+    // Same reversed-bounds defense as `sliceIsExportable`: nothing to warn about on a slice
+    // that can never render.
+    guard slice.startSample < slice.endSample else { return [] }
     let sliceRange = slice.startSample..<slice.endSample
     let localTimeline = SliceRenderPlanBuilder.localTimeline(
       sliceRange: sliceRange, removals: Array(timelineRemovals))

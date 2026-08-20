@@ -194,6 +194,17 @@ struct EditorExportRemovalTests {
     #expect(model.exportTightWarning.contains("Intro"))
   }
 
+  /// A slice with reversed bounds must read as unexportable (and warn nothing), not trap
+  /// forming its range — `sliceIsExportable` runs from `sliceRows` on every render.
+  @Test func aSliceWithReversedBoundsIsUnexportableWithoutTrapping() {
+    let model = editor(Fixtures.editPlan())
+    let reversed = Slice(
+      id: UUID(), name: "Broken", startSample: 5000, endSample: 4000, wordIDs: [],
+      snippet: "x", warnings: [])
+    #expect(!model.sliceIsExportable(reversed))
+    expectNoDifference(model.exportWarnings(for: reversed), [])
+  }
+
   /// The bounds check the Python engine used to do: a stale slice whose range runs past the
   /// recording's end must fail the export with a clear message BEFORE any render job is
   /// issued, not trap forming a range or read past EOF inside the renderer.
