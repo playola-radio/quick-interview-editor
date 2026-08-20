@@ -790,7 +790,10 @@ final class EditorModel: ViewModel {
     let lower = max(0, range.lowerBound)
     let upper = min(range.upperBound, editPlan.source.durationSamples)
     guard lower < upper else {
-      audioSelection = nil
+      // Clear everything, not just `audioSelection`: a leftover `selectionAnchorSample` /
+      // `selectionEditingEdge` would let a later Shift gesture extend from a selection the user
+      // just cleared.
+      clearSelection()
       return
     }
     audioSelection = lower..<upper
@@ -801,13 +804,16 @@ final class EditorModel: ViewModel {
     }
   }
 
-  /// Clears the freeform selection and any in-progress selection-edit state. Leaves the transcript's
-  /// own selection alone — `audioSelection` is the source of truth; transcript rendering derives from
-  /// it, not the reverse.
+  /// Clears the freeform selection and any in-progress selection-edit state. The rendered transcript
+  /// highlight derives from `audioSelection` (the source of truth), so clearing that clears the
+  /// highlight. But the transcript keeps a *gesture* anchor for Shift-click extension, which is not
+  /// derived — so we also invalidate it here. Otherwise a later transcript Shift-click would extend
+  /// from the anchor of the selection the user just cleared, resurrecting it.
   func clearSelection() {
     audioSelection = nil
     selectionAnchorSample = nil
     selectionEditingEdge = nil
+    transcript.invalidateSelectionAnchor()
   }
 
   /// The Clear button in the mark-clip bar. Drops the freeform selection whatever created it —
@@ -1977,10 +1983,14 @@ final class EditorModel: ViewModel {
     return updated
   }
 
-  /// Builds a brand-new slice from a fine-tuned sample range, deriving word membership by
-  /// midpoint (not the raw transcript selection) so a dragged cut owns the right words.
+  /// Builds a brand-new slice from a fine-tuned sample range, deriving word membership by the
+  /// spec's overlap rule (a word is in the clip iff any of its audio overlaps) — the same rule as
+  /// direct Add-from-selection, so fine-tuning a selection before committing never silently drops a
+  /// partially-overlapped edge word.
   private func makeSlice(range: Range<Int>) -> Slice {
-    buildSlice(id: UUID(), name: "Slice \(nextSliceNumber)", range: range, plan: editPlan)
+    buildSlice(
+      id: UUID(), name: "Slice \(nextSliceNumber)", range: range,
+      wordIDs: wordIDs(anyOverlap: range, words: editPlan.words), plan: editPlan)
   }
 
   /// Marks the export as running synchronously (so the buttons disable immediately

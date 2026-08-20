@@ -180,8 +180,34 @@ struct EditorFineTuneTests {
     expectNoDifference(model.slices.count, 1)
     let added = model.slices[0]
     expectNoDifference(added.startSample..<added.endSample, draft)
-    expectNoDifference(added.wordIDs, wordIDs(overlapping: draft, words: model.editPlan.words))
+    expectNoDifference(added.wordIDs, wordIDs(anyOverlap: draft, words: model.editPlan.words))
     #expect(!model.transcript.hasSelection)  // selection cleared, pane closes
+  }
+
+  /// The pending-selection commit (`makeSlice`) must use the same overlap membership as direct
+  /// Add-from-selection, so fine-tuning a selection before committing never silently drops a
+  /// partially-overlapped edge word. Regression: `makeSlice` derived membership by midpoint via
+  /// `buildSlice`, so a word overlapping the draft by under half survived Add-from-selection but
+  /// vanished after a fine-tune commit of the same range.
+  @Test func commitPendingSelectionUsesOverlapMembershipForEdgeWords() {
+    let model = editor()
+    let words = model.editPlan.words
+    func mid(_ word: Word) -> Int {
+      word.startSample! + (word.endSample! - word.startSample!) / 2
+    }
+    // Draft clips word[1] and word[3] at their midpoints (partial overlap — midpoint excludes them)
+    // and fully covers word[2]: overlap membership is {w1,w2,w3}, midpoint would be {w2}.
+    let draft = (mid(words[1]) + 1)..<mid(words[3])
+    model.selectSourceRange(draft, snapPlayhead: false)
+    model.syncEditSession()
+    #expect(wordIDs(anyOverlap: draft, words: words) != wordIDs(overlapping: draft, words: words))
+
+    model.commitEditTapped()
+
+    let added = model.slices[0]
+    expectNoDifference(added.wordIDs, wordIDs(anyOverlap: draft, words: words))
+    #expect(added.wordIDs.contains(words[1].id))
+    #expect(added.wordIDs.contains(words[3].id))
   }
 
   @Test func commitWithNoChangeDoesNothing() {

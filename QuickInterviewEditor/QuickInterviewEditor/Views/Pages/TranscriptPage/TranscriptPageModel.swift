@@ -311,6 +311,15 @@ class TranscriptPageModel: ViewModel {
     onSelectionIntent?(.clear)
   }
 
+  /// Drops the transcript's own gesture anchor/focus without emitting a selection intent.
+  /// The editor calls this when it clears the freeform selection (e.g. a waveform gap-click)
+  /// so a later transcript Shift-click starts a fresh single-word selection instead of
+  /// extending from the stale anchor of a selection the user already cleared.
+  func invalidateSelectionAnchor() {
+    selectionAnchorID = nil
+    selectionFocusID = nil
+  }
+
   /// Selects exactly one word (anchor == focus). Used by the waveform→transcript sync
   /// when the user clicks a point in the audio.
   func selectWord(_ id: Word.ID) {

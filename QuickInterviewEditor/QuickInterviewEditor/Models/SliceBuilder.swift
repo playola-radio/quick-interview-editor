@@ -2,13 +2,14 @@ import Foundation
 
 /// The one canonical way to turn a **sample range** into a `Slice`, shared by the
 /// editor's fine-tune / new-slice-from-range path (`EditorModel.makeSlice`) and the
-/// cut-suggestion accept path, so word membership (by midpoint), snippet, and warnings
-/// are derived exactly one way. The accept path derives its range from a suggestion's
-/// word IDs and calls this; a fine-tuned cut passes its dragged range. (The plain
-/// Add-from-selection path builds inline from the live transcript selection instead —
-/// it owns the user's exact selected words rather than re-deriving by midpoint.)
-func buildSlice(id: UUID, name: String, range: Range<Int>, plan: EditPlan) -> Slice {
-  let ids = wordIDs(overlapping: range, words: plan.words)
+/// cut-suggestion accept path, so snippet and warnings are derived exactly one way.
+/// Word membership (`ids`) is supplied by the caller because the two paths need different
+/// rules: the editor uses **overlap** (spec §4 — a word is in a clip iff any of its audio
+/// overlaps), while the accept path uses **midpoint** so its post-build guard tolerates the
+/// slight end-overlaps forced alignment leaves between neighbouring words.
+func buildSlice(id: UUID, name: String, range: Range<Int>, wordIDs ids: [Word.ID], plan: EditPlan)
+  -> Slice
+{
   return Slice(
     id: id,
     name: name,

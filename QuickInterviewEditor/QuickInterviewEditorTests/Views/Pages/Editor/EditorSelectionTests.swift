@@ -152,6 +152,22 @@ struct EditorSelectionTests {
     expectNoDifference(model.selectionSummary, "No selection")
   }
 
+  /// Clearing the freeform selection must also invalidate the transcript's Shift-click gesture anchor.
+  /// Otherwise a later transcript Shift-click extends from the anchor of the selection the user just
+  /// cleared — resurrecting it. After a clear, a Shift-click should plain-select the clicked word.
+  @Test func clearingSelectionInvalidatesTranscriptExtendAnchor() {
+    let model = editor()
+    model.transcript.selectWords(anchorID: 2, focusID: 4)
+    #expect(model.audioSelection != nil)
+
+    model.clearSelection()
+    #expect(model.audioSelection == nil)
+
+    model.transcript.wordClicked(3, extending: true)
+    let word3 = model.editPlan.words.first { $0.id == 3 }!
+    expectNoDifference(model.audioSelection, word3.startSample!..<word3.endSample!)
+  }
+
   /// A selection built from bad word bounds must not persist past the file's end. `selectSourceRange`
   /// is the single write path, so it clamps to `[0, durationSamples]`; a range fully past EOF collapses
   /// to no selection. Regression: an out-of-file range flowed straight into a removal that revalidation
