@@ -15,29 +15,36 @@ Plan source: `docs/superpowers/plans/2026-08-20-remove-section-crossfade-complet
 ## Stages
 
 ### Stage 1: Seam selection state + mutual exclusion — DONE-when tests green
+
 - `selectedSeamID`; `selectSeam(_:)` / `seamClicked(_:)`; `deselectSeam()`.
 - Mutual exclusion: range writes clear the seam; selecting a seam clears the range.
-- `syncEditedTimeline` drops a `selectedSeamID` whose seam no longer renders (undo/redo/restore).
+- `syncEditedTimeline` drops a `selectedSeamID` whose removal no longer exists (undo/redo/restore);
+  an off-screen seam whose removal still exists is preserved.
 
 ### Stage 2: Restore + updateCrossfade model API
+
 - `restoreRemoval(id:)`, `restoreRemovalTapped()` (selected), `updateCrossfade(id:_:)` — all
   through `mutateDocument`. Undoable + persisted.
 
 ### Stage 3: Hit-testing + selected overlay
+
 - `seamID(atX:)`; integrate into `waveformClicked`; `seamContextMenuItems(atX:)`.
 - `SeamOverlay { id, span, isSelected }`; `seamOverlays`; selected visual in `SeamBowtieOverlay`.
 
 ### Stage 4: Delete-key arbitration + Escape
+
 - `EditorKey.escape`; `editorKeyDown` arbitration (seam → restore; else remove-section path; else false).
 
 ### Stage 5: Playback reconciliation regression test
+
 - Restore mid free-playback → cursor stays on the same SOURCE moment; stale playlist stops.
 
 ### Stage 6: View wiring
+
 - MarkClipBar "Restore Removed Audio" button (model-decided visibility/enablement).
 - `WaveformView`/`WaveformLaneView` seam overlays + AppKit context menu via `menu(for:)`.
 
-### Stage 7: Green + format/lint + Codex review/challenge + PR + /fix-review.
+### Stage 7: Green + format/lint + Codex review/challenge + PR + /fix-review
 
 ## Status — Stages 1–7 (in progress)
 - 27 tests in `EditorSeamSelectionTests` + 2 escape-key tests in `EditorKeyMonitorTests`; full

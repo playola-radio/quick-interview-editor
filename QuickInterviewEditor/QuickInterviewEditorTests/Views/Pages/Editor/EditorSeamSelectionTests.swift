@@ -346,7 +346,8 @@ struct EditorSeamSelectionTests {
       // Removal running to EOF: the trailing kept island is empty, so the crossfade clamps to 0 —
       // a hard cut with a zero-width bowtie. It must still be clickable (and therefore restorable);
       // otherwise a head/tail trim would be an un-restorable dead-end that permanently blocks export.
-      let id = addRemoval(model, range: 1_600_000..<1_855_488, length: 600)
+      let duration = model.editPlan.source.durationSamples
+      let id = addRemoval(model, range: 1_600_000..<duration, length: 600)
       let seam = model.editedWaveform.timeline.seams[0]
       expectNoDifference(seam.crossfadeLength, 0)
 
