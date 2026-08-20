@@ -280,7 +280,7 @@ final class EditorModel: ViewModel {
     guard let range = sourceRange(coveringWords: anchorID, focusID) else { return }
     selectionAnchorSample =
       anchorHoldSample(anchorID: anchorID, focusID: focusID) ?? range.lowerBound
-    selectSourceRange(range, snapPlayhead: true)
+    selectSourceRange(range, snapPlayhead: true, origin: .transcript)
   }
 
   /// The anchor word's far-from-focus edge, so a later Shift-extend pivots from where the drag began
@@ -302,10 +302,11 @@ final class EditorModel: ViewModel {
       let wordRange = sourceRange(ofWord: id)
     {
       selectSourceRange(
-        min(anchor, wordRange.lowerBound)..<max(anchor, wordRange.upperBound), snapPlayhead: false)
+        min(anchor, wordRange.lowerBound)..<max(anchor, wordRange.upperBound), snapPlayhead: false,
+        origin: .transcript)
     } else if let wordRange = sourceRange(ofWord: id) {
       selectionAnchorSample = wordRange.lowerBound
-      selectSourceRange(wordRange, snapPlayhead: true)
+      selectSourceRange(wordRange, snapPlayhead: true, origin: .transcript)
     }
   }
 
@@ -777,12 +778,21 @@ final class EditorModel: ViewModel {
     return lower..<upper
   }
 
+  /// Where a `selectSourceRange` write came from. A `.transcript` write is driven by a transcript
+  /// gesture that has *already* set the transcript's own anchor/focus, so the funnel must preserve
+  /// them. Every other write (`.external` — waveform click/marquee, slice/suggestion reveal) replaces
+  /// the freeform selection without any transcript gesture, leaving the transcript's private
+  /// anchor/focus pointing at the selection the user just replaced; the funnel drops that stale anchor.
+  enum SelectionOrigin { case transcript, external }
+
   /// Sets the freeform selection to an exact SOURCE range and (optionally) snaps the playhead to its
   /// start, mirroring `rulerMovedPlayhead`: stop the transport, place the cursor, and bump the
   /// cursor-move epoch so a deferred selection snap captured earlier in the drag bails instead of
   /// clobbering this placement. An empty/degenerate range clears. This is the single write path the
-  /// waveform (marquee + click) uses.
-  func selectSourceRange(_ range: Range<Int>, snapPlayhead: Bool) {
+  /// waveform (marquee + click), slice/suggestion reveal, and transcript intents all funnel through.
+  func selectSourceRange(
+    _ range: Range<Int>, snapPlayhead: Bool, origin: SelectionOrigin = .external
+  ) {
     // Clamp to the file's real extent so a selection built from bad word bounds (a word whose
     // `endSample` overruns the audio) can never persist an out-of-file removal that revalidation
     // silently drops on reload. `selectSourceRange` is the single write path, so clamping here
@@ -797,6 +807,14 @@ final class EditorModel: ViewModel {
       return
     }
     audioSelection = lower..<upper
+    if origin == .external {
+      // A non-transcript write replaced the selection without a transcript gesture, so the
+      // transcript's private anchor/focus still identify the *previous* selection. Drop them, or a
+      // later transcript re-click of that word toggles it off (thinking it's still the sole
+      // selection) and a Shift-click extends from the stale anchor — resurrecting a selection the
+      // user already replaced. Transcript-origin writes keep their anchor (the gesture just set it).
+      transcript.invalidateSelectionAnchor()
+    }
     if snapPlayhead {
       stopTransportForRuler()
       playheadSample = lower

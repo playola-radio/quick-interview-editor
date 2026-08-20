@@ -168,6 +168,43 @@ struct EditorSelectionTests {
     expectNoDifference(model.audioSelection, word3.startSample!..<word3.endSample!)
   }
 
+  /// A non-transcript selection (waveform click/marquee, slice/suggestion reveal) that *replaces* an
+  /// existing transcript selection must also invalidate the transcript's gesture anchor. Otherwise a
+  /// later plain re-click of the originally-selected word hits the toggle branch (anchor == focus == X)
+  /// and clears the replacement instead of selecting X. Regression for the "stale transcript toggle
+  /// state" finding — the sibling of the Shift-extend case above, but on the plain re-click path.
+  @Test func externalSelectionInvalidatesTranscriptToggleAnchor() {
+    let model = editor()
+    model.transcript.wordClicked(2, extending: false)
+    let word2 = model.editPlan.words.first { $0.id == 2 }!
+    expectNoDifference(model.audioSelection, word2.startSample!..<word2.endSample!)
+
+    let word4 = model.editPlan.words.first { $0.id == 4 }!
+    model.selectSourceRange(word4.startSample!..<word4.endSample!, snapPlayhead: false)
+
+    model.transcript.wordClicked(2, extending: false)
+    expectNoDifference(model.audioSelection, word2.startSample!..<word2.endSample!)
+  }
+
+  /// The invalidation must also cover the case where a non-transcript write *collapses to empty*
+  /// (a fully out-of-file range), which returns through `clearSelection()` before the `.external`
+  /// branch runs. `clearSelection()` invalidates the transcript anchor itself, so the guarantee
+  /// holds on that path too: after an empty external write, a plain re-click of the previously
+  /// selected word selects it rather than toggling off the (now cleared) selection.
+  @Test func emptyExternalSelectionAlsoInvalidatesTranscriptAnchor() {
+    let model = editor()
+    model.transcript.wordClicked(2, extending: false)
+    let word2 = model.editPlan.words.first { $0.id == 2 }!
+    expectNoDifference(model.audioSelection, word2.startSample!..<word2.endSample!)
+
+    let duration = model.editPlan.source.durationSamples
+    model.selectSourceRange((duration + 100_000)..<(duration + 200_000), snapPlayhead: false)
+    #expect(model.audioSelection == nil)
+
+    model.transcript.wordClicked(2, extending: false)
+    expectNoDifference(model.audioSelection, word2.startSample!..<word2.endSample!)
+  }
+
   /// A selection built from bad word bounds must not persist past the file's end. `selectSourceRange`
   /// is the single write path, so it clamps to `[0, durationSamples]`; a range fully past EOF collapses
   /// to no selection. Regression: an out-of-file range flowed straight into a removal that revalidation
