@@ -55,10 +55,14 @@ struct WaveformLaneView<Overlay: View>: View {
   let onAreaSelectBegan: (CGFloat, Bool) -> Void
   let onAreaSelectChanged: (CGFloat) -> Void
   let onAreaSelectEnded: (CGFloat) -> Void
-  /// Crossfade seams to draw as bowtie X's over the band. Defaults to `[]` so every existing call
-  /// site compiles unchanged. Positioning these on the collapsed edited waveform is a later step —
-  /// this lane only draws whatever spans it's handed.
-  var seams: [WaveformSpan] = []
+  /// Crossfade seams to draw as bowtie X's over the band, each carrying its selected state. Defaults
+  /// to `[]` so every existing call site (e.g. the slice-edit sheet) compiles unchanged. This lane
+  /// only draws whatever overlays it's handed.
+  var seams: [SeamOverlay] = []
+  /// The right-click menu for a band position, keyed by view-x. The model decides whether the x
+  /// hits a seam and what the menu contains; returning `[]` shows no menu. Default no-op so call
+  /// sites without a seam menu (the slice-edit sheet) compile unchanged.
+  var onContextMenu: (CGFloat) -> [WaveformMenuItem] = { _ in [] }
   /// Drag handles on the highlighted range's edges. A grab within a few points of the left/right edge
   /// of `highlightRange` fires these; a mouse-down anywhere else falls through to the marquee below.
   /// Default no-ops so the slice-edit sheet (which doesn't offer edge drag) compiles unchanged.
@@ -86,7 +90,8 @@ struct WaveformLaneView<Overlay: View>: View {
           onBodyClick: onBodyClick,
           onAreaSelectBegan: onAreaSelectBegan,
           onAreaSelectChanged: onAreaSelectChanged,
-          onAreaSelectEnded: onAreaSelectEnded)
+          onAreaSelectEnded: onAreaSelectEnded,
+          onContextMenu: onContextMenu)
       )
       // Sits ABOVE the marquee layer: it claims only the few points at each edge of the highlight, so
       // an edge grab starts a boundary drag while every other mouse-down falls through to the marquee.
@@ -96,7 +101,8 @@ struct WaveformLaneView<Overlay: View>: View {
           endX: highlightRange.flatMap { waveform.laneX(forSource: $0.upperBound) },
           onEdgeDragBegan: onEdgeDragBegan,
           onEdgeDragged: onEdgeDragged,
-          onEdgeDragEnded: onEdgeDragEnded)
+          onEdgeDragEnded: onEdgeDragEnded,
+          onContextMenu: onContextMenu)
       )
       .overlay(alignment: .topLeading) {
         if let highlight {
@@ -184,21 +190,28 @@ private struct WaveformCanvas: View {
 /// Purely a renderer: it decides nothing about which seams exist or where they sit: the model
 /// hands it spans, this draws them.
 private struct SeamBowtieOverlay: View {
-  let seams: [WaveformSpan]
+  let seams: [SeamOverlay]
 
   private let strokeColor = Color.white.opacity(0.4)
+  private let selectedColor = Color(red: 0.96, green: 0.86, blue: 0.4)
 
   var body: some View {
     Canvas { context, size in
-      var path = Path()
       for seam in seams {
-        let rect = CGRect(x: seam.positionX, y: 0, width: seam.width, height: size.height)
+        let rect = CGRect(
+          x: seam.span.positionX, y: 0, width: seam.span.width, height: size.height)
+        if seam.isSelected {
+          context.fill(Path(rect), with: .color(selectedColor.opacity(0.16)))
+        }
+        var path = Path()
         path.move(to: CGPoint(x: rect.minX, y: rect.minY))
         path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
         path.move(to: CGPoint(x: rect.minX, y: rect.maxY))
         path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+        context.stroke(
+          path, with: .color(seam.isSelected ? selectedColor : strokeColor),
+          lineWidth: seam.isSelected ? 2 : 1)
       }
-      context.stroke(path, with: .color(strokeColor), lineWidth: 1)
     }
   }
 }
@@ -312,6 +325,7 @@ private struct WaveformInteractionLayer: NSViewRepresentable {
   let onAreaSelectBegan: (CGFloat, Bool) -> Void
   let onAreaSelectChanged: (CGFloat) -> Void
   let onAreaSelectEnded: (CGFloat) -> Void
+  let onContextMenu: (CGFloat) -> [WaveformMenuItem]
 
   func makeNSView(context: Context) -> InteractionView {
     let view = InteractionView()
@@ -329,6 +343,7 @@ private struct WaveformInteractionLayer: NSViewRepresentable {
     view.onAreaSelectBegan = onAreaSelectBegan
     view.onAreaSelectChanged = onAreaSelectChanged
     view.onAreaSelectEnded = onAreaSelectEnded
+    view.onContextMenu = onContextMenu
   }
 
   final class InteractionView: NSView {
@@ -337,6 +352,7 @@ private struct WaveformInteractionLayer: NSViewRepresentable {
     var onAreaSelectBegan: ((CGFloat, Bool) -> Void)?
     var onAreaSelectChanged: ((CGFloat) -> Void)?
     var onAreaSelectEnded: ((CGFloat) -> Void)?
+    var onContextMenu: ((CGFloat) -> [WaveformMenuItem])?
 
     private var dragStartX: CGFloat?
     private var didDrag = false
@@ -394,6 +410,46 @@ private struct WaveformInteractionLayer: NSViewRepresentable {
         atX: localX(event))
       // Consume: do NOT call super, so an enclosing ScrollView never double-scrolls.
     }
+
+    /// Right-click: ask the model what (if anything) sits under the pointer. An empty result
+    /// (no seam) shows no menu; the model both selects the seam and supplies its actions.
+    override func menu(for event: NSEvent) -> NSMenu? {
+      waveformContextMenu(from: onContextMenu?(localX(event)) ?? [])
+    }
+  }
+}
+
+/// Builds the AppKit menu the model asked for from plain title+action pairs, or nil when the model
+/// reported nothing under the pointer. Shared by every waveform layer that can surface the seam
+/// menu, so the edge-handle layer and the marquee layer resolve a right-click identically.
+@MainActor
+private func waveformContextMenu(from items: [WaveformMenuItem]) -> NSMenu? {
+  guard !items.isEmpty else { return nil }
+  let menu = NSMenu()
+  for item in items {
+    menu.addItem(ClosureMenuItem(title: item.title, action: item.action))
+  }
+  return menu
+}
+
+/// An `NSMenuItem` that runs a closure when picked, so the model can hand the waveform menu plain
+/// title+action pairs without a target/selector dance.
+private final class ClosureMenuItem: NSMenuItem {
+  private let handler: () -> Void
+
+  init(title: String, action: @escaping () -> Void) {
+    handler = action
+    super.init(title: title, action: #selector(fire), keyEquivalent: "")
+    target = self
+  }
+
+  @available(*, unavailable)
+  required init(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  @objc private func fire() {
+    handler()
   }
 }
 
@@ -408,6 +464,10 @@ private struct WaveformEdgeHandleLayer: NSViewRepresentable {
   let onEdgeDragBegan: (SelectionEdge) -> Void
   let onEdgeDragged: (SelectionEdge, CGFloat) -> Void
   let onEdgeDragEnded: (SelectionEdge) -> Void
+  /// Same seam menu the marquee layer offers. Because this layer sits above the marquee and claims
+  /// the edge zones, a right-click on a selection edge that also lands on a seam would otherwise be
+  /// swallowed here; forwarding it keeps the seam restorable even when its bowtie hugs an edge.
+  let onContextMenu: (CGFloat) -> [WaveformMenuItem]
 
   func makeNSView(context: Context) -> HandleView {
     let view = HandleView()
@@ -425,6 +485,7 @@ private struct WaveformEdgeHandleLayer: NSViewRepresentable {
     view.onEdgeDragBegan = onEdgeDragBegan
     view.onEdgeDragged = onEdgeDragged
     view.onEdgeDragEnded = onEdgeDragEnded
+    view.onContextMenu = onContextMenu
     view.window?.invalidateCursorRects(for: view)
   }
 
@@ -434,6 +495,7 @@ private struct WaveformEdgeHandleLayer: NSViewRepresentable {
     var onEdgeDragBegan: ((SelectionEdge) -> Void)?
     var onEdgeDragged: ((SelectionEdge, CGFloat) -> Void)?
     var onEdgeDragEnded: ((SelectionEdge) -> Void)?
+    var onContextMenu: ((CGFloat) -> [WaveformMenuItem])?
 
     /// Half-width of a grab zone: a mouse-down within this many points of an edge grabs it.
     private let grabTolerance: CGFloat = 6
@@ -493,6 +555,12 @@ private struct WaveformEdgeHandleLayer: NSViewRepresentable {
     override func mouseUp(with event: NSEvent) {
       if let activeEdge { onEdgeDragEnded?(activeEdge) }
       activeEdge = nil
+    }
+
+    /// Right-click on an edge zone: forward to the seam menu so a bowtie sitting under a selection
+    /// edge stays restorable. Empty result (no seam here) shows no menu, same as the marquee layer.
+    override func menu(for event: NSEvent) -> NSMenu? {
+      waveformContextMenu(from: onContextMenu?(localX(event)) ?? [])
     }
   }
 }

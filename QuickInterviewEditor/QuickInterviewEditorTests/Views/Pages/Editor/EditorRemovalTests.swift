@@ -373,7 +373,7 @@ struct EditorRemovalTests {
 
   /// Integration proof of the axis flip: with the lane's geometry installed, a removal must
   /// COLLAPSE the edited waveform (its edited duration shrinks by the removed span PLUS the
-  /// crossfade overlap), draw a bowtie at the seam (`seamSpans` becomes non-empty), and re-place a
+  /// crossfade overlap), draw a bowtie at the seam (`seamOverlays` becomes non-empty), and re-place a
   /// post-removal cursor by its EDITED (leftward-shifted) position — all without the view touching
   /// any waveform math. A fixed zoom (spp 300, well under the fit ceiling) keeps `timelineChanged`
   /// from re-fitting, so the cursor's view-x moving left is purely the collapse.
@@ -402,7 +402,7 @@ struct EditorRemovalTests {
       expectNoDifference(
         model.editedWaveform.editedDurationSamples, duration - 200_000 - 96)
       // A bowtie is now drawn at the single seam.
-      expectNoDifference(model.seamSpans.count, 1)
+      expectNoDifference(model.seamOverlays.count, 1)
       // Source 220_000 now sits at edited 220_000 − 200_000 − 96 = 19_904 → x 66.3…: the cursor
       // reads the EDITED axis and moved left with the collapse.
       #expect(beforePlayheadX != nil)

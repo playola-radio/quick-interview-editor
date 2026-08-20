@@ -146,11 +146,20 @@ final class EditedWaveformAdapter {
     return WaveformSpan(positionX: clippedStart, width: clippedEnd - clippedStart)
   }
 
-  /// The bowtie span for a crossfaded seam:
-  /// `editedCrossfadeStart..<(editedCrossfadeStart + crossfadeLength)`, mapped to view-x. Nil for
-  /// a zero-length (fully clamped) crossfade — there's nothing to draw.
+  /// The bowtie span for a seam, mapped to view-x. A crossfaded seam covers
+  /// `editedCrossfadeStart..<(editedCrossfadeStart + crossfadeLength)`. A zero-length (fully
+  /// clamped) seam — a removal at sample 0 or EOF, or an adjacent seam that lost a shared island —
+  /// collapses to a zero-width span at the join: the bowtie renders as a thin hard-cut marker and,
+  /// crucially, stays selectable (and therefore restorable) rather than becoming an invisible
+  /// dead-end. Nil only when the seam sits entirely off-screen.
   func spanForSeam(_ seam: TimelineSeam) -> WaveformSpan? {
-    span(forEdited: seam.editedCrossfadeStart..<(seam.editedCrossfadeStart + seam.crossfadeLength))
+    guard seam.crossfadeLength > 0 else {
+      let positionX = editedSampleToX(seam.editedCrossfadeStart)
+      guard positionX >= 0, positionX <= viewportWidth else { return nil }
+      return WaveformSpan(positionX: positionX, width: 0)
+    }
+    return span(
+      forEdited: seam.editedCrossfadeStart..<(seam.editedCrossfadeStart + seam.crossfadeLength))
   }
 
   // MARK: - Coordinate transforms

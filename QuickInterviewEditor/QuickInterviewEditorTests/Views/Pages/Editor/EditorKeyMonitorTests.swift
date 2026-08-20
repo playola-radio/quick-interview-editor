@@ -41,6 +41,14 @@ struct EditorKeyMonitorTests {
     expectNoDifference(key(51, .option), nil)  // ⌥⌫
   }
 
+  @Test func plainEscapeMapsToEscape() {
+    expectNoDifference(key(53), .escape)  // Esc
+  }
+
+  @Test func modifiedEscapeFallsThrough() {
+    expectNoDifference(key(53, .command), nil)  // ⌘Esc
+  }
+
   @Test func plainArrowsNudgeCutIn() {
     expectNoDifference(key(123), .nudgeCutInEarlier)  // ←
     expectNoDifference(key(124), .nudgeCutInLater)  // →
