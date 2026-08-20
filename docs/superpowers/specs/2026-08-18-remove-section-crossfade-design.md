@@ -284,6 +284,12 @@ first editing PR.
 > restore-removal, export split resolved to Swift-PCM + Python marker
 > injection).
 
+### Historical PR sequence (superseded)
+
+The four-PR sequence below is the **original** plan and is superseded by the
+5-PR completion sequence linked above; it is kept for historical record only,
+not as the current plan.
+
 Four PRs, each independently shippable and testable. The core feature (remove → hear →
 export) is complete at PR 2; PR 3 adds Logic-parity editing; PR 4 adds slice scope.
 

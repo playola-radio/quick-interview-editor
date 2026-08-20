@@ -34,10 +34,13 @@ center, ⌃⌥X, inspector); no way to delete a removal except whole-document un
 ## Locked decisions
 
 1. **Swift owns all sample construction — no parallel Python/Swift audio paths.**
-   One `CrossfadeRenderer` (equal-power, linear, continuous `curveAmount`,
-   per-frame across all channels) feeds both live audition and export. The
-   failure mode of parallel paths — preview sounds different from export — is
-   unacceptable. Python is demoted to marker injection only (see decision 5).
+   One `CrossfadeRenderer` (equal-power, linear, per-frame across all
+   channels) feeds both live audition and export. PR 2 ships only the stored
+   `curveAmount` field (decision 4) and renders amount-0 envelopes; the
+   `curveAmount`-shaping DSP lands in PR 5, after verifying Logic's actual
+   curve behavior (interface-parity rule). The failure mode of parallel paths
+   — preview sounds different from export — is unacceptable. Python is
+   demoted to marker injection only (see decision 5).
 2. **Transport is ALWAYS in edited coordinates** in the main editor —
    `playheadEditedSample`, never a runtime branch on whether removals exist.
    With zero removals `EditedTimeline` is the identity map, so behavior is
@@ -53,7 +56,12 @@ center, ⌃⌥X, inspector); no way to delete a removal except whole-document un
    Kept-segment interiors via `scheduleSegment` from the source file; each seam
    via a pre-rendered `AVAudioPCMBuffer` (`scheduleBuffer`). Schedule near-term
    items up front (small lookahead); completion callbacks are bookkeeping only,
-   never gap-sensitive chaining. Contract:
+   never gap-sensitive chaining.
+   **Prototype deviation:** the PR 2 spike schedules the entire plan up front
+   instead of a bounded lookahead — segments are cheap file references and
+   only seam crossfade buffers retain PCM (one short buffer per removal), so
+   this was low-risk to defer. Bounded lookahead moves to PR 3's transport
+   wiring, to be added if seam-buffer memory profiling warrants it. Contract:
    - `pause()` → `node.pause()`, freeze cursor from playlist frame timeline;
      schedule stays intact. `resume()` → `node.play()`, no reschedule.
    - `seek(editedSample:)` → stop, invalidate generation, rebuild playlist from
@@ -65,6 +73,7 @@ center, ⌃⌥X, inspector); no way to delete a removal except whole-document un
    - Cursor is computed from node time against the playlist frame timeline,
      never trusted from callback timing.
 4. **`Crossfade` grows Logic-parity fields**, leniently decoded:
+
    ```swift
    struct Crossfade: Equatable, Codable, Sendable {
      var lengthSamples: Int
@@ -73,6 +82,7 @@ center, ⌃⌥X, inspector); no way to delete a removal except whole-document un
      var centerOffsetSamples: Int     // shifts the fade center; missing → 0
    }
    ```
+
    One curve amount applied complementarily to out/in gains (no independent
    fade-in/fade-out shapes in v1).
 5. **Export split = option (b):** Swift renders markerless AIFF PCM through the
@@ -95,8 +105,10 @@ center, ⌃⌥X, inspector); no way to delete a removal except whole-document un
 ## PR sequence
 
 ### PR 2 — Swift crossfade DSP + edited render plan (foundation)
-- `CrossfadeRenderer`: equal-power/linear gain curves with `curveAmount`,
-  per-frame, multi-channel; one shared endpoint/rounding convention.
+
+- `CrossfadeRenderer`: equal-power/linear gain curves at `curveAmount == 0`
+  (the stored field, decision 4), per-frame, multi-channel; one shared
+  endpoint/rounding convention. `curveAmount`-shaping DSP is PR 5 scope.
 - `AudioEditRenderPlan` / playlist builder from `EditedTimeline`: kept-segment
   interiors, per-seam overlap tails, partial-seam-from-offset support.
 - Rename `editedCenter` → `editedCrossfadeStart` (+ derived center).
@@ -110,6 +122,7 @@ center, ⌃⌥X, inspector); no way to delete a removal except whole-document un
   `AVAudioFile` in the canonical AIFF format.
 
 ### PR 3 — Live edited transport (HEAR IT — earliest user value)
+
 - `AudioPlayerClient.playEdited(plan:rate:session:)`; playlist scheduler in
   `LivePlayerBox` per decision 3.
 - Main transport migrates to edited coordinates everywhere (decision 2);
@@ -129,6 +142,7 @@ center, ⌃⌥X, inspector); no way to delete a removal except whole-document un
   removal.
 
 ### PR 4 — Seam selection + Restore Removed Audio (small, ships fast)
+
 - `selectedSeamID` + mutual exclusion with `audioSelection` (decision 6);
   bowtie hit-testing + selected visual state.
 - `selectSeam(_:)`, `deleteRemoval(id:)`, `deleteSelectedRemoval()`,
@@ -138,6 +152,7 @@ center, ⌃⌥X, inspector); no way to delete a removal except whole-document un
   + inspector "Restore Removed Audio"; Escape deselects.
 
 ### PR 5 — Logic-style crossfade editing
+
 - Edge drag → `lengthSamples` (clamped to available handles); middle drag →
   `centerOffsetSamples`; vertical drag → `curveAmount`; `⌃⌥X` resets the
   selected seam to the equal-power default; numeric inspector (length, center,
@@ -151,6 +166,7 @@ center, ⌃⌥X, inspector); no way to delete a removal except whole-document un
   interface parity — check, don't guess).
 
 ### PR 6 — Export with removals
+
 - Swift renders each slice's PCM through the shared renderer; Python injects
   markers only (decision 5); explicit marker-injection API on the engine
   boundary.

@@ -20,28 +20,53 @@ struct PlaylistFrameTimeline: Equatable {
     var editedLength: Int
   }
 
+  /// One scheduled item as it ACTUALLY reached the node: the edited span it
+  /// reproduces and the native frames genuinely scheduled for it — which can be
+  /// fewer than the span implies when the source file is shorter than the plan
+  /// assumed, or zero when the item was dropped entirely.
+  struct ScheduledSpan: Equatable {
+    var editedSpan: Range<Int>
+    var nativeFrameCount: Int
+  }
+
   private let entries: [Entry]
   private let ratio: Double
   var totalNativeFrames: Int
 
-  init(plan: AudioEditRenderPlan, ratio: Double = 1) {
+  /// Builds the mapping from the spans that were actually scheduled, so the
+  /// cursor can never drift ahead of the audio when an item was clamped or
+  /// dropped against the real file (the scheduler and this table must share
+  /// one source of truth for frame counts — never two roundings of the plan).
+  init(scheduled: [ScheduledSpan], ratio: Double = 1) {
     let ratio = max(ratio, .ulpOfOne)
     self.ratio = ratio
     var entries: [Entry] = []
     var nodeFrameStart = 0
-    for item in plan.items {
-      let span = item.editedSpan
-      let nativeFrameCount = Int((Double(span.count) * ratio).rounded())
+    for span in scheduled where span.nativeFrameCount > 0 {
       entries.append(
         Entry(
           nodeFrameStart: nodeFrameStart,
-          nativeFrameCount: nativeFrameCount,
-          editedStart: span.lowerBound,
-          editedLength: span.count))
-      nodeFrameStart += nativeFrameCount
+          nativeFrameCount: span.nativeFrameCount,
+          editedStart: span.editedSpan.lowerBound,
+          editedLength: span.editedSpan.count))
+      nodeFrameStart += span.nativeFrameCount
     }
     self.entries = entries
     self.totalNativeFrames = nodeFrameStart
+  }
+
+  /// Convenience for pure/idealized use (tests, previews): assumes every item
+  /// schedules its full span at `ratio`. Live playback must use
+  /// `init(scheduled:ratio:)` with the counts that really reached the node.
+  init(plan: AudioEditRenderPlan, ratio: Double = 1) {
+    let clamped = max(ratio, .ulpOfOne)
+    self.init(
+      scheduled: plan.items.map { item in
+        ScheduledSpan(
+          editedSpan: item.editedSpan,
+          nativeFrameCount: Int((Double(item.editedSpan.count) * clamped).rounded()))
+      },
+      ratio: clamped)
   }
 
   /// The edited sample the cursor sits on after `framesPlayed` native input

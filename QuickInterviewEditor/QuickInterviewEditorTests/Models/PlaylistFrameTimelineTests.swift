@@ -67,6 +67,36 @@ struct PlaylistFrameTimelineTests {
     expectNoDifference(timeline.editedSample(forFramesPlayed: 2), 1)
   }
 
+  @Test func scheduledSpansShorterThanTheirEditedSpanDoNotDriftLaterEntries() {
+    // Middle entry claims edited [40,70) but only 20 of its 30 native frames
+    // actually scheduled (the source file was shorter than the plan assumed).
+    // The next entry's frames must map from ITS edited start — the cursor may
+    // never drift ahead of the audio by the missing frames.
+    let timeline = PlaylistFrameTimeline(
+      scheduled: [
+        .init(editedSpan: 0..<40, nativeFrameCount: 40),
+        .init(editedSpan: 40..<70, nativeFrameCount: 20),
+        .init(editedSpan: 70..<100, nativeFrameCount: 30),
+      ], ratio: 1)
+    expectNoDifference(timeline.totalNativeFrames, 90)
+    expectNoDifference(timeline.editedSample(forFramesPlayed: 45), 45)
+    expectNoDifference(timeline.editedSample(forFramesPlayed: 60), 70)  // last entry's first frame
+    expectNoDifference(timeline.editedSample(forFramesPlayed: 75), 85)
+    expectNoDifference(timeline.editedSample(forFramesPlayed: 90), 100)
+  }
+
+  @Test func droppedEntriesAreSkippedWithoutPollutingTheEnd() {
+    // A zero-frame span (an item clamped away entirely) contributes nothing —
+    // including to the end-of-stream position.
+    let timeline = PlaylistFrameTimeline(
+      scheduled: [
+        .init(editedSpan: 0..<40, nativeFrameCount: 40),
+        .init(editedSpan: 40..<70, nativeFrameCount: 0),
+      ], ratio: 1)
+    expectNoDifference(timeline.totalNativeFrames, 40)
+    expectNoDifference(timeline.editedSample(forFramesPlayed: 40), 40)
+  }
+
   @Test func emptyPlanHasNoFrames() {
     let plan = AudioEditRenderPlan(
       timeline: EditedTimeline(sourceDurationSamples: 100, removals: [removal(40, 60, length: 10)]),

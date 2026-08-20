@@ -267,7 +267,15 @@ private actor LivePlayerBox {
     currentSession = session
     startPlanSample = 0
     playRatio = ratio
-    editedFrameTimeline = PlaylistFrameTimeline(plan: plan, ratio: ratio)
+    // The cursor table is built from the RESOLVED entries — the frame counts that truly
+    // reach the node — never from a second rounding of the plan. A clamped or dropped
+    // item would otherwise leave every later entry's frame offset ahead of the audio.
+    editedFrameTimeline = PlaylistFrameTimeline(
+      scheduled: scheduledEntries.map {
+        PlaylistFrameTimeline.ScheduledSpan(
+          editedSpan: $0.editedSpan, nativeFrameCount: $0.nativeFrameCount)
+      },
+      ratio: ratio)
 
     if node.engine == nil { engine.attach(node) }
     if timePitch.engine == nil { engine.attach(timePitch) }
@@ -286,7 +294,7 @@ private actor LivePlayerBox {
     let lastIndex = scheduledEntries.count - 1
     for (index, entry) in scheduledEntries.enumerated() {
       let completion = index == lastIndex ? onLast : nil
-      switch entry {
+      switch entry.payload {
       case .segment(let start, let count):
         node.scheduleSegment(
           file, startingFrame: start, frameCount: count, at: nil,
@@ -304,10 +312,18 @@ private actor LivePlayerBox {
     }
   }
 
-  /// What one plan item becomes on the node: a file segment or a pre-rendered buffer.
-  private enum ScheduledEntry {
-    case segment(start: AVAudioFramePosition, count: AVAudioFrameCount)
-    case buffer(AVAudioPCMBuffer)
+  /// What one plan item becomes on the node — the schedulable payload plus the edited span
+  /// it reproduces and the native frames genuinely scheduled, so the cursor table can be
+  /// built from the same counts the node plays (one rounding, one source of truth).
+  private struct ScheduledEntry {
+    enum Payload {
+      case segment(start: AVAudioFramePosition, count: AVAudioFrameCount)
+      case buffer(AVAudioPCMBuffer)
+    }
+
+    var payload: Payload
+    var editedSpan: Range<Int>
+    var nativeFrameCount: Int
   }
 
   /// Resolves every plan item that will ACTUALLY reach the node, before `playEdited` touches
@@ -330,14 +346,22 @@ private actor LivePlayerBox {
         let clampedEnd = min(endFrame, file.length)
         let frameCount = AVAudioFrameCount(max(0, clampedEnd - clampedStart))
         guard frameCount > 0 else { continue }
-        entries.append(.segment(start: clampedStart, count: frameCount))
+        entries.append(
+          ScheduledEntry(
+            payload: .segment(start: clampedStart, count: frameCount),
+            editedSpan: item.editedSpan,
+            nativeFrameCount: Int(frameCount)))
       case .seam(_, let leftTail, let rightHead, _, _, let fadeOffset):
         guard
           let buffer = try seamBuffer(
             file: file, leftTail: leftTail, rightHead: rightHead,
             fadeOffset: fadeOffset, ratio: ratio)
         else { continue }
-        entries.append(.buffer(buffer))
+        entries.append(
+          ScheduledEntry(
+            payload: .buffer(buffer),
+            editedSpan: item.editedSpan,
+            nativeFrameCount: Int(buffer.frameLength)))
       }
     }
     return entries
