@@ -20,8 +20,13 @@ struct AudioEditRenderPlan: Equatable, Sendable {
     /// beginning at `editedStart` on the edited axis.
     case segment(source: Range<Int>, editedStart: Int)
     /// A crossfade overlap: `leftTail` (outgoing) blended with `rightHead`
-    /// (incoming) over `length` samples, beginning at `editedStart`.
-    case seam(id: UUID, leftTail: Range<Int>, rightHead: Range<Int>, length: Int, editedStart: Int)
+    /// (incoming) over `length` samples, beginning at `editedStart`. When a
+    /// seek lands inside the crossfade, `fadeOffset` records how many samples
+    /// of the original fade were skipped, so rendering continues the fade's
+    /// gains from the seek point (full fade length = `fadeOffset + length`).
+    case seam(
+      id: UUID, leftTail: Range<Int>, rightHead: Range<Int>, length: Int, editedStart: Int,
+      fadeOffset: Int)
   }
 
   var items: [Item]
@@ -62,7 +67,8 @@ struct AudioEditRenderPlan: Equatable, Sendable {
           leftTail: (segment.source.upperBound - length)..<segment.source.upperBound,
           rightHead: rightSegment.source.lowerBound..<(rightSegment.source.lowerBound + length),
           length: length,
-          editedStart: seam.editedCrossfadeStart))
+          editedStart: seam.editedCrossfadeStart,
+          fadeOffset: 0))
     }
 
     self.items = Self.trimmed(full, toStartEdited: max(0, startEditedSample))
@@ -86,14 +92,15 @@ struct AudioEditRenderPlan: Equatable, Sendable {
       case .segment(let source, _):
         result.append(
           .segment(source: (source.lowerBound + offset)..<source.upperBound, editedStart: start))
-      case .seam(let id, let leftTail, let rightHead, let length, _):
+      case .seam(let id, let leftTail, let rightHead, let length, _, let fadeOffset):
         result.append(
           .seam(
             id: id,
             leftTail: (leftTail.lowerBound + offset)..<leftTail.upperBound,
             rightHead: (rightHead.lowerBound + offset)..<rightHead.upperBound,
             length: length - offset,
-            editedStart: start))
+            editedStart: start,
+            fadeOffset: fadeOffset + offset))
       }
     }
     return result
@@ -106,7 +113,7 @@ extension AudioEditRenderPlan.Item {
     switch self {
     case .segment(let source, let editedStart):
       return editedStart..<(editedStart + source.count)
-    case .seam(_, _, _, let length, let editedStart):
+    case .seam(_, _, _, let length, let editedStart, _):
       return editedStart..<(editedStart + length)
     }
   }

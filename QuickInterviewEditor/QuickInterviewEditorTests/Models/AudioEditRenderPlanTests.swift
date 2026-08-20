@@ -31,7 +31,9 @@ struct AudioEditRenderPlanTests {
       plan.items,
       [
         .segment(source: 0..<30, editedStart: 0),
-        .seam(id: id(1), leftTail: 30..<40, rightHead: 60..<70, length: 10, editedStart: 30),
+        .seam(
+          id: id(1), leftTail: 30..<40, rightHead: 60..<70, length: 10, editedStart: 30,
+          fadeOffset: 0),
         .segment(source: 70..<100, editedStart: 40),
       ])
   }
@@ -58,9 +60,13 @@ struct AudioEditRenderPlanTests {
       plan.items,
       [
         .segment(source: 0..<25, editedStart: 0),
-        .seam(id: id(1), leftTail: 25..<30, rightHead: 40..<45, length: 5, editedStart: 25),
+        .seam(
+          id: id(1), leftTail: 25..<30, rightHead: 40..<45, length: 5, editedStart: 25,
+          fadeOffset: 0),
         .segment(source: 45..<65, editedStart: 30),
-        .seam(id: id(2), leftTail: 65..<70, rightHead: 80..<85, length: 5, editedStart: 50),
+        .seam(
+          id: id(2), leftTail: 65..<70, rightHead: 80..<85, length: 5, editedStart: 50,
+          fadeOffset: 0),
         .segment(source: 85..<100, editedStart: 55),
       ])
   }
@@ -83,7 +89,9 @@ struct AudioEditRenderPlanTests {
     expectNoDifference(
       plan.items,
       [
-        .seam(id: id(1), leftTail: 33..<40, rightHead: 63..<70, length: 7, editedStart: 33),
+        .seam(
+          id: id(1), leftTail: 33..<40, rightHead: 63..<70, length: 7, editedStart: 33,
+          fadeOffset: 3),
         .segment(source: 70..<100, editedStart: 40),
       ])
   }
@@ -124,7 +132,7 @@ struct AudioEditRenderPlanTests {
       switch item {
       case .segment(let source, _):
         #expect(source.lowerBound <= source.upperBound)
-      case .seam(_, let leftTail, let rightHead, let length, _):
+      case .seam(_, let leftTail, let rightHead, let length, _, _):
         #expect(leftTail.lowerBound <= leftTail.upperBound)
         #expect(rightHead.lowerBound <= rightHead.upperBound)
         #expect(length >= 0)

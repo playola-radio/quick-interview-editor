@@ -70,6 +70,36 @@ struct CrossfadeRendererTests {
     }
   }
 
+  @Test func offsetGainsAreTheTailSliceOfTheFullFade() {
+    // A partial seam (seek 3 samples into a 10-sample fade) must continue the
+    // original fade's gains from sample 3 — never restart at out=1/in=0.
+    for curve in [CrossfadeCurve.equalPower, .linear] {
+      let full = CrossfadeRenderer.gains(count: 10, curve: curve)
+      let partial = CrossfadeRenderer.gains(offset: 3, count: 7, total: 10, curve: curve)
+      expectClose(partial.out, Array(full.out[3...]))
+      expectClose(partial.in, Array(full.in[3...]))
+    }
+  }
+
+  @Test func zeroOffsetGainsMatchThePlainVariant() {
+    let full = CrossfadeRenderer.gains(count: 5, curve: .equalPower)
+    let offset = CrossfadeRenderer.gains(offset: 0, count: 5, total: 5, curve: .equalPower)
+    expectClose(offset.out, full.out)
+    expectClose(offset.in, full.in)
+  }
+
+  @Test func blendWithFadeOffsetContinuesTheFade() {
+    // Blending constant 1s makes the output the gain sum; the offset blend must
+    // equal the tail slice of the full blend, not a restarted shorter fade.
+    let ones = [Float](repeating: 1, count: 10)
+    let full = CrossfadeRenderer.blend(out: [ones], incoming: [ones], curve: .equalPower)
+    let partialOnes = [Float](repeating: 1, count: 7)
+    let partial = CrossfadeRenderer.blend(
+      out: [partialOnes], incoming: [partialOnes], curve: .equalPower,
+      fadeOffset: 3, fadeTotal: 10)
+    expectClose(partial[0], Array(full[0][3...]))
+  }
+
   @Test func blendSingleChannelEqualPowerMatchesKnownVector() {
     let result = CrossfadeRenderer.blend(
       out: [[1, 1, 1, 1, 1]], incoming: [[1, 1, 1, 1, 1]], curve: .equalPower)

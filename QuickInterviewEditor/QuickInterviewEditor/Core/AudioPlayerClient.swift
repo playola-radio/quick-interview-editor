@@ -291,10 +291,11 @@ private actor LivePlayerBox {
         node.scheduleSegment(
           file, startingFrame: min(startFrame, file.length), frameCount: frameCount, at: nil,
           completionCallbackType: .dataPlayedBack, completionHandler: completion)
-      case .seam(_, let leftTail, let rightHead, let length, _):
+      case .seam(_, let leftTail, let rightHead, _, _, let fadeOffset):
         guard
           let buffer = try seamBuffer(
-            file: file, leftTail: leftTail, rightHead: rightHead, length: length, ratio: ratio)
+            file: file, leftTail: leftTail, rightHead: rightHead,
+            fadeOffset: fadeOffset, ratio: ratio)
         else { continue }
         node.scheduleBuffer(
           buffer, at: nil, options: [], completionCallbackType: .dataPlayedBack,
@@ -311,16 +312,23 @@ private actor LivePlayerBox {
   /// Pre-renders one seam's crossfade into a PCM buffer: reads the outgoing tail and incoming head
   /// from `file`, blends them with equal-power gains (the spike's fixed curve — PR5 threads the
   /// per-seam curve through the plan), and packs the result into `file.processingFormat`.
+  /// `fadeOffset` (plan samples skipped by a seek into the crossfade) keeps the gains continuing
+  /// the original fade instead of restarting it. The overlap length is `leftTail.count` (the
+  /// plan's seam `length` always equals its trimmed tail/head range counts).
   private func seamBuffer(
-    file: AVAudioFile, leftTail: Range<Int>, rightHead: Range<Int>, length: Int, ratio: Double
+    file: AVAudioFile, leftTail: Range<Int>, rightHead: Range<Int>, fadeOffset: Int,
+    ratio: Double
   ) throws -> AVAudioPCMBuffer? {
-    let nativeCount = AVAudioFrameCount(max(0, (Double(length) * ratio).rounded()))
+    let nativeCount = AVAudioFrameCount(max(0, (Double(leftTail.count) * ratio).rounded()))
     guard nativeCount > 0 else { return nil }
     let leftStart = AVAudioFramePosition((Double(leftTail.lowerBound) * ratio).rounded())
     let rightStart = AVAudioFramePosition((Double(rightHead.lowerBound) * ratio).rounded())
     let out = try readFloats(file: file, startFrame: leftStart, frameCount: nativeCount)
     let incoming = try readFloats(file: file, startFrame: rightStart, frameCount: nativeCount)
-    let blended = CrossfadeRenderer.blend(out: out, incoming: incoming, curve: .equalPower)
+    let nativeFadeOffset = Int((Double(fadeOffset) * ratio).rounded())
+    let blended = CrossfadeRenderer.blend(
+      out: out, incoming: incoming, curve: .equalPower,
+      fadeOffset: nativeFadeOffset, fadeTotal: nativeFadeOffset + Int(nativeCount))
     guard
       let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: nativeCount),
       let channels = buffer.floatChannelData
