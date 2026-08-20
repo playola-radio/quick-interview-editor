@@ -87,8 +87,8 @@ struct WaveformLaneView<Overlay: View>: View {
       // an edge grab starts a boundary drag while every other mouse-down falls through to the marquee.
       .overlay(
         WaveformEdgeHandleLayer(
-          startX: highlight?.positionX,
-          endX: highlight.map { $0.positionX + $0.width },
+          startX: highlightRange.flatMap { waveform.lanePlayheadX(forSource: $0.lowerBound) },
+          endX: highlightRange.flatMap { waveform.lanePlayheadX(forSource: $0.upperBound) },
           onEdgeDragBegan: onEdgeDragBegan,
           onEdgeDragged: onEdgeDragged,
           onEdgeDragEnded: onEdgeDragEnded)

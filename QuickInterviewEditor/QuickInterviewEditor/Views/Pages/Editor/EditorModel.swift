@@ -222,6 +222,7 @@ final class EditorModel: ViewModel {
 
   // MARK: - Display Text
   let markAsClipLabel = "Mark as Clip"
+  let clearButtonLabel = "Clear"
   let scrollToCurrentWordLabel = "Scroll to current word"
   let emptyStateMessage = "Select words in the transcript, then Mark as Clip."
   let playLabel = "Play"
@@ -277,8 +278,21 @@ final class EditorModel: ViewModel {
   /// ordered by transcript position) becomes an exact source range and seeds the freeform selection.
   func selectWords(anchorID: Word.ID, focusID: Word.ID) {
     guard let range = sourceRange(coveringWords: anchorID, focusID) else { return }
-    selectionAnchorSample = range.lowerBound
+    selectionAnchorSample =
+      anchorHoldSample(anchorID: anchorID, focusID: focusID) ?? range.lowerBound
     selectSourceRange(range, snapPlayhead: true)
+  }
+
+  /// The anchor word's far-from-focus edge, so a later Shift-extend pivots from where the drag began
+  /// (Logic's "anchor stays put, focus moves"). A right-to-left selection (anchor after focus) must
+  /// hold the anchor's END, not the range's lower bound — otherwise the next extension pivots off the
+  /// wrong edge. Nil when either word lacks bounds, letting the caller fall back to `range.lowerBound`.
+  private func anchorHoldSample(anchorID: Word.ID, focusID: Word.ID) -> Int? {
+    guard let anchorRange = sourceRange(ofWord: anchorID),
+      let anchorPos = editPlan.words.firstIndex(where: { $0.id == anchorID }),
+      let focusPos = editPlan.words.firstIndex(where: { $0.id == focusID })
+    else { return nil }
+    return anchorPos <= focusPos ? anchorRange.lowerBound : anchorRange.upperBound
   }
 
   /// A single-word intent: select the word's exact `[startSample, endSample)`. `extending` (Shift)
@@ -449,6 +463,18 @@ final class EditorModel: ViewModel {
   /// fine-tune draft is unsaved — a tuned pending selection (whose adjustments it would discard)
   /// or a dirty existing-slice edit with a held selection (which requires Save/Cancel first).
   var canAddSlice: Bool { selectedSourceRange != nil && !fineTune.hasUnsavedChange }
+  /// Clear is offered whenever a freeform selection exists — including a marquee/edge-drag one that
+  /// never touched the transcript. `audioSelection` is the source of truth; reading it here (not
+  /// `transcript.hasSelection`) is what keeps the bar live for waveform-created selections.
+  var canClearSelection: Bool { audioSelection != nil }
+  /// The bar's word-count readout, derived from the freeform selection so it stays accurate for
+  /// every selection path. Counts words the range overlaps (the same set the transcript highlights);
+  /// a silence-only selection reads "0 words selected".
+  var selectionSummary: String {
+    guard let range = audioSelection else { return "No selection" }
+    let count = wordIDs(anyOverlap: range, words: editPlan.words).count
+    return "\(count) word\(count == 1 ? "" : "s") selected"
+  }
   // Undo/redo restore `slices` wholesale; doing that under an open cut edit would leave the
   // draft anchored to a stale committed range, so gate on Save/Cancel first.
   var canUndo: Bool { documentUndo.canUndo && !hasUncommittedSliceEdit }
@@ -768,6 +794,12 @@ final class EditorModel: ViewModel {
     audioSelection = nil
     selectionAnchorSample = nil
     selectionEditingEdge = nil
+  }
+
+  /// The Clear button in the mark-clip bar. Drops the freeform selection whatever created it —
+  /// transcript click/drag, waveform marquee, or edge drag — since all of them live in `audioSelection`.
+  func clearSelectionTapped() {
+    clearSelection()
   }
 
   /// Scrolls the transcript to frame a freeform source range by revealing its first overlapping word,

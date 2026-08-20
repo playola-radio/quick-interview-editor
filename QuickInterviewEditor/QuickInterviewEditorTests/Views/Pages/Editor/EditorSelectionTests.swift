@@ -119,6 +119,39 @@ struct EditorSelectionTests {
     expectNoDifference(model.removedWordIDs, Set([words[2].id]))
   }
 
+  /// A right-to-left transcript drag anchors on the LATER word, so a subsequent Shift-extend must
+  /// pivot from that word's end — not the range's lower bound. Regression: `selectWords` used to hold
+  /// `range.lowerBound` unconditionally, so extending an R-to-L selection pivoted off the wrong edge.
+  @Test func rightToLeftSelectionHoldsAnchorWordFarEdge() {
+    let model = editor()
+    // Words 2..4 ("a","young","Hayes") have real bounds. Drag anchor=Hayes(id 4) back to focus="a"
+    // (id 2): the held anchor is Hayes's end (119202), not "a"'s start.
+    model.selectWords(anchorID: 4, focusID: 2)
+    // Shift-extend inward to "young" (id 3): the range pivots from Hayes's end, giving young.start →
+    // Hayes.end. The old lower-bound anchor would have produced a.start → young.end instead.
+    model.selectWord(3, extending: true)
+    expectNoDifference(model.audioSelection, 77704..<119202)
+  }
+
+  /// The mark-clip bar reads its clear-enabled state and word-count summary from `audioSelection`, so
+  /// a waveform marquee selection (which never touches the transcript) still lights up the bar and is
+  /// clearable. Regression: the bar read `transcript.hasSelection`/`selectionSummary`, which stayed
+  /// stale for waveform-created selections after the source-of-truth inversion.
+  @Test func clearBarTracksWaveformSelection() {
+    let model = editor()
+    #expect(!model.canClearSelection)
+    expectNoDifference(model.selectionSummary, "No selection")
+
+    let words = model.editPlan.words
+    model.selectSourceRange(words[1].startSample!..<words[3].endSample!, snapPlayhead: false)
+    #expect(model.canClearSelection)
+    expectNoDifference(model.selectionSummary, "3 words selected")
+
+    model.clearSelectionTapped()
+    #expect(!model.canClearSelection)
+    expectNoDifference(model.selectionSummary, "No selection")
+  }
+
   @Test func addSliceWordIDsAreOverlapDerivedAtCommit() {
     let model = editor()
     let words = model.editPlan.words

@@ -12,10 +12,10 @@ struct MarkClipBarView: View {
       Button(model.markAsClipLabel) { model.addSliceTapped() }
         .disabled(!model.canAddSlice)
 
-      Button(model.transcript.clearButtonLabel) { model.transcript.clearSelectionTapped() }
-        .disabled(!model.transcript.hasSelection)
+      Button(model.clearButtonLabel) { model.clearSelectionTapped() }
+        .disabled(!model.canClearSelection)
 
-      Text(model.transcript.selectionSummary)
+      Text(model.selectionSummary)
         .font(.system(size: 12))
         .foregroundStyle(Color(white: 0.5))
         .lineLimit(1)
