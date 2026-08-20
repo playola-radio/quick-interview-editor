@@ -316,7 +316,7 @@ final class EditorModel: ViewModel {
   /// selection is a new-slice intent that retargets the pane), else the active slice.
   /// `sliceSelected` clears the selection so an edited slice cleanly becomes the driver.
   var fineTuneTarget: FineTuneModel.Target? {
-    if transcript.selectedSampleRange != nil { return .pendingSelection }
+    if selectedSourceRange != nil { return .pendingSelection }
     if let activeSliceID { return .slice(activeSliceID) }
     return nil
   }
@@ -343,7 +343,7 @@ final class EditorModel: ViewModel {
   var fineTuneSessionKey: FineTuneSessionKey {
     FineTuneSessionKey(
       activeSliceID: activeSliceID, activeSliceRange: activeSliceRange,
-      selection: transcript.selectedSampleRange)
+      selection: selectedSourceRange)
   }
 
   /// True only while an EXISTING slice has an unsaved cut edit — the user must Save or Cancel
@@ -770,12 +770,18 @@ final class EditorModel: ViewModel {
     selectionEditingEdge = nil
   }
 
-  /// Scrolls the transcript to frame a freeform source range by revealing its first overlapping word.
-  /// The waveform now owns the selection directly, so `transcript.revealSelection()` (which reads the
-  /// transcript's own selection) no longer applies. A range overlapping no word scrolls nowhere.
-  private func revealSourceRange(_ range: Range<Int>) {
+  /// Scrolls the transcript to frame a freeform source range by revealing its first overlapping word,
+  /// and (when `zoomWaveform`) zooms the waveform to the current selection. The waveform now owns the
+  /// selection directly, so `transcript.revealSelection()` (which read the transcript's own selection)
+  /// no longer applies. A range overlapping no word scrolls nowhere.
+  ///
+  /// `zoomWaveform` defaults to false: the marquee-release and plain-click paths reveal scroll-only
+  /// (Logic never zooms on a marquee release — see the waveform-area-select design), while the
+  /// suggestion/clip/reveal-words callers opt in to `zoomWaveform: true` to frame the target.
+  func revealSourceRange(_ range: Range<Int>, zoomWaveform: Bool = false) {
     guard let wordID = wordIDs(anyOverlap: range, words: editPlan.words).first else { return }
     transcript.revealWord(wordID)
+    if zoomWaveform { zoomWaveformToSelection() }
   }
 
   // MARK: - Selection edge editing (drag handles + nudge)
@@ -1023,18 +1029,13 @@ final class EditorModel: ViewModel {
     // reveal the narrower span of the survivors, a subtly wrong jump. Leave the view put instead.
     guard positions.count == wordIDs.count,
       let lower = positions.min(), let upper = positions.max(),
-      transcript.selectWords(anchorID: editPlan.words[lower].id, focusID: editPlan.words[upper].id)
+      let range = sourceRange(coveringWords: editPlan.words[lower].id, editPlan.words[upper].id)
     else { return }
-    revealSelectionAcrossPanes()
+    selectSourceRange(range, snapPlayhead: true)
+    revealSourceRange(range, zoomWaveform: true)
   }
 
-  /// Scrolls the transcript to the current selection and zooms/scrolls the waveform to frame it.
-  func revealSelectionAcrossPanes() {
-    transcript.revealSelection()
-    zoomWaveformToSelection()
-  }
-
-  /// Zooms and scrolls the waveform to frame the current transcript selection (padded). A no-op
+  /// Zooms and scrolls the waveform to frame the current selection (padded). A no-op
   /// when nothing is selected.
   func zoomWaveformToSelection() {
     guard let range = selectedSourceRange else { return }
@@ -1496,7 +1497,7 @@ final class EditorModel: ViewModel {
     }
   }
 
-  /// Selection reconciliation, driven by `EditorView.onChange(of: transcript.selectedSampleRange)`.
+  /// Selection reconciliation, driven by `EditorView.onChange(of: audioSelection)`.
   /// A new selection snaps the cursor to its start; clearing the selection leaves the cursor put.
   /// Any active playback is stopped first — the cursor never jumps while audio keeps playing.
   ///

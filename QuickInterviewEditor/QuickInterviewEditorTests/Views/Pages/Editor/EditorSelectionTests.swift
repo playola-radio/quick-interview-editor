@@ -22,7 +22,6 @@ struct EditorSelectionTests {
     let model = editor()
     // Word 2 ("a", samples 70648..<74176) has real sample bounds — see EditorAreaSelectTests.
     model.transcript.selectWords(anchorID: 2, focusID: 2)
-    expectNoDifference(model.selectedSourceRange, model.transcript.selectedSampleRange)
     expectNoDifference(model.selectedSourceRange, 70648..<74176)
   }
 
@@ -49,7 +48,6 @@ struct EditorSelectionTests {
     // `.onChange` — otherwise every headless model test that sets a selection reads nil.
     let model = editor()
     model.transcript.selectWords(anchorID: 2, focusID: 4)
-    expectNoDifference(model.audioSelection, model.transcript.selectedSampleRange)
     expectNoDifference(model.audioSelection, 70648..<119202)
   }
 

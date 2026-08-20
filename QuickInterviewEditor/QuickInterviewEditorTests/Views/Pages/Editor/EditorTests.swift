@@ -74,12 +74,12 @@ struct EditorTests {
   @Test func addSliceFromSelectionCreatesSlice() {
     let model = editor()
     selectWords(model.transcript, 0, 3)
-    let selectedWordIDs = model.transcript.orderedSelectedWordIDs
+    let expectedWordIDs = wordIDs(anyOverlap: model.audioSelection!, words: model.editPlan.words)
     model.addSliceTapped()
     expectNoDifference(model.slices.count, 1)
     let slice = model.slices[0]
     expectNoDifference(slice.name, "Slice 1")
-    expectNoDifference(slice.wordIDs, selectedWordIDs)
+    expectNoDifference(slice.wordIDs, expectedWordIDs)
     #expect(slice.startSample < slice.endSample)
     #expect(!slice.snippet.isEmpty)
   }
@@ -818,12 +818,13 @@ struct EditorTests {
     expectNoDifference(model.audioSelection, nil)
   }
 
-  @Test func highlightedSampleRangeMirrorsTranscriptSelection() {
+  @Test func highlightedSampleRangeMirrorsAudioSelection() {
     let model = editor()
     #expect(model.highlightedSampleRange == nil)
     selectWords(model.transcript, 0, 2)
-    expectNoDifference(model.highlightedSampleRange, model.transcript.selectedSampleRange)
-    #expect(model.highlightedSampleRange != nil)
+    let expected = model.editPlan.words[0].startSample!..<model.editPlan.words[2].endSample!
+    expectNoDifference(model.highlightedSampleRange, expected)
+    expectNoDifference(model.highlightedSampleRange, model.audioSelection)
   }
 
   @Test func waveformHighlightSpanCombinesSelectionWithGeometry() {

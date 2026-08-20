@@ -93,7 +93,7 @@ struct EditorFineTuneTests {
     expectNoDifference(model.fineTuneTarget, .pendingSelection)
     #expect(model.showsFineTunePane)
     model.syncEditSession()
-    expectNoDifference(model.fineTune.committedRange, model.transcript.selectedSampleRange)
+    expectNoDifference(model.fineTune.committedRange, model.audioSelection)
   }
 
   /// Updated (Task 9 deadlock fix): a `.pendingSelection` draft is a disposable CANDIDATE that
@@ -111,8 +111,8 @@ struct EditorFineTuneTests {
     selectWords(model.transcript, 4, 6)
     model.syncEditSession()
     // Retargeted cleanly to the new selection — the abandoned A tuning is gone, not held.
-    expectNoDifference(model.fineTune.committedRange, model.transcript.selectedSampleRange)
-    expectNoDifference(model.fineTune.draftRange, model.transcript.selectedSampleRange)
+    expectNoDifference(model.fineTune.committedRange, model.audioSelection)
+    expectNoDifference(model.fineTune.draftRange, model.audioSelection)
     #expect(!model.fineTune.hasUnsavedChange)
     #expect(model.showsFineTunePane)
   }
@@ -129,7 +129,7 @@ struct EditorFineTuneTests {
     // A different selection arrives; the abandoned A tuning is discarded, not held.
     selectWords(model.transcript, 4, 6)
     model.syncEditSession()
-    let selectionB = model.transcript.selectedSampleRange!
+    let selectionB = model.audioSelection!
     #expect(selectionB != draftA)
 
     model.commitEditTapped()
@@ -201,7 +201,7 @@ struct EditorFineTuneTests {
     model.syncEditSession()
     // Save is enabled immediately — no need to nudge first when the auto-cut is already good.
     #expect(model.canCommitEdit)
-    let selection = model.transcript.selectedSampleRange!
+    let selection = model.audioSelection!
 
     model.commitEditTapped()
     expectNoDifference(model.slices.count, 1)
@@ -349,7 +349,7 @@ struct EditorFineTuneTests {
     model.syncEditSession()
     expectNoDifference(model.fineTuneTarget, .pendingSelection)
     expectNoDifference(model.activeSliceID, nil)
-    expectNoDifference(model.fineTune.committedRange, model.transcript.selectedSampleRange)
+    expectNoDifference(model.fineTune.committedRange, model.audioSelection)
   }
 
   @Test func aSelectionDoesNotDropAnUnsavedSliceEditUntilResolved() {
@@ -426,11 +426,11 @@ struct EditorFineTuneTests {
     // A selection made mid-edit is held behind the dirty slice draft.
     selectWords(model.transcript, 5, 7)
     model.syncEditSession()
-    let held = model.transcript.selectedSampleRange
+    let held = model.audioSelection
 
     // Re-clicking the active slice's button must not drop that held selection.
     model.sliceSelected(slice.id)
-    expectNoDifference(model.transcript.selectedSampleRange, held)
+    expectNoDifference(model.audioSelection, held)
     expectNoDifference(model.fineTune.target, .slice(slice.id))  // still the slice session
 
     // Cancel then retargets the pane to the held selection.

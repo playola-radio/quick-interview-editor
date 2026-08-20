@@ -42,7 +42,7 @@ struct EditorRevealTests {
 
     model.cutSuggestionSelected(suggestion)
 
-    expectNoDifference(model.transcript.selectedWordIDSet, [1, 2, 3])
+    expectNoDifference(model.selectedWordIDs, [1, 2, 3])
     expectNoDifference(model.transcript.reveal, TranscriptReveal(wordID: 1, token: 1))
     // range 100_000..<250_000 (count 150_000), padded ×1.2 over 1000 px ⇒ 180 spp, centered.
     expectNoDifference(model.editedWaveform.samplesPerPixel, 180)
@@ -61,7 +61,7 @@ struct EditorRevealTests {
     // The suggestion references words no longer in the plan → must not jump the view.
     model.cutSuggestionSelected(Fixtures.cutSuggestion(id: Fixtures.uuid(9), wordIDs: [900, 901]))
 
-    expectNoDifference(model.transcript.selectedWordIDSet, [1])
+    expectNoDifference(model.selectedWordIDs, [1])
     expectNoDifference(model.transcript.reveal, priorReveal)
     expectNoDifference(model.editedWaveform.samplesPerPixel, priorSpp)
     expectNoDifference(model.editedWaveform.visibleStartSample, priorStart)
@@ -78,7 +78,7 @@ struct EditorRevealTests {
     // One surviving word (1) and one missing (900) — must NOT reveal the survivor's narrower span.
     model.cutSuggestionSelected(Fixtures.cutSuggestion(id: Fixtures.uuid(9), wordIDs: [1, 900]))
 
-    expectNoDifference(model.transcript.selectedWordIDSet, [1])
+    expectNoDifference(model.selectedWordIDs, [1])
     expectNoDifference(model.transcript.reveal, priorReveal)
     expectNoDifference(model.editedWaveform.samplesPerPixel, priorSpp)
     expectNoDifference(model.editedWaveform.visibleStartSample, priorStart)
@@ -91,7 +91,7 @@ struct EditorRevealTests {
 
     model.cutSuggestionSelected(suggestion)
 
-    expectNoDifference(model.transcript.selectedWordIDSet, [1, 2, 3])
+    expectNoDifference(model.selectedWordIDs, [1, 2, 3])
     expectNoDifference(model.transcript.reveal, TranscriptReveal(wordID: 1, token: 1))
     expectNoDifference(model.editedWaveform.samplesPerPixel, 180)
   }
@@ -102,7 +102,7 @@ struct EditorRevealTests {
 
     model.cutSuggestionSelected(suggestion)
 
-    expectNoDifference(model.transcript.selectedWordIDSet, [])
+    expectNoDifference(model.selectedWordIDs, [])
     #expect(model.transcript.reveal == nil)
     expectNoDifference(model.editedWaveform.samplesPerPixel, 1000)
   }
@@ -117,7 +117,7 @@ struct EditorRevealTests {
 
     model.sliceRevealTapped(id)
 
-    expectNoDifference(model.transcript.selectedWordIDSet, [2, 3])
+    expectNoDifference(model.selectedWordIDs, [2, 3])
     expectNoDifference(model.transcript.reveal, TranscriptReveal(wordID: 2, token: 1))
     // range 150_000..<250_000 (count 100_000), padded ×1.2 over 1000 px ⇒ 120 spp, centered.
     expectNoDifference(model.editedWaveform.samplesPerPixel, 120)
@@ -127,7 +127,7 @@ struct EditorRevealTests {
   @Test func revealingAnUnknownClipIsANoOp() {
     let model = editor()
     model.sliceRevealTapped(Fixtures.uuid(99))
-    expectNoDifference(model.transcript.selectedWordIDSet, [])
+    expectNoDifference(model.selectedWordIDs, [])
     expectNoDifference(model.editedWaveform.samplesPerPixel, 1000)
   }
 
@@ -135,5 +135,15 @@ struct EditorRevealTests {
     let model = editor()
     model.zoomWaveformToSelection()
     expectNoDifference(model.editedWaveform.samplesPerPixel, 1000)
+  }
+
+  @Test func revealSourceRangeScrollsToFirstOverlappingWord() {
+    let model = editor()
+    // A source range squarely inside word 3 (200_000..<250_000) — the first (only) overlapping
+    // word is 3, so the transcript reveals it. Default `zoomWaveform: false` ⇒ scroll only, no zoom.
+    let range = 200_000..<250_000
+    model.revealSourceRange(range)
+    expectNoDifference(model.transcript.reveal, TranscriptReveal(wordID: 3, token: 1))
+    expectNoDifference(model.editedWaveform.samplesPerPixel, 1000)  // unchanged: no zoom
   }
 }

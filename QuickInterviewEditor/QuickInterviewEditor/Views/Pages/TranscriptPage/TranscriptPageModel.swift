@@ -105,12 +105,12 @@ class TranscriptPageModel: ViewModel {
   let runTogetherMaxGapMs: Double = 30
   @ObservationIgnored private var gaps: [WordGap] = []
   var isLoading = false
-  /// Transcript-local selection endpoints, kept only to render the text highlight while later tasks
-  /// migrate the transcript to derive its highlight from the authoritative `audioSelection`. No
-  /// longer the selection's source of truth — the gesture handlers emit `onSelectionIntent` and
-  /// `EditorModel.audioSelection` is authoritative. Retired in a later task.
-  var selectionAnchorID: Word.ID?
-  var selectionFocusID: Word.ID?
+  /// In-progress gesture working state: the anchor/focus of the active click-drag or shift-extend.
+  /// NOT the selection's source of truth — the gesture handlers emit `onSelectionIntent` and
+  /// `EditorModel.audioSelection` is authoritative. Private because nothing outside the gesture
+  /// handlers reads them; the renderer draws the pushed-in `highlightedWordIDs` instead.
+  private var selectionAnchorID: Word.ID?
+  private var selectionFocusID: Word.ID?
   var document = TranscriptDocument(words: [])
   var plainTranscriptText: String { document.text }
   let minFontSize = 11.0
@@ -167,16 +167,6 @@ class TranscriptPageModel: ViewModel {
     guard count > 0 else { return "No selection" }
     return "\(count) word\(count == 1 ? "" : "s") selected"
   }
-  var selectedSampleRange: Range<Int>? {
-    guard let plan = editPlan, let first = selectedWords.first, let last = selectedWords.last
-    else { return nil }
-    let sr = Double(plan.source.sampleRate)
-    let lower = first.startSample ?? Int(first.start * sr)
-    let upper = last.endSample ?? Int((last.end ?? last.start) * sr)
-    // non-monotonic samples must not build an inverted Range
-    guard lower < upper else { return nil }
-    return lower..<upper
-  }
   /// Sample ranges of the run-together words, ordered by transcript position. Words
   /// missing sample bounds (or with inverted/zero-width bounds) are excluded. A duplicate
   /// word ID emits only its first occurrence's range, matching the dedup semantics of the
@@ -193,14 +183,6 @@ class TranscriptPageModel: ViewModel {
     }
     return ranges
   }
-  var orderedSelectedWordIDs: [Word.ID] { selectedWords.map(\.id) }
-  var selectionSnippet: String {
-    selectedWords.map(\.text).joined(separator: " ")
-      .trimmingCharacters(in: .whitespaces)
-  }
-  /// Public selection set for the renderer to diff (the private `selectedWordIDs` stays internal).
-  var selectedWordIDSet: Set<Word.ID> { selectedWordIDs }
-
   /// The clip bands mapped to drawable UTF-16 runs, in transcript order. Walks
   /// `document.wordRanges` (position order, so it's correct even for non-monotonic word IDs)
   /// and merges each maximal stretch of consecutive words belonging to the SAME band into ONE
@@ -518,6 +500,4 @@ class TranscriptPageModel: ViewModel {
     else { return [] }
     return plan.words[min(anchorIndex, focusIndex)...max(anchorIndex, focusIndex)]
   }
-
-  private var selectedWordIDs: Set<Word.ID> { Set(selectedWords.map(\.id)) }
 }

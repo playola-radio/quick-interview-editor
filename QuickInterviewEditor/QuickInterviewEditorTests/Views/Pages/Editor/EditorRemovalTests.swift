@@ -421,7 +421,7 @@ struct EditorRemovalTests {
     let model = editor(fingerprint: fingerprint)
     model.transcript.selectWords(
       anchorID: model.editPlan.words[1].id, focusID: model.editPlan.words[2].id)
-    return (model, model.transcript.selectedSampleRange!)
+    return (model, model.audioSelection!)
   }
 
   @Test func selectingWordsThenSyncingOpensAPendingSelectionSession() {
