@@ -9,6 +9,8 @@ import Testing
 // swiftlint:disable large_tuple
 // The (URL, Range<Int>, Int) recorded-call tuple mirrors `audioPlayer.play`'s three
 // leading arguments, so it recurs across the gate helper and the tests that assert on a call.
+// Free play (Play/Space from stopped) now goes through `audioPlayer.playEdited` instead, whose
+// (URL, AudioEditRenderPlan, Int) tuple mirrors ITS three leading arguments the same way.
 
 /// Suspends each `play` until released; reports starts. Holds an array of continuations so two
 /// overlapping plays (a supersession) both suspend and resume together. Mirrors AuditionGate.
@@ -103,6 +105,20 @@ struct EditorTransportTests {
     }
   }
 
+  /// `playEdited` counterpart to `recordingPlay`, for free-play tests (the main Play/Space from
+  /// stopped now builds an `AudioEditRenderPlan` instead of a source `Range<Int>`).
+  private func recordingPlayEdited(
+    _ recorded: LockIsolated<(URL, AudioEditRenderPlan, Int)?>, _ gate: TransportGate
+  )
+    -> @Sendable (URL, AudioEditRenderPlan, Int, Double, PlaybackSessionID) async throws ->
+    PlaybackEnd
+  {
+    { url, plan, sampleRate, _, _ in
+      recorded.setValue((url, plan, sampleRate))
+      return await gate.play()
+    }
+  }
+
   // MARK: - Panel flags
 
   @Test func panelFlagsWhenStoppedWithPlayableCursor() {
@@ -143,11 +159,11 @@ struct EditorTransportTests {
 
   @Test func playStartsFromCursorToEndOfAudioAndRecordsOrigin() async {
     let gate = TransportGate()
-    let recorded = LockIsolated<(URL, Range<Int>, Int)?>(nil)
+    let recorded = LockIsolated<(URL, AudioEditRenderPlan, Int)?>(nil)
     let model = editor()
     model.playheadEditedSample = 1000
     await withDependencies {
-      $0.audioPlayer.play = recordingPlay(recorded, gate)
+      $0.audioPlayer.playEdited = recordingPlayEdited(recorded, gate)
       $0.audioPlayer.stop = { _ in gate.release() }
     } operation: {
       let task = Task { await model.transportPlayTapped() }
@@ -155,7 +171,10 @@ struct EditorTransportTests {
       #expect(model.isTransportPlaying)
       expectNoDifference(model.transportOriginEditedSample, 1000)
       expectNoDifference(recorded.value?.0, model.canonicalAudioURL)
-      expectNoDifference(recorded.value?.1, 1000..<model.editPlan.source.durationSamples)
+      expectNoDifference(recorded.value?.1.items.first?.editedSpan.lowerBound, 1000)
+      expectNoDifference(
+        recorded.value?.1.items.last?.editedSpan.upperBound,
+        model.editPlan.source.durationSamples)
       expectNoDifference(recorded.value?.2, model.editPlan.source.sampleRate)
       await model.transportStopTapped()
       await task.value
@@ -164,20 +183,22 @@ struct EditorTransportTests {
 
   @Test func playRunsToFileEndIgnoringSelection() async {
     let gate = TransportGate()
-    let recorded = LockIsolated<(URL, Range<Int>, Int)?>(nil)
+    let recorded = LockIsolated<(URL, AudioEditRenderPlan, Int)?>(nil)
     let model = editor()
     selectWords(model.transcript, 1, 4)
     let selection = model.audioSelection!
     model.playheadEditedSample = selection.lowerBound
     await withDependencies {
-      $0.audioPlayer.play = recordingPlay(recorded, gate)
+      $0.audioPlayer.playEdited = recordingPlayEdited(recorded, gate)
       $0.audioPlayer.stop = { _ in gate.release() }
     } operation: {
       let task = Task { await model.transportPlayTapped() }
       await gate.awaitStarted()
       // Plays from the cursor to the END OF THE FILE, not to the selection's end.
+      expectNoDifference(recorded.value?.1.items.first?.editedSpan.lowerBound, selection.lowerBound)
       expectNoDifference(
-        recorded.value?.1, selection.lowerBound..<model.editPlan.source.durationSamples)
+        recorded.value?.1.items.last?.editedSpan.upperBound,
+        model.editPlan.source.durationSamples)
       await model.transportStopTapped()
       await task.value
     }
@@ -188,7 +209,7 @@ struct EditorTransportTests {
     let model = editor()
     model.playheadEditedSample = model.editPlan.source.durationSamples
     await withDependencies {
-      $0.audioPlayer.play = { _, _, _, _, _ in
+      $0.audioPlayer.playEdited = { _, _, _, _, _ in
         played.setValue(true)
         return .finished
       }
@@ -204,7 +225,9 @@ struct EditorTransportTests {
     let model = editor()
     model.playheadEditedSample = 1000
     await withDependencies {
-      $0.audioPlayer.play = { _, _, _, _, _ in throw EngineClientError.engineFailed("boom") }
+      $0.audioPlayer.playEdited = { _, _, _, _, _ in
+        throw EngineClientError.engineFailed("boom")
+      }
     } operation: {
       await withKnownIssue {
         await model.transportPlayTapped()
@@ -221,7 +244,7 @@ struct EditorTransportTests {
     model.playheadEditedSample = 1000
     let end = model.editPlan.source.durationSamples
     await withDependencies {
-      $0.audioPlayer.play = { _, _, _, _, _ in await gate.play() }
+      $0.audioPlayer.playEdited = { _, _, _, _, _ in await gate.play() }
       $0.audioPlayer.stop = { _ in gate.release() }
     } operation: {
       let task = Task { await model.transportPlayTapped() }
@@ -241,7 +264,7 @@ struct EditorTransportTests {
     let model = editor()
     model.playheadEditedSample = 1000
     await withDependencies {
-      $0.audioPlayer.play = { _, _, _, _, _ in await gate.play() }
+      $0.audioPlayer.playEdited = { _, _, _, _, _ in await gate.play() }
       $0.audioPlayer.pause = { _ in .source(4321) }
       $0.audioPlayer.stop = { _ in gate.release() }
     } operation: {
@@ -284,7 +307,7 @@ struct EditorTransportTests {
     let model = editor()
     model.playheadEditedSample = 1000
     await withDependencies {
-      $0.audioPlayer.play = { _, _, _, _, _ in await gate.play() }
+      $0.audioPlayer.playEdited = { _, _, _, _, _ in await gate.play() }
       $0.audioPlayer.pause = { _ in .source(4321) }
       $0.audioPlayer.resume = { _ in
         resumed.setValue(true)
@@ -310,7 +333,7 @@ struct EditorTransportTests {
     let model = editor()
     model.playheadEditedSample = 1000
     await withDependencies {
-      $0.audioPlayer.play = { _, _, _, _, _ in await gate.play() }
+      $0.audioPlayer.playEdited = { _, _, _, _, _ in await gate.play() }
       $0.audioPlayer.pause = { _ in .source(4321) }
       $0.audioPlayer.resume = { _ in false }  // engine restart failed
       $0.audioPlayer.stop = { _ in gate.release() }
@@ -335,7 +358,7 @@ struct EditorTransportTests {
     let model = editor()
     model.playheadEditedSample = 1000
     await withDependencies {
-      $0.audioPlayer.play = { _, _, _, _, _ in await gate.play() }
+      $0.audioPlayer.playEdited = { _, _, _, _, _ in await gate.play() }
       $0.audioPlayer.stop = { session in
         stoppedSession.setValue(session)
         gate.release()
@@ -364,6 +387,9 @@ struct EditorTransportTests {
     model.addSliceTapped()
     let slice = model.slices[0]
     await withDependencies {
+      // Both paths are exercised: the transport (free play) starts via `playEdited`, then the
+      // slice shortcut (`play`) takes it over.
+      $0.audioPlayer.playEdited = { _, _, _, _, _ in await gate.play() }
       $0.audioPlayer.play = { _, _, _, _, _ in await gate.play() }
       $0.audioPlayer.stop = { _ in gate.release() }
     } operation: {
@@ -415,7 +441,7 @@ struct EditorTransportTests {
     let model = editor()
     model.playheadEditedSample = 1000
     await withDependencies {
-      $0.audioPlayer.play = { _, _, _, _, _ in await gate.play() }
+      $0.audioPlayer.playEdited = { _, _, _, _, _ in await gate.play() }
       $0.audioPlayer.stop = { _ in gate.release() }
     } operation: {
       let task = Task { await model.transportPlayStopTapped() }
@@ -431,7 +457,7 @@ struct EditorTransportTests {
     let model = editor()
     model.playheadEditedSample = 1000
     await withDependencies {
-      $0.audioPlayer.play = { _, _, _, _, _ in await gate.play() }
+      $0.audioPlayer.playEdited = { _, _, _, _, _ in await gate.play() }
       $0.audioPlayer.stop = { _ in gate.release() }
     } operation: {
       let task = Task { await model.transportPlayTapped() }
@@ -516,7 +542,7 @@ struct EditorTransportTests {
     let model = editor()
     model.playheadEditedSample = 1000
     await withDependencies {
-      $0.audioPlayer.play = { _, _, _, _, _ in await gate.play() }
+      $0.audioPlayer.playEdited = { _, _, _, _, _ in await gate.play() }
       $0.audioPlayer.stop = { _ in
         stopped.setValue(true)
         gate.release()
@@ -574,10 +600,10 @@ struct EditorTransportTests {
     let model = editor()
     model.playheadEditedSample = 1000
     await withDependencies {
-      // Another tab took over the shared player: `play` returns `.superseded` while our own session
-      // is still set (the other tab can't touch it). The transport must reset without jumping the
-      // cursor to the range end.
-      $0.audioPlayer.play = { _, _, _, _, _ in
+      // Another tab took over the shared player: `playEdited` returns `.superseded` while our own
+      // session is still set (the other tab can't touch it). The transport must reset without
+      // jumping the cursor to the range end.
+      $0.audioPlayer.playEdited = { _, _, _, _, _ in
         _ = await gate.play()
         return .superseded
       }
@@ -598,6 +624,7 @@ struct EditorTransportTests {
     let shared = SharedFakePlayer()
     let client = AudioPlayerClient(
       play: { _, _, _, _, _ in await shared.play() },
+      playEdited: { _, _, _, _, _ in await shared.play() },
       pause: { _ in nil }, resume: { _ in true },
       stop: { _ in }, setRate: { _ in }, positions: { AsyncStream { $0.finish() } })
     let tabA = editor()
@@ -645,7 +672,7 @@ struct EditorTransportTests {
     let playedRate = LockIsolated<Double?>(nil)
     await withDependencies {
       $0.defaultAppStorage = UserDefaults(suiteName: "editor-speed-play-\(UUID())")!
-      $0.audioPlayer.play = { _, _, _, rate, _ in
+      $0.audioPlayer.playEdited = { _, _, _, rate, _ in
         playedRate.setValue(rate)
         return await gate.play()
       }
@@ -668,7 +695,7 @@ struct EditorTransportTests {
     let rates = LockIsolated<[Double]>([])
     await withDependencies {
       $0.defaultAppStorage = UserDefaults(suiteName: "editor-speed-live-\(UUID())")!
-      $0.audioPlayer.play = { _, _, _, _, _ in await gate.play() }
+      $0.audioPlayer.playEdited = { _, _, _, _, _ in await gate.play() }
       $0.audioPlayer.setRate = { rate in rates.withValue { $0.append(rate) } }
       $0.audioPlayer.stop = { _ in gate.release() }
     } operation: {

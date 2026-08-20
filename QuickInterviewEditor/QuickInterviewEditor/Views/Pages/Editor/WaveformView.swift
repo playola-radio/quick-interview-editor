@@ -45,11 +45,6 @@ struct WaveformView: View {
           .font(.system(size: 11, weight: .medium))
           .foregroundStyle(Color(red: 0.96, green: 0.86, blue: 0.4))
       }
-      if let note = model.removalPlaybackNote {
-        Text(note)
-          .font(.system(size: 11, weight: .medium))
-          .foregroundStyle(Color(white: 0.44))
-      }
       Spacer()
       WaveformAmplitudeZoomButton(waveform: model.waveform)
         .disabled(!model.waveform.canAmplitudeZoom)

@@ -28,6 +28,13 @@ struct AudioPlayerClient: Sendable {
   /// atomically with the start, so no suspension point sits between it and `session` becoming
   /// current. `session` tags this playback's ticks.
   var play: @Sendable (URL, Range<Int>, Int, Double, PlaybackSessionID) async throws -> PlaybackEnd
+  /// Plays an edited-timeline render plan as ONE gapless stream — kept-segment interiors
+  /// scheduled from `url`, seam crossfades pre-rendered and blended — at `rate`
+  /// (pitch-preserving), reporting positions/pause samples on the EDITED axis
+  /// (`PlaybackSample.edited`). Mirrors `play`'s session/rate contract.
+  var playEdited:
+    @Sendable (URL, AudioEditRenderPlan, Int, Double, PlaybackSessionID) async throws
+      -> PlaybackEnd
   /// Pauses `session` if it is the current playback, freezing the node in place; returns the
   /// exact resting sample, tagged with its coordinate axis (nil if `session` is not current).
   /// Does not end the `play` call.
@@ -75,6 +82,10 @@ extension AudioPlayerClient: TestDependencyKey {
       reportIssue("AudioPlayerClient.play called without a test override")
       throw EngineClientError.unimplemented("AudioPlayerClient.play")
     },
+    playEdited: { _, _, _, _, _ -> PlaybackEnd in
+      reportIssue("AudioPlayerClient.playEdited called without a test override")
+      throw EngineClientError.unimplemented("AudioPlayerClient.playEdited")
+    },
     pause: { _ in
       reportIssue("AudioPlayerClient.pause called without a test override")
       return nil
@@ -91,7 +102,8 @@ extension AudioPlayerClient: TestDependencyKey {
   )
 
   static let previewValue = AudioPlayerClient(
-    play: { _, _, _, _, _ in .finished }, pause: { _ in nil }, resume: { _ in true },
+    play: { _, _, _, _, _ in .finished }, playEdited: { _, _, _, _, _ in .finished },
+    pause: { _ in nil }, resume: { _ in true },
     stop: { _ in }, setRate: { _ in }, positions: { AsyncStream { $0.finish() } })
 }
 
@@ -111,6 +123,10 @@ extension AudioPlayerClient {
       play: { url, range, sampleRate, rate, session in
         try await box.play(
           url: url, range: range, planSampleRate: sampleRate, rate: rate, session: session)
+      },
+      playEdited: { url, plan, sampleRate, rate, session in
+        try await box.playEdited(
+          url: url, plan: plan, planSampleRate: sampleRate, rate: rate, session: session)
       },
       pause: { session in await box.pause(session: session) },
       resume: { session in await box.resume(session: session) },
@@ -252,12 +268,12 @@ private actor LivePlayerBox {
     }
   }
 
-  /// SPIKE (PR2): plays an edited-timeline `plan` as one gapless stream on the shared node —
-  /// kept-segment interiors scheduled straight from `file`, seam crossfades pre-rendered into PCM
-  /// buffers and blended by `CrossfadeRenderer` — proving the playlist scheduler + edited-position
-  /// bookkeeping before the transport migrates to edited coordinates. Positions report EDITED
-  /// samples (`editedFrameTimeline`). Not exposed on `AudioPlayerClient` yet (PR3 wires the
-  /// transport); exercised by manual verification only.
+  /// The transport's edited-playback engine: plays an edited-timeline `plan` as one gapless
+  /// stream on the shared node — kept-segment interiors scheduled straight from `file`, seam
+  /// crossfades pre-rendered into PCM buffers and blended by `CrossfadeRenderer`. Positions
+  /// report EDITED samples (`editedFrameTimeline`). The whole plan is scheduled up front
+  /// (retained per the PR 2 deviation note: the seam buffers are the only PCM held, one short
+  /// crossfade per removal, so bounded lookahead isn't warranted).
   func playEdited(
     url: URL, plan: AudioEditRenderPlan, planSampleRate: Int, rate: Double,
     session: PlaybackSessionID

@@ -242,21 +242,6 @@ struct EditorTests {
     expectNoDifference(model.timelineRemovals.count, 1)
   }
 
-  @Test func removalPlaybackNoteAppearsOnlyWithRemovals() {
-    let model = editor()
-    expectNoDifference(model.removalPlaybackNote, nil)
-
-    model.mutateDocument { doc in
-      doc.timelineRemovals.append(
-        TimelineRemoval(
-          id: Fixtures.uuid(3), removedRange: 1000..<2000,
-          crossfade: Crossfade(lengthSamples: 480, curve: .equalPower)))
-    }
-    expectNoDifference(
-      model.removalPlaybackNote,
-      "Playback preview does not yet blend cuts (coming next).")
-  }
-
   @Test func undoRemovingPlayingSliceReconcilesPlayback() async {
     let gate = PlayerGate()
     let stopped = LockIsolated(false)

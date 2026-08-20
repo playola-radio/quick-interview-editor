@@ -1,3 +1,4 @@
+import ConcurrencyExtras
 import CustomDump
 import Dependencies
 import Foundation
@@ -111,6 +112,114 @@ struct EditorEditedCursorTests {
     }
     expectNoDifference(model.playheadEditedSample, 45_200)
     expectNoDifference(model.transportPhase, .paused(session))
+  }
+
+  @Test func freePlayBuildsEditedPlanFromCursor() async {
+    let model = editor()
+    addRemoval(model, 40_000, 60_000, length: 4_800)
+    model.playheadEditedSample = 10_000
+    let recorded = LockIsolated<(URL, AudioEditRenderPlan, Int)?>(nil)
+    await withDependencies {
+      $0.audioPlayer.playEdited = { url, plan, sampleRate, _, _ in
+        recorded.setValue((url, plan, sampleRate))
+        return .finished
+      }
+    } operation: {
+      await model.transportPlayTapped()
+    }
+    let (url, plan, sampleRate) = recorded.value!
+    expectNoDifference(url, Fixtures.canonicalAudioURL)
+    expectNoDifference(sampleRate, model.editPlan.source.sampleRate)
+    // The plan starts exactly at the cursor's edited sample …
+    expectNoDifference(plan.items.first?.editedSpan.lowerBound, 10_000)
+    // … and covers the timeline to its edited end.
+    expectNoDifference(
+      plan.items.last?.editedSpan.upperBound,
+      model.editedWaveform.timeline.editedDurationSamples)
+  }
+
+  @Test func freePlayWithoutRemovalsIsIdentityPlan() async {
+    let model = editor()
+    let recorded = LockIsolated<AudioEditRenderPlan?>(nil)
+    await withDependencies {
+      $0.audioPlayer.playEdited = { _, plan, _, _, _ in
+        recorded.setValue(plan)
+        return .finished
+      }
+    } operation: {
+      await model.transportPlayTapped()
+    }
+    // Zero removals → the identity playlist: one segment, the whole file.
+    expectNoDifference(
+      recorded.value?.items,
+      [.segment(source: 0..<model.editPlan.source.durationSamples, editedStart: 0)])
+  }
+
+  @Test func freePlayFinishRestsCursorAtEditedEnd() async {
+    let model = editor()
+    addRemoval(model, 40_000, 60_000, length: 4_800)
+    model.playheadEditedSample = 10_000
+    await withDependencies {
+      $0.audioPlayer.playEdited = { _, _, _, _, _ in .finished }
+    } operation: {
+      await model.transportPlayTapped()
+    }
+    expectNoDifference(
+      model.playheadEditedSample, model.editedWaveform.timeline.editedDurationSamples)
+  }
+
+  @Test func playDisabledAtEditedEndOfTimeline() {
+    let model = editor()
+    addRemoval(model, 40_000, 60_000, length: 4_800)
+    model.playheadEditedSample = model.editedWaveform.timeline.editedDurationSamples
+    #expect(!model.canTransportPlay)
+  }
+
+  @Test func seekIntoSeamPlaysPartialFade() async {
+    let model = editor()
+    addRemoval(model, 40_000, 60_000, length: 4_800)
+    // Crossfade occupies edited [35_200, 40_000). Seek 1_000 samples into it.
+    model.playheadEditedSample = 36_200
+    let recorded = LockIsolated<AudioEditRenderPlan?>(nil)
+    await withDependencies {
+      $0.audioPlayer.playEdited = { _, plan, _, _, _ in
+        recorded.setValue(plan)
+        return .finished
+      }
+    } operation: {
+      await model.transportPlayTapped()
+    }
+    guard
+      case .seam(_, _, _, let length, let editedStart, let fadeOffset) = recorded.value?.items
+        .first
+    else {
+      Issue.record("expected a partial seam first")
+      return
+    }
+    // The fade CONTINUES from the seek point: 1_000 consumed, 3_800 remaining.
+    expectNoDifference(fadeOffset, 1_000)
+    expectNoDifference(length, 3_800)
+    expectNoDifference(editedStart, 36_200)
+  }
+
+  @Test func sliceShortcutStillPlaysSourceRange() async {
+    let model = editor()
+    addRemoval(model, 40_000, 60_000, length: 4_800)
+    let slice = Slice(
+      id: UUID(), name: "S", startSample: 5_000, endSample: 20_000, wordIDs: [],
+      snippet: "", warnings: [])
+    model.mutateSlices { $0.append(slice) }
+    let recorded = LockIsolated<Range<Int>?>(nil)
+    await withDependencies {
+      $0.audioPlayer.play = { _, range, _, _, _ in
+        recorded.setValue(range)
+        return .finished
+      }
+    } operation: {
+      await model.playSliceTapped(slice.id)
+    }
+    // The slice path keeps SOURCE-range playback (its range IS source data).
+    expectNoDifference(recorded.value, 5_000..<20_000)
   }
 
   /// Installs explicit waveform geometry (no audio decode) so the edited adapter's

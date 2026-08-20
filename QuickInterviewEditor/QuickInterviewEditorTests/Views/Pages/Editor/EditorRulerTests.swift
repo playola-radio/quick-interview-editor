@@ -51,6 +51,15 @@ struct EditorRulerTests {
     { _, _, _, _, _ in await gate.play() }
   }
 
+  /// `playEdited` counterpart to `gatedPlay`: the ruler's playback-interaction tests all drive
+  /// free play (`transportPlayTapped` from stopped), which now goes through `playEdited`.
+  private func gatedPlayEdited(_ gate: RulerPlayGate)
+    -> @Sendable (URL, AudioEditRenderPlan, Int, Double, PlaybackSessionID) async throws ->
+    PlaybackEnd
+  {
+    { _, _, _, _, _ in await gate.play() }
+  }
+
   // MARK: - Mapping + clamping
 
   @Test func rulerClickMapsViewXToPlanSample() {
@@ -129,7 +138,7 @@ struct EditorRulerTests {
     geometry(model, samplesPerPixel: 100, start: 0)
     model.playheadEditedSample = 1000
     await withDependencies {
-      $0.audioPlayer.play = gatedPlay(gate)
+      $0.audioPlayer.playEdited = gatedPlayEdited(gate)
       $0.audioPlayer.stop = { session in
         stoppedSession.setValue(session)
         gate.release()
@@ -159,7 +168,7 @@ struct EditorRulerTests {
     geometry(model, samplesPerPixel: 100, start: 0)
     model.playheadEditedSample = 1000
     await withDependencies {
-      $0.audioPlayer.play = gatedPlay(gate)
+      $0.audioPlayer.playEdited = gatedPlayEdited(gate)
       $0.audioPlayer.pause = { _ in .source(4321) }
       $0.audioPlayer.stop = { _ in
         stopped.setValue(true)
@@ -256,7 +265,7 @@ struct EditorRulerTests {
     let token = model.cursorMoveToken
     model.playheadEditedSample = rangeA.lowerBound  // a valid play start within the selection
     await withDependencies {
-      $0.audioPlayer.play = gatedPlay(gate)
+      $0.audioPlayer.playEdited = gatedPlayEdited(gate)
       $0.audioPlayer.stop = { _ in
         stopped.setValue(true)
         gate.release()
