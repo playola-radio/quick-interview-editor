@@ -338,6 +338,15 @@ class TranscriptPageModel: ViewModel {
     reveal = TranscriptReveal(wordID: first.id, token: revealToken)
   }
 
+  /// Requests a scroll to a specific word, token-bumped so the renderer re-scrolls even to the same
+  /// word. Used when the waveform owns the selection (freeform `audioSelection`) and drives the
+  /// transcript scroll by the range's first overlapping word, rather than the transcript's own
+  /// selection (which the waveform no longer sets).
+  func revealWord(_ id: Word.ID) {
+    revealToken += 1
+    reveal = TranscriptReveal(wordID: id, token: revealToken)
+  }
+
   func transcriptClicked(atUTF16Offset offset: Int, extending: Bool = false) {
     guard let id = document.wordID(atUTF16Offset: offset) else { return }
     wordClicked(id, extending: extending)

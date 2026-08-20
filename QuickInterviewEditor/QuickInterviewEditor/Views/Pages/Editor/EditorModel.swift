@@ -581,17 +581,28 @@ final class EditorModel: ViewModel {
     await audioPlayer.stop(session)
   }
 
-  /// Waveform → transcript: a click at view-x selects the word whose audio contains that
-  /// point; Shift extends the current selection to it. A click landing in a gap selects
-  /// nothing and leaves the selection untouched.
+  /// Waveform click at view-x writes `audioSelection` directly in exact SOURCE samples. A plain
+  /// click selects the containing word's exact `[startSample, endSample)` (a convenience seed — the
+  /// stored range is the word's real bounds, never a snap of a drag) and snaps the playhead there;
+  /// Shift extends the current freeform selection to the clicked sample. A click landing in a gap
+  /// (no word contains it) clears the selection.
   func waveformClicked(atX positionX: CGFloat, extending: Bool) {
     let sample = editedWaveform.xToSourceSample(positionX)
-    guard let wordID = wordID(atSample: sample) else { return }
     if extending {
-      transcript.wordClicked(wordID, extending: true)
-    } else {
-      transcript.selectWord(wordID)
+      let anchor = selectionAnchorSample ?? audioSelection?.lowerBound ?? sample
+      selectSourceRange(min(anchor, sample)..<max(anchor, sample), snapPlayhead: false)
+      return
     }
+    guard let wordID = wordID(atSample: sample),
+      let word = editPlan.words.first(where: { $0.id == wordID }),
+      let start = word.startSample, let end = word.endSample
+    else {
+      clearSelection()
+      return
+    }
+    selectionAnchorSample = start
+    selectSourceRange(start..<end, snapPlayhead: true)
+    revealSourceRange(start..<end)
   }
 
   // MARK: - Waveform area selection (Logic-style marquee)
@@ -611,13 +622,13 @@ final class EditorModel: ViewModel {
     guard editedWaveform.hasUsableGeometry else { return }
     cancelAutoScroll()
     areaSelectGeneration &+= 1
-    let existingAnchorID = extending ? transcript.selectionAnchorID : nil
-    let existingAnchorSample = existingAnchorID.flatMap(anchorSample(forWord:))
+    // Shift-extend keeps the pre-drag anchor edge (in source samples), so only the focus moves.
+    let existingAnchorSample =
+      extending ? (selectionAnchorSample ?? audioSelection?.lowerBound) : nil
+    let anchor = clampedSample(editedWaveform.xToSourceSample(startX))
     areaSelectDrag = WaveformAreaSelectDrag(
-      anchorSample: clampedSample(editedWaveform.xToSourceSample(startX)),
-      currentX: startX,
-      existingAnchorID: existingAnchorSample == nil ? nil : existingAnchorID,
-      existingAnchorSample: existingAnchorSample)
+      anchorSample: anchor, currentX: startX, existingAnchorSample: existingAnchorSample)
+    selectionAnchorSample = existingAnchorSample ?? anchor
     isWaveformAreaSelecting = true
     updateMarqueeSelection()
   }
@@ -635,67 +646,82 @@ final class EditorModel: ViewModel {
     }
   }
 
-  /// Release: stops any auto-scroll, commits the final selection, and — only if it resolved to words —
-  /// snaps the playhead to the selection start (claiming cursor authority so a straggler snap can't
-  /// undo it) and scrolls the transcript to it. A drag that ended over pure silence clears instead.
+  /// Release: stops any auto-scroll, then commits the exact dragged source range to `audioSelection`,
+  /// snapping the playhead to its start (claiming cursor authority so a straggler snap can't undo it)
+  /// and scrolling the transcript to the range's first overlapping word. Freeform — the committed
+  /// range is the raw dragged samples, never snapped to word edges. A degenerate (empty) range clears.
   func waveformAreaSelectEnded(toX positionX: CGFloat) {
     guard isWaveformAreaSelecting, areaSelectDrag != nil else { return }
     areaSelectDrag?.currentX = positionX
     cancelAutoScroll()
-    let resolved = marqueeAnchorFocus()
+    let range = marqueeSourceRange()
     areaSelectDrag = nil
     isWaveformAreaSelecting = false
     // Retire this drag's epoch too (not only `Began`), so a tick already resumed past its sleep bails
     // on the generation guard even before the next drag starts.
     areaSelectGeneration &+= 1
-    guard let (anchor, focus) = resolved else {
-      transcript.clearSelectionTapped()
+    if let range {
+      selectSourceRange(range, snapPlayhead: true)
+      revealSourceRange(range)
+    } else {
+      clearSelection()
+    }
+  }
+
+  /// Live selection during the drag: writes the exact dragged source range to `audioSelection` on
+  /// every pointer move — freeform, no word snap.
+  private func updateMarqueeSelection() {
+    audioSelection = marqueeSourceRange()
+  }
+
+  /// The exact SOURCE range for the current drag: the fixed edge (the drag anchor, or the preserved
+  /// Shift-extend anchor) to the live dragged edge, in source samples. Floors to a 1-sample span so a
+  /// drag is never empty. When the pointer is off-screen (auto-scrolling) its x is clamped to the
+  /// visible edge, so the far edge is re-read from wherever the viewport has scrolled to. Nil only
+  /// when there is no active drag.
+  private func marqueeSourceRange() -> Range<Int>? {
+    guard let drag = areaSelectDrag else { return nil }
+    let fixed = drag.existingAnchorSample ?? drag.anchorSample
+    let clampedX = min(max(0, drag.currentX), editedWaveform.viewportWidth)
+    let focus = clampedSample(editedWaveform.xToSourceSample(clampedX))
+    let lower = min(fixed, focus)
+    let upper = max(max(fixed, focus), lower + 1)  // never an empty range
+    return lower..<upper
+  }
+
+  /// Sets the freeform selection to an exact SOURCE range and (optionally) snaps the playhead to its
+  /// start, mirroring `rulerMovedPlayhead`: stop the transport, place the cursor, and bump the
+  /// cursor-move epoch so a deferred selection snap captured earlier in the drag bails instead of
+  /// clobbering this placement. An empty/degenerate range clears. This is the single write path the
+  /// waveform (marquee + click) uses.
+  func selectSourceRange(_ range: Range<Int>, snapPlayhead: Bool) {
+    guard range.lowerBound < range.upperBound else {
+      audioSelection = nil
       return
     }
-    // Commit/reveal are NOT gated on `selectWords`' "did it change" return: the resolved IDs always
-    // come from `editPlan.words`, and a release that lands on the same words the last tick set must
-    // still snap the playhead and scroll the transcript.
-    transcript.selectWords(anchorID: anchor, focusID: focus)
-    commitMarqueePlayhead()
-    transcript.revealSelection()
-  }
-
-  /// Live selection during the drag: sets the anchor/focus for the current marquee, but leaves an
-  /// existing selection untouched when the marquee currently covers no word's midpoint (dragging
-  /// through silence shouldn't flicker the highlight off and back on).
-  private func updateMarqueeSelection() {
-    guard let (anchor, focus) = marqueeAnchorFocus() else { return }
-    transcript.selectWords(anchorID: anchor, focusID: focus)
-  }
-
-  /// Resolves the current drag to the anchor/focus word IDs, or nil when the marquee covers no word.
-  /// The overlapped set (words whose midpoint falls in the range) is in transcript order; the drag
-  /// direction decides which end is the anchor. Shift-extend keeps the pre-drag anchor and moves only
-  /// the focus to the dragged edge. When the pointer is off-screen (auto-scrolling) its x is clamped
-  /// to the visible edge, so the far edge is re-read from wherever the viewport has scrolled to.
-  private func marqueeAnchorFocus() -> (anchor: Word.ID, focus: Word.ID)? {
-    guard let drag = areaSelectDrag else { return nil }
-    let fixedSample = drag.existingAnchorSample ?? drag.anchorSample
-    let clampedX = min(max(0, drag.currentX), editedWaveform.viewportWidth)
-    let focusSample = clampedSample(editedWaveform.xToSourceSample(clampedX))
-    let lower = min(fixedSample, focusSample)
-    let upper = max(max(fixedSample, focusSample), lower + 1)  // never an empty range
-    let ids = wordIDs(overlapping: lower..<upper, words: editPlan.words)
-    guard let first = ids.first, let last = ids.last else { return nil }
-    if let existing = drag.existingAnchorID {
-      return (existing, focusSample >= fixedSample ? last : first)
+    audioSelection = range
+    if snapPlayhead {
+      stopTransportForRuler()
+      playheadSample = range.lowerBound
+      cursorMoveGeneration &+= 1
     }
-    return focusSample >= drag.anchorSample ? (first, last) : (last, first)
   }
 
-  /// The synchronous, ordered playhead commit for a finished marquee — mirrors `rulerMovedPlayhead`:
-  /// stop the transport, place the cursor at the selection start, and bump the cursor-move epoch so a
-  /// deferred selection snap captured earlier in the drag bails instead of clobbering this placement.
-  private func commitMarqueePlayhead() {
-    guard let range = selectedSourceRange else { return }
-    stopTransportForRuler()
-    playheadSample = range.lowerBound
-    cursorMoveGeneration &+= 1
+  /// Clears the freeform selection and any in-progress selection-edit state. Leaves the transcript's
+  /// own selection alone — `audioSelection` is the source of truth; transcript rendering derives from
+  /// it, not the reverse.
+  func clearSelection() {
+    audioSelection = nil
+    selectionAnchorSample = nil
+    selectionEditingEdge = nil
+  }
+
+  /// Scrolls the transcript to frame a freeform source range by revealing its first overlapping word.
+  /// The waveform now owns the selection directly, so `transcript.revealSelection()` (which reads the
+  /// transcript's own selection) no longer applies. A range overlapping no word scrolls nowhere.
+  private func revealSourceRange(_ range: Range<Int>) {
+    guard let wordID = wordIDs(anyOverlap: range, words: editPlan.words).first else { return }
+    transcript.revealWord(wordID)
   }
 
   private func isPointerPastEdge(_ positionX: CGFloat) -> Bool {
@@ -761,10 +787,6 @@ final class EditorModel: ViewModel {
 
   private func clampedSample(_ sample: Int) -> Int {
     min(max(0, sample), waveform.totalSamples)
-  }
-
-  private func anchorSample(forWord id: Word.ID) -> Int? {
-    editPlan.words.first(where: { $0.id == id })?.startSample
   }
 
   // swiftlint:disable function_parameter_count
@@ -2064,12 +2086,11 @@ struct FineTuneSessionKey: Equatable {
 }
 
 /// Transient state for an in-progress waveform marquee drag. `anchorSample` is the fixed edge in
-/// plan samples (captured once, so a mid-drag zoom/resize can't move it); `currentX` is the live
-/// dragged edge in view coordinates. For a Shift-extend, `existingAnchorSample`/`existingAnchorID`
-/// hold the pre-drag selection anchor that the extend must preserve.
+/// source samples (captured once, so a mid-drag zoom/resize can't move it); `currentX` is the live
+/// dragged edge in view coordinates. For a Shift-extend, `existingAnchorSample` holds the pre-drag
+/// selection anchor (in source samples) that the extend must preserve.
 private struct WaveformAreaSelectDrag {
   var anchorSample: Int
   var currentX: CGFloat
-  var existingAnchorID: Word.ID?
   var existingAnchorSample: Int?
 }

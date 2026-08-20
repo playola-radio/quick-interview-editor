@@ -785,7 +785,8 @@ struct EditorTests {
     identityGeometry(model)
     let word = model.editPlan.words.first { $0.startSample != nil && $0.endSample != nil }!
     model.waveformClicked(atX: CGFloat(word.startSample! + 1), extending: false)
-    expectNoDifference(model.transcript.orderedSelectedWordIDs, [word.id])
+    // A plain click writes the containing word's EXACT source range to audioSelection.
+    expectNoDifference(model.audioSelection, word.startSample!..<word.endSample!)
   }
 
   @Test func waveformTapAtWordStartIsInclusiveAtEndIsExclusive() {
@@ -798,23 +799,23 @@ struct EditorTests {
     }!
     let word = words[index]
     model.waveformClicked(atX: CGFloat(word.startSample!), extending: false)  // start is inclusive
-    expectNoDifference(model.transcript.orderedSelectedWordIDs, [word.id])
-    // Clear first: a tap at the exclusive end lands in the next word or a gap, never
-    // back on this word — so the selection must not be this word afterward.
-    model.transcript.clearSelectionTapped()
+    expectNoDifference(model.audioSelection, word.startSample!..<word.endSample!)
+    // A tap at the exclusive end lands in the next word or a gap, never back on this word — so the
+    // stored range must not be this word's range afterward.
     model.waveformClicked(atX: CGFloat(word.endSample!), extending: false)  // end is exclusive
-    #expect(model.transcript.orderedSelectedWordIDs != [word.id])
+    #expect(model.audioSelection != word.startSample!..<word.endSample!)
   }
 
-  @Test func waveformTapInEmptyAreaLeavesSelectionUntouched() {
+  @Test func waveformTapInEmptyAreaClearsSelection() {
     let model = editor()
     identityGeometry(model)
-    selectWords(model.transcript, 0, 0)
-    let before = model.transcript.orderedSelectedWordIDs
-    // a sample far beyond the audio belongs to no word
+    let word = model.editPlan.words.first { $0.startSample != nil && $0.endSample != nil }!
+    model.transcript.selectWords(anchorID: word.id, focusID: word.id)
+    #expect(model.audioSelection != nil)  // seeded from the transcript selection
+    // A sample far beyond the audio belongs to no word → a gap click clears the selection.
     model.waveformClicked(
       atX: CGFloat(model.editPlan.source.durationSamples + 10_000), extending: false)
-    expectNoDifference(model.transcript.orderedSelectedWordIDs, before)
+    expectNoDifference(model.audioSelection, nil)
   }
 
   @Test func highlightedSampleRangeMirrorsTranscriptSelection() {
@@ -1427,7 +1428,9 @@ struct EditorTests {
     let later = words[4]
     model.waveformClicked(atX: CGFloat(first.startSample! + 1), extending: false)
     model.waveformClicked(atX: CGFloat(later.startSample! + 1), extending: true)
-    #expect(model.transcript.selectedWordIDSet.count >= 2)  // extended across the run
+    // Shift-extend pivots on the first click's anchor (word 0's start) and stretches audioSelection
+    // to the extending click's sample — a freeform range spanning the run between them.
+    expectNoDifference(model.audioSelection, first.startSample!..<(later.startSample! + 1))
   }
 
   @Test func editorKeyDownZoomFitTogglesUsingSelection() {
