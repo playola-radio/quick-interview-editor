@@ -104,7 +104,8 @@ struct EditorAreaSelectTests {
     model.waveformAreaSelectChanged(toX: 385)  // sample 77000
     model.waveformAreaSelectEnded(toX: 385)
     expectNoDifference(model.audioSelection, 75000..<77000)
-    expectNoDifference(model.transcript.reveal, nil)  // no word overlaps → transcript scrolls nowhere
+    // no word overlaps → transcript scrolls nowhere
+    expectNoDifference(model.transcript.reveal, nil)
   }
 
   // MARK: - Shift-extend
