@@ -20,6 +20,9 @@ enum EditorKey {
   case nudgeCutInLater
   case nudgeCutOutEarlier
   case nudgeCutOutLater
+  /// Deselects a selected crossfade seam (decision 6). Consumed only when a seam is selected,
+  /// so it falls through otherwise (e.g. to dismiss a sheet).
+  case escape
 }
 
 @MainActor
@@ -287,6 +290,13 @@ final class EditorModel: ViewModel {
   /// "stop, then act" rule — leaving the cursor where the remap puts it. Source-range sessions
   /// (slice, preview, audition, modal) play original audio, which a removal doesn't change.
   private func syncEditedTimeline() {
+    // Drop a seam selection whose removal is gone (restore, undo, redo) before anything reads it.
+    // Runs ahead of the timeline-equality guard so a stale selection is always reconciled, even in
+    // the (impossible-in-practice) case where the removals changed but the collapsed timeline
+    // compares equal.
+    if let selectedSeamID, timelineRemovals[id: selectedSeamID] == nil {
+      self.selectedSeamID = nil
+    }
     let newTimeline = editedTimeline
     guard newTimeline != editedWaveform.timeline else { return }
     if case .free = transportContext, let session = transportPhase.session {
@@ -332,6 +342,9 @@ final class EditorModel: ViewModel {
   let suggestionsTabLabel = "Suggestions"
   let rightPanelPickerLabel = "Right panel"
   let revealClipLabel = "Reveal clip in transcript and waveform"
+  let restoreRemovedAudioLabel = "Restore Removed Audio"
+  /// The mark-clip bar's readout when a crossfade seam (not a word range) is selected.
+  let crossfadeSelectedSummary = "Crossfade selected"
 
   // MARK: - Fine-tune session
   /// The active slice's committed range, if a slice is open in the pane.
@@ -356,6 +369,35 @@ final class EditorModel: ViewModel {
   var selectionAnchorSample: Int?
   /// The edge currently being drag-edited (set in Task 8).
   var selectionEditingEdge: SelectionEdge?
+
+  // MARK: - Seam selection
+  /// The crossfade seam currently selected, identified by its removal's id (a `TimelineSeam`'s id
+  /// IS its `TimelineRemoval`'s id). A peer of `audioSelection` and MUTUALLY EXCLUSIVE with it
+  /// (decision 6): selecting a seam clears the freeform selection, and any freeform-selection write
+  /// clears the seam. Plain @Observable transient view state — like `audioSelection`, it is not part
+  /// of the undo-tracked document. Kept valid by `syncEditedTimeline`, which drops it when the
+  /// removal it points at no longer exists (restore, undo, redo).
+  var selectedSeamID: TimelineRemoval.ID?
+
+  /// Selects the crossfade seam for removal `id`, mutually exclusive with the range selection:
+  /// clears any freeform selection first, then records the seam. A no-op if that removal doesn't
+  /// exist. Unlike a body click this does NOT move the playhead — Logic selects a crossfade on
+  /// click without seeking.
+  func selectSeam(_ id: TimelineRemoval.ID) {
+    guard timelineRemovals[id: id] != nil else { return }
+    clearSelection()
+    selectedSeamID = id
+  }
+
+  /// A click (or context-click) that landed on a seam's bowtie. Selects it.
+  func seamClicked(_ id: TimelineRemoval.ID) {
+    selectSeam(id)
+  }
+
+  /// Drops the seam selection (Escape). Idempotent.
+  func deselectSeam() {
+    selectedSeamID = nil
+  }
 
   /// Read facade every downstream reader migrates onto (spec §6). Backed by `audioSelection`.
   var selectedSourceRange: Range<Int>? { audioSelection }
@@ -546,8 +588,39 @@ final class EditorModel: ViewModel {
   /// already-synced `editedTimeline` (kept current by `syncEditedTimeline()` on every removal
   /// change) rather than rebuilding one, since `editedTimeline` constructs a fresh value on
   /// every read.
-  var seamSpans: [WaveformSpan] {
-    editedWaveform.timeline.seams.compactMap(editedWaveform.spanForSeam)
+  var seamOverlays: [SeamOverlay] {
+    editedWaveform.timeline.seams.compactMap { seam in
+      guard let span = editedWaveform.spanForSeam(seam) else { return nil }
+      return SeamOverlay(id: seam.id, span: span, isSelected: seam.id == selectedSeamID)
+    }
+  }
+
+  /// Widens each bowtie's clickable target by a few points on each side, so a short crossfade
+  /// (a hair wide at low zoom) is still selectable.
+  private static let seamHitTolerance: CGFloat = 4
+
+  /// Hit-testing lives here (the view only reports x): the removal id whose bowtie the view-x
+  /// lands on, or nil. Walks the same drawn seams the lane renders — a zero-length or off-screen
+  /// seam has no span, so it isn't hittable.
+  func seamID(atX positionX: CGFloat) -> TimelineRemoval.ID? {
+    editedWaveform.timeline.seams.first { seam in
+      guard let span = editedWaveform.spanForSeam(seam) else { return false }
+      return positionX >= span.positionX - Self.seamHitTolerance
+        && positionX <= span.positionX + span.width + Self.seamHitTolerance
+    }?.id
+  }
+
+  /// The right-click menu for a waveform position: the Restore item when the x hits a seam's
+  /// bowtie, empty otherwise. Context-clicking a seam also SELECTS it (Logic selects on
+  /// context-click), so the menu, the ⌫ key, and the panel button all act on the same seam.
+  func seamContextMenuItems(atX positionX: CGFloat) -> [WaveformMenuItem] {
+    guard let id = seamID(atX: positionX) else { return [] }
+    selectSeam(id)
+    return [
+      WaveformMenuItem(title: restoreRemovedAudioLabel) { [weak self] in
+        self?.restoreRemoval(id: id)
+      }
+    ]
   }
 
   // MARK: - View Helpers
@@ -569,6 +642,7 @@ final class EditorModel: ViewModel {
   /// every selection path. Counts words the range overlaps (the same set the transcript highlights);
   /// a silence-only selection reads "0 words selected".
   var selectionSummary: String {
+    if selectedSeamID != nil { return crossfadeSelectedSummary }
     guard let range = audioSelection else { return "No selection" }
     let count = wordIDs(anyOverlap: range, words: editPlan.words).count
     return "\(count) word\(count == 1 ? "" : "s") selected"
@@ -777,6 +851,12 @@ final class EditorModel: ViewModel {
   /// Shift extends the current freeform selection to the clicked sample. A click landing in a gap
   /// (no word contains it) clears the selection.
   func waveformClicked(atX positionX: CGFloat, extending: Bool) {
+    // A plain click on a bowtie selects the seam (Logic selects a crossfade on click). Shift-click
+    // is a range-extend gesture, so it skips the seam test and falls through to selection.
+    if !extending, let seam = seamID(atX: positionX) {
+      seamClicked(seam)
+      return
+    }
     let sample = editedWaveform.xToSourceSample(positionX)
     // Shift-click extends from an existing anchor. With no anchor and no live selection there is
     // nothing to extend, so fall through to plain-click behavior (select the containing word) —
@@ -789,7 +869,9 @@ final class EditorModel: ViewModel {
       let word = editPlan.words.first(where: { $0.id == wordID }),
       let start = word.startSample, let end = word.endSample
     else {
+      // A click in empty space deselects everything, including a selected seam.
       clearSelection()
+      selectedSeamID = nil
       return
     }
     selectionAnchorSample = start
@@ -812,6 +894,9 @@ final class EditorModel: ViewModel {
   /// geometry is loaded (the x→sample mapping is meaningless before then).
   func waveformAreaSelectBegan(atX startX: CGFloat, extending: Bool) {
     guard editedWaveform.hasUsableGeometry else { return }
+    // A marquee writes `audioSelection` live from its first move; drop any seam selection up front
+    // so the two never coexist (decision 6).
+    selectedSeamID = nil
     cancelAutoScroll()
     areaSelectGeneration &+= 1
     // Shift-extend keeps the pre-drag anchor edge (in source samples), so only the focus moves.
@@ -896,6 +981,10 @@ final class EditorModel: ViewModel {
   func selectSourceRange(
     _ range: Range<Int>, snapPlayhead: Bool, origin: SelectionOrigin = .external
   ) {
+    // A freeform-selection write and a seam selection are mutually exclusive (decision 6): any
+    // range write drops the seam. This is the single range-write funnel, so clearing here covers
+    // every caller (transcript, marquee end, word click, reveal).
+    selectedSeamID = nil
     // Clamp to the file's real extent so a selection built from bad word bounds (a word whose
     // `endSample` overruns the audio) can never persist an out-of-file removal that revalidation
     // silently drops on reload. `selectSourceRange` is the single write path, so clamping here
@@ -1144,14 +1233,28 @@ final class EditorModel: ViewModel {
     case .speedUp: transcript.speedUpTapped()
     case .speedDown: transcript.speedDownTapped()
     case .removeSection:
-      // Falls through (returns false) when nothing removable is selected, so the event still
-      // reaches a focused slice row's List `.onDelete` — the intended arbitration between the
-      // two delete targets.
-      guard canRemoveSelectedSection else { return false }
-      Task { await removeSelectedSectionTapped() }
+      return handleRemoveSectionKey()
+    case .escape:
+      // Consumed only when it actually deselects a seam, so a no-op Escape still propagates.
+      guard selectedSeamID != nil else { return false }
+      deselectSeam()
     case .nudgeCutInEarlier, .nudgeCutInLater, .nudgeCutOutEarlier, .nudgeCutOutLater:
       return nudgeSelection(key)
     }
+    return true
+  }
+
+  /// Delete-key arbitration (decision 6), split out of `editorKeyDown`'s switch to keep its
+  /// cyclomatic complexity in check: a selected seam restores its removal; else a removable
+  /// source-range selection removes a section; else fall through (`false`) so the event still
+  /// reaches a focused slice row's List `.onDelete`.
+  private func handleRemoveSectionKey() -> Bool {
+    if selectedSeamID != nil {
+      restoreRemovalTapped()
+      return true
+    }
+    guard canRemoveSelectedSection else { return false }
+    Task { await removeSelectedSectionTapped() }
     return true
   }
 
@@ -1424,6 +1527,50 @@ final class EditorModel: ViewModel {
     transcript.clearSelectionTapped()
     fineTune.clear()
     await reconcilePlayback()
+  }
+
+  // MARK: - Restore removed audio
+  /// Whether the Restore control is offered: a seam is selected and its removal still exists. The
+  /// `!isExporting` guard is defensive symmetry with `canRemoveSelectedSection` — export is
+  /// hard-blocked whenever any removal exists, so a seam can't be selected mid-export anyway.
+  var canRestoreSelectedRemoval: Bool {
+    guard let selectedSeamID else { return false }
+    return timelineRemovals[id: selectedSeamID] != nil && !isExporting
+  }
+
+  /// Drives whether the panel shows the Restore affordance at all — only when a seam is selected,
+  /// so it appears exactly in the context where it acts.
+  var shouldShowRestoreControl: Bool { selectedSeamID != nil }
+
+  /// Restores a removed source range: drops the removal (and its crossfade) from the document,
+  /// reopening the original audio at that seam. Routed through `mutateDocument`, so it is a single
+  /// undo step, re-persists the sidecar, and re-syncs the edited timeline — which stops any stale
+  /// free-play and remaps the cursor to the same SOURCE moment (playback reconciliation, PR 3), and
+  /// drops this seam from `selectedSeamID` since it no longer exists. A no-op for an unknown id.
+  func restoreRemoval(id: TimelineRemoval.ID) {
+    guard timelineRemovals[id: id] != nil else { return }
+    mutateDocument { doc in
+      doc.timelineRemovals.remove(id: id)
+    }
+  }
+
+  /// The Restore Removed Audio affordance (⌫ on a selected seam, its context menu, the panel
+  /// button): restores the currently selected seam's removal. A no-op when no seam is selected.
+  func restoreRemovalTapped() {
+    guard let selectedSeamID else { return }
+    restoreRemoval(id: selectedSeamID)
+  }
+
+  /// Updates a removal's crossfade as one undo step. Model API ONLY for PR 4 — there is no
+  /// fade-editing UI yet; PR 5's edge/center/curve drags and the numeric inspector call this. The
+  /// stored length is kept as the user's intent; `EditedTimeline` clamps it per-seam on build (a
+  /// too-long fade is clamped for rendering without losing the stored value), mirroring how
+  /// `removeSelectedSectionTapped` stores the default length. A no-op for an unknown id.
+  func updateCrossfade(id: TimelineRemoval.ID, _ crossfade: Crossfade) {
+    guard timelineRemovals[id: id] != nil else { return }
+    mutateDocument { doc in
+      doc.timelineRemovals[id: id]?.crossfade = crossfade
+    }
   }
 
   func renameSlice(_ id: Slice.ID, to name: String) {

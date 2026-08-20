@@ -97,7 +97,7 @@ struct SliceEditKeyMonitor: NSViewRepresentable {
         if isARepeat { return true }
         model.zoomFitTapped()
         return true
-      case .speedUp, .speedDown, .removeSection, .nudgeCutInEarlier, .nudgeCutInLater,
+      case .speedUp, .speedDown, .removeSection, .escape, .nudgeCutInEarlier, .nudgeCutInLater,
         .nudgeCutOutEarlier, .nudgeCutOutLater:
         return false
       }

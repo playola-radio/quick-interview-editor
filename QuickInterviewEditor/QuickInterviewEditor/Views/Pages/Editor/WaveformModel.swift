@@ -485,3 +485,21 @@ struct WaveformSpan: Equatable {
   var positionX: CGFloat
   var width: CGFloat
 }
+
+/// A crossfade seam ready to render: its bowtie span, the removal id it belongs to (so a click can
+/// select it), and whether it's the selected seam (so the lane can draw the selected state). The
+/// model derives these; the lane only draws.
+struct SeamOverlay: Equatable, Identifiable {
+  let id: UUID
+  let span: WaveformSpan
+  let isSelected: Bool
+}
+
+/// One item in the waveform's AppKit right-click menu. The model builds these (title + what to do);
+/// the lane bridges each to an `NSMenuItem`. Not `Sendable` — it carries a `@MainActor` closure and
+/// is only ever constructed and invoked on the main actor.
+@MainActor
+struct WaveformMenuItem {
+  let title: String
+  let action: () -> Void
+}

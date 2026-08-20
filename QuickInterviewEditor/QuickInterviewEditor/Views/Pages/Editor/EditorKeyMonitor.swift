@@ -77,6 +77,7 @@ struct EditorKeyMonitor: NSViewRepresentable {
       case 43 where modifiers == .shift: return .speedDown  // <
       case 47 where modifiers == .shift: return .speedUp  // >
       case 51 where modifiers.isEmpty: return .removeSection  // ⌫ (⌘⌫/⌥⌫ fall through)
+      case 53 where modifiers.isEmpty: return .escape  // Esc deselects a selected seam
       default: break
       }
       if modifiers.isEmpty, characters?.lowercased() == "z" { return .zoomFit }

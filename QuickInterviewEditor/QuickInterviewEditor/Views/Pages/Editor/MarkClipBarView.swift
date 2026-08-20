@@ -15,6 +15,11 @@ struct MarkClipBarView: View {
       Button(model.clearButtonLabel) { model.clearSelectionTapped() }
         .disabled(!model.canClearSelection)
 
+      if model.shouldShowRestoreControl {
+        Button(model.restoreRemovedAudioLabel) { model.restoreRemovalTapped() }
+          .disabled(!model.canRestoreSelectedRemoval)
+      }
+
       Text(model.selectionSummary)
         .font(.system(size: 12))
         .foregroundStyle(Color(white: 0.5))
