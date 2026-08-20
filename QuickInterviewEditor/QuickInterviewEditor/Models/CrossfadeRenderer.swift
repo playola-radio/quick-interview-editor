@@ -30,10 +30,17 @@ enum CrossfadeRenderer {
   static func blend(out: [[Float]], incoming: [[Float]], curve: CrossfadeCurve) -> [[Float]] {
     let count = out.first?.count ?? 0
     let (gOut, gIn) = gains(count: count, curve: curve)
-    return zip(out, incoming).map { outChannel, inChannel in
-      zip(zip(outChannel, inChannel), zip(gOut, gIn)).map { samples, gains in
-        samples.0 * gains.0 + samples.1 * gains.1
+    var result: [[Float]] = []
+    result.reserveCapacity(out.count)
+    for channel in out.indices {
+      let outChannel = out[channel]
+      let inChannel = incoming[channel]
+      var blended = [Float](repeating: 0, count: count)
+      for i in 0..<count {
+        blended[i] = outChannel[i] * gOut[i] + inChannel[i] * gIn[i]
       }
+      result.append(blended)
     }
+    return result
   }
 }
