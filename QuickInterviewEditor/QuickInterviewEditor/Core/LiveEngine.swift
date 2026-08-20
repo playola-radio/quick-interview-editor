@@ -469,6 +469,144 @@ enum LiveEngine {
     }
   }
 
+  // MARK: injectMarkers
+
+  /// Stamps MARK chunks into slice AIFFs the app already rendered itself, by driving
+  /// `logic_markers.cli inject-markers`. Unlike `render`, this modifies `files` in
+  /// place and produces no new files to keep, so the scratch work dir (holding only
+  /// the request JSON) is removed on every exit path — success, failure, or cancel.
+  /// No progress events are emitted on this path; stderr is still drained so a full
+  /// pipe can't stall the child.
+  static func injectMarkers(_ files: [MarkerInjectionFile]) async throws {
+    guard !files.isEmpty else { return }
+
+    let launch = resolvedLaunch()
+    guard FileManager.default.isExecutableFile(atPath: launch.executable.path) else {
+      throw EngineClientError.engineNotFound(launch.executable.path)
+    }
+    let work = try makeWorkDir()
+    defer { try? FileManager.default.removeItem(at: work) }
+
+    let requestURL = work.appendingPathComponent("request.json")
+    try writeInjectRequest(files, to: requestURL)
+
+    let proc = try SpawnedProcess(
+      executable: launch.executable,
+      arguments: launch.arguments(subcommand: "inject-markers", ["--request", requestURL.path]),
+      currentDirectory: launch.workingDirectory,
+      extraEnvironment: launch.environment
+    )
+    if Task.isCancelled {
+      proc.terminate()
+      throw CancellationError()
+    }
+
+    async let stdoutData = proc.readStdoutToEnd()
+    async let exitCode = proc.waitForExit()
+
+    // No QIE_EVENT progress is emitted here; drain and discard every stderr line
+    // anyway so the child can't stall on a full pipe.
+    for await _ in proc.stderrLines() {}
+
+    let out = await stdoutData
+    let code = await exitCode
+    let logURL = writeJobLog(
+      kind: "inject-markers", audio: files[0].url, exitCode: code, stdout: out,
+      stderr: proc.stderrTail())
+
+    if Task.isCancelled {
+      throw CancellationError()
+    }
+    guard code == 0 else {
+      throw EngineClientError.injectFailed(proc.stderrTail() + logHint(logURL))
+    }
+    let expectedPaths = Set(files.map(\.url.path))
+    try decodeInjectResult(out, expectedPaths: expectedPaths, logURL: logURL)
+  }
+
+  /// The request as the snake-cased JSON `logic_markers.cli inject-markers` reads.
+  /// Exposed (not private) so the Swift→Python wire contract is unit-tested without
+  /// spawning a subprocess.
+  static func encodedInjectRequest(_ files: [MarkerInjectionFile]) throws -> Data {
+    let wire = InjectWireRequest(
+      files: files.map { file in
+        InjectWireRequest.File(
+          path: file.url.path,
+          markers: file.markers.map {
+            InjectWireRequest.Marker(position: $0.position, name: $0.name)
+          }
+        )
+      })
+    return try JSONEncoder().encode(wire)
+  }
+
+  private static func writeInjectRequest(_ files: [MarkerInjectionFile], to url: URL) throws {
+    try encodedInjectRequest(files).write(to: url)
+  }
+
+  /// Decodes and validates the engine's inject-markers result. Exposed (not private)
+  /// so this is unit-tested without spawning a subprocess. A clean exit that
+  /// silently drops/duplicates a requested file must not pass as success — the
+  /// result's path set must equal `expectedPaths` exactly, and every path must still
+  /// exist on disk (injection modifies the AIFF in place; a missing file after a
+  /// reported success means something went wrong).
+  static func decodeInjectResult(
+    _ out: Data, expectedPaths: Set<String>, logURL: URL? = nil
+  ) throws {
+    let wire: InjectWireResult
+    do {
+      wire = try JSONDecoder().decode(InjectWireResult.self, from: out)
+    } catch {
+      // swiftlint:disable:next optional_data_string_conversion
+      let preview = String(decoding: out.prefix(500), as: UTF8.self)
+      throw EngineClientError.injectDecodeFailed(
+        "\(error)\n\nEngine output was not valid JSON. It began with:\n\(preview)" + logHint(logURL)
+      )
+    }
+    let resultPaths = Set(wire.files.map(\.path))
+    guard resultPaths == expectedPaths, wire.files.count == expectedPaths.count else {
+      let missing = expectedPaths.subtracting(resultPaths).sorted()
+      throw EngineClientError.injectDecodeFailed(
+        "engine returned an incomplete inject-markers result; missing [\(missing.joined(separator: ", "))]"
+          + logHint(logURL))
+    }
+    for path in expectedPaths.sorted() {
+      guard FileManager.default.fileExists(atPath: path) else {
+        throw EngineClientError.injectDecodeFailed(
+          "engine reported success injecting markers into \(path), but the file no longer exists"
+            + logHint(logURL))
+      }
+    }
+  }
+
+}
+
+// MARK: - Inject wire types
+
+/// Snake-cased JSON shapes exchanged with `logic_markers.cli inject-markers` — the
+/// request file Swift writes and the result it reads back.
+private struct InjectWireRequest: Encodable {
+  var files: [File]
+  struct File: Encodable {
+    var path: String
+    var markers: [Marker]
+  }
+  struct Marker: Encodable {
+    var position: Int
+    var name: String
+  }
+}
+
+private struct InjectWireResult: Decodable {
+  struct File: Decodable {
+    var path: String
+    var markerCount: Int
+    enum CodingKeys: String, CodingKey {
+      case path
+      case markerCount = "marker_count"
+    }
+  }
+  var files: [File]
 }
 
 // MARK: - Render wire types
