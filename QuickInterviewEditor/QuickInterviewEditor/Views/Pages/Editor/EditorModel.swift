@@ -1382,7 +1382,6 @@ final class EditorModel: ViewModel {
   /// rate. PR 2 makes it user-editable per removal.
   var defaultCrossfadeSamples: Int { Int(0.020 * Double(editPlan.source.sampleRate)) }
 
-  /// True while a `.pendingSelection` fine-tune session's draft is still anchored to the CURRENT
   /// The SOURCE range a removal would apply to: the primary selection. Edge drag + nudge now mutate
   /// `audioSelection` directly (see `selectionNudged` / `selectionEdgeDragged`), so there is no
   /// separate fine-tune draft to prefer — the selection is already the (possibly nudged) truth.

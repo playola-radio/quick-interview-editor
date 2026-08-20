@@ -403,5 +403,6 @@ struct EditorEditedCursorTests {
     addRemoval(model, 40_000, 60_000, length: 4_800)
     model.playheadEditedSample = 35_300  // 100 into the overlap → source 60_100
     expectNoDifference(model.playheadSourceSample, 60_100)
+    expectNoDifference(model.transcript.currentWordID, 1)  // the word covering source 60_100
   }
 }

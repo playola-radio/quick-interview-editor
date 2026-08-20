@@ -537,7 +537,8 @@ struct EditorTests {
       #expect(model.playheadEditedSample == 1000)  // maps the live position
       continuation.finish()  // stands in for the task being cancelled / stream ending
       await task.value
-      #expect(model.playheadEditedSample == 1000)  // persists after exit — the cursor is never cleared
+      // Persists after exit — the cursor is never cleared.
+      #expect(model.playheadEditedSample == 1000)
     }
   }
 

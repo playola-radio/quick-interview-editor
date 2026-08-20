@@ -130,7 +130,8 @@ struct EditorAreaSelectTests {
     model.waveformAreaSelectChanged(toX: 600)
     expectNoDifference(model.transcript.reveal, nil)  // no transcript scroll mid-drag
     model.waveformAreaSelectEnded(toX: 600)
-    expectNoDifference(model.playheadEditedSample, 70000)  // exact range start (not word-snapped 70648)
+    // Exact range start (not word-snapped 70648)
+    expectNoDifference(model.playheadEditedSample, 70000)
     expectNoDifference(model.transportPhase, .stopped)
     // Release scrolls the transcript to the range's first overlapping word (word 2).
     expectNoDifference(model.transcript.reveal?.wordID, 2)

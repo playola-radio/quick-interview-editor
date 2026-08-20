@@ -701,7 +701,8 @@ struct EditorFineTuneTests {
       #expect(model.isTransportPlaying)
       await model.transportStopTapped()
       await task.value
-      expectNoDifference(model.playheadEditedSample, draft.lowerBound)  // Stop → origin (draft start)
+      // Stop → origin (draft start)
+      expectNoDifference(model.playheadEditedSample, draft.lowerBound)
     }
   }
 }

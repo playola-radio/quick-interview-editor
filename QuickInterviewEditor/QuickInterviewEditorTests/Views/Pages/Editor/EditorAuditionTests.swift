@@ -289,7 +289,8 @@ struct EditorAuditionTests {
       #expect(model.playheadEditedSample == 2000)
       continuation.finish()
       await task.value
-      #expect(model.playheadEditedSample == 2000)  // persists after exit — the cursor is never cleared
+      // Persists after exit — the cursor is never cleared.
+      #expect(model.playheadEditedSample == 2000)
     }
   }
 

@@ -96,7 +96,8 @@ struct EditorRulerTests {
     let model = editor()
     model.playheadEditedSample = 777  // no geometry loaded → totalSamples == 0
     model.rulerMovedPlayhead(toX: 40)
-    expectNoDifference(model.playheadEditedSample, 777)  // unchanged: the mapping would be meaningless
+    // Unchanged: the mapping would be meaningless.
+    expectNoDifference(model.playheadEditedSample, 777)
   }
 
   @Test func rulerMoveIsNoOpWhenViewportNotYetMeasured() {
@@ -152,7 +153,8 @@ struct EditorRulerTests {
 
       model.rulerMovedPlayhead(toX: 6)  // stops the transport, then snaps to floor(6*100)=600
       expectNoDifference(model.transportPhase, .stopped)  // reset synchronously
-      expectNoDifference(model.playheadEditedSample, 600)  // where the user clicked, not the range end
+      // Where the user clicked, not the range end.
+      expectNoDifference(model.playheadEditedSample, 600)
 
       await settle { stoppedSession.value != nil }
       expectNoDifference(stoppedSession.value, session)  // stopped OUR session, not stop(nil)

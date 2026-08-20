@@ -233,7 +233,8 @@ struct EditorTransportTests {
         await model.transportPlayTapped()
       }
     }
-    expectNoDifference(model.playheadEditedSample, 1000)  // a failed play must not jump to the range end
+    // A failed play must not jump to the range end.
+    expectNoDifference(model.playheadEditedSample, 1000)
     expectNoDifference(model.transportPhase, .stopped)
     #expect(model.transportPhase.session == nil)
   }
@@ -430,7 +431,8 @@ struct EditorTransportTests {
       #expect(model.isTransportPlaying)
       await model.transportStopTapped()
       await task.value
-      expectNoDifference(model.playheadEditedSample, slice.startSample)  // Stop → origin (slice start)
+      // Stop → origin (slice start)
+      expectNoDifference(model.playheadEditedSample, slice.startSample)
     }
   }
 
@@ -509,7 +511,8 @@ struct EditorTransportTests {
     let model = editor()
     model.playheadEditedSample = 5000
     await model.transportSelectionChanged(nil, cursorToken: model.cursorMoveToken)
-    expectNoDifference(model.playheadEditedSample, 5000)  // clearing the selection never moves the cursor
+    // Clearing the selection never moves the cursor.
+    expectNoDifference(model.playheadEditedSample, 5000)
   }
 
   @Test func staleSelectionTaskDoesNotOverwriteNewerCursor() async {
@@ -587,7 +590,8 @@ struct EditorTransportTests {
       #expect(cursorUnderB != rangeA.lowerBound)
       stopGate.release()  // A resumes and must bail — B is playing now
       await taskA.value
-      expectNoDifference(model.playheadEditedSample, cursorUnderB)  // NOT yanked to selection A's start
+      // NOT yanked to selection A's start
+      expectNoDifference(model.playheadEditedSample, cursorUnderB)
       playGate.release()
       await taskB.value
     }
@@ -648,7 +652,8 @@ struct EditorTransportTests {
       #expect(tabB.isTransportPlaying)
       await shared.finishCurrent()  // B finishes naturally
       await playB.value
-      expectNoDifference(tabB.playheadEditedSample, durationB)  // foreground tab lands at the range end
+      // The foreground tab lands at the range end.
+      expectNoDifference(tabB.playheadEditedSample, durationB)
     }
   }
 
