@@ -432,12 +432,13 @@ enum LiveEngine {
           + logHint(logURL))
     }
     for file in wire.files.sorted(by: { $0.path < $1.path }) {
-      guard let expected = expectedMarkerCounts[file.path], file.markerCount != expected else {
-        continue
+      // Every result path is in `expectedMarkerCounts` — the set equality above proved it.
+      guard let expected = expectedMarkerCounts[file.path] else { continue }
+      if file.markerCount != expected {
+        throw EngineClientError.injectDecodeFailed(
+          "engine reported \(file.markerCount) markers for \(file.path), but \(expected) were requested"
+            + logHint(logURL))
       }
-      throw EngineClientError.injectDecodeFailed(
-        "engine reported \(file.markerCount) markers for \(file.path), but \(expected) were requested"
-          + logHint(logURL))
     }
     for path in expectedPaths.sorted() {
       guard FileManager.default.fileExists(atPath: path) else {

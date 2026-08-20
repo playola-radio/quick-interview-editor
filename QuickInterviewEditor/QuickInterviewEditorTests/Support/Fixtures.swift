@@ -85,3 +85,11 @@ enum Fixtures {
     TranscriptionResult(editPlan: plan, canonicalAudioURL: canonicalAudioURL)
   }
 }
+
+/// Stand-in for `exportRender.renderSlice`: writes a stub AIFF at the job's output URL,
+/// exactly like the live `ExportAudioRenderer` would (but with no real audio content).
+/// Free (non-isolated) function so it can be called directly from a `@Sendable` test
+/// override without crossing back onto a `@MainActor` suite's isolation.
+func writeStubAIFF(_ job: ExportRenderJob) throws {
+  try Data("aiff".utf8).write(to: job.outputURL)
+}

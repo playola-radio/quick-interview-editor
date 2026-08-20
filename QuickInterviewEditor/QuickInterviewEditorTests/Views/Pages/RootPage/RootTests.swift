@@ -131,9 +131,11 @@ struct RootTests {
         renderStarted.setValue(true)
         // Cooperative cancellation — never `Task.sleep` — busy-checks the flag that
         // `closeTab`'s `cancelExportTapped()` sets, mirroring how `ExportAudioRenderer`
-        // honours `Task.checkCancellation()` between chunks.
-        while !Task.isCancelled { await Task.yield() }
-        throw CancellationError()
+        // honours `Task.checkCancellation()` between chunks. Bounded so a regression in
+        // `closeTab`'s cancellation fails the test instead of hanging it, and
+        // `checkCancellation` keeps the stub honest: it throws only on a real cancel.
+        for _ in 0..<100_000 where !Task.isCancelled { await Task.yield() }
+        try Task.checkCancellation()
       }
       $0.workspace.reveal = { _ in }
       $0.audioPlayer.stop = { _ in }  // closeTab also stops playback

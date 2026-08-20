@@ -19,10 +19,14 @@ import Testing
 struct EditorSlicePlaybackTests {
   private let removalID = Fixtures.uuid(1)
 
+  /// Every model gets its own unique sidecar fingerprint so `mutateDocument`'s
+  /// `persistTimelineRemovals` writes can never collide across tests (or with a real
+  /// file's sidecar).
   private func editor(_ plan: EditPlan = Fixtures.editPlan()) -> EditorModel {
     EditorModel(
       sourceURL: URL(fileURLWithPath: "/clip.m4a"),
-      canonicalAudioURL: Fixtures.canonicalAudioURL, editPlan: plan)
+      canonicalAudioURL: Fixtures.canonicalAudioURL, editPlan: plan,
+      sourceFingerprint: "fp-slice-playback-\(UUID().uuidString)")
   }
 
   private func addRemoval(_ model: EditorModel, _ lower: Int, _ upper: Int, length: Int) {

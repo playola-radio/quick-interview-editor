@@ -2639,8 +2639,8 @@ final class EditorModel: ViewModel {
       }
       try await engine.injectMarkers(rendered.injectionFiles)
       await finishExport(
-        targets: targets, outputsByID: rendered.outputsByID, scratchDir: scratchDir,
-        destination: destination)
+        targets: targets, removals: removals, outputsByID: rendered.outputsByID,
+        scratchDir: scratchDir, destination: destination)
     } catch is CancellationError {
       await removeWorkDir(scratchDir)
       exportPhase = .failed(cancelMessage(copied: 0, total: targets.count))
@@ -2708,7 +2708,8 @@ final class EditorModel: ViewModel {
   /// Copies the rendered files to `destination` and sets the terminal `exportPhase` —
   /// success, a copy failure, a mid-copy cancel, or (defensively) a count mismatch.
   private func finishExport(
-    targets: [Slice], outputsByID: [Slice.ID: URL], scratchDir: URL, destination: URL
+    targets: [Slice], removals: [TimelineRemoval], outputsByID: [Slice.ID: URL],
+    scratchDir: URL, destination: URL
   ) async {
     // Copy off the main actor — copying many/large AIFFs (or to a slow/network
     // folder) must not freeze the UI or block the cancel control.
@@ -2729,7 +2730,11 @@ final class EditorModel: ViewModel {
       exportPhase = .failed("Rendered \(outcome.copied.count) of \(targets.count) slices.")
     } else {
       workspace.reveal(outcome.copied)
-      lastExportTightNames = targets.filter { !exportWarnings(for: $0).isEmpty }.map(\.name)
+      // Warnings come from the SAME frozen removal set the render used, so they can never
+      // describe a different timeline than the shipped audio.
+      lastExportTightNames = targets.filter {
+        !exportWarnings(for: $0, removals: removals).isEmpty
+      }.map(\.name)
       exportPhase = .done(count: outcome.copied.count)
     }
   }
@@ -2746,13 +2751,16 @@ final class EditorModel: ViewModel {
   /// export starts/ends from the surviving edge of that removal instead, so a boundary
   /// that was tight against a silence originally can land somewhere entirely different
   /// (or nowhere at all, if the whole slice was removed) once the timeline collapses.
-  func exportWarnings(for slice: Slice) -> [SliceWarning] {
+  /// Pass `removals` to evaluate against a frozen snapshot (the export path hands in the set
+  /// it actually rendered, so the warning can never drift from the shipped audio); defaults
+  /// to the live document.
+  func exportWarnings(for slice: Slice, removals: [TimelineRemoval]? = nil) -> [SliceWarning] {
     // Same reversed-bounds defense as `sliceIsExportable`: nothing to warn about on a slice
     // that can never render.
     guard slice.startSample < slice.endSample else { return [] }
     let sliceRange = slice.startSample..<slice.endSample
     let localTimeline = SliceRenderPlanBuilder.localTimeline(
-      sliceRange: sliceRange, removals: Array(timelineRemovals))
+      sliceRange: sliceRange, removals: removals ?? Array(timelineRemovals))
     let kept = localTimeline.keptSegments.filter { !$0.source.isEmpty }
     guard let first = kept.first, let last = kept.last else { return [] }
     let effectiveStart = slice.startSample + first.source.lowerBound

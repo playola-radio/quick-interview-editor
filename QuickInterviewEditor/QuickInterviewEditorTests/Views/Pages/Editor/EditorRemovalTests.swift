@@ -385,29 +385,34 @@ struct EditorRemovalTests {
   /// refuse ALL export and surface `removalsInvalidNote`, since `EditedTimeline` would
   /// otherwise silently degrade to the identity mapping.
   @Test func invalidRemovalSetBlocksAllExport() {
-    let model = editor(fingerprint: "fp-export-gate-invalid")
-    model.slices.append(
-      Slice(
-        id: Fixtures.uuid(23), name: "A", startSample: 0, endSample: 100, wordIDs: [],
-        snippet: "x", warnings: []))
-    expectNoDifference(model.canExportAll, true)
-    expectNoDifference(model.canExportSlice, true)
+    let fileSystem = LockIsolated<[URL: Data]>([:])
+    withDependencies {
+      $0.defaultFileStorage = FileStorage.inMemory(fileSystem: fileSystem)
+    } operation: {
+      let model = editor(fingerprint: "fp-export-gate-invalid")
+      model.slices.append(
+        Slice(
+          id: Fixtures.uuid(23), name: "A", startSample: 0, endSample: 100, wordIDs: [],
+          snippet: "x", warnings: []))
+      expectNoDifference(model.canExportAll, true)
+      expectNoDifference(model.canExportSlice, true)
 
-    // Bypasses `mutateDocument`'s normalization funnel on purpose — this is the corrupt
-    // state the defensive re-check exists to catch.
-    model.timelineRemovals = [
-      TimelineRemoval(
-        id: Fixtures.uuid(10), removedRange: 10..<50,
-        crossfade: Crossfade(lengthSamples: 4, curve: .equalPower)),
-      TimelineRemoval(
-        id: Fixtures.uuid(11), removedRange: 30..<70,
-        crossfade: Crossfade(lengthSamples: 4, curve: .equalPower)),
-    ]
+      // Bypasses `mutateDocument`'s normalization funnel on purpose — this is the corrupt
+      // state the defensive re-check exists to catch.
+      model.timelineRemovals = [
+        TimelineRemoval(
+          id: Fixtures.uuid(10), removedRange: 10..<50,
+          crossfade: Crossfade(lengthSamples: 4, curve: .equalPower)),
+        TimelineRemoval(
+          id: Fixtures.uuid(11), removedRange: 30..<70,
+          crossfade: Crossfade(lengthSamples: 4, curve: .equalPower)),
+      ]
 
-    #expect(!model.editedTimeline.isValid)
-    expectNoDifference(model.canExportAll, false)
-    expectNoDifference(model.canExportSlice, false)
-    #expect(model.removalsInvalidNote != nil)
+      #expect(!model.editedTimeline.isValid)
+      expectNoDifference(model.canExportAll, false)
+      expectNoDifference(model.canExportSlice, false)
+      #expect(model.removalsInvalidNote != nil)
+    }
   }
 
   @Test func undoingRemovalRestoresExportGate() async {

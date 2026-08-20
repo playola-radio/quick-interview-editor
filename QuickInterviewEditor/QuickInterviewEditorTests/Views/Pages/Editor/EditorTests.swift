@@ -63,14 +63,6 @@ private final class PlayerGate: @unchecked Sendable {
   }
 }
 
-/// Stand-in for `exportRender.renderSlice`: writes a stub AIFF at the job's output URL,
-/// exactly like the live `ExportAudioRenderer` would (but with no real audio content).
-/// Free (non-isolated) function so it can be called directly from a `@Sendable` test
-/// override without crossing back onto `EditorTests`'s `@MainActor` isolation.
-private func writeStubAIFF(_ job: ExportRenderJob) throws {
-  try Data("aiff".utf8).write(to: job.outputURL)
-}
-
 @MainActor
 struct EditorTests {
   private func editor(_ plan: EditPlan = Fixtures.editPlan()) -> EditorModel {
@@ -1101,7 +1093,7 @@ struct EditorTests {
     defer { try? FileManager.default.removeItem(at: destination) }
 
     await withDependencies {
-      $0.exportRender.renderSlice = { _ in throw EngineClientError.renderFailed("boom") }
+      $0.exportRender.renderSlice = { _ in throw EngineClientError.engineFailed("boom") }
     } operation: {
       model.destinationURL = destination
       model.exportAllTapped()

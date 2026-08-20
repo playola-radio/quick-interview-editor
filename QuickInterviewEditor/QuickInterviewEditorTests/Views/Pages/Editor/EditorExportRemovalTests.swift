@@ -6,23 +6,21 @@ import Testing
 
 @testable import QuickInterviewEditor
 
-/// Stand-in for `exportRender.renderSlice`: writes a stub AIFF at the job's output URL. Free
-/// (non-isolated) function so it can be called directly from a `@Sendable` test override
-/// without crossing back onto `EditorExportRemovalTests`'s `@MainActor` isolation.
-private func writeStubAIFF(_ job: ExportRenderJob) throws {
-  try Data("aiff".utf8).write(to: job.outputURL)
-}
-
 /// Export behavior once `timelineRemovals` are in play: the render plan a removal produces,
 /// the markers that survive it, and how the gating/warning surfaces react. `EditorRemovalTests`
 /// already covers the gating predicates (`sliceIsExportable`, `canExportAll`) in isolation;
 /// this file drives the removal-aware pieces through the real `performExport` pipeline.
 @MainActor
 struct EditorExportRemovalTests {
+  /// Every model gets its own unique sidecar fingerprint so `mutateDocument`'s
+  /// `persistTimelineRemovals` writes can never collide across tests (or with a real
+  /// file's sidecar) — the same isolation `EditorSeamSelectionTests` gets from per-test
+  /// fingerprints, without threading a name through every call site.
   private func editor(_ plan: EditPlan) -> EditorModel {
     EditorModel(
       sourceURL: URL(fileURLWithPath: "/clip.m4a"),
-      canonicalAudioURL: Fixtures.canonicalAudioURL, editPlan: plan)
+      canonicalAudioURL: Fixtures.canonicalAudioURL, editPlan: plan,
+      sourceFingerprint: "fp-export-removal-\(UUID().uuidString)")
   }
 
   private func makeTempDir() throws -> URL {

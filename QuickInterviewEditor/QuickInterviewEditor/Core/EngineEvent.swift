@@ -78,7 +78,6 @@ enum EngineClientError: Error, Equatable, LocalizedError {
   case engineNotFound(String)
   case engineFailed(String)
   case decodeFailed(String)
-  case renderFailed(String)
   case injectFailed(String)
   case injectDecodeFailed(String)
 
@@ -88,7 +87,6 @@ enum EngineClientError: Error, Equatable, LocalizedError {
     case .engineNotFound(let path): return "Transcription engine not found at \(path)."
     case .engineFailed(let message): return "Transcription failed: \(message)"
     case .decodeFailed(let message): return "Could not read the transcription result: \(message)"
-    case .renderFailed(let message): return "Export failed: \(message)"
     case .injectFailed(let message): return "Marker injection failed: \(message)"
     case .injectDecodeFailed(let message):
       return "Could not read the marker injection result: \(message)"
