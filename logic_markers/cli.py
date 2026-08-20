@@ -571,6 +571,58 @@ def run_render(source: Path, request_path: Path, work_dir: Path, sample_rate: in
     return {"slices": out_slices}
 
 
+def run_inject(request_path: Path) -> dict:
+    """Stamp MARK chunks into AIFFs the app already rendered (markerless PCM).
+
+    The Swift app now renders slice AIFFs itself; this is the engine's only job on
+    that path. The request (written by the app) is `{"files": [{"path", "markers":
+    [{"position", "name"}, ...]}, ...]}` with markers in canonical ABSOLUTE sample
+    positions for that file. Each file is overwritten in place with its MARK chunk
+    (ids renumbered 1..N, matching `slicer.slice_aiff`'s convention).
+    """
+    request = json.loads(request_path.read_text())
+    out_files = []
+    for entry in request.get("files", []):
+        path = Path(entry["path"])
+        if not path.exists():
+            raise ValueError(f"no such audio file: {path}")
+        aiff_bytes = path.read_bytes()
+
+        frames = aiff_markers.read_frame_count(aiff_bytes)
+        ssnd_frames = aiff_markers.read_ssnd_frame_count(aiff_bytes)
+        if ssnd_frames != frames:
+            raise ValueError(
+                f"{path} is truncated: SSND holds {ssnd_frames} frames but COMM "
+                f"declares {frames}"
+            )
+
+        markers = [
+            aiff_markers.Marker(id=i + 1, position=int(m["position"]), name=str(m["name"]))
+            for i, m in enumerate(entry.get("markers", []))
+        ]
+        for m in markers:
+            if not (0 <= m.position < frames):
+                raise ValueError(
+                    f"{path}: marker position {m.position} is outside the audio "
+                    f"({frames} frames)"
+                )
+
+        path.write_bytes(aiff_markers.add_markers(aiff_bytes, markers))
+        out_files.append({"path": str(path), "marker_count": len(markers)})
+
+    return {"files": out_files}
+
+
+def _cmd_inject(args) -> int:
+    if not args.request.exists():
+        print(f"error: no such request file: {args.request}", file=sys.stderr)
+        return 2
+    result = _redirect_stdout_during(lambda: run_inject(args.request))
+    json.dump(result, sys.stdout)
+    sys.stdout.flush()
+    return 0
+
+
 def _redirect_stdout_during(func):
     """Run `func`, keeping stdout a pure-JSON channel (see `_cmd_plan`'s note).
 
@@ -664,10 +716,19 @@ def main(argv=None) -> int:
     r.add_argument("--sample-rate", type=int, default=44100, help="fallback canonical rate")
     r.set_defaults(func=_cmd_render)
 
+    i = sub.add_parser(
+        "inject-markers", help="inject word markers into rendered AIFFs; JSON to stdout"
+    )
+    i.add_argument("--request", type=Path, required=True, help="request.json (files + markers)")
+    i.set_defaults(func=_cmd_inject)
+
     args = parser.parse_args(argv)
 
-    if not args.input.exists():
-        print(f"error: no such file: {args.input}", file=sys.stderr)
+    # inject-markers has no positional `input` (it addresses files inside the
+    # request); every other subcommand does.
+    input_path = getattr(args, "input", None)
+    if input_path is not None and not input_path.exists():
+        print(f"error: no such file: {input_path}", file=sys.stderr)
         return 2
 
     try:
