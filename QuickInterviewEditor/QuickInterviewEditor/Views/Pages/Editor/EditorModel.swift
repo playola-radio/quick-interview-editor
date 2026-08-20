@@ -242,7 +242,7 @@ final class EditorModel: ViewModel {
   }
   /// The range a fresh edit session would start from — aligned with `fineTuneTarget`: the
   /// transcript selection takes precedence, else the active slice.
-  var activeOrSelectedRange: Range<Int>? { transcript.selectedSampleRange ?? activeSliceRange }
+  var activeOrSelectedRange: Range<Int>? { selectedSourceRange ?? activeSliceRange }
   /// The one range the main waveform overlay tracks — the live draft while dragging, else the
   /// active/selected range. The waveform doesn't care whether it's pending, slice-backed, or
   /// mid-drag.
@@ -320,7 +320,7 @@ final class EditorModel: ViewModel {
 
   // MARK: - Waveform sync
   /// The selected audio range, mirrored from the transcript selection.
-  var highlightedSampleRange: Range<Int>? { transcript.selectedSampleRange }
+  var highlightedSampleRange: Range<Int>? { selectedSourceRange }
 
   /// Sample ranges of the run-together words, reading the transcript's already-computed
   /// `runTogetherSampleRanges`. Retained analysis — no longer painted on the waveform — kept
@@ -688,7 +688,7 @@ final class EditorModel: ViewModel {
   /// stop the transport, place the cursor at the selection start, and bump the cursor-move epoch so a
   /// deferred selection snap captured earlier in the drag bails instead of clobbering this placement.
   private func commitMarqueePlayhead() {
-    guard let range = transcript.selectedSampleRange else { return }
+    guard let range = selectedSourceRange else { return }
     stopTransportForRuler()
     playheadSample = range.lowerBound
     cursorMoveGeneration &+= 1
@@ -783,7 +783,7 @@ final class EditorModel: ViewModel {
     switch key {
     case .zoomIn: editedWaveform.zoomInTapped()
     case .zoomOut: editedWaveform.zoomOutTapped()
-    case .zoomFit: editedWaveform.zoomFitToggled(sourceSelection: transcript.selectedSampleRange)
+    case .zoomFit: editedWaveform.zoomFitToggled(sourceSelection: selectedSourceRange)
     case .speedUp: transcript.speedUpTapped()
     case .speedDown: transcript.speedDownTapped()
     case .removeSection:
