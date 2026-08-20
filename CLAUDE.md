@@ -215,6 +215,27 @@ holds no logic, testing the model tests the behavior.
 - Use bundled `edit-plan.json` fixtures so tests never touch real audio or the
   Python subprocess.
 
+### Running tests — fast dev loop vs CI parity
+
+- **Iterate with `make test-fast`** (in `QuickInterviewEditor/`). It runs
+  `xcodebuild test … CODE_SIGNING_ALLOWED=NO` against the default (warm)
+  DerivedData — **no code signing, no fastlane wrapper**. Measured on this repo:
+  ~50s cold / ~15s warm for the full 826-test suite (~9s of which is just
+  executing the tests). Focus one suite with
+  `make test-fast ONLY=QuickInterviewEditorTests/TranscriptSelectionTests`.
+- **Compilation is not the bottleneck** — the unsigned loop above was measured
+  directly at ~15s. The remaining ~10-min `make test` cost was *not* isolated;
+  the likely contributors (fastlane/xcbeautify wrapper, code signing, and/or
+  clean builds from `xcodegen generate`) are inferred, not separately timed. Do
+  NOT reach for an SPM/`swift test` split to go faster regardless — the ~9s
+  test-execution floor caps the gain (see `plans/speed-up-swift-test-builds.md`).
+- **Do NOT run `xcodegen generate` between test runs** — it busts DerivedData and
+  forces a near-cold rebuild. Regenerate only when `project.yml` changes.
+- **Use `make test` (fastlane) for pre-push / CI-parity checks**, not for the
+  inner loop. Note it signs **locally** but disables signing in CI (the Fastfile
+  adds `CODE_SIGNING_ALLOWED=NO` when `ENV['CI']`). Still run `make format-check`
+  + `make lint` before pushing.
+
 ---
 
 ## Project structure (target)

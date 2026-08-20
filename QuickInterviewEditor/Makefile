@@ -1,4 +1,4 @@
-.PHONY: lint format format-check test generate
+.PHONY: lint format format-check test test-fast generate
 
 # Run SwiftLint (strict mode to match CI)
 lint:
@@ -19,6 +19,17 @@ format-check:
 # Run the Swift Testing suite via fastlane
 test:
 	bundle exec fastlane mac test
+
+# Fast local dev loop: skip code signing, reuse the default (warm) DerivedData,
+# no fastlane/xcbeautify wrapper. Iterate a single suite with:
+#   make test-fast ONLY=QuickInterviewEditorTests/TranscriptSelectionTests
+ONLY ?=
+test-fast:
+	xcodebuild test \
+		-scheme QuickInterviewEditor \
+		-destination 'platform=macOS' \
+		CODE_SIGNING_ALLOWED=NO \
+		$(if $(ONLY),-only-testing:$(ONLY),)
 
 # Regenerate the Xcode project from project.yml
 generate:
