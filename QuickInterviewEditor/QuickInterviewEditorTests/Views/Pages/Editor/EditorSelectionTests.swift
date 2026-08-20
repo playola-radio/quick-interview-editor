@@ -193,6 +193,47 @@ struct EditorSelectionTests {
     model.editedWaveform.visibleStartSample = 0
   }
 
+  /// Trimming the edge that holds the extend-anchor must move the anchor with it, so a later
+  /// Shift-extend pivots from the trimmed boundary — never the pre-trim one. Regression: edge edits
+  /// wrote `audioSelection` but left `selectionAnchorSample` at the pre-trim start, so the next
+  /// Shift-extend restored the audio the user had just trimmed away.
+  @Test func trimmingAnchorEdgeMovesAnchorSoShiftExtendKeepsTheTrim() {
+    let model = editor()
+    // Plain-select "young" (id 3, 77704..<98916): the anchor pins to its start (77704).
+    model.selectWord(3, extending: false)
+    model.selectionEdgeDragBegan(.start)
+    model.selectionEdgeDraggedToSource(.start, 88_000)
+    let trimmed = model.audioSelection!
+    #expect(trimmed.lowerBound > 77_704)
+    expectNoDifference(model.selectionAnchorSample, trimmed.lowerBound)
+
+    // Shift-extend to "Hayes" (id 4, ...<119202): the range pivots from the trimmed start, not 77704.
+    model.selectWord(4, extending: true)
+    #expect(model.audioSelection?.lowerBound == trimmed.lowerBound)
+    #expect(model.audioSelection?.upperBound == 119_202)
+  }
+
+  /// A marquee over a gap that overlaps no word must not enable "Mark as Clip": `addSliceTapped()`
+  /// would derive no word IDs and no-op, so the button would be enabled yet inert. Regression:
+  /// `canAddSlice` keyed only on the selection being non-nil, ignoring whether it covered any word.
+  @Test func silenceOnlySelectionDisablesAddSlice() throws {
+    let model = editor()
+    let spans =
+      model.editPlan.words
+      .compactMap { word -> Range<Int>? in
+        guard let start = word.startSample, let end = word.endSample else { return nil }
+        return start..<end
+      }
+      .sorted { $0.lowerBound < $1.lowerBound }
+    // A gap strictly between two adjacent words overlaps no word.
+    let gap = try #require(
+      zip(spans, spans.dropFirst()).first { $0.1.lowerBound > $0.0.upperBound }
+        .map { $0.0.upperBound..<$0.1.lowerBound })
+    model.selectSourceRange(gap, snapPlayhead: false)
+    #expect(model.selectedSourceRange != nil)
+    #expect(!model.canAddSlice)
+  }
+
   @Test func addSliceWordIDsAreOverlapDerivedAtCommit() {
     let model = editor()
     let words = model.editPlan.words

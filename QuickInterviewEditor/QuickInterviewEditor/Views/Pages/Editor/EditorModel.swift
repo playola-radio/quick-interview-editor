@@ -461,8 +461,14 @@ final class EditorModel: ViewModel {
   // MARK: - View Helpers
   /// The panel's plain "Add slice" builds from the raw selection, so it's disabled whenever any
   /// fine-tune draft is unsaved — a tuned pending selection (whose adjustments it would discard)
-  /// or a dirty existing-slice edit with a held selection (which requires Save/Cancel first).
-  var canAddSlice: Bool { selectedSourceRange != nil && !fineTune.hasUnsavedChange }
+  /// or a dirty existing-slice edit with a held selection (which requires Save/Cancel first). A
+  /// silence-only selection (a marquee over a gap that overlaps no word) also disables it: it would
+  /// derive no word IDs, so `addSliceTapped()` would no-op, leaving the button enabled but inert.
+  var canAddSlice: Bool {
+    guard let range = selectedSourceRange else { return false }
+    return !wordIDs(anyOverlap: range, words: editPlan.words).isEmpty
+      && !fineTune.hasUnsavedChange
+  }
   /// Clear is offered whenever a freeform selection exists — including a marquee/edge-drag one that
   /// never touched the transcript. `audioSelection` is the source of truth; reading it here (not
   /// `transcript.hasSelection`) is what keeps the bar live for waveform-created selections.
@@ -855,10 +861,26 @@ final class EditorModel: ViewModel {
     // No pre-clamp: `boundaryEditor` already clamps `sourceSample` into the legal window
     // (`0...fileDurationSamples`) via `clampedBoundary`. Clamping here against
     // `waveform.totalSamples` would wrongly couple this geometry-free seam to async waveform load.
-    audioSelection =
+    applyEdgeEdit(
+      edge, of: range,
+      to: edge == .start
+        ? boundaryEditor.moveStart(of: range, to: sourceSample, snap: false)
+        : boundaryEditor.moveEnd(of: range, to: sourceSample, snap: false))
+  }
+
+  /// Commits an edge edit and keeps `selectionAnchorSample` pinned to the edge it already tracks: if
+  /// the held anchor sat on the edited edge, it follows that edge to its new sample. Otherwise a later
+  /// Shift-extend would pivot from the pre-edit boundary and silently restore audio the user just
+  /// trimmed. When the anchor tracks the untouched edge (or is nil), it stays valid and is left alone.
+  private func applyEdgeEdit(_ edge: SelectionEdge, of old: Range<Int>, to updated: Range<Int>) {
+    let anchorTracksEditedEdge =
       edge == .start
-      ? boundaryEditor.moveStart(of: range, to: sourceSample, snap: false)
-      : boundaryEditor.moveEnd(of: range, to: sourceSample, snap: false)
+      ? selectionAnchorSample == old.lowerBound
+      : selectionAnchorSample == old.upperBound
+    audioSelection = updated
+    if anchorTracksEditedEdge {
+      selectionAnchorSample = edge == .start ? updated.lowerBound : updated.upperBound
+    }
   }
 
   /// Release: the edge is no longer live, so transport-snap resumes tracking selection changes.
@@ -868,10 +890,11 @@ final class EditorModel: ViewModel {
   /// freeform. No-op with no selection.
   func selectionNudged(_ edge: SelectionEdge, byMs ms: Double) {
     guard let range = audioSelection else { return }
-    audioSelection =
-      edge == .start
-      ? boundaryEditor.nudgeStart(of: range, byMs: ms)
-      : boundaryEditor.nudgeEnd(of: range, byMs: ms)
+    applyEdgeEdit(
+      edge, of: range,
+      to: edge == .start
+        ? boundaryEditor.nudgeStart(of: range, byMs: ms)
+        : boundaryEditor.nudgeEnd(of: range, byMs: ms))
   }
 
   private func isPointerPastEdge(_ positionX: CGFloat) -> Bool {
