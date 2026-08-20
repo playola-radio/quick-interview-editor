@@ -102,6 +102,21 @@ struct EditedTimelineTests {
     expectNoDifference(timeline.editedToSource(120), 180)  // in K2's edited span
   }
 
+  @Test func seamsSharingAShortIslandNeverOverClaimIt() {
+    // Remove [40,48) and [52,60), both requesting L=10; they share the 4-sample
+    // island K1=[48,52). Adjacent claims on one segment must never sum past its
+    // length — otherwise both seams cover the same edited span and the rendered
+    // stream outgrows editedDurationSamples. The earlier seam wins the island
+    // (clamped to 4); the later seam collapses to a hard cut.
+    // K0=[0,40) len40, K1=[48,52) len4, K2=[60,100) len40.
+    // editedDuration = (40+4+40) - (4+0) = 80.
+    let timeline = EditedTimeline(
+      sourceDurationSamples: 100,
+      removals: [removal(40, 48, length: 10, id: 1), removal(52, 60, length: 10, id: 2)])
+    expectNoDifference(timeline.seams.map(\.crossfadeLength), [4, 0])
+    expectNoDifference(timeline.editedDurationSamples, 80)
+  }
+
   @Test func adjacentRemovalsCollapseKeptSegmentToZeroLength() {
     // Remove [40,50) and [50,60): the middle kept segment K1=[50,50) has zero
     // length, so both crossfades clamp to 0 (no handle on either side of it).

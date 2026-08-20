@@ -95,6 +95,23 @@ struct AudioEditRenderPlanTests {
     expectNoDifference(plan.items, [])
   }
 
+  @Test func sharedShortIslandPlanTilesTheEditedAxisExactly() {
+    // The island case must still produce a plan whose items tile the edited
+    // axis contiguously and sum to editedDurationSamples — no overlapping seam
+    // spans, no duplicated audio, no backward cursor jumps.
+    let timeline = EditedTimeline(
+      sourceDurationSamples: 100,
+      removals: [removal(40, 48, length: 10, id: 1), removal(52, 60, length: 10, id: 2)])
+    let plan = AudioEditRenderPlan(timeline: timeline)
+    let total = plan.items.map { $0.editedSpan.count }.reduce(0, +)
+    expectNoDifference(total, timeline.editedDurationSamples)
+    var cursor = 0
+    for item in plan.items {
+      expectNoDifference(item.editedSpan.lowerBound, cursor)
+      cursor = item.editedSpan.upperBound
+    }
+  }
+
   @Test func sharedShortIslandDoesNotProduceReversedRanges() {
     // Two removals leaving a 4-sample island [48,52); both request L=10 but the
     // island only affords smaller handles. The plan must never emit a reversed

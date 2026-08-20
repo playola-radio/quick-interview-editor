@@ -79,15 +79,23 @@ struct EditedTimeline: Equatable {
     // it can never eat more than the kept segment immediately to its left or
     // immediately to its right.
     //
-    // Known limitation (spec §4.2): each removal is clamped independently, so
-    // two seams sharing a kept island shorter than both requested crossfades
-    // can each claim the full island, over-claiming it in edited space. This
-    // is spec-mandated behavior for a rare edge case; PR2's audio blending
-    // will revisit it.
-    let clampedLengths: [Int] = normalized.indices.map { index in
-      let leftHandle = sourceRangesList[index].count
+    // Clamping is sequential (left to right): a seam's left handle is reduced
+    // by whatever the PREVIOUS seam already claimed of that shared segment, so
+    // adjacent claims on one kept island can never sum past its length. Two
+    // seams over-claiming a short island would otherwise cover the same edited
+    // span, making the rendered stream longer than `editedDurationSamples`
+    // (duplicated audio, backward cursor jumps). The earlier seam wins the
+    // island; the later one shrinks — collapsing to a hard cut when nothing is
+    // left. (Revises spec §4.2's independent clamping, which PR2's audio
+    // blending was slated to revisit.)
+    var clampedLengths: [Int] = []
+    clampedLengths.reserveCapacity(normalized.count)
+    for index in normalized.indices {
+      let claimedByPreviousSeam = index > 0 ? clampedLengths[index - 1] : 0
+      let leftHandle = sourceRangesList[index].count - claimedByPreviousSeam
       let rightHandle = sourceRangesList[index + 1].count
-      return max(0, min(normalized[index].crossfade.lengthSamples, leftHandle, rightHandle))
+      clampedLengths.append(
+        max(0, min(normalized[index].crossfade.lengthSamples, leftHandle, rightHandle)))
     }
 
     self.removals = zip(normalized, clampedLengths).map { removal, length in
