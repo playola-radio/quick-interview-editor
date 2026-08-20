@@ -107,6 +107,36 @@ struct AudioEditRenderPlan: Equatable, Sendable {
   }
 }
 
+extension AudioEditRenderPlan {
+  /// Rebases every SOURCE range by `delta`, leaving the edited axis untouched.
+  ///
+  /// A slice-local plan is built on a timeline whose source axis starts at 0 (the
+  /// slice's first sample), but it is rendered and scheduled against the FULL
+  /// canonical file — so its source ranges must be shifted back to absolute file
+  /// coordinates while `editedStart`/`length`/`fadeOffset` stay slice-relative.
+  func offsettingSources(by delta: Int) -> AudioEditRenderPlan {
+    guard delta != 0 else { return self }
+    var shifted = self
+    shifted.items = items.map { item in
+      switch item {
+      case .segment(let source, let editedStart):
+        return .segment(
+          source: (source.lowerBound + delta)..<(source.upperBound + delta),
+          editedStart: editedStart)
+      case .seam(let id, let leftTail, let rightHead, let length, let editedStart, let fadeOffset):
+        return .seam(
+          id: id,
+          leftTail: (leftTail.lowerBound + delta)..<(leftTail.upperBound + delta),
+          rightHead: (rightHead.lowerBound + delta)..<(rightHead.upperBound + delta),
+          length: length,
+          editedStart: editedStart,
+          fadeOffset: fadeOffset)
+      }
+    }
+    return shifted
+  }
+}
+
 extension AudioEditRenderPlan.Item {
   /// The half-open range this item covers on the edited axis.
   var editedSpan: Range<Int> {
