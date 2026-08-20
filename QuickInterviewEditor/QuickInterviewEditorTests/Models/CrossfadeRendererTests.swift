@@ -5,10 +5,10 @@ import Testing
 @testable import QuickInterviewEditor
 
 struct CrossfadeRendererTests {
-  private func expectClose(_ a: [Float], _ b: [Float], tolerance: Float = 1e-4) {
-    expectNoDifference(a.count, b.count)
-    for (i, (x, y)) in zip(a, b).enumerated() {
-      #expect(abs(x - y) < tolerance, "index \(i): \(x) !~= \(y)")
+  private func expectClose(_ lhs: [Float], _ rhs: [Float], tolerance: Float = 1e-4) {
+    expectNoDifference(lhs.count, rhs.count)
+    for (index, (lhsValue, rhsValue)) in zip(lhs, rhs).enumerated() {
+      #expect(abs(lhsValue - rhsValue) < tolerance, "index \(index): \(lhsValue) !~= \(rhsValue)")
     }
   }
 
@@ -26,15 +26,15 @@ struct CrossfadeRendererTests {
 
   @Test func equalPowerIsPowerPreservingForCountFive() {
     let (out, in_) = CrossfadeRenderer.gains(count: 5, curve: .equalPower)
-    for i in out.indices {
-      #expect(abs(out[i] * out[i] + in_[i] * in_[i] - 1.0) < 1e-4)
+    for index in out.indices {
+      #expect(abs(out[index] * out[index] + in_[index] * in_[index] - 1.0) < 1e-4)
     }
   }
 
   @Test func equalPowerIsPowerPreservingForCountNine() {
     let (out, in_) = CrossfadeRenderer.gains(count: 9, curve: .equalPower)
-    for i in out.indices {
-      #expect(abs(out[i] * out[i] + in_[i] * in_[i] - 1.0) < 1e-4)
+    for index in out.indices {
+      #expect(abs(out[index] * out[index] + in_[index] * in_[index] - 1.0) < 1e-4)
     }
   }
 

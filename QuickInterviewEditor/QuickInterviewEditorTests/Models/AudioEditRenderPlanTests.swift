@@ -12,8 +12,8 @@ struct AudioEditRenderPlanTests {
       crossfade: Crossfade(lengthSamples: length, curve: .equalPower))
   }
 
-  private func id(_ n: UInt) -> UUID {
-    UUID(uuidString: "00000000-0000-0000-0000-0000000000\(String(format: "%02u", n))")!
+  private func id(_ number: UInt) -> UUID {
+    UUID(uuidString: "00000000-0000-0000-0000-0000000000\(String(format: "%02u", number))")!
   }
 
   @Test func emptyTimelineIsOneSegmentSpanningSource() {
@@ -105,9 +105,9 @@ struct AudioEditRenderPlanTests {
     let plan = AudioEditRenderPlan(timeline: timeline)
     for item in plan.items {
       switch item {
-      case let .segment(source, _):
+      case .segment(let source, _):
         #expect(source.lowerBound <= source.upperBound)
-      case let .seam(_, leftTail, rightHead, length, _):
+      case .seam(_, let leftTail, let rightHead, let length, _):
         #expect(leftTail.lowerBound <= leftTail.upperBound)
         #expect(rightHead.lowerBound <= rightHead.upperBound)
         #expect(length >= 0)

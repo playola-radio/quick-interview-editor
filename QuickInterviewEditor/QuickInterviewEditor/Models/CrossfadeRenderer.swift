@@ -9,16 +9,16 @@ enum CrossfadeRenderer {
     guard count > 0 else { return ([], []) }
     var out = [Float](repeating: 0, count: count)
     var `in` = [Float](repeating: 0, count: count)
-    for i in 0..<count {
-      let t: Float = count > 1 ? Float(i) / Float(count - 1) : 0
+    for index in 0..<count {
+      let position: Float = count > 1 ? Float(index) / Float(count - 1) : 0
       switch curve {
       case .equalPower:
-        let angle = t * .pi / 2
-        out[i] = cos(angle)
-        `in`[i] = sin(angle)
+        let angle = position * .pi / 2
+        out[index] = cos(angle)
+        `in`[index] = sin(angle)
       case .linear:
-        out[i] = 1 - t
-        `in`[i] = t
+        out[index] = 1 - position
+        `in`[index] = position
       }
     }
     return (out, `in`)

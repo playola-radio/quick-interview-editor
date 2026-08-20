@@ -34,12 +34,12 @@ struct AudioEditRenderPlan: Equatable, Sendable {
     let seams = timeline.seams  // seams[i] sits between segments[i] and segments[i + 1]
 
     var full: [Item] = []
-    for i in segments.indices {
-      let segment = segments[i]
+    for index in segments.indices {
+      let segment = segments[index]
       // Samples this segment loses to the crossfades on either side: its head to
       // the preceding seam's incoming audio, its tail to the next seam's outgoing.
-      let lengthBefore = i > 0 ? seams[i - 1].crossfadeLength : 0
-      let lengthAfter = i < seams.count ? seams[i].crossfadeLength : 0
+      let lengthBefore = index > 0 ? seams[index - 1].crossfadeLength : 0
+      let lengthAfter = index < seams.count ? seams[index].crossfadeLength : 0
 
       let interiorLower = segment.source.lowerBound + lengthBefore
       let interiorUpper = segment.source.upperBound - lengthAfter
@@ -51,11 +51,11 @@ struct AudioEditRenderPlan: Equatable, Sendable {
             source: interiorLower..<interiorUpper, editedStart: segment.editedStart + lengthBefore))
       }
 
-      guard i < seams.count else { continue }
-      let seam = seams[i]
+      guard index < seams.count else { continue }
+      let seam = seams[index]
       let length = seam.crossfadeLength
       guard length > 0 else { continue }  // hard cut — abutting segments, no blend
-      let rightSegment = segments[i + 1]
+      let rightSegment = segments[index + 1]
       full.append(
         .seam(
           id: seam.id,
@@ -83,9 +83,10 @@ struct AudioEditRenderPlan: Equatable, Sendable {
       }
       let offset = start - span.lowerBound
       switch item {
-      case let .segment(source, _):
-        result.append(.segment(source: (source.lowerBound + offset)..<source.upperBound, editedStart: start))
-      case let .seam(id, leftTail, rightHead, length, _):
+      case .segment(let source, _):
+        result.append(
+          .segment(source: (source.lowerBound + offset)..<source.upperBound, editedStart: start))
+      case .seam(let id, let leftTail, let rightHead, let length, _):
         result.append(
           .seam(
             id: id,
@@ -103,9 +104,9 @@ extension AudioEditRenderPlan.Item {
   /// The half-open range this item covers on the edited axis.
   var editedSpan: Range<Int> {
     switch self {
-    case let .segment(source, editedStart):
+    case .segment(let source, let editedStart):
       return editedStart..<(editedStart + source.count)
-    case let .seam(_, _, _, length, editedStart):
+    case .seam(_, _, _, let length, let editedStart):
       return editedStart..<(editedStart + length)
     }
   }

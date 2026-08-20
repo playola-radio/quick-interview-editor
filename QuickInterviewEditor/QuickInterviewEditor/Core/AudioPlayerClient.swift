@@ -284,14 +284,14 @@ private actor LivePlayerBox {
     for (index, item) in plan.items.enumerated() {
       let completion = index == lastIndex ? onLast : nil
       switch item {
-      case let .segment(source, _):
+      case .segment(let source, _):
         let startFrame = AVAudioFramePosition((Double(source.lowerBound) * ratio).rounded())
         let frameCount = AVAudioFrameCount(max(0, (Double(source.count) * ratio).rounded()))
         guard frameCount > 0 else { continue }
         node.scheduleSegment(
           file, startingFrame: min(startFrame, file.length), frameCount: frameCount, at: nil,
           completionCallbackType: .dataPlayedBack, completionHandler: completion)
-      case let .seam(_, leftTail, rightHead, length, _):
+      case .seam(_, let leftTail, let rightHead, let length, _):
         guard
           let buffer = try seamBuffer(
             file: file, leftTail: leftTail, rightHead: rightHead, length: length, ratio: ratio)
@@ -327,10 +327,12 @@ private actor LivePlayerBox {
     else { return nil }
     buffer.frameLength = nativeCount
     let channelCount = Int(file.processingFormat.channelCount)
-    for c in 0..<channelCount {
-      let source = blended[min(c, blended.count - 1)]
-      let destination = channels[c]
-      for i in 0..<Int(nativeCount) { destination[i] = i < source.count ? source[i] : 0 }
+    for channel in 0..<channelCount {
+      let source = blended[min(channel, blended.count - 1)]
+      let destination = channels[channel]
+      for frame in 0..<Int(nativeCount) {
+        destination[frame] = frame < source.count ? source[frame] : 0
+      }
     }
     return buffer
   }
@@ -352,9 +354,9 @@ private actor LivePlayerBox {
     try file.read(into: buffer, frameCount: available)
     guard let channels = buffer.floatChannelData else { return result }
     let read = Int(buffer.frameLength)
-    for c in 0..<channelCount {
-      let source = channels[c]
-      for i in 0..<read { result[c][i] = source[i] }
+    for channel in 0..<channelCount {
+      let source = channels[channel]
+      for frame in 0..<read { result[channel][frame] = source[frame] }
     }
     return result
   }
