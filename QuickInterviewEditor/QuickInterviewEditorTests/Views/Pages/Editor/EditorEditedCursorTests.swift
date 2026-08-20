@@ -319,6 +319,54 @@ struct EditorEditedCursorTests {
     for _ in 0..<1000 where !condition() { await Task.yield() }
   }
 
+  @Test func stopReturnsSourceRangeOriginWithExactSourceSample() async {
+    let model = editor()
+    addRemoval(model, 40_000, 60_000, length: 4_800)
+    let slice = Slice(
+      id: UUID(), name: "S", startSample: 38_000, endSample: 70_000, wordIDs: [],
+      snippet: "", warnings: [])
+    model.mutateSlices { $0.append(slice) }
+    let gate = EditedPlayGate()
+    await withDependencies {
+      $0.audioPlayer.play = { _, _, _, _, _ in await gate.play() }
+      $0.audioPlayer.stop = { _ in await gate.finish(.stopped) }
+    } operation: {
+      let play = Task { await model.playSliceTapped(slice.id) }
+      await settle(until: model.isTransportPlaying)
+      await model.transportStopTapped()
+      await play.value
+    }
+    // The origin (source 38_000) sits in the crossfade's outgoing tail; Stop must restore it
+    // exactly, not clear the anchor and round-trip edited 38_000 to the post-cut 62_800.
+    expectNoDifference(model.playheadEditedSample, 38_000)
+    expectNoDifference(model.playheadSourceSample, 38_000)
+  }
+
+  @Test func timelineChangePreservesSourceRangeOriginExactly() async {
+    let model = editor()
+    addRemoval(model, 40_000, 60_000, length: 4_800)
+    let slice = Slice(
+      id: UUID(), name: "S", startSample: 38_000, endSample: 70_000, wordIDs: [],
+      snippet: "", warnings: [])
+    model.mutateSlices { $0.append(slice) }
+    let gate = EditedPlayGate()
+    await withDependencies {
+      $0.audioPlayer.play = { _, _, _, _, _ in await gate.play() }
+      $0.audioPlayer.stop = { _ in await gate.finish(.stopped) }
+    } operation: {
+      let play = Task { await model.playSliceTapped(slice.id) }
+      await settle(until: model.isTransportPlaying)
+      // A second, non-overlapping removal rebuilds the timeline mid-playback. The source-range
+      // session keeps playing (original audio is unaffected), and the origin's remap must carry
+      // its EXACT source sample rather than round-tripping through the old edited axis.
+      addRemoval(model, 100_000, 120_000, length: 4_800)
+      #expect(model.isTransportPlaying)
+      await model.transportStopTapped()
+      await play.value
+    }
+    expectNoDifference(model.playheadSourceSample, 38_000)
+  }
+
   @Test func rulerMapsThroughEditedAxis() {
     let model = editor()
     addRemoval(model, 40_000, 60_000, length: 4_800)

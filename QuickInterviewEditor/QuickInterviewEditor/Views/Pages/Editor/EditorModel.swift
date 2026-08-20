@@ -205,6 +205,18 @@ final class EditorModel: ViewModel {
     playheadEditedSample = editedCursor(forSource: sourceSample)
   }
 
+  /// Returns the cursor to where the transport last started: through the origin's exact source
+  /// sample for a source-range playback (a plain edited restore would clear the source anchor
+  /// and round-trip an in-tail origin to the post-cut side), or the edited origin for
+  /// edited-timeline playback.
+  private func returnCursorToTransportOrigin() {
+    if let sourceOrigin = transportOriginSourceAnchor {
+      placeCursor(atSource: sourceOrigin)
+    } else if let origin = transportOriginEditedSample {
+      playheadEditedSample = origin
+    }
+  }
+
   /// Keeps the transcript's current-word highlight on the word under the cursor, so it tracks
   /// where you ARE — playing, paused, scrubbed, ruler-moved, or stopped — never a stale
   /// last-heard word. Keeps the last word in a gap (never lose your place) and only writes on a
@@ -216,6 +228,10 @@ final class EditorModel: ViewModel {
   }
   /// Where the transport last started playing, in EDITED samples; Stop returns the cursor here.
   var transportOriginEditedSample: Int?
+  /// The EXACT source sample of a source-range playback's origin (nil for edited-timeline
+  /// playback). Stop and the timeline remap restore through it, so an origin inside a
+  /// crossfade tail or removed span isn't round-tripped to the post-cut side.
+  @ObservationIgnored private var transportOriginSourceAnchor: Int?
   /// Bumped whenever something authoritatively places the cursor outside the selection-snap path — a
   /// ruler move or a transport start. A deferred selection snap (`transportSelectionChanged`) captures
   /// this at selection-change time (via `cursorMoveToken`) and bails if it changed, so it can neither
@@ -279,7 +295,11 @@ final class EditorModel: ViewModel {
       Task { await stopOwnedPlayback(session) }
     }
     let sourceCursor = playheadSourceSample
-    let sourceOrigin = transportOriginEditedSample.map(editedWaveform.timeline.editedToSource)
+    // A source-range playback's origin keeps its exact source anchor; only an edited-axis
+    // origin (already stopped above for free play) falls back to the lossy round trip.
+    let sourceOrigin =
+      transportOriginSourceAnchor
+      ?? transportOriginEditedSample.map(editedWaveform.timeline.editedToSource)
     editedWaveform.timeline = newTimeline
     editedWaveform.timelineChanged()
     placeCursor(atSource: sourceCursor)
@@ -739,6 +759,7 @@ final class EditorModel: ViewModel {
     transportPhase = .stopped
     transportContext = .free
     transportOriginEditedSample = nil
+    transportOriginSourceAnchor = nil
   }
 
   /// Stops the given session, or does nothing if it's nil. A nil session means THIS editor
@@ -1317,7 +1338,7 @@ final class EditorModel: ViewModel {
   /// a no-op when nothing is playing, so overlapping open/dismiss stop paths can all call it.
   func stopActiveTransportSnapshotting() {
     guard let session = transportPhase.session else { return }
-    if let origin = transportOriginEditedSample { playheadEditedSample = origin }
+    returnCursorToTransportOrigin()
     resetTransportState()
     endTranscriptFollow()
     Task { [weak self] in await self?.stopOwnedPlayback(session) }
@@ -1653,6 +1674,7 @@ final class EditorModel: ViewModel {
     let session = PlaybackSessionID()
     transportContext = context
     transportOriginEditedSample = resolved.startEditedSample
+    transportOriginSourceAnchor = resolved.sourceRange?.lowerBound
     if let sourceRange = resolved.sourceRange {
       placeCursor(atSource: sourceRange.lowerBound)
     } else {
@@ -1734,7 +1756,7 @@ final class EditorModel: ViewModel {
   /// Clearing the session (in `endTransportPlayback`) before awaiting the stop means the suspended
   /// `play`'s natural-end cleanup won't run and overwrite the origin.
   func transportStopTapped() async {
-    if let origin = transportOriginEditedSample { playheadEditedSample = origin }
+    returnCursorToTransportOrigin()
     await endTransportPlayback()
   }
 
