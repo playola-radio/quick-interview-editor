@@ -63,6 +63,14 @@ private final class PlayerGate: @unchecked Sendable {
   }
 }
 
+/// Stand-in for `exportRender.renderSlice`: writes a stub AIFF at the job's output URL,
+/// exactly like the live `ExportAudioRenderer` would (but with no real audio content).
+/// Free (non-isolated) function so it can be called directly from a `@Sendable` test
+/// override without crossing back onto `EditorTests`'s `@MainActor` isolation.
+private func writeStubAIFF(_ job: ExportRenderJob) throws {
+  try Data("aiff".utf8).write(to: job.outputURL)
+}
+
 @MainActor
 struct EditorTests {
   private func editor(_ plan: EditPlan = Fixtures.editPlan()) -> EditorModel {
@@ -884,41 +892,21 @@ struct EditorTests {
     return dir
   }
 
-  private func writeTempAIFF(in dir: URL, named name: String) throws -> URL {
-    let url = dir.appendingPathComponent(name)
-    try Data("aiff".utf8).write(to: url)
-    return url
-  }
-
-  /// A stream that reports rendering `ids` and completes with a temp AIFF per id.
-  private func renderedSlices(
-    for ids: [Slice.ID], workDir: URL
-  ) throws -> [RenderedSlice] {
-    try ids.map { id in
-      RenderedSlice(id: id, url: try writeTempAIFF(in: workDir, named: "\(id.uuidString).aiff"))
-    }
-  }
-
   @Test func exportAllCopiesRevealsAndRemembersDestination() async throws {
     let model = editor()
     addSlices(model, [(0, 1), (2, 3)])
-    let ids = model.slices.map(\.id)
-    let workDir = try makeTempDir()
     let destination = try makeTempDir()
     defer { try? FileManager.default.removeItem(at: destination) }
-    let rendered = try renderedSlices(for: ids, workDir: workDir)
     let revealed = LockIsolated<[URL]>([])
-    let capturedRequest = LockIsolated<RenderRequest?>(nil)
+    let renderedJobs = LockIsolated<[ExportRenderJob]>([])
+    let injected = LockIsolated<[MarkerInjectionFile]>([])
 
     await withDependencies {
-      $0.engine.renderSlices = { request in
-        capturedRequest.setValue(request)
-        return AsyncThrowingStream { continuation in
-          continuation.yield(.progress(RenderProgress(message: "", index: 1, total: ids.count)))
-          continuation.yield(.completed(RenderResult(slices: rendered, workDir: workDir)))
-          continuation.finish()
-        }
+      $0.exportRender.renderSlice = { job in
+        renderedJobs.withValue { $0.append(job) }
+        try writeStubAIFF(job)
       }
+      $0.engine.injectMarkers = { files in injected.setValue(files) }
       $0.workspace.reveal = { revealed.setValue($0) }
     } operation: {
       model.destinationURL = destination
@@ -927,24 +915,27 @@ struct EditorTests {
     }
 
     expectNoDifference(model.exportPhase, .done(count: 2))
-    expectNoDifference(Set(capturedRequest.value?.slices.map(\.id) ?? []), Set(ids))
     // Render is driven from the canonical AIFF, not the original source file, and
-    // carries the plan's duration so the engine can verify the exact file.
-    expectNoDifference(capturedRequest.value?.audioURL, model.canonicalAudioURL)
+    // carries the plan's duration so the renderer can verify the exact file.
+    expectNoDifference(Set(renderedJobs.value.map(\.canonicalAudioURL)), [model.canonicalAudioURL])
     expectNoDifference(
-      capturedRequest.value?.durationSamples, model.editPlan.source.durationSamples)
+      Set(renderedJobs.value.map(\.sourceDurationSamples)), [model.editPlan.source.durationSamples])
+    expectNoDifference(injected.value.count, 2)
     let contents = try FileManager.default.contentsOfDirectory(atPath: destination.path).sorted()
     expectNoDifference(contents.count, 2)
     expectNoDifference(revealed.value.count, 2)
     expectNoDifference(
       Set(revealed.value.map { $0.deletingLastPathComponent().path }), [destination.path])
-    // The engine work-dir is removed after the copy.
-    #expect(!FileManager.default.fileExists(atPath: workDir.path))
+    // The scratch dir export renders into is removed after the copy.
+    for job in renderedJobs.value {
+      #expect(
+        !FileManager.default.fileExists(atPath: job.outputURL.deletingLastPathComponent().path))
+    }
   }
 
   @Test func exportWithMissingCanonicalAudioFailsClearlyWithoutRendering() async throws {
     // A canonical dir reaped out from under a live session (overlapping instance's
-    // launch cleanup): export must refuse with actionable copy, never hand the engine a
+    // launch cleanup): export must refuse with actionable copy, never hand the renderer a
     // dead path or prompt for a destination.
     let missing = FileManager.default.temporaryDirectory
       .appendingPathComponent("qie-missing-\(UUID().uuidString)", isDirectory: true)
@@ -955,9 +946,8 @@ struct EditorTests {
     addSlices(model, [(0, 1)])
 
     await withDependencies {
-      $0.engine.renderSlices = { _ in
-        Issue.record("engine must not render when the canonical audio is missing")
-        return AsyncThrowingStream { $0.finish() }
+      $0.exportRender.renderSlice = { _ in
+        Issue.record("export must not render when the canonical audio is missing")
       }
       $0.workspace.chooseDirectory = {
         Issue.record("must not prompt for a destination when the canonical audio is missing")
@@ -977,26 +967,19 @@ struct EditorTests {
     // can never race an in-flight export.
     let model = editor()
     addSlices(model, [(0, 1)])
-    let ids = model.slices.map(\.id)
-    let workDir = try makeTempDir()
     let destination = try makeTempDir()
     defer { try? FileManager.default.removeItem(at: destination) }
-    let rendered = try renderedSlices(for: ids, workDir: workDir)
     let order = LockIsolated<[String]>([])
     let gate = PlayerGate()
 
     await withDependencies {
-      $0.engine.renderSlices = { _ in
-        AsyncThrowingStream { continuation in
-          Task {
-            order.withValue { $0.append("render-start") }
-            _ = await gate.play()  // suspend the render until the test releases it
-            order.withValue { $0.append("render-end") }
-            continuation.yield(.completed(RenderResult(slices: rendered, workDir: workDir)))
-            continuation.finish()
-          }
-        }
+      $0.exportRender.renderSlice = { job in
+        order.withValue { $0.append("render-start") }
+        _ = await gate.play()  // suspend the render until the test releases it
+        order.withValue { $0.append("render-end") }
+        try writeStubAIFF(job)
       }
+      $0.engine.injectMarkers = { _ in }
       $0.workspace.reveal = { _ in }
     } operation: {
       model.destinationURL = destination
@@ -1032,9 +1015,8 @@ struct EditorTests {
         try? FileManager.default.removeItem(at: canonical)  // vanishes while the picker is open
         return destination
       }
-      $0.engine.renderSlices = { _ in
-        Issue.record("engine must not render after the canonical audio vanished")
-        return AsyncThrowingStream { $0.finish() }
+      $0.exportRender.renderSlice = { _ in
+        Issue.record("export must not render after the canonical audio vanished")
       }
     } operation: {
       model.exportAllTapped()
@@ -1044,24 +1026,20 @@ struct EditorTests {
     expectNoDifference(model.exportPhase, .failed(model.canonicalMissingMessage))
   }
 
-  @Test func exportAllMapsResultsByIdNotOrder() async throws {
+  /// `performExport` names each rendered file from `targets` (built in slice order), not
+  /// from render-completion order — this is a structural guarantee now that `outputsByID`
+  /// is keyed by slice id, so a slower-to-render slice can never shuffle the destination
+  /// filenames.
+  @Test func exportAllNamesSlicesByTargetOrder() async throws {
     let model = editor()
     addSlices(model, [(0, 1), (2, 3)])
-    let ids = model.slices.map(\.id)
     let stem = model.sourceURL.deletingPathExtension().lastPathComponent
-    let workDir = try makeTempDir()
     let destination = try makeTempDir()
     defer { try? FileManager.default.removeItem(at: destination) }
-    // Render results returned in REVERSE order; copy must still match slice → name by id.
-    let rendered = try renderedSlices(for: ids, workDir: workDir).reversed()
 
     await withDependencies {
-      $0.engine.renderSlices = { _ in
-        AsyncThrowingStream { continuation in
-          continuation.yield(.completed(RenderResult(slices: Array(rendered), workDir: workDir)))
-          continuation.finish()
-        }
-      }
+      $0.exportRender.renderSlice = { try writeStubAIFF($0) }
+      $0.engine.injectMarkers = { _ in }
       $0.workspace.reveal = { _ in }
     } operation: {
       model.destinationURL = destination
@@ -1076,11 +1054,8 @@ struct EditorTests {
   @Test func missingDestinationPromptsChooseDirectory() async throws {
     let model = editor()
     addSlices(model, [(0, 1)])
-    let ids = model.slices.map(\.id)
-    let workDir = try makeTempDir()
     let destination = try makeTempDir()
     defer { try? FileManager.default.removeItem(at: destination) }
-    let rendered = try renderedSlices(for: ids, workDir: workDir)
     let promptCount = LockIsolated(0)
 
     await withDependencies {
@@ -1089,12 +1064,8 @@ struct EditorTests {
         return destination
       }
       $0.workspace.reveal = { _ in }
-      $0.engine.renderSlices = { _ in
-        AsyncThrowingStream { continuation in
-          continuation.yield(.completed(RenderResult(slices: rendered, workDir: workDir)))
-          continuation.finish()
-        }
-      }
+      $0.exportRender.renderSlice = { try writeStubAIFF($0) }
+      $0.engine.injectMarkers = { _ in }
     } operation: {
       model.exportAllTapped()
       await model.exportTask?.value
@@ -1123,18 +1094,14 @@ struct EditorTests {
     #expect(model.destinationURL == nil)
   }
 
-  @Test func throwingRenderStreamSetsFailed() async throws {
+  @Test func renderFailureSetsFailed() async throws {
     let model = editor()
     addSlices(model, [(0, 1)])
     let destination = try makeTempDir()
     defer { try? FileManager.default.removeItem(at: destination) }
 
     await withDependencies {
-      $0.engine.renderSlices = { _ in
-        AsyncThrowingStream { continuation in
-          continuation.finish(throwing: EngineClientError.renderFailed("boom"))
-        }
-      }
+      $0.exportRender.renderSlice = { _ in throw EngineClientError.renderFailed("boom") }
     } operation: {
       model.destinationURL = destination
       model.exportAllTapped()
@@ -1148,24 +1115,27 @@ struct EditorTests {
     #expect(message.contains("boom"))
   }
 
-  @Test func partialRenderResultIsReportedAsFailureNotSuccess() async throws {
+  /// A renderer that silently leaves a target's output file missing (rather than
+  /// throwing) must still fail the export instead of reporting success — the copy step's
+  /// own error surfaces, since `outputsByID` no longer guards against a missing file the
+  /// way the old "fewer results than requested" branch did.
+  @Test func missingRenderedFileFailsCopyNotSuccess() async throws {
     let model = editor()
     addSlices(model, [(0, 1), (2, 3)])
-    let ids = model.slices.map(\.id)
-    let workDir = try makeTempDir()
     let destination = try makeTempDir()
     defer { try? FileManager.default.removeItem(at: destination) }
-    // Engine returns only the FIRST of two requested slices.
-    let rendered = Array(try renderedSlices(for: ids, workDir: workDir).prefix(1))
     let revealed = LockIsolated(false)
+    let renderCount = LockIsolated(0)
 
     await withDependencies {
-      $0.engine.renderSlices = { _ in
-        AsyncThrowingStream { continuation in
-          continuation.yield(.completed(RenderResult(slices: rendered, workDir: workDir)))
-          continuation.finish()
+      $0.exportRender.renderSlice = { job in
+        let isFirst = renderCount.withValue {
+          $0 += 1
+          return $0 == 1
         }
+        if isFirst { try writeStubAIFF(job) }  // the second target writes nothing
       }
+      $0.engine.injectMarkers = { _ in }
       $0.workspace.reveal = { _ in revealed.setValue(true) }
     } operation: {
       model.destinationURL = destination
@@ -1173,42 +1143,41 @@ struct EditorTests {
       await model.exportTask?.value
     }
 
-    guard case .failed(let message) = model.exportPhase else {
+    guard case .failed = model.exportPhase else {
       Issue.record("expected .failed, got \(model.exportPhase)")
       return
     }
-    #expect(message.contains("1 of 2"))
     #expect(!revealed.value)  // no partial reveal
-    #expect(!FileManager.default.fileExists(atPath: workDir.path))  // still cleaned up
   }
 
   @Test func progressEventsWalkExportingThenDone() async throws {
     let model = editor()
     addSlices(model, [(0, 1), (2, 3)])
-    let ids = model.slices.map(\.id)
-    let workDir = try makeTempDir()
     let destination = try makeTempDir()
     defer { try? FileManager.default.removeItem(at: destination) }
-    let rendered = try renderedSlices(for: ids, workDir: workDir)
-    let (stream, continuation) = AsyncThrowingStream<RenderEvent, Error>.makeStream()
+    let gate = PlayerGate()
 
     await withDependencies {
-      $0.engine.renderSlices = { _ in stream }
+      $0.exportRender.renderSlice = { job in
+        _ = await gate.play()
+        try writeStubAIFF(job)
+      }
+      $0.engine.injectMarkers = { _ in }
       $0.workspace.reveal = { _ in }
     } operation: {
       model.destinationURL = destination
       model.exportAllTapped()
 
-      continuation.yield(.progress(RenderProgress(message: "", index: 1, total: 2)))
+      await gate.awaitStarted()
       await settle { model.exportPhase == .exporting(current: 1, total: 2) }
       expectNoDifference(model.exportPhase, .exporting(current: 1, total: 2))
+      gate.releaseFirst()
 
-      continuation.yield(.progress(RenderProgress(message: "", index: 2, total: 2)))
+      await gate.awaitStarted()
       await settle { model.exportPhase == .exporting(current: 2, total: 2) }
       expectNoDifference(model.exportPhase, .exporting(current: 2, total: 2))
+      gate.releaseFirst()
 
-      continuation.yield(.completed(RenderResult(slices: rendered, workDir: workDir)))
-      continuation.finish()
       await model.exportTask?.value
       expectNoDifference(model.exportPhase, .done(count: 2))
     }
@@ -1219,24 +1188,31 @@ struct EditorTests {
     addSlices(model, [(0, 1), (2, 3)])
     let destination = try makeTempDir()
     defer { try? FileManager.default.removeItem(at: destination) }
-    let (stream, continuation) = AsyncThrowingStream<RenderEvent, Error>.makeStream()
-    let terminated = LockIsolated(false)
-    continuation.onTermination = { _ in terminated.setValue(true) }
+    let gate = PlayerGate()
+    let scratchDirs = LockIsolated<[URL]>([])
 
     await withDependencies {
-      $0.engine.renderSlices = { _ in stream }
+      $0.exportRender.renderSlice = { job in
+        scratchDirs.withValue { $0.append(job.outputURL.deletingLastPathComponent()) }
+        _ = await gate.play()  // suspend the first slice's render until the test cancels
+        // Cooperative cancellation: never `Task.sleep` — check the flag the export task's
+        // own cancel() sets, the same contract `ExportAudioRenderer` honours via
+        // `Task.checkCancellation()` between chunks.
+        try Task.checkCancellation()
+        try writeStubAIFF(job)
+      }
+      $0.engine.injectMarkers = { _ in }
       $0.workspace.reveal = { _ in }
     } operation: {
       model.destinationURL = destination
       model.exportAllTapped()  // sync fire; stores the cancellable task
-      continuation.yield(.progress(RenderProgress(message: "", index: 1, total: 2)))
-      await Task.yield()
+      await gate.awaitStarted()
       #expect(model.isExporting)
       model.cancelExportTapped()
+      gate.release()  // let the suspended render observe the cancellation and unwind
       await model.exportTask?.value
     }
 
-    #expect(terminated.value)
     guard case .failed(let message) = model.exportPhase else {
       Issue.record("expected .failed, got \(model.exportPhase)")
       return
@@ -1245,26 +1221,26 @@ struct EditorTests {
     // Nothing was copied to the destination.
     let contents = try FileManager.default.contentsOfDirectory(atPath: destination.path)
     expectNoDifference(contents, [])
+    // The scratch dir is cleaned up even on a cancelled export.
+    if let scratchDir = scratchDirs.value.first {
+      #expect(!FileManager.default.fileExists(atPath: scratchDir.path))
+    }
   }
 
   @Test func tightJoinWarningCarriedIntoSummary() async throws {
     let model = editor()
+    // The fixture's first silence spans [0, 51817] and its second starts at 306495, so
+    // 60000...70000 sits entirely in the gap between them — neither edge touches a silence.
     let tight = Slice(
-      id: UUID(), name: "Intro", startSample: 10, endSample: 200,
-      wordIDs: [], snippet: "x", warnings: [.tightStart])
+      id: UUID(), name: "Intro", startSample: 60000, endSample: 70000,
+      wordIDs: [], snippet: "x", warnings: [])
     model.slices.append(tight)
-    let workDir = try makeTempDir()
     let destination = try makeTempDir()
     defer { try? FileManager.default.removeItem(at: destination) }
-    let rendered = try renderedSlices(for: [tight.id], workDir: workDir)
 
     await withDependencies {
-      $0.engine.renderSlices = { _ in
-        AsyncThrowingStream { continuation in
-          continuation.yield(.completed(RenderResult(slices: rendered, workDir: workDir)))
-          continuation.finish()
-        }
-      }
+      $0.exportRender.renderSlice = { try writeStubAIFF($0) }
+      $0.engine.injectMarkers = { _ in }
       $0.workspace.reveal = { _ in }
     } operation: {
       model.destinationURL = destination
@@ -1272,11 +1248,14 @@ struct EditorTests {
       await model.exportTask?.value
     }
 
+    // Computed fresh from the plan's silences (`exportWarnings(for:)`), not from
+    // `tight.warnings` — this slice's edges don't touch a silence in the fixture
+    // transcript, so both edges are tight.
     #expect(model.exportTightWarning.contains("Intro"))
     #expect(model.exportTightWarning.contains("tight"))
   }
 
-  @Test func renderRequestNudgesCollidingMarkerPositions() async {
+  @Test func exportMarkersNudgeCollidingPositions() async throws {
     let plan = EditPlan(
       schemaVersion: 1,
       source: .init(path: "/clip.m4a", sampleRate: 44100, channels: 1, durationSamples: 100_000),
@@ -1290,21 +1269,22 @@ struct EditorTests {
       Slice(
         id: UUID(), name: "A", startSample: 0, endSample: 8820, wordIDs: [1, 2], snippet: "x",
         warnings: []))
-    let captured = LockIsolated<RenderRequest?>(nil)
+    let captured = LockIsolated<[MarkerInjectionFile]>([])
+    let destination = try makeTempDir()
+    defer { try? FileManager.default.removeItem(at: destination) }
 
     await withDependencies {
-      $0.engine.renderSlices = { request in
-        captured.setValue(request)
-        return AsyncThrowingStream { $0.finish() }
-      }
+      $0.exportRender.renderSlice = { try writeStubAIFF($0) }
+      $0.engine.injectMarkers = { files in captured.setValue(files) }
+      $0.workspace.reveal = { _ in }
     } operation: {
-      model.destinationURL = URL(fileURLWithPath: NSTemporaryDirectory())
+      model.destinationURL = destination
       model.exportAllTapped()
       await model.exportTask?.value
     }
 
     // Colliding start samples become strictly increasing marker positions.
-    expectNoDifference(captured.value?.markers.map(\.position), [4410, 4411])
+    expectNoDifference(captured.value.first?.markers.map(\.position), [4410, 4411])
   }
 
   @Test func exportControlsGatedByStateAndExporting() async {

@@ -317,7 +317,10 @@ struct EditorRemovalTests {
     }
   }
 
-  @Test func pendingRemovalGatesExportAndSurfacesNote() {
+  /// Export gating is per-slice now (`sliceIsExportable`), not "any removal blocks
+  /// everything": a removal that doesn't overlap the slice at all must leave that
+  /// slice — and "Export all" — untouched.
+  @Test func removalOutsideSliceDoesNotBlockExport() {
     let fileSystem = LockIsolated<[URL: Data]>([:])
     withDependencies {
       $0.defaultFileStorage = FileStorage.inMemory(fileSystem: fileSystem)
@@ -329,7 +332,7 @@ struct EditorRemovalTests {
           snippet: "x", warnings: []))
       expectNoDifference(model.canExportAll, true)
       expectNoDifference(model.canExportSlice, true)
-      expectNoDifference(model.exportBlockedByRemovalsNote, nil)
+      expectNoDifference(model.removalsInvalidNote, nil)
 
       model.mutateDocument { doc in
         doc.timelineRemovals.append(
@@ -338,10 +341,73 @@ struct EditorRemovalTests {
             crossfade: Crossfade(lengthSamples: 48, curve: .equalPower)))
       }
 
-      expectNoDifference(model.canExportAll, false)
-      expectNoDifference(model.canExportSlice, false)
-      #expect(model.exportBlockedByRemovalsNote != nil)
+      expectNoDifference(model.canExportAll, true)
+      expectNoDifference(model.canExportSlice, true)
+      expectNoDifference(model.removalsInvalidNote, nil)
     }
+  }
+
+  /// A removal that swallows a slice's entire source range leaves nothing to export for
+  /// THAT slice (`sliceIsExportable` false), while an unaffected slice stays exportable —
+  /// so "Export all" still runs, just skipping the fully-removed one.
+  @Test func removalCoveringSliceMakesOnlyThatSliceUnexportable() {
+    let fileSystem = LockIsolated<[URL: Data]>([:])
+    withDependencies {
+      $0.defaultFileStorage = FileStorage.inMemory(fileSystem: fileSystem)
+    } operation: {
+      let model = editor(fingerprint: "fp-export-gate-covering")
+      model.slices.append(
+        Slice(
+          id: Fixtures.uuid(21), name: "Covered", startSample: 1000, endSample: 2000,
+          wordIDs: [], snippet: "x", warnings: []))
+      model.slices.append(
+        Slice(
+          id: Fixtures.uuid(22), name: "Untouched", startSample: 0, endSample: 100,
+          wordIDs: [], snippet: "x", warnings: []))
+
+      model.mutateDocument { doc in
+        doc.timelineRemovals.append(
+          TimelineRemoval(
+            id: Fixtures.uuid(9), removedRange: 1000..<2000,
+            crossfade: Crossfade(lengthSamples: 48, curve: .equalPower)))
+      }
+
+      #expect(!model.sliceIsExportable(model.slices[id: Fixtures.uuid(21)]!))
+      #expect(model.sliceIsExportable(model.slices[id: Fixtures.uuid(22)]!))
+      expectNoDifference(model.canExportAll, true)
+      expectNoDifference(model.canExportSlice, true)
+      expectNoDifference(model.removalsInvalidNote, nil)
+    }
+  }
+
+  /// The defensive, non-routine check (BINDING PR-2 Codex contract): an invalid removal
+  /// set — two overlapping removals bypassing the normalizing mutation funnel — must
+  /// refuse ALL export and surface `removalsInvalidNote`, since `EditedTimeline` would
+  /// otherwise silently degrade to the identity mapping.
+  @Test func invalidRemovalSetBlocksAllExport() {
+    let model = editor(fingerprint: "fp-export-gate-invalid")
+    model.slices.append(
+      Slice(
+        id: Fixtures.uuid(23), name: "A", startSample: 0, endSample: 100, wordIDs: [],
+        snippet: "x", warnings: []))
+    expectNoDifference(model.canExportAll, true)
+    expectNoDifference(model.canExportSlice, true)
+
+    // Bypasses `mutateDocument`'s normalization funnel on purpose — this is the corrupt
+    // state the defensive re-check exists to catch.
+    model.timelineRemovals = [
+      TimelineRemoval(
+        id: Fixtures.uuid(10), removedRange: 10..<50,
+        crossfade: Crossfade(lengthSamples: 4, curve: .equalPower)),
+      TimelineRemoval(
+        id: Fixtures.uuid(11), removedRange: 30..<70,
+        crossfade: Crossfade(lengthSamples: 4, curve: .equalPower)),
+    ]
+
+    #expect(!model.editedTimeline.isValid)
+    expectNoDifference(model.canExportAll, false)
+    expectNoDifference(model.canExportSlice, false)
+    #expect(model.removalsInvalidNote != nil)
   }
 
   @Test func undoingRemovalRestoresExportGate() async {
@@ -352,7 +418,7 @@ struct EditorRemovalTests {
       let model = editor(fingerprint: "fp-export-gate-undo")
       model.slices.append(
         Slice(
-          id: Fixtures.uuid(21), name: "A", startSample: 0, endSample: 100, wordIDs: [],
+          id: Fixtures.uuid(21), name: "A", startSample: 1000, endSample: 2000, wordIDs: [],
           snippet: "x", warnings: []))
       model.mutateDocument { doc in
         doc.timelineRemovals.append(
@@ -360,14 +426,14 @@ struct EditorRemovalTests {
             id: Fixtures.uuid(8), removedRange: 1000..<2000,
             crossfade: Crossfade(lengthSamples: 48, curve: .equalPower)))
       }
-      expectNoDifference(model.canExportAll, false)
-      expectNoDifference(model.canExportSlice, false)
+      #expect(!model.sliceIsExportable(model.slices[id: Fixtures.uuid(21)]!))
 
       await model.undoTapped()
 
+      #expect(model.sliceIsExportable(model.slices[id: Fixtures.uuid(21)]!))
       expectNoDifference(model.canExportAll, true)
       expectNoDifference(model.canExportSlice, true)
-      expectNoDifference(model.exportBlockedByRemovalsNote, nil)
+      expectNoDifference(model.removalsInvalidNote, nil)
     }
   }
 
