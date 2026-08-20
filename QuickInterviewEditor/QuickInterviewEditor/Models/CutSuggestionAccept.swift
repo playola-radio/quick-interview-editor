@@ -99,11 +99,12 @@ func acceptCutSuggestion(
   }
 
   let slice = buildSlice(
-    id: suggestion.id, name: sliceName(for: suggestion), range: range, plan: plan)
+    id: suggestion.id, name: sliceName(for: suggestion), range: range,
+    wordIDs: wordIDs(overlapping: range, words: plan.words), plan: plan)
 
-  // `buildSlice` recomputes membership by audio midpoint over the derived range. For a
-  // clean disjoint span that's exactly the validated words; if it isn't, the accepted
-  // slice would silently differ from the suggestion — refuse rather than mislead.
+  // Membership is recomputed by audio midpoint over the derived range. For a clean disjoint
+  // span that's exactly the validated words; if it isn't, the accepted slice would silently
+  // differ from the suggestion — refuse rather than mislead.
   guard slice.wordIDs == words.map(\.id) else {
     return .invalid(.wordMembershipMismatch)
   }

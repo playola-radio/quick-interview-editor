@@ -167,7 +167,7 @@ struct EditorTransportTests {
     let recorded = LockIsolated<(URL, Range<Int>, Int)?>(nil)
     let model = editor()
     selectWords(model.transcript, 1, 4)
-    let selection = model.transcript.selectedSampleRange!
+    let selection = model.audioSelection!
     model.playheadSample = selection.lowerBound
     await withDependencies {
       $0.audioPlayer.play = recordingPlay(recorded, gate)
@@ -473,7 +473,7 @@ struct EditorTransportTests {
     let model = editor()
     model.playheadSample = 9999
     selectWords(model.transcript, 2, 4)
-    let selection = model.transcript.selectedSampleRange!
+    let selection = model.audioSelection!
     await model.transportSelectionChanged(selection, cursorToken: model.cursorMoveToken)
     expectNoDifference(model.playheadSample, selection.lowerBound)
   }
@@ -489,7 +489,7 @@ struct EditorTransportTests {
     let stopGate = TransportGate()
     let model = editor()
     selectWords(model.transcript, 1, 3)  // selection A
-    let rangeA = model.transcript.selectedSampleRange!
+    let rangeA = model.audioSelection!
     let session = PlaybackSessionID()
     model.transportPhase = .playing(session)  // A's reconciliation must stop this first
     await withDependencies {
@@ -499,7 +499,7 @@ struct EditorTransportTests {
       let taskA = Task { await model.transportSelectionChanged(rangeA, cursorToken: tokenA) }
       await stopGate.awaitStarted()  // A is now suspended awaiting the stop
       selectWords(model.transcript, 5, 7)  // selection B arrives
-      let rangeB = model.transcript.selectedSampleRange!
+      let rangeB = model.audioSelection!
       // B snaps immediately (no owner left)
       await model.transportSelectionChanged(rangeB, cursorToken: model.cursorMoveToken)
       expectNoDifference(model.playheadSample, rangeB.lowerBound)
@@ -525,7 +525,7 @@ struct EditorTransportTests {
       await gate.awaitStarted()
       #expect(model.isTransportPlaying)
       selectWords(model.transcript, 3, 5)
-      let selection = model.transcript.selectedSampleRange!
+      let selection = model.audioSelection!
       // Stop first, then snap.
       await model.transportSelectionChanged(selection, cursorToken: model.cursorMoveToken)
       await task.value
@@ -543,7 +543,7 @@ struct EditorTransportTests {
     model.addSliceTapped()  // clears the selection
     let slice = model.slices[0]
     selectWords(model.transcript, 6, 8)  // selection A, distinct from the slice's words
-    let rangeA = model.transcript.selectedSampleRange!
+    let rangeA = model.audioSelection!
     model.transportPhase = .playing(PlaybackSessionID())  // the transport owns playback
     await withDependencies {
       $0.audioPlayer.play = { _, _, _, _, _ in await playGate.play() }

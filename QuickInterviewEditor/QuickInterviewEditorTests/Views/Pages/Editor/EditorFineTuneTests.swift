@@ -93,7 +93,7 @@ struct EditorFineTuneTests {
     expectNoDifference(model.fineTuneTarget, .pendingSelection)
     #expect(model.showsFineTunePane)
     model.syncEditSession()
-    expectNoDifference(model.fineTune.committedRange, model.transcript.selectedSampleRange)
+    expectNoDifference(model.fineTune.committedRange, model.audioSelection)
   }
 
   /// Updated (Task 9 deadlock fix): a `.pendingSelection` draft is a disposable CANDIDATE that
@@ -111,8 +111,8 @@ struct EditorFineTuneTests {
     selectWords(model.transcript, 4, 6)
     model.syncEditSession()
     // Retargeted cleanly to the new selection — the abandoned A tuning is gone, not held.
-    expectNoDifference(model.fineTune.committedRange, model.transcript.selectedSampleRange)
-    expectNoDifference(model.fineTune.draftRange, model.transcript.selectedSampleRange)
+    expectNoDifference(model.fineTune.committedRange, model.audioSelection)
+    expectNoDifference(model.fineTune.draftRange, model.audioSelection)
     #expect(!model.fineTune.hasUnsavedChange)
     #expect(model.showsFineTunePane)
   }
@@ -129,7 +129,7 @@ struct EditorFineTuneTests {
     // A different selection arrives; the abandoned A tuning is discarded, not held.
     selectWords(model.transcript, 4, 6)
     model.syncEditSession()
-    let selectionB = model.transcript.selectedSampleRange!
+    let selectionB = model.audioSelection!
     #expect(selectionB != draftA)
 
     model.commitEditTapped()
@@ -156,8 +156,9 @@ struct EditorFineTuneTests {
     model.commitEditTapped()
     let committed = model.slices[id: slice.id]!
     expectNoDifference(committed.startSample..<committed.endSample, draft)
-    // Word membership + snippet are re-derived from the new range, not the stale selection.
-    expectNoDifference(committed.wordIDs, wordIDs(overlapping: draft, words: model.editPlan.words))
+    // Word membership + snippet are re-derived from the new range by the spec's overlap rule,
+    // not the stale selection.
+    expectNoDifference(committed.wordIDs, wordIDs(anyOverlap: draft, words: model.editPlan.words))
     #expect(!committed.snippet.isEmpty)
 
     // Exactly one undo entry for the whole drag: undoing restores the original cut in one step.
@@ -179,8 +180,34 @@ struct EditorFineTuneTests {
     expectNoDifference(model.slices.count, 1)
     let added = model.slices[0]
     expectNoDifference(added.startSample..<added.endSample, draft)
-    expectNoDifference(added.wordIDs, wordIDs(overlapping: draft, words: model.editPlan.words))
+    expectNoDifference(added.wordIDs, wordIDs(anyOverlap: draft, words: model.editPlan.words))
     #expect(!model.transcript.hasSelection)  // selection cleared, pane closes
+  }
+
+  /// The pending-selection commit (`makeSlice`) must use the same overlap membership as direct
+  /// Add-from-selection, so fine-tuning a selection before committing never silently drops a
+  /// partially-overlapped edge word. Regression: `makeSlice` derived membership by midpoint via
+  /// `buildSlice`, so a word overlapping the draft by under half survived Add-from-selection but
+  /// vanished after a fine-tune commit of the same range.
+  @Test func commitPendingSelectionUsesOverlapMembershipForEdgeWords() {
+    let model = editor()
+    let words = model.editPlan.words
+    func mid(_ word: Word) -> Int {
+      word.startSample! + (word.endSample! - word.startSample!) / 2
+    }
+    // Draft clips word[1] and word[3] at their midpoints (partial overlap — midpoint excludes them)
+    // and fully covers word[2]: overlap membership is {w1,w2,w3}, midpoint would be {w2}.
+    let draft = (mid(words[1]) + 1)..<mid(words[3])
+    model.selectSourceRange(draft, snapPlayhead: false)
+    model.syncEditSession()
+    #expect(wordIDs(anyOverlap: draft, words: words) != wordIDs(overlapping: draft, words: words))
+
+    model.commitEditTapped()
+
+    let added = model.slices[0]
+    expectNoDifference(added.wordIDs, wordIDs(anyOverlap: draft, words: words))
+    #expect(added.wordIDs.contains(words[1].id))
+    #expect(added.wordIDs.contains(words[3].id))
   }
 
   @Test func commitWithNoChangeDoesNothing() {
@@ -201,7 +228,7 @@ struct EditorFineTuneTests {
     model.syncEditSession()
     // Save is enabled immediately — no need to nudge first when the auto-cut is already good.
     #expect(model.canCommitEdit)
-    let selection = model.transcript.selectedSampleRange!
+    let selection = model.audioSelection!
 
     model.commitEditTapped()
     expectNoDifference(model.slices.count, 1)
@@ -349,7 +376,7 @@ struct EditorFineTuneTests {
     model.syncEditSession()
     expectNoDifference(model.fineTuneTarget, .pendingSelection)
     expectNoDifference(model.activeSliceID, nil)
-    expectNoDifference(model.fineTune.committedRange, model.transcript.selectedSampleRange)
+    expectNoDifference(model.fineTune.committedRange, model.audioSelection)
   }
 
   @Test func aSelectionDoesNotDropAnUnsavedSliceEditUntilResolved() {
@@ -426,11 +453,11 @@ struct EditorFineTuneTests {
     // A selection made mid-edit is held behind the dirty slice draft.
     selectWords(model.transcript, 5, 7)
     model.syncEditSession()
-    let held = model.transcript.selectedSampleRange
+    let held = model.audioSelection
 
     // Re-clicking the active slice's button must not drop that held selection.
     model.sliceSelected(slice.id)
-    expectNoDifference(model.transcript.selectedSampleRange, held)
+    expectNoDifference(model.audioSelection, held)
     expectNoDifference(model.fineTune.target, .slice(slice.id))  // still the slice session
 
     // Cancel then retargets the pane to the held selection.
@@ -466,6 +493,23 @@ struct EditorFineTuneTests {
     model.commitEditTapped()
     expectNoDifference(model.slices.count, 1)
     expectNoDifference(model.slices[0].startSample..<model.slices[0].endSample, draft)
+  }
+
+  /// The `canAddSlice` word-overlap bar, generalized to the fine-tune Save path: a silence-only
+  /// pending selection (a marquee over a gap that overlaps no word) opens a `.pendingSelection`
+  /// session, but Save must stay disabled and the commit must no-op — otherwise it appends a slice
+  /// with an empty `wordIDs` list, the exact invalid state the direct Add path already blocks.
+  @Test func silenceOnlyPendingDraftCannotBeCommitted() {
+    let model = editor()
+    // 75000..<77000 lies entirely in the gap between word 2 (…74176) and word 3 (77704…):
+    // a freeform selection overlapping no word.
+    model.audioSelection = 75000..<77000
+    model.syncEditSession()
+    expectNoDifference(model.fineTuneTarget, .pendingSelection)
+    #expect(model.fineTune.draftRange != nil)  // the pane opened on the wordless draft…
+    #expect(!model.canCommitEdit)  // …but Save is disabled: no overlapping word
+    model.commitEditTapped()  // action-level guard: no-op
+    expectNoDifference(model.slices.count, 0)
   }
 
   @Test func addSliceIsDisabledWhileASliceEditIsDirtyWithAHeldSelection() {

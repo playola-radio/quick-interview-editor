@@ -21,6 +21,9 @@ struct WaveformView: View {
         onAreaSelectChanged: { model.waveformAreaSelectChanged(toX: $0) },
         onAreaSelectEnded: { model.waveformAreaSelectEnded(toX: $0) },
         seams: model.seamSpans,
+        onEdgeDragBegan: { model.selectionEdgeDragBegan($0) },
+        onEdgeDragged: { model.selectionEdgeDragged($0, toX: $1) },
+        onEdgeDragEnded: { model.selectionEdgeDragEnded($0) },
         auditionOverlay: { span in
           if model.canAudition { AuditionEdgeButtons(model: model, span: span) }
         }

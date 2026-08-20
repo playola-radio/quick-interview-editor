@@ -195,13 +195,13 @@ struct EditorRulerTests {
     let model = editor()
     geometry(model, samplesPerPixel: 100, start: 0)
     selectWords(model.transcript, 1, 4)
-    let selection = model.transcript.selectedSampleRange
+    let selection = model.audioSelection
     #expect(selection != nil)
 
     model.rulerMovedPlayhead(toX: 3)
     expectNoDifference(model.playheadSample, 300)
     // Ruling D: a ruler move never clears the selection.
-    expectNoDifference(model.transcript.selectedSampleRange, selection)
+    expectNoDifference(model.audioSelection, selection)
   }
 
   /// A ruler click landing while `transportSelectionChanged` is suspended awaiting its stop must
@@ -212,7 +212,7 @@ struct EditorRulerTests {
     let model = editor()
     geometry(model, samplesPerPixel: 100, start: 0)
     selectWords(model.transcript, 1, 3)  // selection A
-    let rangeA = model.transcript.selectedSampleRange!
+    let rangeA = model.audioSelection!
     model.transportPhase = .playing(PlaybackSessionID())  // A's snap must stop this first
     await withDependencies {
       $0.audioPlayer.stop = { _ in _ = await stopGate.play() }  // suspend inside A's stop
@@ -235,7 +235,7 @@ struct EditorRulerTests {
     let model = editor()
     geometry(model, samplesPerPixel: 100, start: 0)
     selectWords(model.transcript, 1, 3)  // selection A registered; onChange captures the token now
-    let rangeA = model.transcript.selectedSampleRange!
+    let rangeA = model.audioSelection!
     let token = model.cursorMoveToken
     model.rulerMovedPlayhead(toX: 7)  // ruler click lands before the deferred snap runs → 700
     // The deferred snap runs late; the ruler is the later action and wins.
@@ -252,7 +252,7 @@ struct EditorRulerTests {
     let model = editor()
     geometry(model, samplesPerPixel: 100, start: 0)
     selectWords(model.transcript, 1, 3)  // selection A; the view would capture the token here
-    let rangeA = model.transcript.selectedSampleRange!
+    let rangeA = model.audioSelection!
     let token = model.cursorMoveToken
     model.playheadSample = rangeA.lowerBound  // a valid play start within the selection
     await withDependencies {

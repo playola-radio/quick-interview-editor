@@ -79,7 +79,8 @@ struct CutSuggestionAcceptTests {
     let start = words.compactMap(\.startSample).min()!
     let end = words.compactMap(\.endSample).max()!
     let expected = buildSlice(
-      id: sug.id, name: "The night the tour bus broke down", range: start..<end, plan: plan)
+      id: sug.id, name: "The night the tour bus broke down", range: start..<end,
+      wordIDs: words.map(\.id), plan: plan)
 
     guard case .accepted(let slice, _) = result else {
       Issue.record("expected .accepted, got \(result)")

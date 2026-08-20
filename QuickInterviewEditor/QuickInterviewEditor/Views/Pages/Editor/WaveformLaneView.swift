@@ -54,6 +54,12 @@ struct WaveformLaneView<Overlay: View>: View {
   /// site compiles unchanged. Positioning these on the collapsed edited waveform is a later step —
   /// this lane only draws whatever spans it's handed.
   var seams: [WaveformSpan] = []
+  /// Drag handles on the highlighted range's edges. A grab within a few points of the left/right edge
+  /// of `highlightRange` fires these; a mouse-down anywhere else falls through to the marquee below.
+  /// Default no-ops so the slice-edit sheet (which doesn't offer edge drag) compiles unchanged.
+  var onEdgeDragBegan: (SelectionEdge) -> Void = { _ in }
+  var onEdgeDragged: (SelectionEdge, CGFloat) -> Void = { _, _ in }
+  var onEdgeDragEnded: (SelectionEdge) -> Void = { _ in }
   @ViewBuilder let auditionOverlay: (WaveformSpan) -> Overlay
 
   private let bandHeight: CGFloat = 148
@@ -76,6 +82,16 @@ struct WaveformLaneView<Overlay: View>: View {
           onAreaSelectBegan: onAreaSelectBegan,
           onAreaSelectChanged: onAreaSelectChanged,
           onAreaSelectEnded: onAreaSelectEnded)
+      )
+      // Sits ABOVE the marquee layer: it claims only the few points at each edge of the highlight, so
+      // an edge grab starts a boundary drag while every other mouse-down falls through to the marquee.
+      .overlay(
+        WaveformEdgeHandleLayer(
+          startX: highlightRange.flatMap { waveform.lanePlayheadX(forSource: $0.lowerBound) },
+          endX: highlightRange.flatMap { waveform.lanePlayheadX(forSource: $0.upperBound) },
+          onEdgeDragBegan: onEdgeDragBegan,
+          onEdgeDragged: onEdgeDragged,
+          onEdgeDragEnded: onEdgeDragEnded)
       )
       .overlay(alignment: .topLeading) {
         if let highlight {
@@ -372,6 +388,106 @@ private struct WaveformInteractionLayer: NSViewRepresentable {
         commandDown: flags.contains(.command),
         atX: localX(event))
       // Consume: do NOT call super, so an enclosing ScrollView never double-scrolls.
+    }
+  }
+}
+
+/// A transparent AppKit layer over the band that claims ONLY the few points at each edge of the
+/// highlighted range and turns a drag there into a boundary edit. It sits above the marquee layer, so
+/// its `hitTest` returns `self` only inside a handle zone and `nil` everywhere else — a mouse-down
+/// away from an edge falls through to the marquee/click layer beneath, unchanged. It reads nothing
+/// from the model: the edge x-positions are handed in, and it forwards raw gesture x to the closures.
+private struct WaveformEdgeHandleLayer: NSViewRepresentable {
+  let startX: CGFloat?
+  let endX: CGFloat?
+  let onEdgeDragBegan: (SelectionEdge) -> Void
+  let onEdgeDragged: (SelectionEdge, CGFloat) -> Void
+  let onEdgeDragEnded: (SelectionEdge) -> Void
+
+  func makeNSView(context: Context) -> HandleView {
+    let view = HandleView()
+    apply(to: view)
+    return view
+  }
+
+  func updateNSView(_ nsView: HandleView, context: Context) {
+    apply(to: nsView)
+  }
+
+  private func apply(to view: HandleView) {
+    view.startX = startX
+    view.endX = endX
+    view.onEdgeDragBegan = onEdgeDragBegan
+    view.onEdgeDragged = onEdgeDragged
+    view.onEdgeDragEnded = onEdgeDragEnded
+    view.window?.invalidateCursorRects(for: view)
+  }
+
+  final class HandleView: NSView {
+    var startX: CGFloat?
+    var endX: CGFloat?
+    var onEdgeDragBegan: ((SelectionEdge) -> Void)?
+    var onEdgeDragged: ((SelectionEdge, CGFloat) -> Void)?
+    var onEdgeDragEnded: ((SelectionEdge) -> Void)?
+
+    /// Half-width of a grab zone: a mouse-down within this many points of an edge grabs it.
+    private let grabTolerance: CGFloat = 6
+    private var activeEdge: SelectionEdge?
+
+    override var acceptsFirstResponder: Bool { false }
+
+    /// Claim only the edge zones. `point` arrives in the superview's coordinates; convert into our own
+    /// bounds before testing so the zones track our frame origin.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+      let local = convert(point, from: superview)
+      guard bounds.contains(local) else { return nil }
+      return edge(nearestToX: local.x) != nil ? self : nil
+    }
+
+    /// The edge whose x is within `grabTolerance` of `x`, choosing the nearer one when both zones
+    /// overlap on a narrow selection. Nil when no edge is in range (or there is no selection).
+    private func edge(nearestToX posX: CGFloat) -> SelectionEdge? {
+      var best: (edge: SelectionEdge, distance: CGFloat)?
+      if let startX { best = (.start, abs(posX - startX)) }
+      if let endX {
+        let distance = abs(posX - endX)
+        if best == nil || distance < best!.distance { best = (.end, distance) }
+      }
+      guard let best, best.distance <= grabTolerance else { return nil }
+      return best.edge
+    }
+
+    private func localX(_ event: NSEvent) -> CGFloat {
+      convert(event.locationInWindow, from: nil).x
+    }
+
+    override func resetCursorRects() {
+      let cursor = NSCursor.resizeLeftRight
+      if let startX {
+        addCursorRect(
+          CGRect(x: startX - grabTolerance, y: 0, width: grabTolerance * 2, height: bounds.height),
+          cursor: cursor)
+      }
+      if let endX {
+        addCursorRect(
+          CGRect(x: endX - grabTolerance, y: 0, width: grabTolerance * 2, height: bounds.height),
+          cursor: cursor)
+      }
+    }
+
+    override func mouseDown(with event: NSEvent) {
+      activeEdge = edge(nearestToX: localX(event))
+      if let activeEdge { onEdgeDragBegan?(activeEdge) }
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+      guard let activeEdge else { return }
+      onEdgeDragged?(activeEdge, localX(event))
+    }
+
+    override func mouseUp(with event: NSEvent) {
+      if let activeEdge { onEdgeDragEnded?(activeEdge) }
+      activeEdge = nil
     }
   }
 }

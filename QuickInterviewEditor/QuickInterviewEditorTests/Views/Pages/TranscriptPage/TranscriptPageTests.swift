@@ -33,19 +33,24 @@ struct TranscriptPageTests {
   /// separator did not shift the range map, so hit-testing still lands on the right word.
   @Test func clickingWordAfterParagraphBreakSelectsIt() {
     let model = TranscriptPageModel(editPlan: Fixtures.editPlanV2())
+    var intent: TranscriptPageModel.SelectionIntent?
+    model.onSelectionIntent = { intent = $0 }
     // Word index 4 ("He", id 5) is the first word of the second paragraph.
     model.transcriptClicked(atUTF16Offset: offset(model, wordIndex: 4))
-    expectNoDifference(model.selectedWordIDSet, [5])
+    expectNoDifference(intent, .word(5, extending: false))
   }
 
   /// Dragging a selection that spans a paragraph break stays contiguous and correct —
   /// the break changes offsets but every word still maps to its own range.
   @Test func selectionSpanningParagraphBreakIsContiguous() {
     let model = TranscriptPageModel(editPlan: Fixtures.editPlanV2())
+    var intent: TranscriptPageModel.SelectionIntent?
+    model.onSelectionIntent = { intent = $0 }
     // From "Hayes." (id 4, end of paragraph 1) through "waits" (id 6, in paragraph 2).
     model.transcriptDragBegan(atUTF16Offset: offset(model, wordIndex: 3))
     model.transcriptDragged(toUTF16Offset: offset(model, wordIndex: 5))
-    expectNoDifference(model.selectedWordIDSet, [4, 5, 6])
+    expectNoDifference(intent, .words(anchor: 4, focus: 6))
+    expectNoDifference(model.selectionSummary, "3 words selected")
   }
 
   @Test func viewAppearedLoadsWords() async {
@@ -79,22 +84,25 @@ struct TranscriptPageTests {
     expectNoDifference(model.selectionSummary, "1 word selected")
   }
 
-  @Test func selectedSampleRangeMatchesBoundaryWords() async {
+  @Test func dragEmitsBoundaryWordIntent() async {
     let model = await loadedModel()
     let plan = model.editPlan!
+    var intent: TranscriptPageModel.SelectionIntent?
+    model.onSelectionIntent = { intent = $0 }
     model.transcriptDragBegan(atUTF16Offset: offset(model, wordIndex: 0))
     model.transcriptDragged(toUTF16Offset: offset(model, wordIndex: 2))
-    let expected = plan.words[0].startSample!..<plan.words[2].endSample!
-    expectNoDifference(model.selectedSampleRange, expected)
+    expectNoDifference(intent, .words(anchor: plan.words[0].id, focus: plan.words[2].id))
   }
 
   @Test func clearSelectionEmptiesIt() async {
     let model = await loadedModel()
+    var intent: TranscriptPageModel.SelectionIntent?
+    model.onSelectionIntent = { intent = $0 }
     model.transcriptDragBegan(atUTF16Offset: offset(model, wordIndex: 0))
     model.transcriptDragged(toUTF16Offset: offset(model, wordIndex: 2))
     model.clearSelectionTapped()
     #expect(!model.hasSelection)
-    expectNoDifference(model.selectedWordIDSet, [])
+    expectNoDifference(intent, .clear)
   }
 
   @Test func runTogetherSetPopulatedAtDefaultThreshold() async {
@@ -156,11 +164,12 @@ struct TranscriptPageTests {
       word(90, "c", start: 0.4, end: 0.5),
     ]
     let model = await modelLoaded(with: words)
+    var intent: TranscriptPageModel.SelectionIntent?
+    model.onSelectionIntent = { intent = $0 }
     model.transcriptDragBegan(atUTF16Offset: offset(model, wordIndex: 0))
     model.transcriptDragged(toUTF16Offset: offset(model, wordIndex: 1))
     expectNoDifference(model.selectionSummary, "2 words selected")
-    expectNoDifference(model.selectedWordIDSet, [10, 50])
-    expectNoDifference(model.selectedSampleRange, words[0].startSample!..<words[1].endSample!)
+    expectNoDifference(intent, .words(anchor: 10, focus: 50))
   }
 
   /// A malformed plan with duplicate word IDs must not trap the app on load.
@@ -174,20 +183,4 @@ struct TranscriptPageTests {
     expectNoDifference(model.plainTranscriptText, "a dup b")
   }
 
-  @Test func orderedSelectionExposesIDsAndSnippet() {
-    let model = TranscriptPageModel(editPlan: Fixtures.editPlan())
-    let planWords = model.editPlan!.words
-    model.transcriptDragBegan(atUTF16Offset: offset(model, wordIndex: 2))
-    model.transcriptDragged(toUTF16Offset: offset(model, wordIndex: 4))
-    expectNoDifference(
-      model.orderedSelectedWordIDs, [planWords[2].id, planWords[3].id, planWords[4].id])
-    #expect(!model.selectionSnippet.isEmpty)
-    #expect(model.selectionSnippet == model.selectionSnippet.trimmingCharacters(in: .whitespaces))
-  }
-
-  @Test func orderedSelectionEmptyWithoutSelection() {
-    let model = TranscriptPageModel(editPlan: Fixtures.editPlan())
-    expectNoDifference(model.orderedSelectedWordIDs, [])
-    expectNoDifference(model.selectionSnippet, "")
-  }
 }

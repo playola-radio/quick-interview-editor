@@ -291,9 +291,11 @@ struct EditorRemovalTests {
     }
   }
 
-  /// Word 3's midpoint (77704 + (98916-77704)/2 = 88310) falls inside the removal below;
-  /// words 1, 2, and 4's midpoints do not.
-  @Test func removedWordIDsTracksMidpointMembershipAndClearsOnUndo() async {
+  /// The removal `72_000..<114_000` fully contains only word 3 ("young", 77704..<98916); it clips
+  /// word 2 ("a", 70648..<74176) and word 4 ("Hayes", 107736..<119202) at their edges. Strikethrough
+  /// is full-containment, not midpoint — the clipped neighbors keep sounding, so only word 3 is
+  /// struck. (Midpoint membership would wrongly strike words 2 and 4 too.)
+  @Test func removedWordIDsTracksFullContainmentAndClearsOnUndo() async {
     let fileSystem = LockIsolated<[URL: Data]>([:])
     await withDependencies {
       $0.defaultFileStorage = FileStorage.inMemory(fileSystem: fileSystem)
@@ -305,7 +307,7 @@ struct EditorRemovalTests {
       model.mutateDocument { doc in
         doc.timelineRemovals.append(
           TimelineRemoval(
-            id: Fixtures.uuid(5), removedRange: 80_000..<100_000,
+            id: Fixtures.uuid(5), removedRange: 72_000..<114_000,
             crossfade: Crossfade(lengthSamples: 48, curve: .equalPower)))
       }
       expectNoDifference(model.removedWordIDs, [word3])
@@ -409,7 +411,7 @@ struct EditorRemovalTests {
     }
   }
 
-  // MARK: - Boundary nudge (Task 9)
+  // MARK: - Boundary nudge (freeform selection)
 
   /// Selects words 1..2 (indices) and returns both the model and the resulting raw selection —
   /// the same words `removeSelectedSectionCreatesRemovalWithDefaultCrossfade` uses, chosen for
@@ -419,7 +421,7 @@ struct EditorRemovalTests {
     let model = editor(fingerprint: fingerprint)
     model.transcript.selectWords(
       anchorID: model.editPlan.words[1].id, focusID: model.editPlan.words[2].id)
-    return (model, model.transcript.selectedSampleRange!)
+    return (model, model.audioSelection!)
   }
 
   @Test func selectingWordsThenSyncingOpensAPendingSelectionSession() {
@@ -434,7 +436,10 @@ struct EditorRemovalTests {
     }
   }
 
-  /// 10 ms at the fixture's 44,100 Hz sample rate is exactly 441 samples.
+  /// 10 ms at the fixture's 44,100 Hz sample rate is exactly 441 samples. The arrow keys now nudge
+  /// the freeform selection (`audioSelection`) directly, so the moved range shows on
+  /// `selectedSourceRange`. `syncEditSession()` is called to prove an open fine-tune session no
+  /// longer intercepts the nudge.
   @Test func nudgeCutInLaterMovesTheStartLaterBy441Samples() {
     let fileSystem = LockIsolated<[URL: Data]>([:])
     withDependencies {
@@ -444,7 +449,7 @@ struct EditorRemovalTests {
       model.syncEditSession()
       #expect(model.editorKeyDown(.nudgeCutInLater))
       expectNoDifference(
-        model.fineTune.draftRange, (selection.lowerBound + 441)..<selection.upperBound)
+        model.selectedSourceRange, (selection.lowerBound + 441)..<selection.upperBound)
     }
   }
 
@@ -457,7 +462,7 @@ struct EditorRemovalTests {
       model.syncEditSession()
       #expect(model.editorKeyDown(.nudgeCutInEarlier))
       expectNoDifference(
-        model.fineTune.draftRange, (selection.lowerBound - 441)..<selection.upperBound)
+        model.selectedSourceRange, (selection.lowerBound - 441)..<selection.upperBound)
     }
   }
 
@@ -470,7 +475,7 @@ struct EditorRemovalTests {
       model.syncEditSession()
       #expect(model.editorKeyDown(.nudgeCutOutLater))
       expectNoDifference(
-        model.fineTune.draftRange, selection.lowerBound..<(selection.upperBound + 441))
+        model.selectedSourceRange, selection.lowerBound..<(selection.upperBound + 441))
     }
   }
 
@@ -483,7 +488,7 @@ struct EditorRemovalTests {
       model.syncEditSession()
       #expect(model.editorKeyDown(.nudgeCutOutEarlier))
       expectNoDifference(
-        model.fineTune.draftRange, selection.lowerBound..<(selection.upperBound - 441))
+        model.selectedSourceRange, selection.lowerBound..<(selection.upperBound - 441))
     }
   }
 
@@ -511,7 +516,7 @@ struct EditorRemovalTests {
       let (model, selection) = selectionEditor(fingerprint: "fp-nudge-remove")
       model.syncEditSession()
       #expect(model.editorKeyDown(.nudgeCutOutLater))
-      let nudgedRange = model.fineTune.draftRange!
+      let nudgedRange = model.selectedSourceRange!
       #expect(nudgedRange != selection)
 
       await model.removeSelectedSectionTapped()
@@ -524,13 +529,10 @@ struct EditorRemovalTests {
     }
   }
 
-  /// Regression (coordinator-flagged deadlock, Task 9 follow-up fix): a `.pendingSelection`
-  /// draft is a disposable CANDIDATE with no pane protecting it, so `syncEditSession()` must
-  /// freely abandon a dirty draft the moment the live selection moves on to a different range —
-  /// NOT hold it forever like a `.slice` edit would. Select A, nudge it dirty, then select B:
-  /// the session must retarget cleanly to B (draft == B, not dirty), and Remove Section must act
-  /// on B, not the abandoned A'.
-  @Test func removeSelectedSectionAfterReselectingRemovesTheNewSelectionNotTheStaleNudgedDraft()
+  /// Reselecting replaces the freeform selection outright, so Remove Section acts on the new
+  /// selection — never a stale earlier one. Select A, nudge it, then select B: `audioSelection`
+  /// becomes B (there is no separately held draft that could go stale), and the removal uses B.
+  @Test func removeSelectedSectionAfterReselectingRemovesTheNewSelectionNotTheStaleNudgedRange()
     async
   {
     let fileSystem = LockIsolated<[URL: Data]>([:])
@@ -540,19 +542,15 @@ struct EditorRemovalTests {
       let (model, selectionA) = selectionEditor(fingerprint: "fp-nudge-reselect")
       model.syncEditSession()
       #expect(model.editorKeyDown(.nudgeCutOutLater))
-      let nudgedA = model.fineTune.draftRange!
+      let nudgedA = model.selectedSourceRange!
       #expect(nudgedA != selectionA)
 
-      // Select different words (B) — the dirty draft on A is abandoned, not held.
+      // Select different words (B) — the freeform selection is replaced, not merged.
       model.transcript.selectWords(
         anchorID: model.editPlan.words[4].id, focusID: model.editPlan.words[5].id)
       model.syncEditSession()
-      let selectionB = model.transcript.selectedSampleRange!
+      let selectionB = model.selectedSourceRange!
       #expect(selectionB != nudgedA)
-      // The session retargeted cleanly to B — no stale draft, no unsaved change.
-      expectNoDifference(model.fineTune.draftRange, selectionB)
-      expectNoDifference(model.fineTune.committedRange, selectionB)
-      #expect(!model.fineTune.hasUnsavedChange)
 
       await model.removeSelectedSectionTapped()
 
@@ -561,16 +559,16 @@ struct EditorRemovalTests {
     }
   }
 
-  /// The deadlock, directly: nudging A and then reselecting B must NOT permanently disable
-  /// `canAddSlice` for B or block `editSliceTapped` on an existing slice — both were previously
-  /// wedged forever because the abandoned dirty draft on A was held rather than discarded.
-  @Test func reselectingAfterADirtyPendingDraftDoesNotPermanentlyBlockAddSliceOrEditSlice() {
+  /// Nudging the freeform selection mutates `audioSelection` directly and never opens or dirties a
+  /// held fine-tune draft, so it can't wedge `canAddSlice` or block `editSliceTapped` — the class
+  /// of deadlock the retired nudge-via-fineTune stopgap could cause is gone by construction.
+  @Test func nudgingASelectionNeverBlocksAddSliceOrEditSlice() {
     let fileSystem = LockIsolated<[URL: Data]>([:])
     withDependencies {
       $0.defaultFileStorage = FileStorage.inMemory(fileSystem: fileSystem)
     } operation: {
-      let model = editor(fingerprint: "fp-deadlock-repro")
-      // An existing slice, added and selection cleared, before touching the A/B dance below.
+      let model = editor(fingerprint: "fp-nudge-no-deadlock")
+      // An existing slice, added and selection cleared, before the nudge below.
       model.transcript.selectWords(
         anchorID: model.editPlan.words[7].id, focusID: model.editPlan.words[8].id)
       model.addSliceTapped()
@@ -580,47 +578,41 @@ struct EditorRemovalTests {
       model.transcript.selectWords(
         anchorID: model.editPlan.words[1].id, focusID: model.editPlan.words[2].id)
       model.syncEditSession()
-      #expect(model.editorKeyDown(.nudgeCutOutLater))  // dirty draft on A
-      #expect(model.fineTune.hasUnsavedChange)
-
-      model.transcript.selectWords(
-        anchorID: model.editPlan.words[4].id, focusID: model.editPlan.words[5].id)
-      model.syncEditSession()
-
-      // Not stuck: B is addable...
+      #expect(model.editorKeyDown(.nudgeCutOutLater))
+      // The nudge left no unsaved fine-tune draft behind...
+      #expect(!model.fineTune.hasUnsavedChange)
+      // ...so a fresh add and an existing-slice edit both stay available.
       #expect(model.canAddSlice)
-      // ...and the existing slice's fine-tune pane opens.
       model.editSliceTapped(existingSlice.id)
       expectNoDifference(model.editSlice?.sliceID, existingSlice.id)
     }
   }
 
-  /// Once the draft is freely abandoned on reselect (the fix above), a nudge key on the NEW
-  /// selection must actually work — proving the deadlock doesn't leave nudging inert either.
-  @Test func nudgeKeysWorkOnANewSelectionAfterAbandoningAPriorDirtyDraft() {
+  /// A nudge on one selection followed by a fresh selection: the arrow keys keep working on the
+  /// new selection (they always target the live `audioSelection`).
+  @Test func nudgeKeysWorkOnAFreshSelectionAfterAPriorNudge() {
     let fileSystem = LockIsolated<[URL: Data]>([:])
     withDependencies {
       $0.defaultFileStorage = FileStorage.inMemory(fileSystem: fileSystem)
     } operation: {
-      let (model, _) = selectionEditor(fingerprint: "fp-nudge-fresh-after-abandon")
+      let (model, _) = selectionEditor(fingerprint: "fp-nudge-fresh")
       model.syncEditSession()
-      #expect(model.editorKeyDown(.nudgeCutOutLater))  // dirty draft on A, abandoned below
+      #expect(model.editorKeyDown(.nudgeCutOutLater))  // moves selection A
 
       model.transcript.selectWords(
         anchorID: model.editPlan.words[4].id, focusID: model.editPlan.words[5].id)
       model.syncEditSession()
-      let selectionB = model.transcript.selectedSampleRange!
+      let selectionB = model.selectedSourceRange!
 
       #expect(model.editorKeyDown(.nudgeCutOutLater))
       expectNoDifference(
-        model.fineTune.draftRange, selectionB.lowerBound..<(selectionB.upperBound + 441))
+        model.selectedSourceRange, selectionB.lowerBound..<(selectionB.upperBound + 441))
     }
   }
 
-  /// Same fix, via Clear: an abandoned dirty draft must not leave the app in a bad state once
-  /// nothing is selected — the session fully clears, so Remove Section is (correctly) disabled
-  /// rather than silently eligible against the discarded draft.
-  @Test func clearingASelectionAfterADirtyNudgeFullyClearsTheSessionNotStuckDirty() {
+  /// Clearing the selection after a nudge leaves nothing removable: `audioSelection` is nil, so
+  /// Remove Section is (correctly) disabled and the fine-tune session clears with the selection.
+  @Test func clearingASelectionAfterANudgeDisablesRemove() {
     let fileSystem = LockIsolated<[URL: Data]>([:])
     withDependencies {
       $0.defaultFileStorage = FileStorage.inMemory(fileSystem: fileSystem)
@@ -628,15 +620,13 @@ struct EditorRemovalTests {
       let (model, _) = selectionEditor(fingerprint: "fp-nudge-clear")
       model.syncEditSession()
       #expect(model.editorKeyDown(.nudgeCutOutLater))
-      #expect(model.fineTune.hasUnsavedChange)
 
       model.transcript.clearSelectionTapped()
       model.syncEditSession()
 
+      expectNoDifference(model.selectedSourceRange, nil)
       expectNoDifference(model.canRemoveSelectedSection, false)
       expectNoDifference(model.fineTune.target, nil)
-      expectNoDifference(model.fineTune.draftRange, nil)
-      #expect(!model.fineTune.hasUnsavedChange)
     }
   }
 }

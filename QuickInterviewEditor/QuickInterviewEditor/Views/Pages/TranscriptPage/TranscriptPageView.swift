@@ -12,7 +12,7 @@ struct TranscriptPageView: View {
         fontSize: model.fontSize,
         paragraphSpacing: model.paragraphSpacing,
         lineSpacing: model.lineSpacing,
-        selected: model.selectedWordIDSet,
+        selected: model.highlightedWordIDs,
         clipContainers: model.clipContainers,
         removedWordIDs: model.removedWordIDs,
         currentWordID: model.currentWordID,

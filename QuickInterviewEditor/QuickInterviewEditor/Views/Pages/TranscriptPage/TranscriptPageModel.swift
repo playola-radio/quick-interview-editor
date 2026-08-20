@@ -55,6 +55,23 @@ class TranscriptPageModel: ViewModel {
   /// owner) can apply it to the shared player — live if playing, and for the next play otherwise.
   @ObservationIgnored var onPlaybackRateChanged: ((Double) -> Void)?
 
+  /// A text-selection gesture, expressed as which words it hit. The transcript no longer owns the
+  /// selection: it resolves the gesture to word IDs and hands this intent to `EditorModel`, which
+  /// writes the authoritative freeform `audioSelection`. One-directional — nothing writes back
+  /// through here. Lives on the model (not a view `.onChange`) so headless tests apply intents.
+  @ObservationIgnored var onSelectionIntent: ((SelectionIntent) -> Void)?
+
+  /// What a transcript selection gesture resolved to, in transcript terms (word IDs). `EditorModel`
+  /// turns each into a source-sample range on the authoritative `audioSelection`.
+  enum SelectionIntent: Equatable, Sendable {
+    /// A span from an anchor word to a focus word (drag, or a resolved multi-word selection).
+    case words(anchor: Word.ID, focus: Word.ID)
+    /// A single word; `extending` (Shift) stretches the current selection to it.
+    case word(Word.ID, extending: Bool)
+    /// Clear the selection entirely.
+    case clear
+  }
+
   // MARK: - Initialization
   let planURL: URL?
   init(planURL: URL? = Bundle.main.url(forResource: "edit-plan", withExtension: "json")) {
@@ -88,8 +105,12 @@ class TranscriptPageModel: ViewModel {
   let runTogetherMaxGapMs: Double = 30
   @ObservationIgnored private var gaps: [WordGap] = []
   var isLoading = false
-  var selectionAnchorID: Word.ID?
-  var selectionFocusID: Word.ID?
+  /// In-progress gesture working state: the anchor/focus of the active click-drag or shift-extend.
+  /// NOT the selection's source of truth — the gesture handlers emit `onSelectionIntent` and
+  /// `EditorModel.audioSelection` is authoritative. Private because nothing outside the gesture
+  /// handlers reads them; the renderer draws the pushed-in `highlightedWordIDs` instead.
+  private var selectionAnchorID: Word.ID?
+  private var selectionFocusID: Word.ID?
   var document = TranscriptDocument(words: [])
   var plainTranscriptText: String { document.text }
   let minFontSize = 11.0
@@ -118,6 +139,10 @@ class TranscriptPageModel: ViewModel {
   /// from `timelineRemovals` and pushed in by the view — mirrors `clipBands`. The transcript
   /// stays layout-local and only renders what it's handed.
   var removedWordIDs: Set<Word.ID> = []
+  /// Words to highlight, derived by `EditorModel` from the authoritative `audioSelection` (overlap
+  /// predicate) and pushed in by the view — mirrors `removedWordIDs`/`clipBands`. This is what the
+  /// renderer draws; the transcript's own `selectedWordIDSet` shadow is retired in a later task.
+  var highlightedWordIDs: Set<Word.ID> = []
   /// The latest explicit reveal request (from clicking a suggestion or clip). The view scrolls
   /// to it regardless of `followMode`; nil until the first reveal.
   var reveal: TranscriptReveal?
@@ -142,16 +167,6 @@ class TranscriptPageModel: ViewModel {
     guard count > 0 else { return "No selection" }
     return "\(count) word\(count == 1 ? "" : "s") selected"
   }
-  var selectedSampleRange: Range<Int>? {
-    guard let plan = editPlan, let first = selectedWords.first, let last = selectedWords.last
-    else { return nil }
-    let sr = Double(plan.source.sampleRate)
-    let lower = first.startSample ?? Int(first.start * sr)
-    let upper = last.endSample ?? Int((last.end ?? last.start) * sr)
-    // non-monotonic samples must not build an inverted Range
-    guard lower < upper else { return nil }
-    return lower..<upper
-  }
   /// Sample ranges of the run-together words, ordered by transcript position. Words
   /// missing sample bounds (or with inverted/zero-width bounds) are excluded. A duplicate
   /// word ID emits only its first occurrence's range, matching the dedup semantics of the
@@ -168,14 +183,6 @@ class TranscriptPageModel: ViewModel {
     }
     return ranges
   }
-  var orderedSelectedWordIDs: [Word.ID] { selectedWords.map(\.id) }
-  var selectionSnippet: String {
-    selectedWords.map(\.text).joined(separator: " ")
-      .trimmingCharacters(in: .whitespaces)
-  }
-  /// Public selection set for the renderer to diff (the private `selectedWordIDs` stays internal).
-  var selectedWordIDSet: Set<Word.ID> { selectedWordIDs }
-
   /// The clip bands mapped to drawable UTF-16 runs, in transcript order. Walks
   /// `document.wordRanges` (position order, so it's correct even for non-monotonic word IDs)
   /// and merges each maximal stretch of consecutive words belonging to the SAME band into ONE
@@ -301,6 +308,16 @@ class TranscriptPageModel: ViewModel {
   func clearSelectionTapped() {
     selectionAnchorID = nil
     selectionFocusID = nil
+    onSelectionIntent?(.clear)
+  }
+
+  /// Drops the transcript's own gesture anchor/focus without emitting a selection intent.
+  /// The editor calls this when it clears the freeform selection (e.g. a waveform gap-click)
+  /// so a later transcript Shift-click starts a fresh single-word selection instead of
+  /// extending from the stale anchor of a selection the user already cleared.
+  func invalidateSelectionAnchor() {
+    selectionAnchorID = nil
+    selectionFocusID = nil
   }
 
   /// Selects exactly one word (anchor == focus). Used by the waveform→transcript sync
@@ -308,6 +325,7 @@ class TranscriptPageModel: ViewModel {
   func selectWord(_ id: Word.ID) {
     selectionAnchorID = id
     selectionFocusID = id
+    onSelectionIntent?(.word(id, extending: false))
   }
 
   /// Selects the contiguous run between two words (a suggestion's or clip's endpoints).
@@ -321,6 +339,7 @@ class TranscriptPageModel: ViewModel {
     else { return false }
     selectionAnchorID = anchorID
     selectionFocusID = focusID
+    onSelectionIntent?(.words(anchor: anchorID, focus: focusID))
     return true
   }
 
@@ -330,6 +349,15 @@ class TranscriptPageModel: ViewModel {
     guard let first = selectedWords.first else { return }
     revealToken += 1
     reveal = TranscriptReveal(wordID: first.id, token: revealToken)
+  }
+
+  /// Requests a scroll to a specific word, token-bumped so the renderer re-scrolls even to the same
+  /// word. Used when the waveform owns the selection (freeform `audioSelection`) and drives the
+  /// transcript scroll by the range's first overlapping word, rather than the transcript's own
+  /// selection (which the waveform no longer sets).
+  func revealWord(_ id: Word.ID) {
+    revealToken += 1
+    reveal = TranscriptReveal(wordID: id, token: revealToken)
   }
 
   func transcriptClicked(atUTF16Offset offset: Int, extending: Bool = false) {
@@ -343,8 +371,9 @@ class TranscriptPageModel: ViewModel {
     guard let plan = editPlan, plan.words.contains(where: { $0.id == id }) else { return }
     let anchorIsValid =
       selectionAnchorID.map { anchor in plan.words.contains { $0.id == anchor } } ?? false
-    if extending, anchorIsValid {
+    if extending, anchorIsValid, let anchor = selectionAnchorID {
       selectionFocusID = id  // keep anchor, move focus
+      onSelectionIntent?(.words(anchor: anchor, focus: id))
     } else if extending {
       selectWord(id)  // no valid anchor -> plain select
     } else if selectionAnchorID == id, selectionFocusID == id {
@@ -358,11 +387,15 @@ class TranscriptPageModel: ViewModel {
     guard let id = document.wordID(atUTF16Offset: offset) else { return }
     selectionAnchorID = id
     selectionFocusID = id
+    onSelectionIntent?(.word(id, extending: false))
   }
 
   func transcriptDragged(toUTF16Offset offset: Int) {
-    guard let id = document.wordID(atUTF16Offset: offset) else { return }
+    guard let id = document.wordID(atUTF16Offset: offset), let anchor = selectionAnchorID else {
+      return
+    }
     selectionFocusID = id
+    onSelectionIntent?(.words(anchor: anchor, focus: id))
   }
 
   func transcriptDragEnded() {}
@@ -476,6 +509,4 @@ class TranscriptPageModel: ViewModel {
     else { return [] }
     return plan.words[min(anchorIndex, focusIndex)...max(anchorIndex, focusIndex)]
   }
-
-  private var selectedWordIDs: Set<Word.ID> { Set(selectedWords.map(\.id)) }
 }
