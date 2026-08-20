@@ -193,4 +193,140 @@ struct EditorExportRemovalTests {
 
     #expect(model.exportTightWarning.contains("Intro"))
   }
+
+  /// The bounds check the Python engine used to do: a stale slice whose range runs past the
+  /// recording's end must fail the export with a clear message BEFORE any render job is
+  /// issued, not trap forming a range or read past EOF inside the renderer.
+  @Test func aSliceRangePastTheRecordingEndFailsTheExportBeforeRendering() async throws {
+    let plan = EditPlan(
+      schemaVersion: 1,
+      source: .init(path: "/clip.m4a", sampleRate: 44100, channels: 1, durationSamples: 100_000),
+      words: [], silences: [], segments: [])
+    let model = editor(plan)
+    model.slices.append(
+      Slice(
+        id: UUID(), name: "Stale", startSample: 90_000, endSample: 120_000, wordIDs: [],
+        snippet: "x", warnings: []))
+    let renderedJobs = LockIsolated<[ExportRenderJob]>([])
+    let destination = try makeTempDir()
+    defer { try? FileManager.default.removeItem(at: destination) }
+
+    await withDependencies {
+      $0.exportRender.renderSlice = { job in
+        renderedJobs.withValue { $0.append(job) }
+        try writeStubAIFF(job)
+      }
+      $0.engine.injectMarkers = { _ in }
+      $0.workspace.reveal = { _ in }
+    } operation: {
+      model.destinationURL = destination
+      model.exportAllTapped()
+      await model.exportTask?.value
+    }
+
+    if case .failed(let message) = model.exportPhase {
+      #expect(message.contains("Stale"))
+    } else {
+      Issue.record("expected .failed, got \(model.exportPhase)")
+    }
+    expectNoDifference(renderedJobs.value, [])
+  }
+
+  /// Undo/redo rewind the document wholesale — mid-export that would make the finished AIFFs
+  /// stale relative to what the user sees (same rationale as blocking new removals during an
+  /// export). Blocked while the export runs, available again once it's done.
+  @Test func undoIsBlockedWhileAnExportIsRunning() async throws {
+    let plan = EditPlan(
+      schemaVersion: 1,
+      source: .init(path: "/clip.m4a", sampleRate: 44100, channels: 1, durationSamples: 100_000),
+      words: [], silences: [], segments: [])
+    let model = editor(plan)
+    model.slices.append(
+      Slice(
+        id: UUID(), name: "A", startSample: 0, endSample: 20000, wordIDs: [], snippet: "x",
+        warnings: []))
+    model.mutateDocument { doc in
+      doc.timelineRemovals.append(
+        TimelineRemoval(
+          id: UUID(), removedRange: 5000..<8000,
+          crossfade: Crossfade(lengthSamples: 0, curve: .equalPower)))
+    }
+    expectNoDifference(model.canUndo, true)
+    let removalsBefore = model.timelineRemovals
+    let (gateStream, gate) = AsyncStream.makeStream(of: Void.self)
+    let destination = try makeTempDir()
+    defer { try? FileManager.default.removeItem(at: destination) }
+
+    await withDependencies {
+      $0.exportRender.renderSlice = { job in
+        try writeStubAIFF(job)
+        // Suspend until the test releases the gate, so assertions run mid-export.
+        for await _ in gateStream {}
+      }
+      $0.engine.injectMarkers = { _ in }
+      $0.workspace.reveal = { _ in }
+    } operation: {
+      model.destinationURL = destination
+      model.exportAllTapped()
+      expectNoDifference(model.canUndo, false)
+      // A menu/shortcut invocation must no-op too, not just disable the button.
+      await model.undoTapped()
+      expectNoDifference(model.timelineRemovals, removalsBefore)
+      gate.finish()
+      await model.exportTask?.value
+    }
+
+    expectNoDifference(model.exportPhase, .done(count: 1))
+    expectNoDifference(model.canUndo, true)
+  }
+
+  /// The removal set is frozen at the tap that passed the export gate: a document mutation
+  /// landing between the tap and the render (the destination picker sits between them) must
+  /// not change what gets rendered — the export ships exactly the timeline that enabled it.
+  @Test func exportRendersTheRemovalSetThatGatedIt() async throws {
+    let plan = EditPlan(
+      schemaVersion: 1,
+      source: .init(path: "/clip.m4a", sampleRate: 44100, channels: 1, durationSamples: 100_000),
+      words: [], silences: [], segments: [])
+    let model = editor(plan)
+    model.slices.append(
+      Slice(
+        id: UUID(), name: "A", startSample: 0, endSample: 20000, wordIDs: [], snippet: "x",
+        warnings: []))
+    model.mutateDocument { doc in
+      doc.timelineRemovals.append(
+        TimelineRemoval(
+          id: UUID(), removedRange: 5000..<8000,
+          crossfade: Crossfade(lengthSamples: 0, curve: .equalPower)))
+    }
+    let renderedJobs = LockIsolated<[ExportRenderJob]>([])
+    let destination = try makeTempDir()
+    defer { try? FileManager.default.removeItem(at: destination) }
+
+    await withDependencies {
+      $0.exportRender.renderSlice = { job in
+        renderedJobs.withValue { $0.append(job) }
+        try writeStubAIFF(job)
+      }
+      $0.engine.injectMarkers = { _ in }
+      $0.workspace.reveal = { _ in }
+    } operation: {
+      model.destinationURL = destination
+      model.exportAllTapped()
+      // The export task hasn't run yet (it starts at the next suspension); a mutation
+      // sneaking in here must not leak into the render.
+      model.mutateDocument { doc in
+        doc.timelineRemovals.append(
+          TimelineRemoval(
+            id: UUID(), removedRange: 10000..<15000,
+            crossfade: Crossfade(lengthSamples: 0, curve: .equalPower)))
+      }
+      await model.exportTask?.value
+    }
+
+    expectNoDifference(model.exportPhase, .done(count: 1))
+    // Only the first (gating-time) removal is rendered out: 20000 - 3000 = 17000. Had the
+    // late removal leaked in, the edited duration would be 12000.
+    expectNoDifference(renderedJobs.value.map(\.editedDurationSamples), [17000])
+  }
 }

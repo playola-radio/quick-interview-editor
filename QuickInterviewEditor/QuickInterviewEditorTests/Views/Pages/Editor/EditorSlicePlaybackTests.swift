@@ -201,6 +201,26 @@ struct EditorSlicePlaybackTests {
     }
   }
 
+  @Test func slicePlaylistFinishRestsAtTheSampleTheAudioActuallyReached() async {
+    let model = editor()
+    addRemoval(model, 40_000, 60_000, length: 4_800)
+    let slice = addSlice(model, 30_000, 80_000)
+    await withDependencies {
+      // A stale/short canonical file clamps the schedule; the player reports the
+      // slice-LOCAL edited sample it truly reached instead of playing to the plan's end.
+      $0.audioPlayer.playEdited = { _, _, _, _, _ in
+        EditedPlaybackEnd(end: .finished, finishedEditedSample: 12_000)
+      }
+    } operation: {
+      await model.playSliceTapped(slice.id)
+    }
+    // Slice-local edited 12_000 converts to absolute source 66_800 (global edited 42_000) —
+    // NOT the slice's end at 80_000, which the audio never got to.
+    expectNoDifference(model.playheadSourceSample, 66_800)
+    expectNoDifference(model.playheadEditedSample, 42_000)
+    expectNoDifference(model.transportPhase, .stopped)
+  }
+
   @Test func slicePlaylistFinishRestsCursorAtTheSliceEnd() async {
     let model = editor()
     addRemoval(model, 40_000, 60_000, length: 4_800)
