@@ -288,11 +288,11 @@ final class EditorModel: ViewModel {
   /// through the SOURCE moment they marked — captured against the old timeline, re-resolved
   /// against the new — so they keep pointing at the same instant of the recording.
   ///
-  /// A live free-play session is playing a playlist built from the OLD timeline: letting it run
-  /// would reinterpret its edited-axis ticks against the new axis, so audio and cursor diverge
-  /// (and a paused one would resume stale audio). Stop it — the mirror of the ruler/selection
-  /// "stop, then act" rule — leaving the cursor where the remap puts it. Source-range sessions
-  /// (slice, preview, audition, modal) play original audio, which a removal doesn't change.
+  /// A live session whose audio was built from the OLD removal set is stale: letting it run
+  /// would reinterpret its ticks against the new axis (free play) or keep playing audio the
+  /// document no longer contains (a slice). Stop it — the mirror of the ruler/selection
+  /// "stop, then act" rule — leaving the cursor where the remap puts it.
+  /// `playbackDependsOnChangedRemovals` decides which sessions that covers.
   private func syncEditedTimeline() {
     // Drop a seam selection whose removal is gone (restore, undo, redo) before anything reads it.
     // Runs ahead of the timeline-equality guard so a stale selection is always reconciled, even in
@@ -303,7 +303,7 @@ final class EditorModel: ViewModel {
     }
     let newTimeline = editedTimeline
     guard newTimeline != editedWaveform.timeline else { return }
-    if case .free = transportContext, let session = transportPhase.session {
+    if let session = transportPhase.session, playbackDependsOnChangedRemovals() {
       resetTransportState()
       endTranscriptFollow()
       Task { await stopOwnedPlayback(session) }
@@ -318,6 +318,25 @@ final class EditorModel: ViewModel {
     editedWaveform.timelineChanged()
     placeCursor(atSource: sourceCursor)
     transportOriginEditedSample = sourceOrigin.map(editedCursor(forSource:))
+  }
+
+  /// Whether the live playback's audio was built from the removal set that just changed. Free
+  /// play always was — its playlist IS the edited timeline. A slice session depends only on the
+  /// removals inside its own range: a playlist session is stale once its slice-local timeline no
+  /// longer matches what it scheduled, and a raw source-range slice session becomes wrong the
+  /// moment a removal first lands inside the slice (it would keep playing audio export now
+  /// cuts). Preview/audition/modal sessions stay deliberately source-faithful and keep playing.
+  private func playbackDependsOnChangedRemovals() -> Bool {
+    if case .free = transportContext { return true }
+    guard let sliceID = transportContext.sliceID, let slice = slices[id: sliceID] else {
+      return false
+    }
+    let newLocal = SliceRenderPlanBuilder.localTimeline(
+      sliceRange: slice.startSample..<slice.endSample, removals: Array(timelineRemovals))
+    guard let scheduled = slicePlaybackConversion?.localTimeline else {
+      return !newLocal.removals.isEmpty
+    }
+    return newLocal != scheduled
   }
 
   // MARK: - Display Text

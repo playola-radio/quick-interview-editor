@@ -247,6 +247,86 @@ struct EditorSlicePlaybackTests {
     expectNoDifference(model.playheadEditedSample, 45_200)
   }
 
+  // MARK: - Removal edits during slice playback
+
+  @Test func addingARemovalInsideThePlayingSliceStopsItsPlaylistPlayback() async {
+    let model = editor()
+    addRemoval(model, 40_000, 60_000, length: 4_800)
+    let slice = addSlice(model, 30_000, 80_000)
+    let gate = PlayGate()
+    await withDependencies {
+      $0.audioPlayer.playEdited = { _, _, _, _, _ in
+        EditedPlaybackEnd(end: await gate.play(), finishedEditedSample: nil)
+      }
+      $0.audioPlayer.stop = { _ in await gate.finish(.stopped) }
+    } operation: {
+      let play = Task { await model.playSliceTapped(slice.id) }
+      await settle(until: model.isTransportPlaying)
+      // A second removal lands inside the playing slice: the scheduled playlist no longer
+      // matches the document, so the session must stop rather than keep playing audio
+      // export would now cut.
+      model.mutateDocument { doc in
+        doc.timelineRemovals.append(
+          TimelineRemoval(
+            id: Fixtures.uuid(2), removedRange: 70_000..<74_000,
+            crossfade: Crossfade(lengthSamples: 0, curve: .equalPower)))
+      }
+      expectNoDifference(model.transportPhase, .stopped)
+      await play.value
+    }
+  }
+
+  @Test func addingARemovalOutsideThePlayingSliceKeepsItPlaying() async {
+    let model = editor()
+    addRemoval(model, 40_000, 60_000, length: 4_800)
+    let slice = addSlice(model, 30_000, 80_000)
+    let gate = PlayGate()
+    await withDependencies {
+      $0.audioPlayer.playEdited = { _, _, _, _, _ in
+        EditedPlaybackEnd(end: await gate.play(), finishedEditedSample: nil)
+      }
+      $0.audioPlayer.stop = { _ in await gate.finish(.stopped) }
+    } operation: {
+      let play = Task { await model.playSliceTapped(slice.id) }
+      await settle(until: model.isTransportPlaying)
+      // The slice's own audio is untouched by a removal elsewhere in the recording, so its
+      // playback keeps going — only the slice-local timeline matters to a slice session.
+      model.mutateDocument { doc in
+        doc.timelineRemovals.append(
+          TimelineRemoval(
+            id: Fixtures.uuid(2), removedRange: 100_000..<110_000,
+            crossfade: Crossfade(lengthSamples: 0, curve: .equalPower)))
+      }
+      #expect(model.isTransportPlaying)
+      await model.transportStopTapped()
+      await play.value
+    }
+  }
+
+  @Test func addingARemovalInsideARawSourceRangeSlicePlaybackStopsIt() async {
+    let model = editor()
+    let slice = addSlice(model, 5_000, 20_000)
+    let gate = PlayGate()
+    await withDependencies {
+      $0.audioPlayer.play = { _, _, _, _, _ in await gate.play() }
+      $0.audioPlayer.stop = { _ in await gate.finish(.stopped) }
+    } operation: {
+      let play = Task { await model.playSliceTapped(slice.id) }
+      await settle(until: model.isTransportPlaying)
+      // The slice was clear of removals when it started, so it took the raw source path. The
+      // first removal to land inside it makes that raw audio wrong — stop, matching what the
+      // slice would render on export.
+      model.mutateDocument { doc in
+        doc.timelineRemovals.append(
+          TimelineRemoval(
+            id: removalID, removedRange: 10_000..<12_000,
+            crossfade: Crossfade(lengthSamples: 0, curve: .equalPower)))
+      }
+      expectNoDifference(model.transportPhase, .stopped)
+      await play.value
+    }
+  }
+
   // MARK: - A natural finish rests where the audio really ended
 
   @Test func finishRestsCursorAtTheSampleThePlaylistActuallyReached() async {
