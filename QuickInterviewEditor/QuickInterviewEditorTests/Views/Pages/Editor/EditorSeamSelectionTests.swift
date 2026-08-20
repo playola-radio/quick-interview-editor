@@ -482,7 +482,9 @@ struct EditorSeamSelectionTests {
     let fileSystem = LockIsolated<[URL: Data]>([:])
     await withDependencies {
       $0.defaultFileStorage = FileStorage.inMemory(fileSystem: fileSystem)
-      $0.audioPlayer.playEdited = { _, _, _, _, _ in await gate.play() }
+      $0.audioPlayer.playEdited = { _, _, _, _, _ in
+        EditedPlaybackEnd(end: await gate.play(), finishedEditedSample: nil)
+      }
       $0.audioPlayer.stop = { _ in gate.release() }
     } operation: {
       let model = editor(fingerprint: "fp-restore-midplay")
