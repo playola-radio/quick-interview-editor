@@ -21,6 +21,15 @@ enum PlaybackEnd: Sendable, Equatable {
   case superseded
 }
 
+/// How an edited-timeline playlist playback ended. `finishedEditedSample` is set only on a
+/// natural `.finished`: the EDITED sample the playlist actually reached, derived from the
+/// RESOLVED (file-clamped) schedule — with a stale/short canonical file this is where the
+/// audio really stopped, not the plan's declared end.
+struct EditedPlaybackEnd: Sendable, Equatable {
+  var end: PlaybackEnd
+  var finishedEditedSample: Int?
+}
+
 struct AudioPlayerClient: Sendable {
   /// Plays url from range.lowerBound to range.upperBound (samples) at `rate` (pitch-preserving
   /// speed, 1.0 = normal) and returns how it ended when playback finishes or `stop`/a superseding
@@ -31,10 +40,11 @@ struct AudioPlayerClient: Sendable {
   /// Plays an edited-timeline render plan as ONE gapless stream — kept-segment interiors
   /// scheduled from `url`, seam crossfades pre-rendered and blended — at `rate`
   /// (pitch-preserving), reporting positions/pause samples on the EDITED axis
-  /// (`PlaybackSample.edited`). Mirrors `play`'s session/rate contract.
+  /// (`PlaybackSample.edited`). Mirrors `play`'s session/rate contract, and additionally reports
+  /// the edited sample a natural finish actually reached (see `EditedPlaybackEnd`).
   var playEdited:
     @Sendable (URL, AudioEditRenderPlan, Int, Double, PlaybackSessionID) async throws
-      -> PlaybackEnd
+      -> EditedPlaybackEnd
   /// Pauses `session` if it is the current playback, freezing the node in place; returns the
   /// exact resting sample, tagged with its coordinate axis (nil if `session` is not current).
   /// Does not end the `play` call.
@@ -82,7 +92,7 @@ extension AudioPlayerClient: TestDependencyKey {
       reportIssue("AudioPlayerClient.play called without a test override")
       throw EngineClientError.unimplemented("AudioPlayerClient.play")
     },
-    playEdited: { _, _, _, _, _ -> PlaybackEnd in
+    playEdited: { _, _, _, _, _ -> EditedPlaybackEnd in
       reportIssue("AudioPlayerClient.playEdited called without a test override")
       throw EngineClientError.unimplemented("AudioPlayerClient.playEdited")
     },
@@ -102,7 +112,8 @@ extension AudioPlayerClient: TestDependencyKey {
   )
 
   static let previewValue = AudioPlayerClient(
-    play: { _, _, _, _, _ in .finished }, playEdited: { _, _, _, _, _ in .finished },
+    play: { _, _, _, _, _ in .finished },
+    playEdited: { _, _, _, _, _ in EditedPlaybackEnd(end: .finished, finishedEditedSample: nil) },
     pause: { _ in nil }, resume: { _ in true },
     stop: { _ in }, setRate: { _ in }, positions: { AsyncStream { $0.finish() } })
 }
@@ -277,7 +288,7 @@ private actor LivePlayerBox {
   func playEdited(
     url: URL, plan: AudioEditRenderPlan, planSampleRate: Int, rate: Double,
     session: PlaybackSessionID
-  ) async throws -> PlaybackEnd {
+  ) async throws -> EditedPlaybackEnd {
     currentRate = Self.clampedRate(rate)
     let file = try AVAudioFile(forReading: url)
     let format = file.processingFormat
@@ -287,7 +298,9 @@ private actor LivePlayerBox {
     // against a short file): no-op without disturbing any current playback, mirroring the
     // empty-range guard in `play`.
     let scheduledEntries = try resolvedEntries(for: plan, file: file, ratio: ratio)
-    guard !scheduledEntries.isEmpty else { return .stopped }
+    guard !scheduledEntries.isEmpty else {
+      return EditedPlaybackEnd(end: .stopped, finishedEditedSample: nil)
+    }
 
     supersede(broadcastStop: false)
     currentSession = session
@@ -296,12 +309,19 @@ private actor LivePlayerBox {
     // The cursor table is built from the RESOLVED entries — the frame counts that truly
     // reach the node — never from a second rounding of the plan. A clamped or dropped
     // item would otherwise leave every later entry's frame offset ahead of the audio.
-    editedFrameTimeline = PlaylistFrameTimeline(
+    let frameTimeline = PlaylistFrameTimeline(
       scheduled: scheduledEntries.map {
         PlaylistFrameTimeline.ScheduledSpan(
           editedSpan: $0.editedSpan, nativeFrameCount: $0.nativeFrameCount)
       },
       ratio: ratio)
+    editedFrameTimeline = frameTimeline
+    // Where a natural finish genuinely lands, captured HERE from this playback's own resolved
+    // schedule — before any suspension, so a later `playEdited` replacing `editedFrameTimeline`
+    // can't clobber it. Against a stale/short canonical file the schedule is clamped, so this
+    // is short of the plan's declared end; the caller rests its cursor on the truth.
+    let finishedSample = frameTimeline.editedSample(
+      forFramesPlayed: scheduledEntries.reduce(0) { $0 + $1.nativeFrameCount })
 
     if node.engine == nil { engine.attach(node) }
     if timePitch.engine == nil { engine.attach(timePitch) }
@@ -310,15 +330,26 @@ private actor LivePlayerBox {
     timePitch.rate = Float(currentRate)
     try engine.start()
 
+    schedule(scheduledEntries, from: file)
+    node.play()
+    startTicking()
+    let end = await withCheckedContinuation { (cont: CheckedContinuation<PlaybackEnd, Never>) in
+      continuation = cont
+    }
+    return EditedPlaybackEnd(
+      end: end, finishedEditedSample: end == .finished ? finishedSample : nil)
+  }
+
+  /// Queues every resolved entry on the node, back to back. Only the FINAL entry carries the
+  /// completion callback; the ones ahead of it queue with `at: nil`, so the stream is gapless
+  /// and completes exactly once.
+  private func schedule(_ entries: [ScheduledEntry], from file: AVAudioFile) {
     let myGeneration = generation
-    // Only the final scheduled entry carries the completion callback; the queued entries
-    // ahead of it play back-to-back with `at: nil`, so the stream is gapless and completes
-    // exactly once.
     let onLast: @Sendable (AVAudioPlayerNodeCompletionCallbackType) -> Void = {
       @Sendable [weak self] _ in Task { await self?.complete(generation: myGeneration) }
     }
-    let lastIndex = scheduledEntries.count - 1
-    for (index, entry) in scheduledEntries.enumerated() {
+    let lastIndex = entries.count - 1
+    for (index, entry) in entries.enumerated() {
       let completion = index == lastIndex ? onLast : nil
       switch entry.payload {
       case .segment(let start, let count):
@@ -330,11 +361,6 @@ private actor LivePlayerBox {
           buffer, at: nil, options: [], completionCallbackType: .dataPlayedBack,
           completionHandler: completion)
       }
-    }
-    node.play()
-    startTicking()
-    return await withCheckedContinuation { (cont: CheckedContinuation<PlaybackEnd, Never>) in
-      continuation = cont
     }
   }
 
