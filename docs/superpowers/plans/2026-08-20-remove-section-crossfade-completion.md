@@ -123,6 +123,11 @@ center, ⌃⌥X, inspector); no way to delete a removal except whole-document un
 
 ### PR 3 — Live edited transport (HEAR IT — earliest user value)
 
+**Status: shipped-pending-review** (branch `briankeane/crossfade-live-transport`;
+plan `2026-08-20-remove-section-crossfade-pr3.md`). Bounded lookahead not
+needed — full-plan scheduling retained (one short PCM buffer per removal is the
+only retained audio).
+
 - `AudioPlayerClient.playEdited(plan:rate:session:)`; playlist scheduler in
   `LivePlayerBox` per decision 3.
 - Main transport migrates to edited coordinates everywhere (decision 2);

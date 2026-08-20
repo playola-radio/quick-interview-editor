@@ -63,9 +63,9 @@ The stale-anchor-prone core. The cursor becomes EDITED-axis; every reader/writer
 - Produces on `WaveformLaneDriving`: `func lanePlayheadX(forCursor cursorSample: Int) -> CGFloat?` — cursor is the DRIVER's presentation axis (edited for `EditedWaveformAdapter`, plan/source for `WaveformModel`)
 - Consumes: `EditedTimeline.sourceToEdited(_:bias:)`, `.editedToSource(_:)`, `.editedDurationSamples`; `EditedWaveformAdapter.timeline` (the synced instance — hot paths must NOT read the computed `editedTimeline`, which rebuilds per read).
 
-- [ ] **Step 0: Invoke `pfw-observable-models`, `pfw-testing`, `pfw-custom-dump`** (list them in the task checklist).
+- [x] **Step 0: Invoke `pfw-observable-models`, `pfw-testing`, `pfw-custom-dump`** (list them in the task checklist).
 
-- [ ] **Step 1: Write the failing conversion tests** in the new `EditorEditedCursorTests.swift`. One removal `[40_000, 60_000)` with crossfade `4_800` on the standard fixture; hand-compute the edited values (fixture `editPlan.source.durationSamples` and sample rate — read `Fixtures.editPlan()` first and adjust the constants so the removal + fade sit inside the file with ≥ crossfade-length handles on both sides).
+- [x] **Step 1: Write the failing conversion tests** in the new `EditorEditedCursorTests.swift`. One removal `[40_000, 60_000)` with crossfade `4_800` on the standard fixture; hand-compute the edited values (fixture `editPlan.source.durationSamples` and sample rate — read `Fixtures.editPlan()` first and adjust the constants so the removal + fade sit inside the file with ≥ crossfade-length handles on both sides).
 
 ```swift
 import CustomDump
@@ -187,9 +187,9 @@ struct EditorEditedCursorTests {
 
 **Adjust the sample constants to the fixture:** before finalizing the test, print/inspect `Fixtures.editPlan().source.durationSamples`. If it is smaller than 80_000, scale all constants down (e.g. divide by 10) keeping the shape: removal `[a,b)` with `L` ≤ min(a, dur−b), a tick/selection source sample `s > b`, expected edited `s − (b−a) − L`.
 
-- [ ] **Step 2: Run to verify failure** — `cd QuickInterviewEditor && make generate && make test-fast ONLY=QuickInterviewEditorTests/EditorEditedCursorTests`. Expected: compile FAIL (`editedCursor`, `playheadEditedSample` undefined).
+- [x] **Step 2: Run to verify failure** — `cd QuickInterviewEditor && make generate && make test-fast ONLY=QuickInterviewEditorTests/EditorEditedCursorTests`. Expected: compile FAIL (`editedCursor`, `playheadEditedSample` undefined).
 
-- [ ] **Step 3: Implement the migration in `EditorModel` + adapter + lane.** All in one pass — this is the consumer sweep; the checklist below is exhaustive (grep `playheadSample`, `transportOriginSample` to confirm nothing is missed):
+- [x] **Step 3: Implement the migration in `EditorModel` + adapter + lane.** All in one pass — this is the consumer sweep; the checklist below is exhaustive (grep `playheadSample`, `transportOriginSample` to confirm nothing is missed):
 
   In `EditorModel.swift`:
   ```swift
@@ -296,11 +296,11 @@ struct EditorEditedCursorTests {
 
   In `WaveformView.swift`: `playhead: { model.playheadEditedSample }`.
 
-- [ ] **Step 4: Mechanical test rename (Sonnet subagent OK):** in the 10 test files listed above, rename `model.playheadSample` / `.transportOriginSample` → `model.playheadEditedSample` / `.transportOriginEditedSample` **only on `EditorModel` instances** (the `EditSliceModel.playheadSample` property keeps its name — it is the modal's own SOURCE cursor). Instruct the subagent to invoke `pfw-testing`/`pfw-custom-dump` and to change nothing else.
+- [x] **Step 4: Mechanical test rename (Sonnet subagent OK):** in the 10 test files listed above, rename `model.playheadSample` / `.transportOriginSample` → `model.playheadEditedSample` / `.transportOriginEditedSample` **only on `EditorModel` instances** (the `EditSliceModel.playheadSample` property keeps its name — it is the modal's own SOURCE cursor). Instruct the subagent to invoke `pfw-testing`/`pfw-custom-dump` and to change nothing else.
 
-- [ ] **Step 5: Run the full suite** — `cd QuickInterviewEditor && make test-fast`. Expected: PASS (zero-removal identity keeps every existing assertion; new conversion tests pass).
+- [x] **Step 5: Run the full suite** — `cd QuickInterviewEditor && make test-fast`. Expected: PASS (zero-removal identity keeps every existing assertion; new conversion tests pass).
 
-- [ ] **Step 6: Format, lint, commit**
+- [x] **Step 6: Format, lint, commit**
 
 ```bash
 cd QuickInterviewEditor && make format && make lint
@@ -334,9 +334,9 @@ Make the coordinate space unambiguous in the type/API, not a comment: positions 
   - `pause: @Sendable (PlaybackSessionID) async -> PlaybackSample?`
 - Consumes: `PlaylistFrameTimeline.editedSample(forFramesPlayed:)` (already returns edited samples when a playlist runs).
 
-- [ ] **Step 0: Invoke `pfw-dependencies`, `pfw-testing`, `pfw-custom-dump`.**
+- [x] **Step 0: Invoke `pfw-dependencies`, `pfw-testing`, `pfw-custom-dump`.**
 
-- [ ] **Step 1: Write the failing tests** (append to `EditorEditedCursorTests.swift`):
+- [x] **Step 1: Write the failing tests** (append to `EditorEditedCursorTests.swift`):
 
 ```swift
 @Test func editedAxisTickMovesCursorDirectly() async {
@@ -375,9 +375,9 @@ Make the coordinate space unambiguous in the type/API, not a comment: positions 
 
 Also update Task 1's two source-axis tests to the new shape: `sample: .source(70_000)` and `pause = { _ in .source(70_000) }`.
 
-- [ ] **Step 2: Run to verify failure** — `make test-fast ONLY=QuickInterviewEditorTests/EditorEditedCursorTests`. Expected: compile FAIL (`.edited` not defined).
+- [x] **Step 2: Run to verify failure** — `make test-fast ONLY=QuickInterviewEditorTests/EditorEditedCursorTests`. Expected: compile FAIL (`.edited` not defined).
 
-- [ ] **Step 3: Implement.**
+- [x] **Step 3: Implement.**
   - `AudioPlayerClient.swift`: add `PlaybackSample`; retype `PlaybackPosition.sample`; retype `pause`; update its doc comment ("returns the exact resting sample, tagged with its axis").
   - `LivePlayerBox`:
     ```swift
@@ -418,11 +418,11 @@ Also update Task 1's two source-axis tests to the new shape: `sample: .source(70
     }
     ```
 
-- [ ] **Step 4: Mechanical test updates (Sonnet subagent OK):** wrap every `PlaybackPosition(sessionID:sample:isPlaying:)` integer with `.source(...)` and every `pause` stub return with `.source(...)` across the test tree (grep `PlaybackPosition(` and `audioPlayer.pause`). No behavioral edits.
+- [x] **Step 4: Mechanical test updates (Sonnet subagent OK):** wrap every `PlaybackPosition(sessionID:sample:isPlaying:)` integer with `.source(...)` and every `pause` stub return with `.source(...)` across the test tree (grep `PlaybackPosition(` and `audioPlayer.pause`). No behavioral edits.
 
-- [ ] **Step 5: Run the full suite** — `make test-fast`. Expected: PASS.
+- [x] **Step 5: Run the full suite** — `make test-fast`. Expected: PASS.
 
-- [ ] **Step 6: Format, lint, commit**
+- [x] **Step 6: Format, lint, commit**
 
 ```bash
 cd QuickInterviewEditor && make format && make lint
@@ -457,9 +457,9 @@ The transport's free play (`Play` button / Space from stopped) builds an `AudioE
   - `private func beginTransportPlayback(_ playback: TransportPlayback, context: TransportContext) async` (replaces the range-only funnel)
 - Removes: `EditorModel.removalPlaybackNote`, its `WaveformView` display, `transportPlayableRange` (folded into the funnel/`canTransportPlay`).
 
-- [ ] **Step 0: Invoke `pfw-observable-models`, `pfw-dependencies`, `pfw-testing`, `pfw-custom-dump`.**
+- [x] **Step 0: Invoke `pfw-observable-models`, `pfw-dependencies`, `pfw-testing`, `pfw-custom-dump`.**
 
-- [ ] **Step 1: Write the failing tests** (append to `EditorEditedCursorTests.swift`):
+- [x] **Step 1: Write the failing tests** (append to `EditorEditedCursorTests.swift`):
 
 ```swift
 @Test func freePlayBuildsEditedPlanFromCursor() async {
@@ -570,9 +570,9 @@ The transport's free play (`Play` button / Space from stopped) builds an `AudioE
 }
 ```
 
-- [ ] **Step 2: Run to verify failure** — `make test-fast ONLY=QuickInterviewEditorTests/EditorEditedCursorTests`. Expected: compile FAIL (`playEdited` not on the client).
+- [x] **Step 2: Run to verify failure** — `make test-fast ONLY=QuickInterviewEditorTests/EditorEditedCursorTests`. Expected: compile FAIL (`playEdited` not on the client).
 
-- [ ] **Step 3: Implement.**
+- [x] **Step 3: Implement.**
   - `AudioPlayerClient.swift`: add the `playEdited` closure per the interface block; testValue:
     ```swift
     playEdited: { _, _, _, _, _ -> PlaybackEnd in
@@ -673,9 +673,9 @@ The transport's free play (`Play` button / Space from stopped) builds an `AudioE
     ```
     (`transportPlayTapped` drops its `transportPlayableRange` guard — the funnel's `.editedTimeline` validation covers it.)
   - Delete `removalPlaybackNote` (model) and its `WaveformView` display block.
-- [ ] **Step 4: Migrate the free-play test stubs (Sonnet subagent OK, with this exact spec):** any test that drives `transportPlayTapped` / `transportPlayStopTapped` / Space (contexts `.free`) and stubs `$0.audioPlayer.play` must stub `$0.audioPlayer.playEdited` instead (signature `(URL, AudioEditRenderPlan, Int, Double, PlaybackSessionID)`); range assertions become plan assertions (`plan.items.first?.editedSpan.lowerBound` for the start; with zero removals the expected plan is `[.segment(source: start..<duration, editedStart: start)]`). Slice/preview/audition/modal tests keep `play`. `TransportGate`-style helpers gain a `playEdited` variant where needed. Delete `removalPlaybackNote` assertions (`EditorRemovalTests`). Subagent must invoke `pfw-testing` + `pfw-custom-dump` and run `make test-fast` to green.
-- [ ] **Step 5: Run the full suite** — `make test-fast`. Expected: PASS.
-- [ ] **Step 6: Format, lint, commit**
+- [x] **Step 4: Migrate the free-play test stubs (Sonnet subagent OK, with this exact spec):** any test that drives `transportPlayTapped` / `transportPlayStopTapped` / Space (contexts `.free`) and stubs `$0.audioPlayer.play` must stub `$0.audioPlayer.playEdited` instead (signature `(URL, AudioEditRenderPlan, Int, Double, PlaybackSessionID)`); range assertions become plan assertions (`plan.items.first?.editedSpan.lowerBound` for the start; with zero removals the expected plan is `[.segment(source: start..<duration, editedStart: start)]`). Slice/preview/audition/modal tests keep `play`. `TransportGate`-style helpers gain a `playEdited` variant where needed. Delete `removalPlaybackNote` assertions (`EditorRemovalTests`). Subagent must invoke `pfw-testing` + `pfw-custom-dump` and run `make test-fast` to green.
+- [x] **Step 5: Run the full suite** — `make test-fast`. Expected: PASS.
+- [x] **Step 6: Format, lint, commit**
 
 ```bash
 cd QuickInterviewEditor && make format && make lint
