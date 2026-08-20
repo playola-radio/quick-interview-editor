@@ -313,6 +313,30 @@ struct EditorSeamSelectionTests {
     }
   }
 
+  @Test func seamIDResolvesToNearestWhenTargetsOverlap() {
+    withStorage {
+      let model = editor(fingerprint: "fp-nearest-seam")
+      model.editedWaveform.viewportWidth = 1000
+      model.editedWaveform.samplesPerPixel = 200
+      model.editedWaveform.visibleStartSample = 0
+      // Two removals with a short kept gap between them: their bowties end up a couple points apart,
+      // close enough that each one's widened hit target covers the other's center. This is the case
+      // where a first-match hit-test would always return the earlier seam and shadow the later one.
+      let idA = addRemoval(model, id: Fixtures.uuid(1), range: 40_000..<80_000, length: 400)
+      let idB = addRemoval(model, id: Fixtures.uuid(2), range: 80_600..<120_000, length: 400)
+
+      let overlayA = model.seamOverlays.first { $0.id == idA }!
+      let overlayB = model.seamOverlays.first { $0.id == idB }!
+      let centerA = overlayA.span.positionX + overlayA.span.width / 2
+      let centerB = overlayB.span.positionX + overlayB.span.width / 2
+      #expect(centerB > centerA)
+      #expect(centerB - centerA < 4)
+
+      expectNoDifference(model.seamID(atX: centerA), idA)
+      expectNoDifference(model.seamID(atX: centerB), idB)
+    }
+  }
+
   @Test func hardCutSeamIsSelectableAndRestorable() {
     withStorage {
       let model = editor(fingerprint: "fp-hardcut-restore")

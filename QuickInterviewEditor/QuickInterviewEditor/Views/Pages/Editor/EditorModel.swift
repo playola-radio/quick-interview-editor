@@ -383,6 +383,13 @@ final class EditorModel: ViewModel {
   /// clears any freeform selection first, then records the seam. A no-op if that removal doesn't
   /// exist. Unlike a body click this does NOT move the playhead — Logic selects a crossfade on
   /// click without seeking.
+  ///
+  /// It deliberately does NOT inline-clear the fine-tune session here. `selectSourceRange` (the
+  /// range-selection path) doesn't either: both leave fine-tune reconciliation to the single
+  /// onChange-driven `syncEditSession()`, which is the one place that knows how to tear down a
+  /// pending tuned selection without clobbering an unsaved existing-slice edit. Adding an inline
+  /// `fineTune.clear()` on just this path would diverge from that centralization and reintroduce the
+  /// unsaved-slice hazard `syncEditSession()` exists to avoid.
   func selectSeam(_ id: TimelineRemoval.ID) {
     guard timelineRemovals[id: id] != nil else { return }
     clearSelection()
@@ -603,13 +610,23 @@ final class EditorModel: ViewModel {
   /// Hit-testing lives here (the view only reports x): the removal id whose bowtie the view-x
   /// lands on, or nil. Walks the same drawn seams the lane renders; a zero-length hard cut has a
   /// zero-width span, so the tolerance below is what makes it clickable. Only a fully off-screen
-  /// seam has no span and so isn't hittable.
+  /// seam has no span and so isn't hittable. When more than one seam's widened target covers the
+  /// x — abutting removals that collapse onto the same join, or two crossfades closer than the
+  /// tolerance — the one whose bowtie center is nearest the click wins, so every removal stays
+  /// individually reachable rather than the first-drawn one always shadowing the rest.
   func seamID(atX positionX: CGFloat) -> TimelineRemoval.ID? {
-    editedWaveform.timeline.seams.first { seam in
-      guard let span = editedWaveform.spanForSeam(seam) else { return false }
-      return positionX >= span.positionX - Self.seamHitTolerance
-        && positionX <= span.positionX + span.width + Self.seamHitTolerance
-    }?.id
+    var best: (id: TimelineRemoval.ID, distance: CGFloat)?
+    for seam in editedWaveform.timeline.seams {
+      guard let span = editedWaveform.spanForSeam(seam) else { continue }
+      guard positionX >= span.positionX - Self.seamHitTolerance,
+        positionX <= span.positionX + span.width + Self.seamHitTolerance
+      else { continue }
+      let distance = abs(positionX - (span.positionX + span.width / 2))
+      if best == nil || distance < best!.distance {
+        best = (seam.id, distance)
+      }
+    }
+    return best?.id
   }
 
   /// The right-click menu for a waveform position: the Restore item when the x hits a seam's
