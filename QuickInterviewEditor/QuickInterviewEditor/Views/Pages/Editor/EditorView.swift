@@ -72,7 +72,8 @@ struct EditorView: View {
     .onChange(of: model.removedWordIDs, initial: true) { _, ids in
       model.transcript.removedWordIDs = ids
     }
-    .onChange(of: model.transcript.selectedSampleRange) { _, newRange in
+    .onChange(of: model.audioSelection) { _, newRange in
+      // `audioSelection` is now the selection source of truth, so transport-snap tracks it directly.
       // Capture the cursor token synchronously at the moment the selection changes, so a ruler click
       // landing before this snap runs is seen as the newer cursor action and the snap yields to it.
       let cursorToken = model.cursorMoveToken

@@ -64,4 +64,31 @@ struct EditorSelectionTests {
     model.selectWord(5, extending: true)
     expectNoDifference(model.audioSelection, 77704..<135960)
   }
+
+  @Test func nudgingStartEdgeMovesOnlyThatEdgeByTenMs() {
+    let model = editor()
+    model.selectSourceRange(10_000..<40_000, snapPlayhead: false)
+    model.selectionNudged(.start, byMs: -10)
+    let expected = model.boundaryEditor.nudgeStart(of: 10_000..<40_000, byMs: -10)
+    expectNoDifference(model.audioSelection, expected)
+  }
+
+  @Test func nudgingEndEdgeLeavesStartFixed() {
+    let model = editor()
+    model.selectSourceRange(10_000..<40_000, snapPlayhead: false)
+    model.selectionNudged(.end, byMs: 10)
+    #expect(model.audioSelection?.lowerBound == 10_000)
+    #expect(model.audioSelection!.upperBound > 40_000)
+  }
+
+  @Test func edgeDragMovesOnlyDraggedEdgeToSample() {
+    let model = editor()
+    model.editedWaveform.viewportResized(width: 1000)
+    model.selectSourceRange(10_000..<40_000, snapPlayhead: false)
+    let target = 25_000
+    model.selectionEdgeDragBegan(.start)
+    model.selectionEdgeDraggedToSource(.start, target)
+    #expect(model.audioSelection?.upperBound == 40_000)
+    #expect(abs((model.audioSelection?.lowerBound ?? 0) - target) <= 1)
+  }
 }

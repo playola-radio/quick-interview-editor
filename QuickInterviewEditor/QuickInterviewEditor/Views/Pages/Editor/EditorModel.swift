@@ -765,6 +765,56 @@ final class EditorModel: ViewModel {
     transcript.revealWord(wordID)
   }
 
+  // MARK: - Selection edge editing (drag handles + nudge)
+  /// The raw two-boundary edge math for the primary selection, built from the plan (whole file as the
+  /// window, no magnified inset) and reusing `FineTuneModel`'s min-duration / snap-threshold constants
+  /// so drag and nudge feel identical to the slice-edit sheet. `snap:false` is the primary path.
+  var boundaryEditor: BoundaryRangeEditor {
+    BoundaryRangeEditor(
+      fileDurationSamples: editPlan.source.durationSamples, sampleRate: editPlan.source.sampleRate,
+      minDurationSamples: Int(fineTune.minSliceMs / 1000 * Double(editPlan.source.sampleRate)),
+      snapThresholdSamples: Int(
+        fineTune.snapThresholdMs / 1000 * Double(editPlan.source.sampleRate)),
+      silences: editPlan.silences)
+  }
+
+  /// A left/right handle grab begins: mark which edge is live so `transportSelectionChanged` stops
+  /// churning the playhead for the duration of the drag (mirrors the marquee's `isWaveformAreaSelecting`
+  /// suppression). An edge drag is fine-tune, not seek — it never snaps the playhead.
+  func selectionEdgeDragBegan(_ edge: SelectionEdge) { selectionEditingEdge = edge }
+
+  /// A handle drag to view-x: map x → source sample and move only that edge, freeform (no silence
+  /// snap). The opposite edge stays fixed; the min-duration floor keeps the range from collapsing.
+  func selectionEdgeDragged(_ edge: SelectionEdge, toX posX: CGFloat) {
+    selectionEdgeDraggedToSource(edge, editedWaveform.xToSourceSample(posX))
+  }
+
+  /// Geometry-free seam behind `selectionEdgeDragged(_:toX:)`: take an exact SOURCE sample directly so
+  /// tests exercise the edge math without a viewport (mirrors the marquee's sample-level seams).
+  func selectionEdgeDraggedToSource(_ edge: SelectionEdge, _ sourceSample: Int) {
+    guard let range = audioSelection else { return }
+    // No pre-clamp: `boundaryEditor` already clamps `sourceSample` into the legal window
+    // (`0...fileDurationSamples`) via `clampedBoundary`. Clamping here against
+    // `waveform.totalSamples` would wrongly couple this geometry-free seam to async waveform load.
+    audioSelection =
+      edge == .start
+      ? boundaryEditor.moveStart(of: range, to: sourceSample, snap: false)
+      : boundaryEditor.moveEnd(of: range, to: sourceSample, snap: false)
+  }
+
+  /// Release: the edge is no longer live, so transport-snap resumes tracking selection changes.
+  func selectionEdgeDragEnded(_ edge: SelectionEdge) { selectionEditingEdge = nil }
+
+  /// Moves one edge of the selection by a signed millisecond delta (the ←/→/⇧←/⇧→ 10 ms nudges),
+  /// freeform. No-op with no selection.
+  func selectionNudged(_ edge: SelectionEdge, byMs ms: Double) {
+    guard let range = audioSelection else { return }
+    audioSelection =
+      edge == .start
+      ? boundaryEditor.nudgeStart(of: range, byMs: ms)
+      : boundaryEditor.nudgeEnd(of: range, byMs: ms)
+  }
+
   private func isPointerPastEdge(_ positionX: CGFloat) -> Bool {
     positionX < 0 || positionX > editedWaveform.viewportWidth
   }
@@ -860,26 +910,22 @@ final class EditorModel: ViewModel {
       guard canRemoveSelectedSection else { return false }
       Task { await removeSelectedSectionTapped() }
     case .nudgeCutInEarlier, .nudgeCutInLater, .nudgeCutOutEarlier, .nudgeCutOutLater:
-      return nudgePendingRemoval(key)
+      return nudgeSelection(key)
     }
     return true
   }
 
-  /// Nudges the pending removal's draft cut points before commit — split out of
-  /// `editorKeyDown`'s switch to keep its cyclomatic complexity in check. Scoped strictly to a
-  /// `.pendingSelection` fine-tune session anchored to the CURRENT selection (see
-  /// `isPendingRemovalSessionCurrent`) — a `.slice` session (opened editing an existing slice)
-  /// must not have its cut points hijacked by these keys, and neither may a stale session left
-  /// behind by a since-changed selection: mutating an invisible draft while swallowing the key
-  /// would silently do nothing the user can see. Both fall through unconsumed (`false`), same as
-  /// no session being open at all.
-  private func nudgePendingRemoval(_ key: EditorKey) -> Bool {
-    guard isPendingRemovalSessionCurrent else { return false }
+  /// Nudges one edge of the primary selection by the ←/→/⇧←/⇧→ keys — split out of `editorKeyDown`'s
+  /// switch (as one combined case delegating here) to keep its cyclomatic complexity in check. Falls
+  /// through unconsumed (`false`) when there is no selection, so the key still reaches a focused slice
+  /// row that might handle it.
+  private func nudgeSelection(_ key: EditorKey) -> Bool {
+    guard audioSelection != nil else { return false }
     switch key {
-    case .nudgeCutInEarlier: fineTune.nudgeCutIn(byMs: -fineTune.nudgeMs)
-    case .nudgeCutInLater: fineTune.nudgeCutIn(byMs: fineTune.nudgeMs)
-    case .nudgeCutOutEarlier: fineTune.nudgeCutOut(byMs: -fineTune.nudgeMs)
-    case .nudgeCutOutLater: fineTune.nudgeCutOut(byMs: fineTune.nudgeMs)
+    case .nudgeCutInEarlier: selectionNudged(.start, byMs: -fineTune.nudgeMs)
+    case .nudgeCutInLater: selectionNudged(.start, byMs: fineTune.nudgeMs)
+    case .nudgeCutOutEarlier: selectionNudged(.end, byMs: -fineTune.nudgeMs)
+    case .nudgeCutOutLater: selectionNudged(.end, byMs: fineTune.nudgeMs)
     default: return false
     }
     return true
@@ -1097,30 +1143,10 @@ final class EditorModel: ViewModel {
   }
 
   /// True while a `.pendingSelection` fine-tune session's draft is still anchored to the CURRENT
-  /// transcript selection — `committedRange` (the session's un-nudged baseline) equals
-  /// `transcript.selectedSampleRange`. False for no session, a `.slice` session, or a STALE
-  /// pending session left behind after the selection moved on (or cleared) without the held draft
-  /// being saved or cancelled.
-  ///
-  /// This distinction matters because there's no fine-tune PANE mounted here (Task 9 wires the
-  /// session invisibly): `syncEditSession()` intentionally HOLDS an unsaved draft across a
-  /// selection change or Clear rather than discarding it, so the user can Save/Cancel it — a
-  /// design that assumes a visible pane. Without this check, a user who nudges range A, then
-  /// selects (or clears to) a different range B, would have ⌫ silently remove the stale, no
-  /// longer visible A' instead of what's actually highlighted (found in adversarial review), and
-  /// a further nudge keypress meant for B would instead mutate the invisible, abandoned A' draft
-  /// while swallowing the key.
-  private var isPendingRemovalSessionCurrent: Bool {
-    fineTune.target == .pendingSelection
-      && fineTune.committedRange == transcript.selectedSampleRange
-  }
-
-  /// The SOURCE range a removal would apply to: the (possibly nudged) draft when
-  /// `isPendingRemovalSessionCurrent`, so a boundary nudge (Task 9) actually changes what gets
-  /// removed; the raw selection otherwise.
-  private var pendingRemovalSourceRange: Range<Int>? {
-    isPendingRemovalSessionCurrent ? fineTune.draftRange : selectedSourceRange
-  }
+  /// The SOURCE range a removal would apply to: the primary selection. Edge drag + nudge now mutate
+  /// `audioSelection` directly (see `selectionNudged` / `selectionEdgeDragged`), so there is no
+  /// separate fine-tune draft to prefer — the selection is already the (possibly nudged) truth.
+  private var pendingRemovalSourceRange: Range<Int>? { selectedSourceRange }
 
   /// Whether `range` can become a removal: non-empty and not overlapping an
   /// existing removal's source span (cross-seam rejection, spec §4.7).
@@ -1468,6 +1494,10 @@ final class EditorModel: ViewModel {
     // duration of the drag so it doesn't churn the transport. `waveformAreaSelectEnded` commits the
     // playhead once, synchronously, when the drag finishes.
     guard !isWaveformAreaSelecting else { return }
+    // An edge-handle drag also writes `audioSelection` on every pointer move; suppress the snap while
+    // an edge is live so a fine-tune drag doesn't churn the transport. Edge drag never snaps the
+    // playhead (it's a boundary edit, not a seek), so there's no commit-once counterpart on release.
+    guard selectionEditingEdge == nil else { return }
     // Bail BEFORE touching playback if the cursor has been placed by a later action — a ruler move or
     // a transport start — since this selection change was registered. `cursorToken` is captured
     // synchronously in the view's `onChange`, so a ruler click or a Play that ran before this deferred
@@ -1477,7 +1507,7 @@ final class EditorModel: ViewModel {
       await endTransportPlayback()
       // Re-check across the stop await: a newer selection, a new playback, or a ruler move (which
       // bumps the generation) all invalidate this snap.
-      guard transcript.selectedSampleRange == newRange, transportPhase.session == nil,
+      guard audioSelection == newRange, transportPhase.session == nil,
         cursorMoveGeneration == cursorToken
       else { return }
     }
