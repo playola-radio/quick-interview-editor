@@ -79,7 +79,6 @@ enum EngineClientError: Error, Equatable, LocalizedError {
   case engineFailed(String)
   case decodeFailed(String)
   case renderFailed(String)
-  case renderDecodeFailed(String)
   case injectFailed(String)
   case injectDecodeFailed(String)
 
@@ -90,7 +89,6 @@ enum EngineClientError: Error, Equatable, LocalizedError {
     case .engineFailed(let message): return "Transcription failed: \(message)"
     case .decodeFailed(let message): return "Could not read the transcription result: \(message)"
     case .renderFailed(let message): return "Export failed: \(message)"
-    case .renderDecodeFailed(let message): return "Could not read the export result: \(message)"
     case .injectFailed(let message): return "Marker injection failed: \(message)"
     case .injectDecodeFailed(let message):
       return "Could not read the marker injection result: \(message)"

@@ -5,7 +5,6 @@ import IssueReporting
 struct EngineClient: Sendable {
   var loadPlan: @Sendable (URL) async throws -> EditPlan
   var transcribe: @Sendable (URL) -> AsyncThrowingStream<EngineEvent, Error>
-  var renderSlices: @Sendable (RenderRequest) -> AsyncThrowingStream<RenderEvent, Error>
   /// Stamps MARK chunks into slice AIFFs the app already rendered itself. See
   /// `LiveEngine.injectMarkers` for the wire contract with `logic_markers.cli
   /// inject-markers`.
@@ -16,7 +15,6 @@ extension EngineClient: DependencyKey {
   static let liveValue = EngineClient(
     loadPlan: { url in try EditPlan.decoded(from: url) },
     transcribe: { url in LiveEngine.transcribe(audio: url) },
-    renderSlices: { request in LiveEngine.render(request) },
     injectMarkers: { files in try await LiveEngine.injectMarkers(files) }
   )
 }
@@ -31,12 +29,6 @@ extension EngineClient: TestDependencyKey {
       AsyncThrowingStream { continuation in
         reportIssue("EngineClient.transcribe called without a test override")
         continuation.finish(throwing: EngineClientError.unimplemented("transcribe"))
-      }
-    },
-    renderSlices: { _ in
-      AsyncThrowingStream { continuation in
-        reportIssue("EngineClient.renderSlices called without a test override")
-        continuation.finish(throwing: EngineClientError.unimplemented("renderSlices"))
       }
     },
     injectMarkers: { _ in
@@ -55,11 +47,6 @@ extension EngineClient: TestDependencyKey {
             TranscriptionResult(
               editPlan: .fixture,
               canonicalAudioURL: URL(fileURLWithPath: "/preview/canonical.aiff"))))
-        continuation.finish()
-      }
-    },
-    renderSlices: { _ in
-      AsyncThrowingStream { continuation in
         continuation.finish()
       }
     },

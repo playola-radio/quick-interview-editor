@@ -31,7 +31,7 @@ struct SlicesPanelView: View {
         Button(model.exportAllLabel) { model.exportAllTapped() }
           .disabled(!model.canExportAll)
       }
-      if let note = model.exportBlockedByRemovalsNote {
+      if let note = model.removalsInvalidNote {
         Text(note).font(.system(size: 11))
           .foregroundStyle(Color(red: 0.89, green: 0.58, blue: 0.58))
       }
@@ -116,6 +116,16 @@ private struct SliceCard: View {
               )
               .help(row.warningHelp).accessibilityLabel(row.warningHelp)
           }
+          if !row.canExport {
+            Text(row.removedLabel)
+              .font(.system(size: 10, weight: .semibold)).tracking(0.3)
+              .foregroundStyle(Color(red: 0.89, green: 0.58, blue: 0.58))
+              .padding(.horizontal, 7).padding(.vertical, 2)
+              .background(
+                Capsule().fill(Color(red: 0.89, green: 0.58, blue: 0.58).opacity(0.16))
+              )
+              .help(row.removedHelp).accessibilityLabel(row.removedHelp)
+          }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
@@ -134,7 +144,7 @@ private struct SliceCard: View {
         Button(model.exportLabel) {
           model.exportSliceTapped(row.id)
         }
-        .disabled(!model.canExportSlice)
+        .disabled(!model.canExportSlice || !row.canExport)
         Spacer()
         Button {
           Task { await model.deleteSlice(row.id) }
@@ -177,6 +187,10 @@ private struct ExportStatus: View {
       }
       if !model.exportTightWarning.isEmpty {
         Text(model.exportTightWarning).font(.system(size: 11))
+          .foregroundStyle(Color(red: 0.89, green: 0.58, blue: 0.58))
+      }
+      if !model.exportSkippedRemovedWarning.isEmpty {
+        Text(model.exportSkippedRemovedWarning).font(.system(size: 11))
           .foregroundStyle(Color(red: 0.89, green: 0.58, blue: 0.58))
       }
     }

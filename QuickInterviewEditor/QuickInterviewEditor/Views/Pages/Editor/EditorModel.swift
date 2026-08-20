@@ -32,6 +32,7 @@ final class EditorModel: ViewModel {
   // MARK: - Dependencies
   @ObservationIgnored @Dependency(\.audioPlayer) var audioPlayer
   @ObservationIgnored @Dependency(\.engine) var engine
+  @ObservationIgnored @Dependency(\.exportRender) var exportRender
   @ObservationIgnored @Dependency(\.workspace) var workspace
   @ObservationIgnored @Dependency(\.continuousClock) var clock
 
@@ -259,6 +260,9 @@ final class EditorModel: ViewModel {
   var rightPanelTab: RightPanelTab = .slices
   private var nextSliceNumber = 1
   private var lastExportTightNames: [String] = []
+  /// Names of slices skipped by the most recent "Export all" because their entire audio
+  /// fell inside a removed section — surfaced by `exportSkippedRemovedWarning`.
+  private var lastExportSkippedRemovedNames: [String] = []
   @ObservationIgnored private(set) var exportTask: Task<Void, Never>?
 
   /// Maps between source and edited sample coordinates given the current removals.
@@ -338,6 +342,9 @@ final class EditorModel: ViewModel {
   let redoLabel = "Redo"
   let tightBadgeLabel = "Tight join"
   let tightBadgeHelp = "A cut point isn't in a silence — add a fade in Logic."
+  let removedBadgeLabel = "Removed"
+  let removedBadgeHelp =
+    "This clip's audio is entirely inside a removed section — there is nothing to export."
   let slicesTabLabel = "Clips"
   let suggestionsTabLabel = "Suggestions"
   let rightPanelPickerLabel = "Right panel"
@@ -680,10 +687,19 @@ final class EditorModel: ViewModel {
     return false
   }
   var canExportAll: Bool {
-    !slices.isEmpty && !isExporting && !hasUncommittedSliceEdit && timelineRemovals.isEmpty
+    !slices.isEmpty && !isExporting && !hasUncommittedSliceEdit && editedTimeline.isValid
+      && slices.contains(where: sliceIsExportable)
   }
   var canExportSlice: Bool {
-    !isExporting && !hasUncommittedSliceEdit && timelineRemovals.isEmpty
+    !isExporting && !hasUncommittedSliceEdit && editedTimeline.isValid
+  }
+
+  /// Whether `slice` has any audio left to export once removals collapse the timeline —
+  /// false only when the slice's entire source range sits inside one or more removals.
+  func sliceIsExportable(_ slice: Slice) -> Bool {
+    SliceRenderPlanBuilder.localTimeline(
+      sliceRange: slice.startSample..<slice.endSample, removals: Array(timelineRemovals)
+    ).editedDurationSamples > 0
   }
 
   var exportStatusMessage: String {
@@ -711,24 +727,39 @@ final class EditorModel: ViewModel {
     return "\(names) \(verb) — add a fade in Logic."
   }
 
+  /// After a successful "Export all", names the slices that were skipped because their
+  /// entire audio fell inside a removed section. Empty otherwise, and never shown for a
+  /// single-slice export (that path already refuses via `sliceIsExportable` before
+  /// starting, so there's nothing to report after the fact).
+  var exportSkippedRemovedWarning: String {
+    guard case .done = exportPhase, !lastExportSkippedRemovedNames.isEmpty else { return "" }
+    let names = lastExportSkippedRemovedNames.joined(separator: ", ")
+    let verb = lastExportSkippedRemovedNames.count == 1 ? "was" : "were"
+    return "\(names) \(verb) skipped — entirely inside a removed section."
+  }
+
   var showsExportStatus: Bool { !exportStatusMessage.isEmpty }
   var showsCancelExport: Bool { isExporting }
 
-  /// Surfaces why export is disabled while a timeline removal is pending: cuts collapse
-  /// the waveform and transcript but aren't applied to the rendered audio yet (that's
-  /// PR 2), so exporting now would silently ship the removed section. `nil` when there's
-  /// nothing to warn about.
-  var exportBlockedByRemovalsNote: String? {
-    timelineRemovals.isEmpty
+  /// Defensive, not routine: the mutation funnel normalizes every removal it accepts, so
+  /// `editedTimeline` is normally valid whenever `timelineRemovals` is non-empty. But if a
+  /// corrupt persisted removal set ever slipped past that funnel (e.g. loaded straight from
+  /// a stale sidecar), `EditedTimeline` would silently degrade to the identity mapping —
+  /// which would reintroduce the "removed" audio into every export. Export must refuse
+  /// outright rather than risk shipping that, so this is the one place export re-checks
+  /// validity directly instead of trusting the funnel (the BINDING PR-2 Codex contract).
+  var removalsInvalidNote: String? {
+    editedTimeline.isValid
       ? nil
-      : "Export is paused while a removed section is pending — cuts aren't applied to exports yet (coming next)."
+      : "Removed sections failed validation — export is disabled. Undo the last change or remove them."
   }
 
   var sliceRows: IdentifiedArrayOf<SliceRowState> {
     let sampleRate = editPlan.source.sampleRate
     return IdentifiedArray(
       uniqueElements: slices.map { slice in
-        SliceRowState(
+        let canExport = sliceIsExportable(slice)
+        return SliceRowState(
           id: slice.id,
           name: slice.name,
           durationLabel: sampleDurationLabel(
@@ -746,7 +777,10 @@ final class EditorModel: ViewModel {
           isActive: activeSliceID == slice.id,
           // The fine-tune button switches the edit target, which `sliceSelected` rejects while
           // another draft is unsaved — disable it then so it doesn't look broken when clicked.
-          canFineTune: !fineTune.hasUnsavedChange || activeSliceID == slice.id
+          canFineTune: !fineTune.hasUnsavedChange || activeSliceID == slice.id,
+          canExport: canExport,
+          removedLabel: canExport ? "" : removedBadgeLabel,
+          removedHelp: canExport ? "" : removedBadgeHelp
         )
       })
   }
@@ -2270,17 +2304,19 @@ final class EditorModel: ViewModel {
 
   // MARK: - Export Actions
   func exportSliceTapped(_ id: Slice.ID) {
-    guard !isExporting, !hasUncommittedSliceEdit, timelineRemovals.isEmpty,
-      let slice = slices[id: id]
+    guard !isExporting, !hasUncommittedSliceEdit, editedTimeline.isValid,
+      let slice = slices[id: id], sliceIsExportable(slice)
     else { return }
+    lastExportSkippedRemovedNames = []
     startExport([slice])
   }
 
   func exportAllTapped() {
-    guard !isExporting, !hasUncommittedSliceEdit, timelineRemovals.isEmpty, !slices.isEmpty else {
-      return
-    }
-    startExport(Array(slices))
+    guard !isExporting, !hasUncommittedSliceEdit, editedTimeline.isValid else { return }
+    let targets = slices.filter(sliceIsExportable)
+    guard !targets.isEmpty else { return }
+    lastExportSkippedRemovedNames = slices.filter { !sliceIsExportable($0) }.map(\.name)
+    startExport(Array(targets))
   }
 
   func cancelExportTapped() {
@@ -2415,37 +2451,78 @@ final class EditorModel: ViewModel {
     return destination
   }
 
+  /// Renders every target slice straight from the canonical AIFF (Swift-side, via
+  /// `exportRender`), then stamps markers into the rendered files in one batched call to
+  /// the engine's `inject-markers` subcommand — the engine no longer touches audio at all.
+  /// Each slice gets its own local `EditedTimeline`/`AudioEditRenderPlan` (built from the
+  /// SAME `timelineRemovals` every other export-gating check uses), so a removal is
+  /// rendered out rather than silently shipped.
   private func performExport(_ targets: [Slice]) async {
     guard let destination = await exportDestination() else { return }
     exportPhase = .exporting(current: 0, total: targets.count)
 
+    // Re-check right before touching audio — see `removalsInvalidNote`'s doc comment for
+    // why this is defensive rather than routine (the BINDING PR-2 Codex contract).
+    guard editedTimeline.isValid else {
+      exportPhase = .failed(
+        removalsInvalidNote ?? "Removed sections failed validation — export is disabled.")
+      return
+    }
+
+    let scratchDir = FileManager.default.temporaryDirectory
+      .appendingPathComponent("qie-export-\(UUID().uuidString)", isDirectory: true)
     do {
-      var rendered: [RenderedSlice] = []
-      var workDir: URL?
-      for try await event in engine.renderSlices(renderRequest(for: targets)) {
-        switch event {
-        case .progress(let progress):
-          exportPhase = .exporting(
-            current: progress.index,
-            total: progress.total == 0 ? targets.count : progress.total)
-        case .completed(let result):
-          rendered = result.slices
-          workDir = result.workDir
-        }
+      try FileManager.default.createDirectory(at: scratchDir, withIntermediateDirectories: true)
+    } catch {
+      exportPhase = .failed(error.localizedDescription)
+      return
+    }
+
+    let removals = Array(timelineRemovals)
+    let sampleRate = editPlan.source.sampleRate
+    let sourceDurationSamples = editPlan.source.durationSamples
+    // RAW absolute source-sample marker positions straight from the loaded plan words —
+    // no global tie-nudge here. `SliceRenderPlanBuilder.markers` maps each marker into
+    // slice-relative EDITED space and applies the strictly-increasing nudge itself.
+    let sourceMarkers = editPlan.words.map { word in
+      RenderMarker(
+        position: word.startSample ?? Int(word.start * Double(sampleRate)), name: word.text)
+    }
+
+    do {
+      var outputsByID: [Slice.ID: URL] = [:]
+      var injectionFiles: [MarkerInjectionFile] = []
+      for (offset, slice) in targets.enumerated() {
+        try Task.checkCancellation()
+        exportPhase = .exporting(current: offset + 1, total: targets.count)
+        let sliceRange = slice.startSample..<slice.endSample
+        let plan = SliceRenderPlanBuilder.plan(sliceRange: sliceRange, removals: removals)
+        let outputURL = scratchDir.appendingPathComponent("\(slice.id.uuidString).aiff")
+        let job = ExportRenderJob(
+          canonicalAudioURL: canonicalAudioURL, plan: plan.plan,
+          editedDurationSamples: plan.editedDurationSamples, sampleRate: sampleRate,
+          sourceDurationSamples: sourceDurationSamples, outputURL: outputURL)
+        try await exportRender.renderSlice(job)
+        outputsByID[slice.id] = outputURL
+        let markers = SliceRenderPlanBuilder.markers(
+          sourceMarkers, sliceRange: sliceRange, localTimeline: plan.localTimeline)
+        injectionFiles.append(MarkerInjectionFile(url: outputURL, markers: markers))
       }
+
       if Task.isCancelled {
-        await removeWorkDir(workDir)
+        await removeWorkDir(scratchDir)
         exportPhase = .failed(cancelMessage(copied: 0, total: targets.count))
         return
       }
+
+      try await engine.injectMarkers(injectionFiles)
+
       // Copy off the main actor — copying many/large AIFFs (or to a slow/network
       // folder) must not freeze the UI or block the cancel control.
-      let byID = Dictionary(
-        rendered.map { ($0.id, $0.url) }, uniquingKeysWith: { first, _ in first })
       let stem = sourceURL.deletingPathExtension().lastPathComponent
       let outcome = await Self.copyRenderedSlices(
-        stem: stem, targets: targets, renderedByID: byID, destination: destination)
-      await removeWorkDir(workDir)
+        stem: stem, targets: targets, renderedByID: outputsByID, destination: destination)
+      await removeWorkDir(scratchDir)
 
       if outcome.cancelled || Task.isCancelled {
         // A cancel landing during the final copy also lands here, so the cancel
@@ -2454,19 +2531,19 @@ final class EditorModel: ViewModel {
       } else if let message = outcome.errorMessage {
         exportPhase = .failed(message)
       } else if outcome.copied.count != targets.count {
-        // A short result means the engine didn't render every requested slice —
-        // report it rather than claiming success on a partial reveal.
-        exportPhase = .failed(
-          "The engine rendered \(outcome.copied.count) of \(targets.count) slices.")
+        // Defense-in-depth: `outputsByID` is built 1:1 with `targets` above, so this
+        // shouldn't be reachable — but report a short result rather than claim success.
+        exportPhase = .failed("Rendered \(outcome.copied.count) of \(targets.count) slices.")
       } else {
         workspace.reveal(outcome.copied)
-        lastExportTightNames = targets.filter { !$0.warnings.isEmpty }.map(\.name)
+        lastExportTightNames = targets.filter { !exportWarnings(for: $0).isEmpty }.map(\.name)
         exportPhase = .done(count: outcome.copied.count)
       }
     } catch is CancellationError {
-      // The engine cleans up its own work-dir on a cancelled/failed run.
+      await removeWorkDir(scratchDir)
       exportPhase = .failed(cancelMessage(copied: 0, total: targets.count))
     } catch {
+      await removeWorkDir(scratchDir)
       exportPhase = .failed(error.localizedDescription)
     }
   }
@@ -2478,25 +2555,22 @@ final class EditorModel: ViewModel {
     return chosen
   }
 
-  private func renderRequest(for targets: [Slice]) -> RenderRequest {
-    let sampleRate = editPlan.source.sampleRate
-    // Walk words in spoken order and nudge any tie one frame forward so two markers
-    // never stack on the same position or get reordered by Logic — matching the
-    // engine's own `build_markers` invariant (aligned timestamps occasionally
-    // collide at the same rounded sample).
-    var lastPosition = Int.min
-    let markers = editPlan.words.map { word -> RenderMarker in
-      var position = word.startSample ?? Int(word.start * Double(sampleRate))
-      if position <= lastPosition { position = lastPosition + 1 }
-      lastPosition = position
-      return RenderMarker(position: position, name: word.text)
-    }
-    let specs = targets.map {
-      RenderSliceSpec(id: $0.id, startSample: $0.startSample, endSample: $0.endSample)
-    }
-    return RenderRequest(
-      audioURL: canonicalAudioURL, sampleRate: sampleRate,
-      durationSamples: editPlan.source.durationSamples, markers: markers, slices: specs)
+  /// Tight-join warnings computed from EXPORT-effective boundaries rather than the
+  /// slice's own stored (original) boundaries: when a cut point falls inside a removal,
+  /// export starts/ends from the surviving edge of that removal instead, so a boundary
+  /// that was tight against a silence originally can land somewhere entirely different
+  /// (or nowhere at all, if the whole slice was removed) once the timeline collapses.
+  func exportWarnings(for slice: Slice) -> [SliceWarning] {
+    let sliceRange = slice.startSample..<slice.endSample
+    let localTimeline = SliceRenderPlanBuilder.localTimeline(
+      sliceRange: sliceRange, removals: Array(timelineRemovals))
+    let kept = localTimeline.keptSegments.filter { !$0.source.isEmpty }
+    guard let first = kept.first, let last = kept.last else { return [] }
+    let effectiveStart = slice.startSample + first.source.lowerBound
+    let effectiveEnd = slice.startSample + last.source.upperBound
+    return sliceWarnings(
+      startSample: effectiveStart, endSample: effectiveEnd,
+      durationSamples: editPlan.source.durationSamples, silences: editPlan.silences)
   }
 
   /// The result of copying rendered slices to the destination, computed off the main
@@ -2623,6 +2697,11 @@ struct SliceRowState: Identifiable, Equatable {
   var playButtonLabel: String
   var isActive: Bool
   var canFineTune: Bool
+  /// False when the slice's audio is entirely inside a removed section — there is
+  /// nothing left to export, so the row shows `removedLabel` instead of an export button.
+  var canExport: Bool
+  var removedLabel: String
+  var removedHelp: String
 }
 
 /// The identity of a fine-tune edit session — the active slice, or a live transcript
