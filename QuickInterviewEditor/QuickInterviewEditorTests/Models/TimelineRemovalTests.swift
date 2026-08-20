@@ -33,3 +33,33 @@ struct TimelineRemovalTests {
     expectNoDifference(TimelineRemovals.normalize([]), [])
   }
 }
+
+struct CrossfadeDecodingTests {
+  @Test func legacyJSONWithoutNewFieldsDecodesWithDefaults() throws {
+    // A sidecar persisted before curveAmount/centerOffsetSamples existed.
+    let json = Data(#"{"lengthSamples":480,"curve":"equalPower"}"#.utf8)
+    let crossfade = try JSONDecoder().decode(Crossfade.self, from: json)
+    expectNoDifference(crossfade.lengthSamples, 480)
+    expectNoDifference(crossfade.curve, .equalPower)
+    expectNoDifference(crossfade.curveAmount, 0)
+    expectNoDifference(crossfade.centerOffsetSamples, 0)
+  }
+
+  @Test func jSONWithNewFieldsDecodesThem() throws {
+    let json = Data(
+      #"{"lengthSamples":480,"curve":"linear","curveAmount":0.5,"centerOffsetSamples":120}"#.utf8)
+    let crossfade = try JSONDecoder().decode(Crossfade.self, from: json)
+    expectNoDifference(crossfade.lengthSamples, 480)
+    expectNoDifference(crossfade.curve, .linear)
+    expectNoDifference(crossfade.curveAmount, 0.5)
+    expectNoDifference(crossfade.centerOffsetSamples, 120)
+  }
+
+  @Test func encodeDecodeRoundTripPreservesAllFields() throws {
+    let original = Crossfade(
+      lengthSamples: 240, curve: .linear, curveAmount: -0.3, centerOffsetSamples: -50)
+    let data = try JSONEncoder().encode(original)
+    let decoded = try JSONDecoder().decode(Crossfade.self, from: data)
+    expectNoDifference(decoded, original)
+  }
+}
