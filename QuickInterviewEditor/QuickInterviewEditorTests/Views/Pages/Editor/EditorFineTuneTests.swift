@@ -495,6 +495,23 @@ struct EditorFineTuneTests {
     expectNoDifference(model.slices[0].startSample..<model.slices[0].endSample, draft)
   }
 
+  /// The `canAddSlice` word-overlap bar, generalized to the fine-tune Save path: a silence-only
+  /// pending selection (a marquee over a gap that overlaps no word) opens a `.pendingSelection`
+  /// session, but Save must stay disabled and the commit must no-op — otherwise it appends a slice
+  /// with an empty `wordIDs` list, the exact invalid state the direct Add path already blocks.
+  @Test func silenceOnlyPendingDraftCannotBeCommitted() {
+    let model = editor()
+    // 75000..<77000 lies entirely in the gap between word 2 (…74176) and word 3 (77704…):
+    // a freeform selection overlapping no word.
+    model.audioSelection = 75000..<77000
+    model.syncEditSession()
+    expectNoDifference(model.fineTuneTarget, .pendingSelection)
+    #expect(model.fineTune.draftRange != nil)  // the pane opened on the wordless draft…
+    #expect(!model.canCommitEdit)  // …but Save is disabled: no overlapping word
+    model.commitEditTapped()  // action-level guard: no-op
+    expectNoDifference(model.slices.count, 0)
+  }
+
   @Test func addSliceIsDisabledWhileASliceEditIsDirtyWithAHeldSelection() {
     let model = editor()
     addSlice(model, 0, 3)

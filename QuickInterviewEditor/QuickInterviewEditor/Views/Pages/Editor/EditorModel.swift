@@ -345,7 +345,12 @@ final class EditorModel: ViewModel {
   /// slice only commits when its cut points actually changed.
   var canCommitEdit: Bool {
     switch fineTune.target {
-    case .pendingSelection: return fineTune.draftRange != nil
+    case .pendingSelection:
+      // A pending selection commits as a NEW slice, so it must clear the same word-overlap bar as
+      // the direct Add path (`canAddSlice`): a silence-only draft would build a slice with no words.
+      // `commitEditTapped` guards on this, so the commit path can't append a wordless slice either.
+      guard let draft = fineTune.draftRange else { return false }
+      return !wordIDs(anyOverlap: draft, words: editPlan.words).isEmpty
     case .slice: return fineTune.hasUnsavedChange
     case .none: return false
     }
