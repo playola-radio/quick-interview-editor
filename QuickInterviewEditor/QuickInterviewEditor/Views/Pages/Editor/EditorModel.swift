@@ -178,12 +178,29 @@ final class EditorModel: ViewModel {
       ?? min(max(0, sourceSample), timeline.editedDurationSamples)
   }
 
+  /// The EXACT source sample for an in-flight source-axis cursor write (nil otherwise), read by
+  /// `syncCurrentWordToCursor` instead of the lossy `playheadSourceSample` round trip: inside a
+  /// crossfade's outgoing tail the edited→source round trip resolves to the post-cut side, which
+  /// would highlight a word the source playback hasn't reached.
+  @ObservationIgnored private var cursorSourceOverride: Int?
+
+  /// Places the cursor for a SOURCE-axis position: stores the mapped edited sample while the
+  /// current-word sync reads the exact source sample rather than round-tripping through the
+  /// edited axis. Every consumer that knows its true source position (ticks, pause freezes,
+  /// selection snaps, the modal's seek) funnels through here.
+  private func placeCursor(atSource sourceSample: Int) {
+    cursorSourceOverride = sourceSample
+    defer { cursorSourceOverride = nil }
+    playheadEditedSample = editedCursor(forSource: sourceSample)
+  }
+
   /// Keeps the transcript's current-word highlight on the word under the cursor, so it tracks
   /// where you ARE — playing, paused, scrubbed, ruler-moved, or stopped — never a stale
   /// last-heard word. Keeps the last word in a gap (never lose your place) and only writes on a
   /// real change so a 30 Hz cursor doesn't churn the transcript view.
   private func syncCurrentWordToCursor() {
-    guard let word = wordID(atSample: playheadSourceSample), word != transcript.currentWordID
+    let sourceSample = cursorSourceOverride ?? playheadSourceSample
+    guard let word = wordID(atSample: sourceSample), word != transcript.currentWordID
     else { return }
     transcript.currentWordID = word
   }
@@ -242,7 +259,7 @@ final class EditorModel: ViewModel {
     let sourceOrigin = transportOriginEditedSample.map(editedWaveform.timeline.editedToSource)
     editedWaveform.timeline = editedTimeline
     editedWaveform.timelineChanged()
-    playheadEditedSample = editedCursor(forSource: sourceCursor)
+    placeCursor(atSource: sourceCursor)
     transportOriginEditedSample = sourceOrigin.map(editedCursor(forSource:))
   }
 
@@ -654,7 +671,7 @@ final class EditorModel: ViewModel {
           playheadEditedSample = editedSample
           sourceSample = playheadSourceSample
         case .source(let source):
-          playheadEditedSample = editedCursor(forSource: source)
+          placeCursor(atSource: source)
           sourceSample = source
         }
         // The slice-detail edit modal owns its own scoped playhead/transcript while it's the
@@ -878,7 +895,7 @@ final class EditorModel: ViewModel {
     }
     if snapPlayhead {
       stopTransportForRuler()
-      playheadEditedSample = editedCursor(forSource: lower)
+      placeCursor(atSource: lower)
       cursorMoveGeneration &+= 1
     }
   }
@@ -1260,7 +1277,7 @@ final class EditorModel: ViewModel {
     child.onSeek = { [weak self] sample in
       guard let self else { return }
       // The modal reasons in SOURCE samples; the persistent cursor lives on the EDITED axis.
-      playheadEditedSample = editedCursor(forSource: sample)
+      placeCursor(atSource: sample)
       editSlice?.updatePlayback(sample: sample, isPlaying: isTransportPlaying)
     }
     child.onDismiss = { [weak self] in
@@ -1613,7 +1630,11 @@ final class EditorModel: ViewModel {
     let session = PlaybackSessionID()
     transportContext = context
     transportOriginEditedSample = resolved.startEditedSample
-    playheadEditedSample = resolved.startEditedSample
+    if let sourceRange = resolved.sourceRange {
+      placeCursor(atSource: sourceRange.lowerBound)
+    } else {
+      playheadEditedSample = resolved.startEditedSample
+    }
     // A transport start authoritatively places the cursor, so it takes cursor authority too: a
     // selection snap deferred from before this Play must bail rather than stop us and snap back.
     cursorMoveGeneration &+= 1
@@ -1646,7 +1667,13 @@ final class EditorModel: ViewModel {
     // touched it — so reset the transport WITHOUT jumping the cursor to the end. A failed play
     // (`.stopped`) likewise leaves the cursor put.
     guard transportPhase.session == session else { return }
-    if outcome == .finished { playheadEditedSample = resolved.finishEditedSample }
+    if outcome == .finished {
+      if let sourceRange = resolved.sourceRange {
+        placeCursor(atSource: sourceRange.upperBound)
+      } else {
+        playheadEditedSample = resolved.finishEditedSample
+      }
+    }
     // Capture the slice-edit child (if this playback was the modal's) BEFORE the reset clears the
     // context — reaching here past the session guard means the modal wasn't torn down, so this IS
     // the owning modal. A natural finish / cross-tab supersede must publish "stopped" back to it.
@@ -1674,7 +1701,7 @@ final class EditorModel: ViewModel {
     guard transportPhase.session == session else { return }
     switch sample {
     case .edited(let editedSample): playheadEditedSample = editedSample
-    case .source(let source): playheadEditedSample = editedCursor(forSource: source)
+    case .source(let source): placeCursor(atSource: source)
     case nil: break
     }
     transportPhase = .paused(session)
@@ -1741,7 +1768,7 @@ final class EditorModel: ViewModel {
         cursorMoveGeneration == cursorToken
       else { return }
     }
-    playheadEditedSample = editedCursor(forSource: newRange.lowerBound)
+    placeCursor(atSource: newRange.lowerBound)
   }
 
   // MARK: - Ruler

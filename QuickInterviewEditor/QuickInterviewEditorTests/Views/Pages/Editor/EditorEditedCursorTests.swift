@@ -68,6 +68,28 @@ struct EditorEditedCursorTests {
     expectNoDifference(model.playheadSourceSample, 70_000)
   }
 
+  @Test func sourceTickInCrossfadeTailKeepsPreCutWord() async {
+    let model = editor()
+    addRemoval(model, 40_000, 60_000, length: 4_800)
+    let session = PlaybackSessionID()
+    model.transportPhase = .playing(session)
+    let (stream, continuation) = AsyncStream.makeStream(of: PlaybackPosition.self)
+    await withDependencies {
+      $0.audioPlayer.positions = { stream }
+    } operation: {
+      let observe = Task { await model.observePlayback() }
+      continuation.yield(
+        PlaybackPosition(sessionID: session, sample: .source(38_000), isPlaying: true))
+      continuation.finish()
+      await observe.value
+    }
+    // Source 38_000 sits in the crossfade's outgoing tail: its edited position lies in the
+    // overlap zone, whose edited→source round trip resolves to the post-cut side (62_800 —
+    // the fixture's word 1). The highlight must track the EXACT source sample still playing:
+    // no word covers 38_000 in the fixture, so the current word stays unset.
+    expectNoDifference(model.transcript.currentWordID, nil)
+  }
+
   @Test func pauseSampleAfterRemovalFreezesCursorOnEditedAxis() async {
     let model = editor()
     addRemoval(model, 40_000, 60_000, length: 4_800)
