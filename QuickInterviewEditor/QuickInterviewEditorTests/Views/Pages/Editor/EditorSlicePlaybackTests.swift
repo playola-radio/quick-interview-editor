@@ -363,6 +363,39 @@ struct EditorSlicePlaybackTests {
     }
   }
 
+  /// The Edit Slice modal previews the collapsed (removal-aware) audio, so it must reset exactly
+  /// like a saved-slice session when a removal lands inside the slice it has open — otherwise the
+  /// modal would keep playing audio export no longer contains.
+  @Test func addingARemovalDuringModalPlaybackResetsThePreview() async {
+    let model = editor()
+    addRemoval(model, 40_000, 60_000, length: 4_800)
+    let slice = addSlice(model, 30_000, 80_000)
+    model.editSliceTapped(slice.id)
+    let child = model.editSlice!
+    let gate = PlayGate()
+    await withDependencies {
+      $0.audioPlayer.playEdited = { _, _, _, _, _ in
+        EditedPlaybackEnd(end: await gate.play(), finishedEditedSample: nil)
+      }
+      $0.audioPlayer.stop = { _ in await gate.finish(.stopped) }
+    } operation: {
+      let play = Task { await child.playPauseTapped() }
+      await settle(until: model.isTransportPlaying)
+      expectNoDifference(model.transportContext, .sliceEdit)
+      // A second removal lands inside the slice the modal is previewing: the collapsed audio it
+      // scheduled no longer matches the document, so the preview must stop rather than keep
+      // playing audio export would now cut.
+      model.mutateDocument { doc in
+        doc.timelineRemovals.append(
+          TimelineRemoval(
+            id: Fixtures.uuid(2), removedRange: 70_000..<74_000,
+            crossfade: Crossfade(lengthSamples: 0, curve: .equalPower)))
+      }
+      expectNoDifference(model.transportPhase, .stopped)
+      await play.value
+    }
+  }
+
   @Test func addingARemovalOutsideThePlayingSliceKeepsItPlaying() async {
     let model = editor()
     addRemoval(model, 40_000, 60_000, length: 4_800)

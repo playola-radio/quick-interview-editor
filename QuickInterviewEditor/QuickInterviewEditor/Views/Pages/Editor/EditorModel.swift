@@ -327,10 +327,19 @@ final class EditorModel: ViewModel {
   /// removals inside its own range: a playlist session is stale once its slice-local timeline no
   /// longer matches what it scheduled, and a raw source-range slice session becomes wrong the
   /// moment a removal first lands inside the slice (it would keep playing audio export now
-  /// cuts). Preview/audition/modal sessions stay deliberately source-faithful and keep playing.
+  /// cuts). Preview/audition sessions stay deliberately source-faithful and keep playing; the
+  /// Edit Slice modal is removal-aware and resets like a saved slice.
   private func playbackDependsOnChangedRemovals() -> Bool {
     if case .free = transportContext { return true }
-    guard let sliceID = transportContext.sliceID, let slice = slices[id: sliceID] else {
+    // The Edit Slice modal previews the collapsed (removal-aware) audio, so it must reset like a
+    // saved-slice session; its slice is the open sheet's, since `.sliceEdit` carries no id.
+    let contextSliceID: Slice.ID?
+    if case .sliceEdit = transportContext {
+      contextSliceID = editSlice?.sliceID
+    } else {
+      contextSliceID = transportContext.sliceID
+    }
+    guard let sliceID = contextSliceID, let slice = slices[id: sliceID] else {
       return false
     }
     let newLocal = SliceRenderPlanBuilder.localTimeline(

@@ -297,8 +297,11 @@ final class EditSliceModel: ViewModel, Identifiable {
     let clampedX = min(max(0, currentX), editedWaveform.viewportWidth)
     let focus = clampedToWindow(editedWaveform.xToSourceSample(clampedX))
     let lower = min(anchor, focus)
-    let upper = max(max(anchor, focus), lower + 1)
-    waveformSelection = lower..<upper
+    // Both endpoints can land on the slice's exclusive upper bound (clampedToWindow is inclusive
+    // there); the 1-sample minimum must not push the span one sample past the slice, so clamp the
+    // upper into the window and expand the lower leftward when there is no room to the right.
+    let upper = min(max(max(anchor, focus), lower + 1), overviewWindow.upperBound)
+    waveformSelection = min(lower, upper - 1)..<upper
   }
 
   private func selectSeam(_ id: TimelineRemoval.ID) {

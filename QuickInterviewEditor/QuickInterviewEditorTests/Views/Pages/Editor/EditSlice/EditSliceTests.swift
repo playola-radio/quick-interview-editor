@@ -418,6 +418,21 @@ struct EditSliceTests {
     #expect(model.canRemoveSelection)
   }
 
+  /// A marquee whose anchor AND focus both land on the slice's exclusive upper bound (the lane's
+  /// right edge, where `clampedToWindow` is inclusive) must not escape the slice by expanding to the
+  /// 1-sample minimum past it — it should collapse to the slice's last sample instead.
+  @Test func marqueeAtTheRightEdgeStaysInsideTheSlice() throws {
+    // slice 10_000..<20_000, spp 10, viewport 1000px -> right edge maps to source sample 20_000
+    let model = laneModel()
+    model.waveformAreaSelectBegan(atX: 1000, extending: false)
+    model.waveformAreaSelectChanged(toX: 1000)
+    model.waveformAreaSelectEnded(toX: 1000)
+
+    let selection = try #require(model.waveformSelection)
+    #expect(selection.upperBound <= model.overviewWindow.upperBound)
+    expectNoDifference(selection, 19_999..<20_000)
+  }
+
   /// A marquee drag is a no-op until the lane geometry is usable (nothing to map view-x against).
   @Test func marqueeIsANoOpWithoutUsableGeometry() {
     let (model, _) = makeModel()  // lane never seeded/laid out
