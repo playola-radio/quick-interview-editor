@@ -16,6 +16,7 @@ struct SlicesPanelView: View {
         } label: {
           Image(systemName: "arrow.uturn.backward")
         }
+        .keyboardShortcut("z", modifiers: .command)
         .disabled(!model.canUndo)
         .help(model.undoLabel).accessibilityLabel(model.undoLabel)
         Button {
@@ -23,6 +24,7 @@ struct SlicesPanelView: View {
         } label: {
           Image(systemName: "arrow.uturn.forward")
         }
+        .keyboardShortcut("z", modifiers: [.command, .shift])
         .disabled(!model.canRedo)
         .help(model.redoLabel).accessibilityLabel(model.redoLabel)
       }
@@ -106,16 +108,6 @@ private struct SliceCard: View {
             .foregroundStyle(Color(white: 0.44))
           Text(row.snippet).font(.system(size: 12.5))
             .foregroundStyle(Color(white: 0.6)).lineLimit(2)
-          if row.isTight {
-            Text(row.warningLabel)
-              .font(.system(size: 10, weight: .semibold)).tracking(0.3)
-              .foregroundStyle(Color(red: 0.89, green: 0.58, blue: 0.58))
-              .padding(.horizontal, 7).padding(.vertical, 2)
-              .background(
-                Capsule().fill(Color(red: 0.89, green: 0.58, blue: 0.58).opacity(0.16))
-              )
-              .help(row.warningHelp).accessibilityLabel(row.warningHelp)
-          }
           if !row.canExport {
             Text(row.removedLabel)
               .font(.system(size: 10, weight: .semibold)).tracking(0.3)
@@ -184,10 +176,6 @@ private struct ExportStatus: View {
           Button(model.cancelExportLabel) { model.cancelExportTapped() }
             .font(.system(size: 11))
         }
-      }
-      if !model.exportTightWarning.isEmpty {
-        Text(model.exportTightWarning).font(.system(size: 11))
-          .foregroundStyle(Color(red: 0.89, green: 0.58, blue: 0.58))
       }
       if !model.exportSkippedRemovedWarning.isEmpty {
         Text(model.exportSkippedRemovedWarning).font(.system(size: 11))

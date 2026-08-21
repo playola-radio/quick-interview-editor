@@ -42,7 +42,7 @@ struct EditorSlicePlaybackTests {
   private func addSlice(_ model: EditorModel, _ start: Int, _ end: Int) -> Slice {
     let slice = Slice(
       id: UUID(), name: "S", startSample: start, endSample: end, wordIDs: [],
-      snippet: "", warnings: [])
+      snippet: "")
     model.mutateSlices { $0.append(slice) }
     return slice
   }
@@ -144,6 +144,69 @@ struct EditorSlicePlaybackTests {
     #expect(!played.value)
     expectNoDifference(model.transportPhase, .stopped)
     expectNoDifference(model.transportContext, .free)
+  }
+
+  // MARK: - Stage 5: the Edit Slice sheet previews the collapsed audio
+
+  /// Play inside the Edit Slice sheet must match slice export too: the sheet's Play routes through
+  /// the SAME slice-local render plan, so a removal inside the slice is skipped on playback exactly
+  /// as it collapses on the sheet's lane. What you hear matches what you see (and what exports).
+  @Test func modalPlayCrossingARemovalPreviewsTheSliceLocalRenderPlan() async {
+    let model = editor()
+    addRemoval(model, 40_000, 60_000, length: 4_800)
+    let slice = addSlice(model, 30_000, 80_000)
+    model.editSliceTapped(slice.id)
+    let child = model.editSlice!
+    let recorded = LockIsolated<AudioEditRenderPlan?>(nil)
+    let playedRaw = LockIsolated(false)
+    await withDependencies {
+      $0.audioPlayer.playEdited = { _, plan, _, _, _ in
+        recorded.setValue(plan)
+        return EditedPlaybackEnd(end: .finished, finishedEditedSample: nil)
+      }
+      $0.audioPlayer.play = { _, _, _, _, _ in
+        playedRaw.setValue(true)
+        return .finished
+      }
+    } operation: {
+      await child.playPauseTapped()  // no cursor yet → plays the whole committed slice
+    }
+    #expect(!playedRaw.value)
+    expectNoDifference(
+      recorded.value?.items,
+      [
+        .segment(source: 30_000..<35_200, editedStart: 0),
+        .seam(
+          id: removalID, leftTail: 35_200..<40_000, rightHead: 60_000..<64_800,
+          length: 4_800, editedStart: 5_200, fadeOffset: 0),
+        .segment(source: 64_800..<80_000, editedStart: 10_000),
+      ])
+  }
+
+  /// A sheet slice clear of every removal keeps the tuned raw source-range path (identical audio),
+  /// so removal-free slices are unchanged by the `.slice` routing.
+  @Test func modalPlayClearOfRemovalsKeepsTheRawSourceRange() async {
+    let model = editor()
+    addRemoval(model, 40_000, 60_000, length: 4_800)
+    let slice = addSlice(model, 5_000, 20_000)
+    model.editSliceTapped(slice.id)
+    let child = model.editSlice!
+    let playedRange = LockIsolated<Range<Int>?>(nil)
+    let playedEdited = LockIsolated(false)
+    await withDependencies {
+      $0.audioPlayer.play = { _, range, _, _, _ in
+        playedRange.setValue(range)
+        return .finished
+      }
+      $0.audioPlayer.playEdited = { _, _, _, _, _ in
+        playedEdited.setValue(true)
+        return EditedPlaybackEnd(end: .finished, finishedEditedSample: nil)
+      }
+    } operation: {
+      await child.playPauseTapped()
+    }
+    expectNoDifference(playedRange.value, 5_000..<20_000)
+    #expect(!playedEdited.value)
   }
 
   // MARK: - Slice-local axis conversion

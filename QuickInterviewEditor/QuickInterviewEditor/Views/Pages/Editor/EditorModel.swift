@@ -259,7 +259,6 @@ final class EditorModel: ViewModel {
   /// column so accepting a suggestion visibly lands a clip in the Slices tab.
   var rightPanelTab: RightPanelTab = .slices
   private var nextSliceNumber = 1
-  private var lastExportTightNames: [String] = []
   /// Names of slices skipped by the most recent "Export all" because their entire audio
   /// fell inside a removed section — surfaced by `exportSkippedRemovedWarning`.
   private var lastExportSkippedRemovedNames: [String] = []
@@ -318,6 +317,9 @@ final class EditorModel: ViewModel {
     editedWaveform.timelineChanged()
     placeCursor(atSource: sourceCursor)
     transportOriginEditedSample = sourceOrigin.map(editedCursor(forSource:))
+    // Fan the same timeline into an open slice-edit sheet so its collapsed lane reflects the change
+    // (a removal / undo / redo on the main timeline) immediately, re-pinned to the slice's new span.
+    editSlice?.syncTimeline(newTimeline)
   }
 
   /// Whether the live playback's audio was built from the removal set that just changed. Free
@@ -359,8 +361,6 @@ final class EditorModel: ViewModel {
     + "update or another window. Re-import the file to export again."
   let undoLabel = "Undo"
   let redoLabel = "Redo"
-  let tightBadgeLabel = "Tight join"
-  let tightBadgeHelp = "A cut point isn't in a silence — add a fade in Logic."
   let removedBadgeLabel = "Removed"
   let removedBadgeHelp =
     "This clip's audio is entirely inside a removed section — there is nothing to export."
@@ -529,9 +529,13 @@ final class EditorModel: ViewModel {
 
   /// True only while an EXISTING slice has an unsaved cut edit — the user must Save or Cancel
   /// before exporting or undo/redo (a pending-selection draft is a new slice, not a mutation,
-  /// and export never renders it, so it doesn't gate).
+  /// and export never renders it, so it doesn't gate). Also true while the Edit Slice sheet holds
+  /// an unsaved boundary draft: that draft is the modal's deferred existing-slice edit, so ⌘Z from
+  /// inside the sheet must be blocked exactly as a docked draft blocks it here — otherwise undo
+  /// would rewind `slices` under the modal's live draft.
   var hasUncommittedSliceEdit: Bool {
-    fineTune.isEditingExistingSlice && fineTune.hasUnsavedChange
+    (fineTune.isEditingExistingSlice && fineTune.hasUnsavedChange)
+      || (editSlice?.fineTune.hasUnsavedChange ?? false)
   }
 
   /// Min/max columns for each fine-tune inset silhouette, delegated to the waveform pyramid.
@@ -743,16 +747,6 @@ final class EditorModel: ViewModel {
     }
   }
 
-  /// After a successful export, names the exported slices whose cut points weren't in
-  /// silence — the user's cue to add a fade in Logic. Empty otherwise. This carries the
-  /// tight-join warning into the summary; it is never written into the AIFF markers.
-  var exportTightWarning: String {
-    guard case .done = exportPhase, !lastExportTightNames.isEmpty else { return "" }
-    let names = lastExportTightNames.joined(separator: ", ")
-    let verb = lastExportTightNames.count == 1 ? "has a tight join" : "have tight joins"
-    return "\(names) \(verb) — add a fade in Logic."
-  }
-
   /// After a successful "Export all", names the slices that were skipped because their
   /// entire audio fell inside a removed section. Empty otherwise, and never shown for a
   /// single-slice export (that path already refuses via `sliceIsExportable` before
@@ -793,9 +787,6 @@ final class EditorModel: ViewModel {
           rangeLabel: "\(sampleTimecodeLabel(slice.startSample, sampleRate: sampleRate)) – "
             + sampleTimecodeLabel(slice.endSample, sampleRate: sampleRate),
           snippet: slice.snippet,
-          isTight: !slice.warnings.isEmpty,
-          warningLabel: slice.warnings.isEmpty ? "" : tightBadgeLabel,
-          warningHelp: slice.warnings.isEmpty ? "" : tightBadgeHelp,
           // The row highlights while its slice is the transport's context; the button is a pure
           // Play shortcut now (no per-slice Stop — the global transport owns Pause/Stop, ruling F).
           isPlaying: transportContext.sliceID == slice.id,
@@ -1494,6 +1485,21 @@ final class EditorModel: ViewModel {
     child.waveform.adopt(
       waveform: waveform.waveform, totalSamples: waveform.totalSamples,
       sampleRate: waveform.sampleRate, contentRange: slice.startSample..<slice.endSample)
+    // Seed the sheet's collapsed lane with the parent's current GLOBAL timeline so any removals
+    // already inside the slice render collapsed the moment it opens. `syncEditedTimeline` keeps it
+    // in sync for every later removal/undo/redo while the sheet stays up.
+    child.syncTimeline(editedTimeline)
+    // Item ①: the modal edits the slice exactly like the main timeline — a marquee removal and a
+    // seam restore route through the SAME funnels the main editor uses, so both surfaces merge
+    // cross-seam removals identically and every edit is one ⌘Z step. `syncEditedTimeline` fans the
+    // result back into the open sheet.
+    child.onRemoveSection = { [weak self] range in await self?.removeSourceRange(range) }
+    child.onRestore = { [weak self] removalID in self?.restoreRemoval(id: removalID) }
+    // ⌘Z/⌘⇧Z pressed inside the sheet route here: a modal removal lives on this document's undo
+    // stack, and `undoTapped`/`redoTapped` fan the restored timeline back into the open sheet via
+    // `syncEditedTimeline`. The main window's SwiftUI undo shortcut can't fire while the sheet is key.
+    child.onUndo = { [weak self] in await self?.undoTapped() }
+    child.onRedo = { [weak self] in await self?.redoTapped() }
     child.onCommit = { [weak self] range in self?.commitSliceEdit(id: id, range: range) }
     child.onPlay = { [weak self] range in
       // Logic model: Play always plays `range` from the playhead as a fresh, exclusive `.sliceEdit`
@@ -1501,7 +1507,12 @@ final class EditorModel: ViewModel {
       // next Play re-plays from it, and seeking mid-play passes a new range here to re-anchor. There
       // is no bespoke resume/drift branch — `beginTransportPlayback` supersedes any prior (playing or
       // paused) session cleanly.
-      await self?.beginTransportPlayback(.sourceRange(range), context: .sliceEdit)
+      //
+      // Item ①: `.slice` (not `.sourceRange`) so the sheet PREVIEWS the collapsed audio — a removal
+      // inside the slice is skipped on playback exactly as it collapses on the lane and exports, so
+      // what you hear matches what you see. With no removal intersecting, `.slice` resolves to the
+      // plain source range (identical audio), so removal-free slices are unchanged.
+      await self?.beginTransportPlayback(.slice(range), context: .sliceEdit)
     }
     child.onPause = { [weak self] in
       guard let self else { return }
@@ -1570,10 +1581,7 @@ final class EditorModel: ViewModel {
       startSample: range.lowerBound,
       endSample: range.upperBound,
       wordIDs: wordIDs,
-      snippet: displaySnippet(sliceSnippet(for: wordIDs, words: editPlan.words)),
-      warnings: sliceWarnings(
-        startSample: range.lowerBound, endSample: range.upperBound,
-        durationSamples: editPlan.source.durationSamples, silences: editPlan.silences)
+      snippet: displaySnippet(sliceSnippet(for: wordIDs, words: editPlan.words))
     )
     mutateSlices { $0.append(slice) }
     nextSliceNumber += 1
@@ -1590,11 +1598,12 @@ final class EditorModel: ViewModel {
   /// separate fine-tune draft to prefer — the selection is already the (possibly nudged) truth.
   private var pendingRemovalSourceRange: Range<Int>? { selectedSourceRange }
 
-  /// Whether `range` can become a removal: non-empty and not overlapping an
-  /// existing removal's source span (cross-seam rejection, spec §4.7).
+  /// Whether `range` can become a removal: non-empty. Cross-seam is now allowed — a range that
+  /// overlaps existing removals merges them into one larger removal via `removeSourceRange`
+  /// (Item ①: the Edit-Slice modal and the main timeline share one collapsed axis, so Delete
+  /// must behave identically on both).
   func canRemove(sourceRange range: Range<Int>) -> Bool {
-    guard range.lowerBound < range.upperBound else { return false }
-    return !timelineRemovals.contains { $0.removedRange.overlaps(range) }
+    range.lowerBound < range.upperBound
   }
 
   /// Drives ⌫ enablement and the Remove Section menu item. Also blocked while an export is
@@ -1611,14 +1620,30 @@ final class EditorModel: ViewModel {
   /// `canRemoveSelectedSection`) so a stale invocation can't mutate the document while an export
   /// is rendering.
   func removeSelectedSectionTapped() async {
-    guard !isExporting, let range = pendingRemovalSourceRange, canRemove(sourceRange: range)
-    else {
-      return
-    }
+    guard let range = pendingRemovalSourceRange else { return }
+    await removeSourceRange(range)
+  }
+
+  /// Removes a SOURCE range, merging any existing removals it overlaps into ONE larger removal
+  /// (Item ①). The single funnel both the main timeline (`removeSelectedSectionTapped`) and the
+  /// Edit-Slice modal route Remove through, so cross-seam behavior is identical on both surfaces —
+  /// the modal is a truncated view of the same collapsed axis. The merged removal spans
+  /// `min(lower)..<max(upper)` of the range and every absorbed removal, and carries the default
+  /// crossfade: an absorbed removal's crossfade was internal to audio that stays removed, so it is
+  /// no longer an audible seam. `normalize` runs only as a validation backstop. A no-op while
+  /// exporting (a removal mid-export would leave the finished AIFF stale) or for an empty range.
+  func removeSourceRange(_ range: Range<Int>) async {
+    guard !isExporting, canRemove(sourceRange: range) else { return }
+    let absorbed = timelineRemovals.filter { $0.removedRange.overlaps(range) }
+    let mergedLower = min(
+      range.lowerBound, absorbed.map(\.removedRange.lowerBound).min() ?? range.lowerBound)
+    let mergedUpper = max(
+      range.upperBound, absorbed.map(\.removedRange.upperBound).max() ?? range.upperBound)
     let removal = TimelineRemoval(
-      id: UUID(), removedRange: range,
+      id: UUID(), removedRange: mergedLower..<mergedUpper,
       crossfade: Crossfade(lengthSamples: defaultCrossfadeSamples, curve: .equalPower))
     mutateDocument { doc in
+      for absorbedRemoval in absorbed { doc.timelineRemovals.remove(id: absorbedRemoval.id) }
       doc.timelineRemovals.append(removal)
       doc.timelineRemovals = IdentifiedArray(
         uniqueElements: TimelineRemovals.normalize(Array(doc.timelineRemovals))
@@ -1740,6 +1765,15 @@ final class EditorModel: ViewModel {
   /// slice is gone (clearing its target + draft). Centralized so every removal path behaves
   /// the same.
   private func reconcilePlayback() async {
+    // A shared-document undo/redo can pull the Edit Slice sheet's slice out from under it: ⌘Z can
+    // delete the slice (rewinding its creation) OR revert its boundaries. The modal's overview
+    // window and committed range are seeded once at open and never re-seed, so a survived-but-moved
+    // slice leaves the sheet editing a stale range that a later Save would recommit over the undone
+    // state. Either way, close the orphaned sheet and drop its transport with it.
+    if let editing = editSlice, editSliceRangeIsStale(editing) {
+      stopActiveTransportSnapshotting()
+      editSlice = nil
+    }
     if case .slice(let playing) = transportContext, slices[id: playing] == nil {
       await endTransportPlayback()
     }
@@ -1760,6 +1794,15 @@ final class EditorModel: ViewModel {
         await stopAuditionIfPlaying()
       }
     }
+  }
+
+  /// Whether the open Edit Slice sheet is now editing a range the document no longer holds: the
+  /// slice was deleted, or it survived but its boundaries were reverted away from the range the
+  /// modal committed to at open (the modal never re-seeds its overview window / committed range).
+  /// A modal removal leaves the slice's own bounds untouched, so it never reads as stale here.
+  private func editSliceRangeIsStale(_ editing: EditSliceModel) -> Bool {
+    guard let slice = slices[id: editing.sliceID] else { return true }
+    return editing.fineTune.committedRange != slice.startSample..<slice.endSample
   }
 
   /// Stops a playing draft preview from an async context, ordered (awaited). No-op unless the
@@ -2532,8 +2575,8 @@ final class EditorModel: ViewModel {
     displaySliceSnippet(text)
   }
 
-  /// Re-derives a slice's word membership, snippet, and warnings for a new sample range once
-  /// the cut points move. Membership is by overlap ("a word is in a clip iff any of its audio
+  /// Re-derives a slice's word membership and snippet for a new sample range once the cut
+  /// points move. Membership is by overlap ("a word is in a clip iff any of its audio
   /// overlaps the range" — the spec's single clip-membership rule), matching how a clip is built
   /// from a freeform selection so editing a clip's boundaries can never silently drop a word that
   /// creating it included.
@@ -2543,9 +2586,6 @@ final class EditorModel: ViewModel {
     updated.endSample = range.upperBound
     updated.wordIDs = wordIDs(anyOverlap: range, words: editPlan.words)
     updated.snippet = displaySnippet(sliceSnippet(for: updated.wordIDs, words: editPlan.words))
-    updated.warnings = sliceWarnings(
-      startSample: range.lowerBound, endSample: range.upperBound,
-      durationSamples: editPlan.source.durationSamples, silences: editPlan.silences)
     return updated
   }
 
@@ -2639,7 +2679,7 @@ final class EditorModel: ViewModel {
       }
       try await engine.injectMarkers(rendered.injectionFiles)
       await finishExport(
-        targets: targets, removals: removals, outputsByID: rendered.outputsByID,
+        targets: targets, outputsByID: rendered.outputsByID,
         scratchDir: scratchDir, destination: destination)
     } catch is CancellationError {
       await removeWorkDir(scratchDir)
@@ -2708,7 +2748,7 @@ final class EditorModel: ViewModel {
   /// Copies the rendered files to `destination` and sets the terminal `exportPhase` —
   /// success, a copy failure, a mid-copy cancel, or (defensively) a count mismatch.
   private func finishExport(
-    targets: [Slice], removals: [TimelineRemoval], outputsByID: [Slice.ID: URL],
+    targets: [Slice], outputsByID: [Slice.ID: URL],
     scratchDir: URL, destination: URL
   ) async {
     // Copy off the main actor — copying many/large AIFFs (or to a slow/network
@@ -2730,11 +2770,6 @@ final class EditorModel: ViewModel {
       exportPhase = .failed("Rendered \(outcome.copied.count) of \(targets.count) slices.")
     } else {
       workspace.reveal(outcome.copied)
-      // Warnings come from the SAME frozen removal set the render used, so they can never
-      // describe a different timeline than the shipped audio.
-      lastExportTightNames = targets.filter {
-        !exportWarnings(for: $0, removals: removals).isEmpty
-      }.map(\.name)
       exportPhase = .done(count: outcome.copied.count)
     }
   }
@@ -2744,30 +2779,6 @@ final class EditorModel: ViewModel {
     guard let chosen = await workspace.chooseDirectory() else { return nil }
     destinationURL = chosen
     return chosen
-  }
-
-  /// Tight-join warnings computed from EXPORT-effective boundaries rather than the
-  /// slice's own stored (original) boundaries: when a cut point falls inside a removal,
-  /// export starts/ends from the surviving edge of that removal instead, so a boundary
-  /// that was tight against a silence originally can land somewhere entirely different
-  /// (or nowhere at all, if the whole slice was removed) once the timeline collapses.
-  /// Pass `removals` to evaluate against a frozen snapshot (the export path hands in the set
-  /// it actually rendered, so the warning can never drift from the shipped audio); defaults
-  /// to the live document.
-  func exportWarnings(for slice: Slice, removals: [TimelineRemoval]? = nil) -> [SliceWarning] {
-    // Same reversed-bounds defense as `sliceIsExportable`: nothing to warn about on a slice
-    // that can never render.
-    guard slice.startSample < slice.endSample else { return [] }
-    let sliceRange = slice.startSample..<slice.endSample
-    let localTimeline = SliceRenderPlanBuilder.localTimeline(
-      sliceRange: sliceRange, removals: removals ?? Array(timelineRemovals))
-    let kept = localTimeline.keptSegments.filter { !$0.source.isEmpty }
-    guard let first = kept.first, let last = kept.last else { return [] }
-    let effectiveStart = slice.startSample + first.source.lowerBound
-    let effectiveEnd = slice.startSample + last.source.upperBound
-    return sliceWarnings(
-      startSample: effectiveStart, endSample: effectiveEnd,
-      durationSamples: editPlan.source.durationSamples, silences: editPlan.silences)
   }
 
   /// The result of copying rendered slices to the destination, computed off the main
@@ -2887,9 +2898,6 @@ struct SliceRowState: Identifiable, Equatable {
   var durationLabel: String
   var rangeLabel: String
   var snippet: String
-  var isTight: Bool
-  var warningLabel: String
-  var warningHelp: String
   var isPlaying: Bool
   var playButtonLabel: String
   var isActive: Bool

@@ -1,6 +1,8 @@
+import ConcurrencyExtras
 import CustomDump
 import Dependencies
 import Foundation
+@_spi(Internals) import Sharing
 import Testing
 
 @testable import QuickInterviewEditor
@@ -140,6 +142,172 @@ struct EditorEditSlicePresentationTests {
       lane.scrolled(toStartSample: 0)  // try to scroll before the slice
       expectNoDifference(lane.visibleStartSample, slice.startSample)  // clamped to the slice start
     }
+  }
+
+  // MARK: - Stage 3: parent ⇄ modal timeline sync
+
+  /// A removal on the MAIN timeline while the slice sheet is open fans into the sheet's collapsed
+  /// lane immediately, and ⌘Z reverts it in the sheet too — the sheet and the main timeline share
+  /// one GLOBAL `EditedTimeline` and never diverge.
+  @Test func removalOnTheMainTimelineFansIntoTheOpenModalAndUndoRevertsBoth() async {
+    let fileSystem = LockIsolated<[URL: Data]>([:])
+    await withDependencies {
+      $0.defaultFileStorage = FileStorage.inMemory(fileSystem: fileSystem)
+    } operation: {
+      let model = editor()
+      addSlice(model, 0, 5)
+      let slice = model.slices[0]
+      model.editSliceTapped(slice.id)
+      let child = model.editSlice!
+      // opens matching the parent (none yet)
+      #expect(child.editedWaveform.timeline.removals.isEmpty)
+
+      selectWords(model.transcript, 1, 2)  // a removable span inside the slice
+      await model.removeSelectedSectionTapped()
+
+      expectNoDifference(
+        child.editedWaveform.timeline.removals.map(\.id), Array(model.timelineRemovals.ids))
+      #expect(child.editedWaveform.timeline.removals.count == 1)
+
+      await model.undoTapped()  // ⌘Z reverts the removal
+      #expect(child.editedWaveform.timeline.removals.isEmpty)  // and the sheet reverts with it
+    }
+  }
+
+  // MARK: - Stage 4b: modal remove / restore routes through the parent funnels
+
+  /// A Remove inside the sheet routes to the parent's `removeSourceRange` merge funnel: a marquee
+  /// crossing an existing removal collapses BOTH into ONE union removal (full parity with the main
+  /// timeline), it's a single ⌘Z, and Restore in the sheet reopens it — all through the same funnels
+  /// the main editor uses, and every change fans back into the open sheet.
+  @Test func modalRemoveMergesCrossSeamThroughTheParentAndRestoreReopens() async {
+    let fileSystem = LockIsolated<[URL: Data]>([:])
+    await withDependencies {
+      $0.defaultFileStorage = FileStorage.inMemory(fileSystem: fileSystem)
+    } operation: {
+      let model = editor()
+      addSlice(model, 0, 5)
+      let slice = model.slices[0]
+      model.editSliceTapped(slice.id)
+      let child = model.editSlice!
+
+      selectWords(model.transcript, 1, 2)  // seed one removal inside the slice
+      await model.removeSelectedSectionTapped()
+      #expect(model.timelineRemovals.count == 1)
+      let seeded = model.timelineRemovals[0].removedRange
+
+      // The sheet removes a span that straddles the seeded removal — the funnel unions them.
+      let straddling = (seeded.lowerBound - 500)..<(seeded.upperBound + 500)
+      await child.onRemoveSection(straddling)
+
+      expectNoDifference(model.timelineRemovals.count, 1)  // merged, not a second removal
+      expectNoDifference(model.timelineRemovals[0].removedRange, straddling)
+      expectNoDifference(
+        child.editedWaveform.timeline.removals.map(\.id), Array(model.timelineRemovals.ids))
+
+      await model.undoTapped()  // one ⌘Z reverts the merge back to the seeded removal
+      expectNoDifference(model.timelineRemovals.map(\.removedRange), [seeded])
+
+      child.onRestore(model.timelineRemovals[0].id)  // Restore in the sheet reopens the audio
+      #expect(model.timelineRemovals.isEmpty)
+      #expect(child.editedWaveform.timeline.removals.isEmpty)
+    }
+  }
+
+  /// ⌘Z pressed INSIDE the sheet (forwarded by `SliceEditKeyMonitor` to `child.undoTapped`) rewinds
+  /// the shared document and fans the restored timeline back into the open sheet — the modal removal
+  /// is undoable without focus ever leaving the sheet.
+  @Test func modalUndoRewindsTheRemovalAndReSyncsTheSheet() async {
+    let fileSystem = LockIsolated<[URL: Data]>([:])
+    await withDependencies {
+      $0.defaultFileStorage = FileStorage.inMemory(fileSystem: fileSystem)
+    } operation: {
+      let model = editor()
+      addSlice(model, 0, 5)
+      let slice = model.slices[0]
+      model.editSliceTapped(slice.id)
+      let child = model.editSlice!
+
+      selectWords(model.transcript, 1, 2)
+      await child.onRemoveSection(model.selectedSourceRange!)
+      #expect(model.timelineRemovals.count == 1)
+      #expect(child.editedWaveform.timeline.removals.count == 1)
+
+      await child.undoTapped()  // ⌘Z from within the sheet
+
+      #expect(model.timelineRemovals.isEmpty)
+      #expect(child.editedWaveform.timeline.removals.isEmpty)
+
+      await child.redoTapped()  // ⌘⇧Z re-applies it, still synced both ways
+      expectNoDifference(model.timelineRemovals.count, 1)
+      expectNoDifference(child.editedWaveform.timeline.removals.count, 1)
+    }
+  }
+
+  /// ⌘Z inside the sheet can rewind the slice's OWN creation. The restored document snapshot
+  /// empties `slices`, so the sheet is now editing a slice that no longer exists — reconciliation
+  /// must close the orphaned sheet rather than leave it acting on a missing range.
+  @Test func undoingASlicesCreationFromInsideTheSheetClosesTheOrphanedSheet() async {
+    let model = editor()
+    addSlice(model, 0, 3)
+    let slice = model.slices[0]
+    model.editSliceTapped(slice.id)
+    #expect(model.editSlice?.sliceID == slice.id)
+
+    await model.undoTapped()  // ⌘Z rewinds the creation
+
+    #expect(model.slices.isEmpty)
+    #expect(model.editSlice == nil)
+  }
+
+  /// A ⌘Z routed through the sheet must NOT rewind the shared document while the sheet holds an
+  /// unsaved boundary draft: that draft is the modal's deferred existing-slice edit, and undoing
+  /// under it would desync the draft from a changed document. The undo no-ops until Save/Cancel —
+  /// exactly as a docked draft blocks undo in the main editor.
+  @Test func undoIsBlockedWhileTheSheetHoldsAnUnsavedDraft() async {
+    let model = editor()
+    addSlice(model, 0, 5)
+    let slice = model.slices[0]
+    model.editSliceTapped(slice.id)
+    let child = model.editSlice!
+
+    child.cutInNudgedForward()  // an unsaved boundary draft in the sheet
+    #expect(child.fineTune.hasUnsavedChange)
+    #expect(model.hasUncommittedSliceEdit)
+
+    await model.undoTapped()  // blocked by the pending draft
+
+    expectNoDifference(model.slices.count, 1)  // creation NOT rewound
+    #expect(model.editSlice != nil)  // sheet stays open over its unchanged slice
+  }
+
+  /// ⌘Z can rewind a slice's BOUNDARY edit (not just its creation) while that slice's sheet is
+  /// open. The slice survives but its range reverts under the modal, whose overview window and
+  /// committed range were seeded once at open — a later Save would recommit the stale range. Close
+  /// the sheet instead. A modal REMOVAL undo (which leaves the slice's own bounds untouched) must
+  /// NOT trip this — that case stays open and re-syncs, covered above.
+  @Test func undoingASlicesBoundaryEditClosesTheSheetEditingThatSlice() async {
+    let model = editor()
+    addSlice(model, 0, 5)
+    let slice = model.slices[0]
+    let originalRange = slice.startSample..<slice.endSample
+
+    // Save a boundary change through the docked pane (one undo entry).
+    model.sliceSelected(slice.id)
+    model.cutOutNudged(byMs: 10)
+    model.commitEditTapped()
+    let committedRange =
+      model.slices[id: slice.id]!.startSample..<model.slices[id: slice.id]!.endSample
+    #expect(committedRange != originalRange)  // the boundary actually moved
+
+    model.editSliceTapped(slice.id)  // open the modal on the edited slice
+    #expect(model.editSlice?.fineTune.committedRange == committedRange)
+
+    await model.undoTapped()  // ⌘Z reverts the boundary edit
+
+    expectNoDifference(
+      model.slices[id: slice.id].map { $0.startSample..<$0.endSample }, originalRange)
+    #expect(model.editSlice == nil)  // closed rather than left editing the stale range
   }
 
   // MARK: - Save / cancel round-trip

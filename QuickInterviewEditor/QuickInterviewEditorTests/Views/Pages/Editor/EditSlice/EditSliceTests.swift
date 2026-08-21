@@ -11,7 +11,7 @@ struct EditSliceTests {
     let slice = Slice(
       id: UUID(), name: "Slice 1",
       startSample: 10_000, endSample: 40_000,
-      wordIDs: [], snippet: "", warnings: [])
+      wordIDs: [], snippet: "")
     return (EditSliceModel(slice: slice, editPlan: plan), slice)
   }
 
@@ -55,7 +55,7 @@ struct EditSliceTests {
     let sliceWordIDs = Array(plan.words.prefix(3).map(\.id))
     let slice = Slice(
       id: UUID(), name: "S", startSample: 0, endSample: 20_000,
-      wordIDs: sliceWordIDs, snippet: "", warnings: [])
+      wordIDs: sliceWordIDs, snippet: "")
     let model = EditSliceModel(slice: slice, editPlan: plan)
 
     expectNoDifference(
@@ -66,7 +66,7 @@ struct EditSliceTests {
     let plan = Fixtures.editPlan()
     let slice = Slice(
       id: UUID(), name: "S", startSample: 5_000, endSample: 25_000,
-      wordIDs: [], snippet: "", warnings: [])
+      wordIDs: [], snippet: "")
     let model = EditSliceModel(slice: slice, editPlan: plan)
     #expect(model.overviewWindow == 5_000..<25_000)
   }
@@ -116,21 +116,21 @@ struct EditSliceTests {
   }
 
   @Test func seekWhilePlayingReAnchorsPlaybackToTheClick() async {
-    let model = laneModel()  // slice 10_000..<20_000, spp 100, start 0
+    let model = laneModel()  // slice 10_000..<20_000, spp 10, start 10_000
     var played: [Range<Int>] = []
     var sought: [Int] = []
     model.onPlay = { played.append($0) }
     model.onSeek = { sought.append($0) }
     model.updatePlayback(sample: 12_000, isPlaying: true)
 
-    await model.waveformSeeked(toX: 150)  // sample 15_000, inside the slice
+    await model.waveformSeeked(toX: 150)  // 10_000 + 150*10 = sample 11_500, inside the slice
 
-    expectNoDifference(played, [15_000..<20_000])  // keeps playing from the click to the cut-out
+    expectNoDifference(played, [11_500..<20_000])  // keeps playing from the click to the cut-out
     #expect(sought.isEmpty)  // it re-anchors, it does not merely reposition
   }
 
   @Test func seekAtTheCutOutWhilePlayingStopsInsteadOfLeavingPlaybackRunning() async {
-    let model = laneModel()  // slice 10_000..<20_000, spp 100, start 0
+    let model = laneModel()  // slice 10_000..<20_000, spp 10, start 10_000
     var played: [Range<Int>] = []
     var sought: [Int] = []
     var stops = 0
@@ -139,7 +139,7 @@ struct EditSliceTests {
     model.onStop = { stops += 1 }
     model.updatePlayback(sample: 12_000, isPlaying: true)
 
-    await model.waveformSeeked(toX: 1000)  // clamps to the cut-out (20_000)
+    await model.waveformSeeked(toX: 1000)  // 10_000 + 1000*10, pin clamps to the cut-out (20_000)
 
     #expect(stops == 1)  // stops rather than leaving playback running past the click
     expectNoDifference(sought, [20_000])  // parks the cursor at the cut-out
@@ -147,30 +147,30 @@ struct EditSliceTests {
   }
 
   @Test func rulerDragWhilePlayingRepositionsCursorWithoutReAnchoring() async {
-    let model = laneModel()  // slice 10_000..<20_000, spp 100, start 0
+    let model = laneModel()  // slice 10_000..<20_000, spp 10, start 10_000
     var played: [Range<Int>] = []
     var sought: [Int] = []
     model.onPlay = { played.append($0) }
     model.onSeek = { sought.append($0) }
     model.updatePlayback(sample: 12_000, isPlaying: true)
 
-    await model.waveformDragged(toX: 150)  // sample 15_000
+    await model.waveformDragged(toX: 150)  // sample 11_500
 
-    expectNoDifference(sought, [15_000])  // cursor-only — a ruler scrub never restarts playback
+    expectNoDifference(sought, [11_500])  // cursor-only — a ruler scrub never restarts playback
     #expect(played.isEmpty)
   }
 
   @Test func seekWhilePausedRepositionsWithoutReplaying() async {
-    let model = laneModel()  // slice 10_000..<20_000, spp 100, start 0
+    let model = laneModel()  // slice 10_000..<20_000, spp 10, start 10_000
     var played: [Range<Int>] = []
     var sought: [Int] = []
     model.onPlay = { played.append($0) }
     model.onSeek = { sought.append($0) }
     // not playing (paused/stopped)
 
-    await model.waveformSeeked(toX: 150)  // sample 15_000
+    await model.waveformSeeked(toX: 150)  // sample 11_500
 
-    expectNoDifference(sought, [15_000])  // just moves the cursor
+    expectNoDifference(sought, [11_500])  // just moves the cursor
     #expect(played.isEmpty)  // no playback started
   }
 
@@ -258,19 +258,41 @@ struct EditSliceTests {
     expectNoDifference(played, [slice.startSample..<slice.endSample])
   }
 
-  // MARK: - Waveform lane (the sheet's own WaveformModel; nav-only, insets still edit)
+  // MARK: - Waveform lane (the sheet's own EDITED adapter, pinned to the slice; insets still edit)
 
-  /// A model whose lane is seeded and laid out with predictable geometry (no focus-fit), so
-  /// view-x ↔ sample mapping is exact: window 10_000..<20_000, spp 100, visibleStart 0.
+  /// A model whose collapsed lane is seeded and laid out with predictable geometry, so view-x ↔
+  /// sample mapping is exact. The source pyramid is adopted (so the adapter's geometry is usable),
+  /// then the pinned lane is laid out: slice 10_000..<20_000 (10_000 wide) over 1000 px -> fit
+  /// spp 10, visibleStart 10_000. With no removals the timeline is identity, so edited == source.
   private func laneModel() -> EditSliceModel {
     let plan = Fixtures.editPlan()
     let slice = Slice(
       id: UUID(), name: "S", startSample: 10_000, endSample: 20_000,
-      wordIDs: [], snippet: "", warnings: [])
+      wordIDs: [], snippet: "")
     let model = EditSliceModel(slice: slice, editPlan: plan)
     model.waveform.totalSamples = 100_000
-    model.waveform.viewportResized(width: 1000)  // fit spp 100, visibleStart 0
+    model.waveform.waveform = Waveform.pyramid(
+      baseMins: [0], baseMaxs: [0], sampleRate: 44100,
+      totalSamples: 100_000, baseBucketSize: 100_000)
+    model.editedWaveform.viewportResized(width: 1000)
     return model
+  }
+
+  @Test func laneRendersOnTheEditedAdapterPinnedToTheSlice() {
+    let model = laneModel()
+    #expect(model.editedWaveform.hasUsableGeometry)
+    // Pinned to the 10_000-wide slice over 1000 px: fit fills the slice edge-to-edge and cannot
+    // scroll before its start.
+    expectNoDifference(model.editedWaveform.samplesPerPixel, 10)
+    expectNoDifference(model.editedWaveform.visibleStartSample, 10_000)
+  }
+
+  @Test func laneCursorMapsTheSourceCursorOntoTheEditedAxis() {
+    let model = laneModel()
+    #expect(model.laneCursorSample == nil)  // no cursor yet
+    model.updatePlayback(sample: 15_000, isPlaying: true)
+    // Identity timeline (no removals): the edited cursor equals the stored source sample.
+    #expect(model.laneCursorSample == 15_000)
   }
 
   @Test func highlightRangeTracksTheLiveDraftRange() {
@@ -281,22 +303,22 @@ struct EditSliceTests {
   }
 
   @Test func waveformSeekedMapsXToSampleAndForwardsToOnSeek() async {
-    let model = laneModel()  // window 10_000..<20_000, spp 100, start 0
+    let model = laneModel()  // window 10_000..<20_000, spp 10, start 10_000
     var sought: [Int] = []
     model.onSeek = { sought.append($0) }
 
-    await model.waveformSeeked(toX: 150)  // 150 px * 100 spp = sample 15_000
+    await model.waveformSeeked(toX: 150)  // 10_000 + 150 px * 10 spp = sample 11_500
 
-    expectNoDifference(sought, [15_000])
+    expectNoDifference(sought, [11_500])
   }
 
   @Test func waveformSeekedClampsInsideTheSliceBeingEdited() async {
-    let model = laneModel()  // window 10_000..<20_000
+    let model = laneModel()  // window 10_000..<20_000, pinned lane
     var sought: [Int] = []
     model.onSeek = { sought.append($0) }
 
-    await model.waveformSeeked(toX: 50)  // sample 5_000, before the slice -> clamps to lower
-    await model.waveformSeeked(toX: 500)  // sample 50_000, past the slice -> clamps to upper
+    await model.waveformSeeked(toX: 0)  // left edge -> the pin holds it at the slice start
+    await model.waveformSeeked(toX: 2000)  // far past the slice -> clamps to the cut-out
 
     expectNoDifference(sought, [10_000, 20_000])
   }
@@ -312,20 +334,55 @@ struct EditSliceTests {
   }
 
   @Test func zoomButtonsForwardToTheLane() {
-    let model = laneModel()  // fit spp 100
-    model.zoomInTapped()
-    expectNoDifference(model.waveform.samplesPerPixel, 50)
-    model.zoomOutTapped()
-    expectNoDifference(model.waveform.samplesPerPixel, 100)
+    let model = laneModel()  // fit spp 10; the min-samples-per-pixel floor is 8
+    model.zoomInTapped()  // 10 -> 5 desired, clamped to the floor 8
+    expectNoDifference(model.editedWaveform.samplesPerPixel, 8)
+    model.zoomOutTapped()  // 8 -> 16 desired, clamped back to fit 10
+    expectNoDifference(model.editedWaveform.samplesPerPixel, 10)
   }
 
   @Test func zoomFitTogglesAgainstTheSlice() {
-    let model = laneModel()  // slice 10_000..<20_000, spp 100
-    model.zoomInTapped()  // spp 50, so a fit is a visible change
-    model.zoomFitTapped()  // fit the whole slice (10_000..<20_000, 10_000 wide) -> spp 10
-    expectNoDifference(model.waveform.samplesPerPixel, 10)
+    let model = laneModel()  // slice 10_000..<20_000, fit spp 10
+    model.zoomInTapped()  // spp 8 (floor), so a fit is a visible change
+    // fit the whole slice (10_000..<20_000, 10_000 wide over 1000 px) -> spp 10
+    model.zoomFitTapped()
+    expectNoDifference(model.editedWaveform.samplesPerPixel, 10)
     model.zoomFitTapped()  // same slice -> restore the pre-fit zoom
-    expectNoDifference(model.waveform.samplesPerPixel, 50)
+    expectNoDifference(model.editedWaveform.samplesPerPixel, 8)
+  }
+
+  // MARK: - Stage 3: parent → modal timeline sync (re-pin + cursor remap)
+
+  /// `syncTimeline` seeds the collapsed lane with the parent's GLOBAL timeline, then re-pins to the
+  /// slice's now-shorter edited extent: a 3_000-sample removal inside the 10_000-wide slice shrinks
+  /// its edited span to 7_000, so the fit re-clamps to spp 7 — still anchored at the slice start.
+  @Test func syncTimelineCollapsesThePinnedLaneForARemovalInsideTheSlice() {
+    let model = laneModel()  // slice 10_000..<20_000, identity, fit spp 10
+    expectNoDifference(model.editedWaveform.samplesPerPixel, 10)
+
+    let removal = TimelineRemoval(
+      id: UUID(), removedRange: 12_000..<15_000, crossfade: Crossfade(lengthSamples: 0))
+    model.syncTimeline(EditedTimeline(sourceDurationSamples: 100_000, removals: [removal]))
+
+    expectNoDifference(model.editedWaveform.timeline.removals.map(\.id), [removal.id])
+    expectNoDifference(model.editedWaveform.samplesPerPixel, 7)  // 7_000 wide over 1000 px
+    // still pinned to the start
+    expectNoDifference(model.editedWaveform.visibleStartSample, 10_000)
+  }
+
+  /// The cursor is stored as a GLOBAL source sample and mapped live through the current timeline, so
+  /// a removal ahead of it slides it left on the collapsed axis without any bespoke remap: source
+  /// 18_000 with 3_000 removed before it resolves to edited 15_000.
+  @Test func syncTimelineRemapsTheCursorOntoTheCollapsedAxis() {
+    let model = laneModel()
+    model.updatePlayback(sample: 18_000, isPlaying: false)
+    expectNoDifference(model.laneCursorSample, 18_000)  // identity so far
+
+    let removal = TimelineRemoval(
+      id: UUID(), removedRange: 12_000..<15_000, crossfade: Crossfade(lengthSamples: 0))
+    model.syncTimeline(EditedTimeline(sourceDurationSamples: 100_000, removals: [removal]))
+
+    expectNoDifference(model.laneCursorSample, 15_000)
   }
 
   // MARK: - FIX 2: updatePlayback highlights the current word in the scoped transcript
@@ -335,7 +392,7 @@ struct EditSliceTests {
     let sliceWordIDs = Array(plan.words.prefix(3).map(\.id))
     let slice = Slice(
       id: UUID(), name: "S", startSample: 0, endSample: 20_000,
-      wordIDs: sliceWordIDs, snippet: "", warnings: [])
+      wordIDs: sliceWordIDs, snippet: "")
     let model = EditSliceModel(slice: slice, editPlan: plan)
     let targetWord = plan.words.first { $0.id == sliceWordIDs[1] }!
     let sampleInsideWord = targetWord.startSample!
@@ -343,5 +400,152 @@ struct EditSliceTests {
     model.updatePlayback(sample: sampleInsideWord, isPlaying: true)
 
     expectNoDifference(model.transcript.currentWordID, targetWord.id)
+  }
+
+  // MARK: - Stage 4b: modal marquee → remove / restore (routed to the parent funnels)
+
+  /// A body drag on the collapsed lane builds a removal marquee: begin+change map view-x to source
+  /// samples (window 10_000..<20_000, spp 10), so the selection is 11_000..<13_000, the highlight
+  /// tracks it, and Remove is enabled.
+  @Test func marqueeDragBuildsARemovalSelection() {
+    let model = laneModel()
+    model.waveformAreaSelectBegan(atX: 100, extending: false)  // 10_000 + 100*10
+    model.waveformAreaSelectChanged(toX: 300)  // 10_000 + 300*10
+    model.waveformAreaSelectEnded(toX: 300)
+
+    expectNoDifference(model.waveformSelection, 11_000..<13_000)
+    expectNoDifference(model.waveformHighlightRange, 11_000..<13_000)
+    #expect(model.canRemoveSelection)
+  }
+
+  /// A marquee drag is a no-op until the lane geometry is usable (nothing to map view-x against).
+  @Test func marqueeIsANoOpWithoutUsableGeometry() {
+    let (model, _) = makeModel()  // lane never seeded/laid out
+    model.waveformAreaSelectBegan(atX: 100, extending: false)
+    #expect(model.waveformSelection == nil)
+    #expect(!model.canRemoveSelection)
+  }
+
+  /// Remove forwards the mapped source range to `onRemoveSection` (the parent's merge funnel) and
+  /// clears the selection.
+  @Test func removeSelectionTappedForwardsTheSourceRangeAndClears() async {
+    let model = laneModel()
+    var removed: [Range<Int>] = []
+    model.onRemoveSection = { removed.append($0) }
+
+    model.waveformAreaSelectBegan(atX: 100, extending: false)
+    model.waveformAreaSelectChanged(toX: 300)
+    model.waveformAreaSelectEnded(toX: 300)
+    await model.removeSelectionTapped()
+
+    expectNoDifference(removed, [11_000..<13_000])
+    #expect(model.waveformSelection == nil)
+    #expect(!model.canRemoveSelection)
+  }
+
+  /// Remove is a no-op with no selection (nothing to forward).
+  @Test func removeSelectionTappedIsANoOpWithoutASelection() async {
+    let model = laneModel()
+    var removed: [Range<Int>] = []
+    model.onRemoveSection = { removed.append($0) }
+    await model.removeSelectionTapped()
+    #expect(removed.isEmpty)
+  }
+
+  /// Seams derive from the shared timeline the parent syncs in, so an existing removal inside the
+  /// slice draws a bowtie on the collapsed lane.
+  @Test func seamOverlaysDeriveFromTheSharedTimeline() {
+    let model = laneModel()
+    #expect(model.seamOverlays.isEmpty)
+    let removal = TimelineRemoval(
+      id: UUID(), removedRange: 12_000..<15_000, crossfade: Crossfade(lengthSamples: 0))
+    model.syncTimeline(EditedTimeline(sourceDurationSamples: 100_000, removals: [removal]))
+
+    expectNoDifference(model.seamOverlays.map(\.id), [removal.id])
+  }
+
+  /// Right-clicking a seam selects it and offers Restore, which forwards the seam's id to `onRestore`
+  /// (the parent's restore funnel).
+  @Test func contextMenuOnASeamSelectsAndRestores() {
+    let model = laneModel()
+    var restored: [TimelineRemoval.ID] = []
+    model.onRestore = { restored.append($0) }
+    let removal = TimelineRemoval(
+      id: UUID(), removedRange: 12_000..<15_000, crossfade: Crossfade(lengthSamples: 0))
+    model.syncTimeline(EditedTimeline(sourceDurationSamples: 100_000, removals: [removal]))
+    let seamX = model.seamOverlays[0].span.positionX
+
+    let items = model.waveformContextMenuItems(atX: seamX)
+
+    expectNoDifference(model.selectedSeamID, removal.id)
+    expectNoDifference(items.map(\.title), [model.restoreRemovedAudioLabel])
+    items[0].action()
+    expectNoDifference(restored, [removal.id])
+  }
+
+  /// Off a seam, the menu offers Remove when a marquee selection exists (the action routes to the
+  /// same `onRemoveSection` funnel that `removeSelectionTappedForwardsTheSourceRangeAndClears`
+  /// covers directly).
+  @Test func contextMenuOffASeamOffersRemoveForTheSelection() {
+    let model = laneModel()
+    model.waveformAreaSelectBegan(atX: 100, extending: false)
+    model.waveformAreaSelectChanged(toX: 300)
+    model.waveformAreaSelectEnded(toX: 300)
+
+    let items = model.waveformContextMenuItems(atX: 700)  // no seam here
+
+    expectNoDifference(items.map(\.title), [model.removeSectionLabel])
+  }
+
+  /// Off a seam with no selection, the menu is empty (nothing to remove or restore).
+  @Test func contextMenuOffASeamWithNoSelectionIsEmpty() {
+    let model = laneModel()
+    let items = model.waveformContextMenuItems(atX: 700)
+    #expect(items.isEmpty)
+  }
+
+  /// Starting a marquee clears any seam selection so the two selections never coexist.
+  @Test func startingAMarqueeClearsTheSeamSelection() {
+    let model = laneModel()
+    let removal = TimelineRemoval(
+      id: UUID(), removedRange: 12_000..<15_000, crossfade: Crossfade(lengthSamples: 0))
+    model.syncTimeline(EditedTimeline(sourceDurationSamples: 100_000, removals: [removal]))
+    _ = model.waveformContextMenuItems(atX: model.seamOverlays[0].span.positionX)
+    #expect(model.selectedSeamID == removal.id)
+
+    model.waveformAreaSelectBegan(atX: 100, extending: false)
+
+    #expect(model.selectedSeamID == nil)
+  }
+
+  // MARK: - Pin correctness / undo forwarding
+
+  /// A removal that swallows the whole slice leaves no kept audio, so the pinned lane is empty and
+  /// unusable — NOT a fallback to the entire project. (The old endpoint-bias pin inverted here and
+  /// pinned `0..<editedDuration`, rendering the full recording inside the sheet.)
+  @Test func aRemovalCoveringTheWholeSliceEmptiesTheLaneInsteadOfShowingTheProject() {
+    let model = laneModel()  // slice 10_000..<20_000
+    #expect(model.editedWaveform.hasUsableGeometry)
+
+    let removal = TimelineRemoval(
+      id: UUID(), removedRange: 8_000..<22_000, crossfade: Crossfade(lengthSamples: 0))
+    model.syncTimeline(EditedTimeline(sourceDurationSamples: 100_000, removals: [removal]))
+
+    #expect(!model.editedWaveform.hasUsableGeometry)
+  }
+
+  /// ⌘Z / ⌘⇧Z inside the sheet forward to the shared-document undo/redo (the parent wires these to
+  /// its own `undoTapped`/`redoTapped`, since the main window's shortcut can't fire while the sheet
+  /// is key).
+  @Test func undoRedoForwardToTheSharedDocumentHandlers() async {
+    let model = laneModel()
+    var events: [String] = []
+    model.onUndo = { events.append("undo") }
+    model.onRedo = { events.append("redo") }
+
+    await model.undoTapped()
+    await model.redoTapped()
+
+    expectNoDifference(events, ["undo", "redo"])
   }
 }

@@ -149,8 +149,7 @@ struct RootTests {
       editor.destinationURL = destination
       editor.slices.append(
         Slice(
-          id: UUID(), name: "A", startSample: 0, endSample: 100, wordIDs: [], snippet: "x",
-          warnings: []))
+          id: UUID(), name: "A", startSample: 0, endSample: 100, wordIDs: [], snippet: "x"))
       editor.exportAllTapped()
       for _ in 0..<1000 where !renderStarted.value { await Task.yield() }
       #expect(editor.isExporting)

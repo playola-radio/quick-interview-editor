@@ -1219,34 +1219,6 @@ struct EditorTests {
     }
   }
 
-  @Test func tightJoinWarningCarriedIntoSummary() async throws {
-    let model = editor()
-    // The fixture's first silence spans [0, 51817] and its second starts at 306495, so
-    // 60000...70000 sits entirely in the gap between them — neither edge touches a silence.
-    let tight = Slice(
-      id: UUID(), name: "Intro", startSample: 60000, endSample: 70000,
-      wordIDs: [], snippet: "x", warnings: [])
-    model.slices.append(tight)
-    let destination = try makeTempDir()
-    defer { try? FileManager.default.removeItem(at: destination) }
-
-    await withDependencies {
-      $0.exportRender.renderSlice = { try writeStubAIFF($0) }
-      $0.engine.injectMarkers = { _ in }
-      $0.workspace.reveal = { _ in }
-    } operation: {
-      model.destinationURL = destination
-      model.exportAllTapped()
-      await model.exportTask?.value
-    }
-
-    // Computed fresh from the plan's silences (`exportWarnings(for:)`), not from
-    // `tight.warnings` — this slice's edges don't touch a silence in the fixture
-    // transcript, so both edges are tight.
-    #expect(model.exportTightWarning.contains("Intro"))
-    #expect(model.exportTightWarning.contains("tight"))
-  }
-
   @Test func exportMarkersNudgeCollidingPositions() async throws {
     let plan = EditPlan(
       schemaVersion: 1,
@@ -1259,8 +1231,7 @@ struct EditorTests {
     let model = editor(plan)
     model.slices.append(
       Slice(
-        id: UUID(), name: "A", startSample: 0, endSample: 8820, wordIDs: [1, 2], snippet: "x",
-        warnings: []))
+        id: UUID(), name: "A", startSample: 0, endSample: 8820, wordIDs: [1, 2], snippet: "x"))
     let captured = LockIsolated<[MarkerInjectionFile]>([])
     let destination = try makeTempDir()
     defer { try? FileManager.default.removeItem(at: destination) }

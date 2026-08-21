@@ -112,16 +112,28 @@ enum ExportAudioRenderer {
     // slicer reusing the source COMM chunk); buffers move in the processing format.
     let output = try AVAudioFile(forWriting: job.outputURL, settings: file.fileFormat.settings)
 
+    // A short declick ramp at the clip's own outer start/end — never at an internal seam,
+    // which already gets its own crossfade. Same envelope live audition applies (locked
+    // decision 1: one shared render path), so a hard cut at a clip boundary never clicks
+    // whichever path the user hears it through.
+    let declickCount = DeclickFade.frameCount(
+      totalFrames: job.editedDurationSamples, sampleRate: job.sampleRate)
+
     var framesWritten = 0
     for item in job.plan.items {
       try Task.checkCancellation()
       switch item {
       case .segment(let source, _):
-        framesWritten += try writeSegment(source, from: file, to: output)
+        framesWritten += try writeSegment(
+          source, from: file, to: output, globalStart: framesWritten,
+          totalFrames: job.editedDurationSamples, fadeInCount: declickCount,
+          fadeOutCount: declickCount)
       case .seam(_, let leftTail, let rightHead, _, _, let fadeOffset):
         framesWritten += try writeSeam(
           leftTail: leftTail, rightHead: rightHead, fadeOffset: fadeOffset,
-          from: file, to: output)
+          from: file, to: output, globalStart: framesWritten,
+          totalFrames: job.editedDurationSamples, fadeInCount: declickCount,
+          fadeOutCount: declickCount)
       }
     }
 
@@ -131,8 +143,10 @@ enum ExportAudioRenderer {
     }
   }
 
+  // swiftlint:disable:next function_parameter_count
   private static func writeSegment(
-    _ source: Range<Int>, from file: AVAudioFile, to output: AVAudioFile
+    _ source: Range<Int>, from file: AVAudioFile, to output: AVAudioFile,
+    globalStart: Int, totalFrames: Int, fadeInCount: Int, fadeOutCount: Int
   ) throws -> Int {
     guard !source.isEmpty else { return 0 }
     let format = file.processingFormat
@@ -156,6 +170,9 @@ enum ExportAudioRenderer {
           requested: Int(count), got: Int(buffer.frameLength),
           atFrame: source.lowerBound + written)
       }
+      applyDeclick(
+        to: buffer, chunkStart: globalStart + written, totalFrames: totalFrames,
+        fadeInCount: fadeInCount, fadeOutCount: fadeOutCount)
       try output.write(from: buffer)
       written += Int(buffer.frameLength)
       remaining -= Int(buffer.frameLength)
@@ -163,6 +180,34 @@ enum ExportAudioRenderer {
     return written
   }
 
+  /// Applies `DeclickFade` in place to a just-read chunk, where `chunkStart` is the chunk's
+  /// position in the WHOLE rendered clip (not the source file). Skips entirely when the chunk
+  /// doesn't touch either fade window — true for the overwhelming majority of chunks in a long
+  /// clip, so this never costs a full per-sample pass on interior audio.
+  private static func applyDeclick(
+    to buffer: AVAudioPCMBuffer, chunkStart: Int, totalFrames: Int,
+    fadeInCount: Int, fadeOutCount: Int
+  ) {
+    guard fadeInCount > 0 || fadeOutCount > 0 else { return }
+    let count = Int(buffer.frameLength)
+    guard count > 0, let channels = buffer.floatChannelData else { return }
+    let chunkEnd = chunkStart + count
+    let touchesFadeIn = fadeInCount > 0 && chunkStart < fadeInCount
+    let touchesFadeOut = fadeOutCount > 0 && chunkEnd > totalFrames - fadeOutCount
+    guard touchesFadeIn || touchesFadeOut else { return }
+    let channelCount = Int(buffer.format.channelCount)
+    for frame in 0..<count {
+      let gain = DeclickFade.gain(
+        atFrame: chunkStart + frame, totalFrames: totalFrames, fadeInCount: fadeInCount,
+        fadeOutCount: fadeOutCount)
+      guard gain != 1 else { continue }
+      for channel in 0..<channelCount {
+        channels[channel][frame] *= gain
+      }
+    }
+  }
+
+  // swiftlint:disable function_parameter_count
   /// Renders one seam's crossfade. The overlap length is `leftTail.count` — the plan's
   /// seam `length` always equals its (possibly trimmed) tail/head range counts, the
   /// same invariant `LivePlayerBox.seamBuffer` relies on.
@@ -175,7 +220,8 @@ enum ExportAudioRenderer {
   /// is the same continuation math a seek into a seam already uses.
   private static func writeSeam(
     leftTail: Range<Int>, rightHead: Range<Int>, fadeOffset: Int,
-    from file: AVAudioFile, to output: AVAudioFile
+    from file: AVAudioFile, to output: AVAudioFile,
+    globalStart: Int, totalFrames: Int, fadeInCount: Int, fadeOutCount: Int
   ) throws -> Int {
     let length = leftTail.count
     guard length > 0 else { return 0 }
@@ -190,9 +236,16 @@ enum ExportAudioRenderer {
         file: file, startFrame: rightHead.lowerBound + chunkStart, frameCount: chunkLength)
       // Same call shape as `LivePlayerBox.seamBuffer`, so export == audition. The curve
       // is fixed equal-power on both paths until PR5 threads per-seam curves through.
-      let blended = CrossfadeRenderer.blend(
+      var blended = CrossfadeRenderer.blend(
         out: out, incoming: incoming, curve: .equalPower,
         fadeOffset: fadeOffset + chunkStart, fadeTotal: fadeOffset + length)
+      // A seam can itself sit at the clip's outer edge (e.g. a removal starting at sample 0),
+      // so the boundary declick applies here exactly like an ordinary segment chunk.
+      for channel in blended.indices {
+        DeclickFade.apply(
+          to: &blended[channel], chunkStart: globalStart + chunkStart, totalFrames: totalFrames,
+          fadeInCount: fadeInCount, fadeOutCount: fadeOutCount)
+      }
       let count = AVAudioFrameCount(chunkLength)
       guard !blended.isEmpty,
         let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: count),
@@ -209,6 +262,7 @@ enum ExportAudioRenderer {
     }
     return length
   }
+  // swiftlint:enable function_parameter_count
 
   /// Reads exactly `frameCount` frames from `startFrame` into per-channel float arrays.
   /// The ratio-1 guarantee plus the plan's in-bounds ranges mean a short read can only

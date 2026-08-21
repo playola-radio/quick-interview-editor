@@ -30,11 +30,36 @@ final class EditedWaveformAdapter {
   /// EDITED range, so the same source selection restores even if the timeline is rebuilt with
   /// identical geometry in between.
   @ObservationIgnored private var fitRestore: FitRestore?
+  /// When set, confines the viewport (fit / zoom / scroll / pan / columns) to a sub-range of the
+  /// EDITED axis — the collapsed extent of one slice for the Edit Slice modal. nil means the whole
+  /// edited timeline, so the main editor's geometry is unchanged. Configuration set alongside
+  /// `timeline`; every setter re-clamps through observed viewport state, so it needs no observation.
+  @ObservationIgnored private var navigableEditedRange: Range<Int>?
 
   // MARK: - Initialization
   init(source: WaveformModel, timeline: EditedTimeline) {
     self.source = source
     self.timeline = timeline
+  }
+
+  /// The effective navigable axis for all viewport math: the pin clamped into the current edited
+  /// duration, or the whole edited timeline when unpinned. Empty when a removal collapses the whole
+  /// pinned slice — callers gate on `!isEmpty` and never widen back to the global axis.
+  private var navigableRange: Range<Int> {
+    guard let range = navigableEditedRange else { return 0..<max(0, editedDurationSamples) }
+    let lower = max(0, min(range.lowerBound, editedDurationSamples))
+    let upper = max(lower, min(range.upperBound, editedDurationSamples))
+    return lower..<upper
+  }
+
+  /// Pins (or unpins, with nil) the viewport to a slice's collapsed extent. Clears any armed Z
+  /// restore — a viewport captured under the previous pin (a different slice, or this slice before
+  /// a removal changed its edited span) must not be restored into the new one — then re-clamps the
+  /// zoom+scroll into the new axis without otherwise resetting them.
+  func setNavigableEditedRange(_ range: Range<Int>?) {
+    navigableEditedRange = range
+    fitRestore = nil
+    timelineChanged()
   }
 
   // MARK: - View Helpers
@@ -43,7 +68,7 @@ final class EditedWaveformAdapter {
   /// source waveform is loaded, the edited timeline has nonzero length, the viewport has been
   /// measured, and a real samples-per-pixel is set.
   var hasUsableGeometry: Bool {
-    source.hasWaveform && editedDurationSamples > 0 && viewportWidth > 0 && samplesPerPixel > 0
+    source.hasWaveform && navigableRange.count > 0 && viewportWidth > 0 && samplesPerPixel > 0
   }
   /// EDITED samples currently visible across the viewport.
   var visibleSampleCount: Int {
@@ -75,7 +100,7 @@ final class EditedWaveformAdapter {
   /// change, WITHOUT resetting zoom: only pins `samplesPerPixel` and `visibleStartSample` back
   /// into the valid range so a collapse (or restore) can't strand the viewport past the new end.
   func timelineChanged() {
-    guard viewportWidth > 0, editedDurationSamples > 0, samplesPerPixel > 0 else { return }
+    guard viewportWidth > 0, navigableRange.count > 0, samplesPerPixel > 0 else { return }
     samplesPerPixel = clampedSamplesPerPixel(samplesPerPixel)
     visibleStartSample = clampedStart(visibleStartSample)
   }
@@ -95,8 +120,8 @@ final class EditedWaveformAdapter {
     for pixel in 0..<columnCount {
       let start = visibleStartSample + Int((Double(pixel) * samplesPerPixel).rounded(.down))
       let end = visibleStartSample + Int((Double(pixel + 1) * samplesPerPixel).rounded(.down))
-      let lo = max(0, min(start, editedDurationSamples))
-      let hi = max(0, min(end, editedDurationSamples))
+      let lo = max(navigableRange.lowerBound, min(start, navigableRange.upperBound))
+      let hi = max(navigableRange.lowerBound, min(end, navigableRange.upperBound))
       guard hi > lo, let peak = mergedSourcePeak(forEdited: lo..<hi) else { continue }
       columns.append(WaveformColumn(positionX: CGFloat(pixel), min: peak.min, max: peak.max))
     }
@@ -121,19 +146,13 @@ final class EditedWaveformAdapter {
   }
 
   /// Horizontal extent of a SOURCE range in view coordinates, clipped to the viewport; nil when
-  /// the mapped EDITED range is empty (e.g. the whole source range fell inside a removal) or
-  /// entirely off-screen. `startBias`/`endBias` resolve either boundary should it land inside a
-  /// removed span rather than a kept segment.
-  func span(
-    forSource sourceRange: Range<Int>, startBias: MappingBias = .leftEdge,
-    endBias: MappingBias = .rightEdge
-  ) -> WaveformSpan? {
-    guard sourceRange.lowerBound < sourceRange.upperBound,
-      let editedStart = timeline.sourceToEdited(sourceRange.lowerBound, bias: startBias),
-      let editedEnd = timeline.sourceToEdited(sourceRange.upperBound, bias: endBias),
-      editedStart < editedEnd
-    else { return nil }
-    return span(forEdited: editedStart..<editedEnd)
+  /// the range maps to no kept audio (the whole source range fell inside a removal) or is entirely
+  /// off-screen. Uses the timeline's edited footprint — the union of every kept segment the source
+  /// range overlaps — so a boundary landing inside a crossfaded removal keeps the crossfade tail
+  /// instead of snapping short of it (matching the overview pin).
+  func span(forSource sourceRange: Range<Int>) -> WaveformSpan? {
+    guard let footprint = timeline.editedFootprint(ofSource: sourceRange) else { return nil }
+    return span(forEdited: footprint)
   }
 
   /// Horizontal extent of an EDITED range in view coordinates, clipped to the viewport; nil when
@@ -169,9 +188,12 @@ final class EditedWaveformAdapter {
   }
 
   /// EDITED sample at the left edge of pixel `x`. Floor semantics, matching `WaveformModel`.
+  /// Clamped into the navigable axis so a click on a pixel that spills past a pinned slice's edited
+  /// extent resolves to the slice's own boundary, not audio beyond it.
   func xToEditedSample(_ posX: CGFloat) -> Int {
-    WaveformViewport.xToSample(
+    let raw = WaveformViewport.xToSample(
       posX, visibleStartSample: visibleStartSample, samplesPerPixel: samplesPerPixel)
+    return max(navigableRange.lowerBound, min(raw, navigableRange.upperBound))
   }
 
   /// SOURCE sample at the left edge of pixel `x` — for clicks/marquee/ruler, which reason about
@@ -206,10 +228,10 @@ final class EditedWaveformAdapter {
   /// Multiplies zoom by `factor` (clamped) while keeping the EDITED sample under view-x
   /// `cursorX` pinned to `cursorX`.
   func zoomByFactor(_ factor: Double, anchoredAtX cursorX: CGFloat) {
-    guard viewportWidth > 0, editedDurationSamples > 0, factor > 0 else { return }
+    guard viewportWidth > 0, !navigableRange.isEmpty, factor > 0 else { return }
     fitRestore = nil
     let result = WaveformViewport.zoomByFactor(
-      factor, anchoredAtX: cursorX, viewportWidth: viewportWidth, axis: 0..<editedDurationSamples,
+      factor, anchoredAtX: cursorX, viewportWidth: viewportWidth, axis: navigableRange,
       samplesPerPixel: samplesPerPixel, visibleStartSample: visibleStartSample)
     samplesPerPixel = result.samplesPerPixel
     visibleStartSample = result.visibleStartSample
@@ -238,13 +260,15 @@ final class EditedWaveformAdapter {
   /// behavior is unchanged. A padded fit (a reveal, not the `Z` toggle) invalidates any armed
   /// restore, same as `WaveformModel.zoomToFit`.
   func zoomToFitEdited(_ editedRange: Range<Int>, paddingFraction: Double = 0) {
-    guard viewportWidth > 0, editedDurationSamples > 0,
-      editedRange.lowerBound < editedRange.upperBound
-    else { return }
+    guard viewportWidth > 0, !navigableRange.isEmpty else { return }
+    let clampedLower = max(navigableRange.lowerBound, editedRange.lowerBound)
+    let clampedUpper = min(navigableRange.upperBound, editedRange.upperBound)
+    guard clampedLower < clampedUpper else { return }
+    let clamped = clampedLower..<clampedUpper
     if paddingFraction > 0 { fitRestore = nil }
     let result = WaveformViewport.zoomToFit(
-      editedRange, paddingFraction: paddingFraction, viewportWidth: viewportWidth,
-      axis: 0..<editedDurationSamples)
+      clamped, paddingFraction: paddingFraction, viewportWidth: viewportWidth,
+      axis: navigableRange)
     samplesPerPixel = result.samplesPerPixel
     visibleStartSample = result.visibleStartSample
   }
@@ -262,7 +286,7 @@ final class EditedWaveformAdapter {
   /// on the SOURCE selection identity — the coordinate space the caller reasons about — not the
   /// EDITED range derived from it.
   func zoomFitToggled(sourceSelection: Range<Int>?) {
-    guard viewportWidth > 0, editedDurationSamples > 0 else { return }
+    guard viewportWidth > 0, !navigableRange.isEmpty else { return }
     if let restore = fitRestore, restore.sourceSelection == sourceSelection {
       samplesPerPixel = clampedSamplesPerPixel(restore.samplesPerPixel)
       visibleStartSample = clampedStart(restore.visibleStartSample)
@@ -296,47 +320,43 @@ final class EditedWaveformAdapter {
   }
 
   private func editedRange(forSource sourceRange: Range<Int>) -> Range<Int>? {
-    guard let start = timeline.sourceToEdited(sourceRange.lowerBound, bias: .leftEdge),
-      let end = timeline.sourceToEdited(sourceRange.upperBound, bias: .rightEdge), start < end
-    else { return nil }
-    return start..<end
+    // Same kept-segment footprint the highlight uses, so `Z` fits exactly what `span(forSource:)`
+    // draws — a boundary landing inside a crossfaded removal keeps the crossfade tail rather than
+    // fitting a range short of it.
+    timeline.editedFootprint(ofSource: sourceRange)
   }
 
   private func zoomToFitAllEdited() {
-    guard viewportWidth > 0, editedDurationSamples > 0 else { return }
+    guard viewportWidth > 0, !navigableRange.isEmpty else { return }
     samplesPerPixel = clampedSamplesPerPixel(fitSamplesPerPixel())
-    visibleStartSample = clampedStart(0)
+    visibleStartSample = clampedStart(navigableRange.lowerBound)
   }
 
   private func zoom(by factor: Double) {
-    guard viewportWidth > 0, editedDurationSamples > 0 else { return }
+    guard viewportWidth > 0, !navigableRange.isEmpty else { return }
     fitRestore = nil
     let result = WaveformViewport.zoom(
-      by: factor, viewportWidth: viewportWidth, axis: 0..<editedDurationSamples,
+      by: factor, viewportWidth: viewportWidth, axis: navigableRange,
       samplesPerPixel: samplesPerPixel, visibleStartSample: visibleStartSample)
     samplesPerPixel = result.samplesPerPixel
     visibleStartSample = result.visibleStartSample
   }
 
   private func fitSamplesPerPixel() -> Double {
-    WaveformViewport.fitSamplesPerPixel(
-      viewportWidth: viewportWidth, axis: 0..<editedDurationSamples)
+    WaveformViewport.fitSamplesPerPixel(viewportWidth: viewportWidth, axis: navigableRange)
   }
 
   private func minEffectiveSamplesPerPixel() -> Double {
-    WaveformViewport.minEffectiveSamplesPerPixel(
-      viewportWidth: viewportWidth, axis: 0..<editedDurationSamples)
+    WaveformViewport.minEffectiveSamplesPerPixel(viewportWidth: viewportWidth, axis: navigableRange)
   }
 
   private func clampedSamplesPerPixel(_ spp: Double) -> Double {
-    WaveformViewport.clampedSamplesPerPixel(
-      spp, viewportWidth: viewportWidth, axis: 0..<editedDurationSamples)
+    WaveformViewport.clampedSamplesPerPixel(spp, viewportWidth: viewportWidth, axis: navigableRange)
   }
 
   private func clampedStart(_ start: Int) -> Int {
     WaveformViewport.clampedStart(
-      start, viewportWidth: viewportWidth, samplesPerPixel: samplesPerPixel,
-      axis: 0..<editedDurationSamples)
+      start, viewportWidth: viewportWidth, samplesPerPixel: samplesPerPixel, axis: navigableRange)
   }
 
   private struct FitRestore {

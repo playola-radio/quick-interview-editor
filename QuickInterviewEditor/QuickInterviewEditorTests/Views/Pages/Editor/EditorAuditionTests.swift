@@ -116,8 +116,7 @@ struct EditorAuditionTests {
     // so the clamp is exercised regardless of the fixture's word timings. `activeSliceRange`
     // needs only `activeSliceID` + the slice present.
     let shortSlice = Slice(
-      id: UUID(), name: "S", startSample: 0, endSample: 1000, wordIDs: [], snippet: "x",
-      warnings: [])
+      id: UUID(), name: "S", startSample: 0, endSample: 1000, wordIDs: [], snippet: "x")
     model.slices.append(shortSlice)
     model.activeSliceID = shortSlice.id
     expectNoDifference(model.activeEditingRange, 0..<1000)
@@ -428,8 +427,7 @@ struct EditorAuditionTests {
     // A slice whose out-point runs past EOF (corrupt/rounded data): audition must clamp to duration.
     let overrun = Slice(
       id: UUID(), name: "S", startSample: dur - 500, endSample: dur + 5000, wordIDs: [],
-      snippet: "x",
-      warnings: [])
+      snippet: "x")
     model.slices.append(overrun)
     model.activeSliceID = overrun.id
     await withDependencies {

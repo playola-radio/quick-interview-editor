@@ -205,4 +205,53 @@ struct EditedTimelineTests {
     expectNoDifference(timeline.editedSample(forSource: 100), nil)
     expectNoDifference(timeline.editedSample(forSource: 150), nil)
   }
+
+  // MARK: - editedFootprint(ofSource:)
+
+  @Test func editedFootprintIsIdentityWithNoRemovals() {
+    let timeline = EditedTimeline(sourceDurationSamples: 100, removals: [])
+    expectNoDifference(timeline.editedFootprint(ofSource: 30..<70), 30..<70)
+  }
+
+  @Test func editedFootprintOfEmptySourceIsNil() {
+    let timeline = EditedTimeline(sourceDurationSamples: 100, removals: [])
+    expectNoDifference(timeline.editedFootprint(ofSource: 40..<40), nil)
+  }
+
+  /// A removal interior to the range shortens the footprint by the collapsed span (minus the
+  /// crossfade overlap): remove [40,60) L=10 inside [30,80) leaves kept 30..<40 (edited 30..<40)
+  /// and 60..<80 (edited 30..<50), unioned to 30..<50.
+  @Test func editedFootprintShrinksForAnInteriorRemoval() {
+    let timeline = EditedTimeline(
+      sourceDurationSamples: 100, removals: [removal(40, 60, length: 10)])
+    expectNoDifference(timeline.editedFootprint(ofSource: 30..<80), 30..<50)
+  }
+
+  /// When the range's UPPER bound lands inside a crossfaded removal, the footprint must still cover
+  /// the kept audio's crossfade tail — the bug the `.rightEdge` endpoint bias dropped. Remove
+  /// [40,60) L=10: kept K0=[0,40)@0 spans edited 0..<40. Range [10,50) keeps source 10..<40 =>
+  /// edited 10..<40 (NOT 10..<30, which stopping at the post-cut segment start would give).
+  @Test func editedFootprintCoversTheCrossfadeTailWhenABoundLandsInARemoval() {
+    let timeline = EditedTimeline(
+      sourceDurationSamples: 100, removals: [removal(40, 60, length: 10)])
+    expectNoDifference(timeline.editedFootprint(ofSource: 10..<50), 10..<40)
+  }
+
+  /// A range wholly inside one removal keeps no audio, so the footprint is nil — callers pin an
+  /// empty lane instead of falling back to the whole timeline.
+  @Test func editedFootprintOfARangeInsideARemovalIsNil() {
+    let timeline = EditedTimeline(
+      sourceDurationSamples: 100, removals: [removal(40, 60, length: 10)])
+    expectNoDifference(timeline.editedFootprint(ofSource: 45..<55), nil)
+  }
+
+  /// Spanning several removals unions every surviving segment: remove [20,30) and [60,70), both
+  /// L=0. Range [10,90) keeps 10..<20, 30..<60, 70..<90 => edited 10..<70 (editedDuration is
+  /// 100-20=80; the range stops 10 short on each side).
+  @Test func editedFootprintSpansMultipleRemovals() {
+    let timeline = EditedTimeline(
+      sourceDurationSamples: 100,
+      removals: [removal(20, 30, length: 0, id: 1), removal(60, 70, length: 0, id: 2)])
+    expectNoDifference(timeline.editedFootprint(ofSource: 10..<90), 10..<70)
+  }
 }

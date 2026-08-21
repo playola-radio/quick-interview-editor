@@ -28,6 +28,8 @@ struct EditSliceView: View {
         }
         .help(model.playPauseLabel)
         Button(model.stopLabel) { Task { await model.stopTapped() } }
+        Button(model.removeSectionLabel) { Task { await model.removeSelectionTapped() } }
+          .disabled(!model.canRemoveSelection)
         Spacer()
         Button(model.cancelLabel) { model.cancelTapped() }
         Button(model.saveLabel) { model.saveTapped() }
@@ -47,10 +49,11 @@ struct EditSliceView: View {
   }
 }
 
-/// The slice's waveform lane: the same reusable ``WaveformLaneView`` the main editor mounts, wired
-/// for navigation only. Ruler/body clicks seek the cursor; the draft kept range is the highlight
-/// band. Marquee area-select is intentionally inert here — boundary editing is the fine-tune insets'
-/// job, so a lane selection would have no meaning (a deliberate divergence from the main editor).
+/// The slice's waveform lane: the same reusable ``WaveformLaneView`` the main editor mounts. Ruler/
+/// body clicks seek the cursor; the draft kept range is the highlight band. Marquee area-select and
+/// the seam context menu mirror the main editor — a marquee removes (routed to the parent's merge
+/// funnel) and a right-click on a seam restores, so the modal edits the slice exactly like the main
+/// timeline (Item ①).
 private struct SliceWaveformLane: View {
   let model: EditSliceModel
 
@@ -58,14 +61,18 @@ private struct SliceWaveformLane: View {
     VStack(alignment: .leading, spacing: 8) {
       zoomHeader
       WaveformLaneView(
-        waveform: model.waveform,
-        playhead: { model.playheadSample },
+        waveform: model.editedWaveform,
+        playhead: { model.laneCursorSample },
         highlightRange: model.waveformHighlightRange,
         onRulerMove: { positionX in Task { await model.waveformDragged(toX: positionX) } },
         onBodyClick: { positionX, _ in Task { await model.waveformSeeked(toX: positionX) } },
-        onAreaSelectBegan: { _, _ in },
-        onAreaSelectChanged: { _ in },
-        onAreaSelectEnded: { _ in },
+        onAreaSelectBegan: { positionX, extending in
+          model.waveformAreaSelectBegan(atX: positionX, extending: extending)
+        },
+        onAreaSelectChanged: { positionX in model.waveformAreaSelectChanged(toX: positionX) },
+        onAreaSelectEnded: { positionX in model.waveformAreaSelectEnded(toX: positionX) },
+        seams: model.seamOverlays,
+        onContextMenu: { positionX in model.waveformContextMenuItems(atX: positionX) },
         auditionOverlay: { _ in EmptyView() }
       )
     }
@@ -108,7 +115,7 @@ private struct FineTuneInsets: View {
         width: model.fineTune.insetWidthPixels, columns: model.cutInColumns(),
         safeZones: model.fineTune.cutInSafeZones, keptSpan: model.fineTune.cutInKeptSpan,
         discardedSpan: model.fineTune.cutInDiscardedSpan, lineX: model.fineTune.cutInLineX,
-        isTight: model.fineTune.isCutInTight, nudgeBackLabel: model.fineTune.nudgeBackLabel,
+        nudgeBackLabel: model.fineTune.nudgeBackLabel,
         nudgeForwardLabel: model.fineTune.nudgeForwardLabel,
         onNudgeBack: { model.cutInNudgedBack() },
         onNudgeForward: { model.cutInNudgedForward() },
@@ -118,7 +125,7 @@ private struct FineTuneInsets: View {
         width: model.fineTune.insetWidthPixels, columns: model.cutOutColumns(),
         safeZones: model.fineTune.cutOutSafeZones, keptSpan: model.fineTune.cutOutKeptSpan,
         discardedSpan: model.fineTune.cutOutDiscardedSpan, lineX: model.fineTune.cutOutLineX,
-        isTight: model.fineTune.isCutOutTight, nudgeBackLabel: model.fineTune.nudgeBackLabel,
+        nudgeBackLabel: model.fineTune.nudgeBackLabel,
         nudgeForwardLabel: model.fineTune.nudgeForwardLabel,
         onNudgeBack: { model.cutOutNudgedBack() },
         onNudgeForward: { model.cutOutNudgedForward() },

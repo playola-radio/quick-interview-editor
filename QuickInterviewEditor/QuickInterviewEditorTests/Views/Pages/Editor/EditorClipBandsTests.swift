@@ -14,7 +14,7 @@ struct EditorClipBandsTests {
   private func slice(_ id: UUID, wordIDs: [Word.ID]) -> Slice {
     Slice(
       id: id, name: "A story", startSample: 0, endSample: 100,
-      wordIDs: wordIDs, snippet: "a story", warnings: [])
+      wordIDs: wordIDs, snippet: "a story")
   }
 
   /// Builds an editor whose sidecar is pre-seeded with the given suggestions, backed by an

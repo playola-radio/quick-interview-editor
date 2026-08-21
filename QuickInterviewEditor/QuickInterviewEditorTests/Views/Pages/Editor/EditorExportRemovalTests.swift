@@ -41,8 +41,7 @@ struct EditorExportRemovalTests {
     let model = editor(plan)
     model.slices.append(
       Slice(
-        id: UUID(), name: "A", startSample: 0, endSample: 20000, wordIDs: [], snippet: "x",
-        warnings: []))
+        id: UUID(), name: "A", startSample: 0, endSample: 20000, wordIDs: [], snippet: "x"))
     model.mutateDocument { doc in
       doc.timelineRemovals.append(
         TimelineRemoval(
@@ -89,7 +88,7 @@ struct EditorExportRemovalTests {
     model.slices.append(
       Slice(
         id: UUID(), name: "A", startSample: 0, endSample: 20000, wordIDs: [1, 2, 3],
-        snippet: "x", warnings: []))
+        snippet: "x"))
     model.mutateDocument { doc in
       doc.timelineRemovals.append(
         TimelineRemoval(
@@ -128,12 +127,10 @@ struct EditorExportRemovalTests {
     let model = editor(Fixtures.editPlan())
     model.slices.append(
       Slice(
-        id: UUID(), name: "A", startSample: 1000, endSample: 2000, wordIDs: [], snippet: "x",
-        warnings: []))
+        id: UUID(), name: "A", startSample: 1000, endSample: 2000, wordIDs: [], snippet: "x"))
     model.slices.append(
       Slice(
-        id: UUID(), name: "B", startSample: 3000, endSample: 4000, wordIDs: [], snippet: "x",
-        warnings: []))
+        id: UUID(), name: "B", startSample: 3000, endSample: 4000, wordIDs: [], snippet: "x"))
     expectNoDifference(model.canExportAll, true)
 
     model.mutateDocument { doc in
@@ -148,59 +145,14 @@ struct EditorExportRemovalTests {
     expectNoDifference(model.canExportAll, false)
   }
 
-  /// `exportWarnings(for:)` recomputes tight-join status from the EXPORT-effective boundary
-  /// (post-removal), not the slice's own stored `warnings` (computed once, at creation, from
-  /// its original cut points): a removal that eats the slice's original start moves the
-  /// effective start deeper into the file, which can turn a join that was never tight into one
-  /// that is — and the stored `warnings` field has no way to know that after the fact.
-  @Test func exportWarningsReflectARemovalShiftedBoundaryNotTheStoredWarnings() async throws {
-    let plan = EditPlan(
-      schemaVersion: 1,
-      source: .init(path: "/clip.m4a", sampleRate: 44100, channels: 1, durationSamples: 100_000),
-      words: [], silences: [], segments: [])
-    let model = editor(plan)
-    let slice = Slice(
-      id: UUID(), name: "Intro", startSample: 0, endSample: 20000, wordIDs: [], snippet: "x",
-      warnings: [])  // stored at creation: starts at sample 0, so no tight-start warning.
-    model.slices.append(slice)
-    model.mutateDocument { doc in
-      doc.timelineRemovals.append(
-        TimelineRemoval(
-          id: UUID(), removedRange: 0..<3000,
-          crossfade: Crossfade(lengthSamples: 0, curve: .equalPower)))
-    }
-
-    // The stored warnings are stale (still empty)...
-    expectNoDifference(model.slices[id: slice.id]?.warnings, [])
-    // ...but the export-effective start is now sample 3000, away from any silence, so both
-    // edges are freshly tight.
-    expectNoDifference(
-      model.exportWarnings(for: model.slices[id: slice.id]!), [.tightStart, .tightEnd])
-
-    let destination = try makeTempDir()
-    defer { try? FileManager.default.removeItem(at: destination) }
-    await withDependencies {
-      $0.exportRender.renderSlice = { try writeStubAIFF($0) }
-      $0.engine.injectMarkers = { _ in }
-      $0.workspace.reveal = { _ in }
-    } operation: {
-      model.destinationURL = destination
-      model.exportAllTapped()
-      await model.exportTask?.value
-    }
-
-    #expect(model.exportTightWarning.contains("Intro"))
-  }
-
-  /// A slice with reversed bounds must read as unexportable (and warn nothing), not trap
-  /// forming its range — `sliceIsExportable` runs from `sliceRows` on every render.
+  /// A slice with reversed bounds must read as unexportable, not trap forming its range —
+  /// `sliceIsExportable` runs from `sliceRows` on every render.
   @Test func aSliceWithReversedBoundsIsUnexportableWithoutTrapping() {
     let model = editor(Fixtures.editPlan())
     let reversed = Slice(
       id: UUID(), name: "Broken", startSample: 5000, endSample: 4000, wordIDs: [],
-      snippet: "x", warnings: [])
+      snippet: "x")
     #expect(!model.sliceIsExportable(reversed))
-    expectNoDifference(model.exportWarnings(for: reversed), [])
   }
 
   /// The bounds check the Python engine used to do: a stale slice whose range runs past the
@@ -215,7 +167,7 @@ struct EditorExportRemovalTests {
     model.slices.append(
       Slice(
         id: UUID(), name: "Stale", startSample: 90_000, endSample: 120_000, wordIDs: [],
-        snippet: "x", warnings: []))
+        snippet: "x"))
     let renderedJobs = LockIsolated<[ExportRenderJob]>([])
     let destination = try makeTempDir()
     defer { try? FileManager.default.removeItem(at: destination) }
@@ -252,8 +204,7 @@ struct EditorExportRemovalTests {
     let model = editor(plan)
     model.slices.append(
       Slice(
-        id: UUID(), name: "A", startSample: 0, endSample: 20000, wordIDs: [], snippet: "x",
-        warnings: []))
+        id: UUID(), name: "A", startSample: 0, endSample: 20000, wordIDs: [], snippet: "x"))
     model.mutateDocument { doc in
       doc.timelineRemovals.append(
         TimelineRemoval(
@@ -300,8 +251,7 @@ struct EditorExportRemovalTests {
     let model = editor(plan)
     model.slices.append(
       Slice(
-        id: UUID(), name: "A", startSample: 0, endSample: 20000, wordIDs: [], snippet: "x",
-        warnings: []))
+        id: UUID(), name: "A", startSample: 0, endSample: 20000, wordIDs: [], snippet: "x"))
     model.mutateDocument { doc in
       doc.timelineRemovals.append(
         TimelineRemoval(

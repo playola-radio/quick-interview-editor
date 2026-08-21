@@ -56,7 +56,7 @@ struct EditorRemovalTests {
         $0.append(
           Slice(
             id: Fixtures.uuid(30), name: "A", startSample: 0, endSample: 100, wordIDs: [],
-            snippet: "x", warnings: []))
+            snippet: "x"))
       }
       expectNoDifference(fileSystem.value[url], afterInit)
 
@@ -89,7 +89,7 @@ struct EditorRemovalTests {
         $0.append(
           Slice(
             id: Fixtures.uuid(32), name: "A", startSample: 0, endSample: 100, wordIDs: [],
-            snippet: "x", warnings: []))
+            snippet: "x"))
       }
       expectNoDifference(fileSystem.value[url], afterInit)
 
@@ -272,7 +272,7 @@ struct EditorRemovalTests {
     }
   }
 
-  @Test func canRemoveRejectsCrossSeamAndEmptySelections() {
+  @Test func canRemoveAllowsCrossSeamAndRejectsEmptySelections() {
     let fileSystem = LockIsolated<[URL: Data]>([:])
     withDependencies {
       $0.defaultFileStorage = FileStorage.inMemory(fileSystem: fileSystem)
@@ -285,9 +285,37 @@ struct EditorRemovalTests {
             crossfade: Crossfade(lengthSamples: 48, curve: .equalPower)))
       }
 
-      #expect(model.canRemove(sourceRange: 450..<550) == false)
+      #expect(model.canRemove(sourceRange: 450..<550) == true)  // cross-seam now merges
       #expect(model.canRemove(sourceRange: 1000..<2000) == true)
-      #expect(model.canRemove(sourceRange: 700..<700) == false)
+      #expect(model.canRemove(sourceRange: 700..<700) == false)  // empty rejected
+    }
+  }
+
+  /// A range that overlaps existing removals absorbs them into ONE larger removal (Item ①). Here
+  /// `450..<550` crosses the `500..<600` seam, so the result is the single union `450..<600`
+  /// carrying the default crossfade (the absorbed 48-sample fade was internal to still-removed
+  /// audio). One undo step reopens all of it.
+  @Test func removeSourceRangeMergesCrossSeamIntoOneUnionRemoval() async {
+    let fileSystem = LockIsolated<[URL: Data]>([:])
+    await withDependencies {
+      $0.defaultFileStorage = FileStorage.inMemory(fileSystem: fileSystem)
+    } operation: {
+      let model = editor(fingerprint: "fp-merge")
+      model.mutateDocument { doc in
+        doc.timelineRemovals.append(
+          TimelineRemoval(
+            id: Fixtures.uuid(9), removedRange: 500..<600,
+            crossfade: Crossfade(lengthSamples: 48, curve: .equalPower)))
+      }
+
+      await model.removeSourceRange(450..<550)
+
+      expectNoDifference(model.timelineRemovals.map(\.removedRange), [450..<600])
+      #expect(
+        model.timelineRemovals.first?.crossfade.lengthSamples == model.defaultCrossfadeSamples)
+
+      await model.undoTapped()
+      expectNoDifference(model.timelineRemovals.map(\.removedRange), [500..<600])
     }
   }
 
@@ -329,7 +357,7 @@ struct EditorRemovalTests {
       model.slices.append(
         Slice(
           id: Fixtures.uuid(20), name: "A", startSample: 0, endSample: 100, wordIDs: [],
-          snippet: "x", warnings: []))
+          snippet: "x"))
       expectNoDifference(model.canExportAll, true)
       expectNoDifference(model.canExportSlice, true)
       expectNoDifference(model.removalsInvalidNote, nil)
@@ -359,11 +387,11 @@ struct EditorRemovalTests {
       model.slices.append(
         Slice(
           id: Fixtures.uuid(21), name: "Covered", startSample: 1000, endSample: 2000,
-          wordIDs: [], snippet: "x", warnings: []))
+          wordIDs: [], snippet: "x"))
       model.slices.append(
         Slice(
           id: Fixtures.uuid(22), name: "Untouched", startSample: 0, endSample: 100,
-          wordIDs: [], snippet: "x", warnings: []))
+          wordIDs: [], snippet: "x"))
 
       model.mutateDocument { doc in
         doc.timelineRemovals.append(
@@ -393,7 +421,7 @@ struct EditorRemovalTests {
       model.slices.append(
         Slice(
           id: Fixtures.uuid(23), name: "A", startSample: 0, endSample: 100, wordIDs: [],
-          snippet: "x", warnings: []))
+          snippet: "x"))
       expectNoDifference(model.canExportAll, true)
       expectNoDifference(model.canExportSlice, true)
 
@@ -424,7 +452,7 @@ struct EditorRemovalTests {
       model.slices.append(
         Slice(
           id: Fixtures.uuid(21), name: "A", startSample: 1000, endSample: 2000, wordIDs: [],
-          snippet: "x", warnings: []))
+          snippet: "x"))
       model.mutateDocument { doc in
         doc.timelineRemovals.append(
           TimelineRemoval(
