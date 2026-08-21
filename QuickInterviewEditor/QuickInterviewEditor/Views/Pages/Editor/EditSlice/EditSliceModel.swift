@@ -292,6 +292,17 @@ final class EditSliceModel: ViewModel, Identifiable {
     waveformSelection = nil
   }
 
+  /// ⌫ parity with the main editor's `handleRemoveSectionKey`: a selected seam restores its removal;
+  /// otherwise the marquee selection is removed through the parent merge funnel. No-ops when neither
+  /// is present (the key monitor consumes ⌫ regardless, like ⌘Z, so it never beeps in the sheet).
+  func removeSectionKeyPressed() async {
+    if let seamID = selectedSeamID {
+      onRestore(seamID)
+      return
+    }
+    await removeSelectionTapped()
+  }
+
   private func updateMarqueeSelection() {
     guard let anchor = marqueeAnchorSample, let currentX = marqueeCurrentX else { return }
     let clampedX = min(max(0, currentX), editedWaveform.viewportWidth)

@@ -467,6 +467,55 @@ struct EditSliceTests {
     #expect(removed.isEmpty)
   }
 
+  /// ⌫ in the sheet removes the current marquee selection through the same funnel as the Remove
+  /// button (parity with the main editor's ⌫ shortcut), then clears it.
+  @Test func deleteKeyRemovesTheMarqueeSelection() async {
+    let model = laneModel()
+    var removed: [Range<Int>] = []
+    model.onRemoveSection = { removed.append($0) }
+
+    model.waveformAreaSelectBegan(atX: 100, extending: false)
+    model.waveformAreaSelectChanged(toX: 300)
+    model.waveformAreaSelectEnded(toX: 300)
+    await model.removeSectionKeyPressed()
+
+    expectNoDifference(removed, [11_000..<13_000])
+    #expect(model.waveformSelection == nil)
+  }
+
+  /// ⌫ with a seam selected restores that removal (the seam branch of the shortcut) instead of
+  /// removing a selection — forwarding the seam's id to the parent's restore funnel.
+  @Test func deleteKeyRestoresTheSelectedSeam() async {
+    let model = laneModel()
+    var restored: [TimelineRemoval.ID] = []
+    model.onRestore = { restored.append($0) }
+    let removal = TimelineRemoval(
+      id: UUID(), removedRange: 12_000..<15_000, crossfade: Crossfade(lengthSamples: 0))
+    model.syncTimeline(EditedTimeline(sourceDurationSamples: 100_000, removals: [removal]))
+    // Right-clicking the seam selects it (the only public path to a seam selection).
+    _ = model.waveformContextMenuItems(atX: model.seamOverlays[0].span.positionX)
+    #expect(model.selectedSeamID == removal.id)
+
+    await model.removeSectionKeyPressed()
+
+    expectNoDifference(restored, [removal.id])
+  }
+
+  /// ⌫ is a no-op when nothing is selected — no removal, no restore (the monitor still consumes it,
+  /// matching how it consumes ⌘Z with nothing to undo).
+  @Test func deleteKeyIsANoOpWithNoSelectionOrSeam() async {
+    let model = laneModel()
+    var removed = 0
+    var restored = 0
+    model.onRemoveSection = { _ in removed += 1 }
+    model.onRestore = { _ in restored += 1 }
+
+    await model.removeSectionKeyPressed()
+
+    #expect(removed == 0)
+    #expect(restored == 0)
+  }
+
   /// Seams derive from the shared timeline the parent syncs in, so an existing removal inside the
   /// slice draws a bowtie on the collapsed lane.
   @Test func seamOverlaysDeriveFromTheSharedTimeline() {

@@ -80,10 +80,11 @@ struct SliceEditKeyMonitor: NSViewRepresentable {
     }
 
     /// Performs the classified key if focus allows it. Returns whether the key was consumed (so the
-    /// caller swallows it instead of letting it beep). The zoom keys, Space (transport), and ⌘Z/⌘⇧Z
-    /// (undo/redo of the shared document) act here; the speed keys and the removal boundary-nudge
-    /// keys (Task 9) are main-editor concerns and fall through untouched — this sheet edits an
-    /// existing slice's cut points via its own scoped `EditSliceModel`, not the removal-only
+    /// caller swallows it instead of letting it beep). The zoom keys, Space (transport), ⌫ (remove
+    /// the marquee selection / restore the selected seam), and ⌘Z/⌘⇧Z (undo/redo of the shared
+    /// document) act here; the speed keys and the removal boundary-nudge keys (Task 9) are
+    /// main-editor concerns and fall through untouched — this sheet edits an existing slice's cut
+    /// points via its own scoped `EditSliceModel`, not the removal-only
     /// `fineTune.target == .pendingSelection` session.
     private func handle(
       zoomKey: EditorKey?, isSpace: Bool, isUndo: Bool, isRedo: Bool, isARepeat: Bool
@@ -122,7 +123,13 @@ struct SliceEditKeyMonitor: NSViewRepresentable {
         if isARepeat { return true }
         model.zoomFitTapped()
         return true
-      case .speedUp, .speedDown, .removeSection, .escape, .nudgeCutInEarlier, .nudgeCutInLater,
+      case .removeSection:
+        // ⌫ removes the marquee selection or restores the selected seam — a document edit on the
+        // shared undo stack, like ⌘Z below. Swallow auto-repeat so holding it fires once per press;
+        // the model no-ops when nothing is selected (so ⌫ never beeps in the sheet).
+        if !isARepeat { Task { await model.removeSectionKeyPressed() } }
+        return true
+      case .speedUp, .speedDown, .escape, .nudgeCutInEarlier, .nudgeCutInLater,
         .nudgeCutOutEarlier, .nudgeCutOutLater:
         return false
       }
