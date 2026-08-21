@@ -32,6 +32,7 @@ final class EditorModel: ViewModel {
   // MARK: - Dependencies
   @ObservationIgnored @Dependency(\.audioPlayer) var audioPlayer
   @ObservationIgnored @Dependency(\.engine) var engine
+  @ObservationIgnored @Dependency(\.exportRender) var exportRender
   @ObservationIgnored @Dependency(\.workspace) var workspace
   @ObservationIgnored @Dependency(\.continuousClock) var clock
 
@@ -259,6 +260,9 @@ final class EditorModel: ViewModel {
   var rightPanelTab: RightPanelTab = .slices
   private var nextSliceNumber = 1
   private var lastExportTightNames: [String] = []
+  /// Names of slices skipped by the most recent "Export all" because their entire audio
+  /// fell inside a removed section — surfaced by `exportSkippedRemovedWarning`.
+  private var lastExportSkippedRemovedNames: [String] = []
   @ObservationIgnored private(set) var exportTask: Task<Void, Never>?
 
   /// Maps between source and edited sample coordinates given the current removals.
@@ -284,11 +288,11 @@ final class EditorModel: ViewModel {
   /// through the SOURCE moment they marked — captured against the old timeline, re-resolved
   /// against the new — so they keep pointing at the same instant of the recording.
   ///
-  /// A live free-play session is playing a playlist built from the OLD timeline: letting it run
-  /// would reinterpret its edited-axis ticks against the new axis, so audio and cursor diverge
-  /// (and a paused one would resume stale audio). Stop it — the mirror of the ruler/selection
-  /// "stop, then act" rule — leaving the cursor where the remap puts it. Source-range sessions
-  /// (slice, preview, audition, modal) play original audio, which a removal doesn't change.
+  /// A live session whose audio was built from the OLD removal set is stale: letting it run
+  /// would reinterpret its ticks against the new axis (free play) or keep playing audio the
+  /// document no longer contains (a slice). Stop it — the mirror of the ruler/selection
+  /// "stop, then act" rule — leaving the cursor where the remap puts it.
+  /// `playbackDependsOnChangedRemovals` decides which sessions that covers.
   private func syncEditedTimeline() {
     // Drop a seam selection whose removal is gone (restore, undo, redo) before anything reads it.
     // Runs ahead of the timeline-equality guard so a stale selection is always reconciled, even in
@@ -299,7 +303,7 @@ final class EditorModel: ViewModel {
     }
     let newTimeline = editedTimeline
     guard newTimeline != editedWaveform.timeline else { return }
-    if case .free = transportContext, let session = transportPhase.session {
+    if let session = transportPhase.session, playbackDependsOnChangedRemovals() {
       resetTransportState()
       endTranscriptFollow()
       Task { await stopOwnedPlayback(session) }
@@ -314,6 +318,25 @@ final class EditorModel: ViewModel {
     editedWaveform.timelineChanged()
     placeCursor(atSource: sourceCursor)
     transportOriginEditedSample = sourceOrigin.map(editedCursor(forSource:))
+  }
+
+  /// Whether the live playback's audio was built from the removal set that just changed. Free
+  /// play always was — its playlist IS the edited timeline. A slice session depends only on the
+  /// removals inside its own range: a playlist session is stale once its slice-local timeline no
+  /// longer matches what it scheduled, and a raw source-range slice session becomes wrong the
+  /// moment a removal first lands inside the slice (it would keep playing audio export now
+  /// cuts). Preview/audition/modal sessions stay deliberately source-faithful and keep playing.
+  private func playbackDependsOnChangedRemovals() -> Bool {
+    if case .free = transportContext { return true }
+    guard let sliceID = transportContext.sliceID, let slice = slices[id: sliceID] else {
+      return false
+    }
+    let newLocal = SliceRenderPlanBuilder.localTimeline(
+      sliceRange: slice.startSample..<slice.endSample, removals: Array(timelineRemovals))
+    guard let scheduled = slicePlaybackConversion?.localTimeline else {
+      return !newLocal.removals.isEmpty
+    }
+    return newLocal != scheduled
   }
 
   // MARK: - Display Text
@@ -338,6 +361,9 @@ final class EditorModel: ViewModel {
   let redoLabel = "Redo"
   let tightBadgeLabel = "Tight join"
   let tightBadgeHelp = "A cut point isn't in a silence — add a fade in Logic."
+  let removedBadgeLabel = "Removed"
+  let removedBadgeHelp =
+    "This clip's audio is entirely inside a removed section — there is nothing to export."
   let slicesTabLabel = "Clips"
   let suggestionsTabLabel = "Suggestions"
   let rightPanelPickerLabel = "Right panel"
@@ -667,9 +693,12 @@ final class EditorModel: ViewModel {
     return "\(count) word\(count == 1 ? "" : "s") selected"
   }
   // Undo/redo restore `slices` wholesale; doing that under an open cut edit would leave the
-  // draft anchored to a stale committed range, so gate on Save/Cancel first.
-  var canUndo: Bool { documentUndo.canUndo && !hasUncommittedSliceEdit }
-  var canRedo: Bool { documentUndo.canRedo && !hasUncommittedSliceEdit }
+  // draft anchored to a stale committed range, so gate on Save/Cancel first. Blocked during
+  // an export for the same reason `canRemoveSelectedSection` is: the document that gated the
+  // export is the one being written to disk, and rewinding it mid-run would leave the
+  // finished AIFFs stale relative to what the user sees.
+  var canUndo: Bool { documentUndo.canUndo && !hasUncommittedSliceEdit && !isExporting }
+  var canRedo: Bool { documentUndo.canRedo && !hasUncommittedSliceEdit && !isExporting }
 
   var sliceCountLabel: String {
     "\(slices.count) \(slices.count == 1 ? "clip" : "clips")"
@@ -680,10 +709,23 @@ final class EditorModel: ViewModel {
     return false
   }
   var canExportAll: Bool {
-    !slices.isEmpty && !isExporting && !hasUncommittedSliceEdit && timelineRemovals.isEmpty
+    !slices.isEmpty && !isExporting && !hasUncommittedSliceEdit && editedTimeline.isValid
+      && slices.contains(where: sliceIsExportable)
   }
   var canExportSlice: Bool {
-    !isExporting && !hasUncommittedSliceEdit && timelineRemovals.isEmpty
+    !isExporting && !hasUncommittedSliceEdit && editedTimeline.isValid
+  }
+
+  /// Whether `slice` has any audio left to export once removals collapse the timeline —
+  /// false only when the slice's entire source range sits inside one or more removals.
+  func sliceIsExportable(_ slice: Slice) -> Bool {
+    // A malformed slice (reversed bounds) must read as unexportable, not trap forming the
+    // range — this runs from `sliceRows` on every render, long before `renderTargets`
+    // reaches its own `invalidSliceRange` check.
+    guard slice.startSample < slice.endSample else { return false }
+    return SliceRenderPlanBuilder.localTimeline(
+      sliceRange: slice.startSample..<slice.endSample, removals: Array(timelineRemovals)
+    ).editedDurationSamples > 0
   }
 
   var exportStatusMessage: String {
@@ -711,24 +753,39 @@ final class EditorModel: ViewModel {
     return "\(names) \(verb) — add a fade in Logic."
   }
 
+  /// After a successful "Export all", names the slices that were skipped because their
+  /// entire audio fell inside a removed section. Empty otherwise, and never shown for a
+  /// single-slice export (that path already refuses via `sliceIsExportable` before
+  /// starting, so there's nothing to report after the fact).
+  var exportSkippedRemovedWarning: String {
+    guard case .done = exportPhase, !lastExportSkippedRemovedNames.isEmpty else { return "" }
+    let names = lastExportSkippedRemovedNames.joined(separator: ", ")
+    let verb = lastExportSkippedRemovedNames.count == 1 ? "was" : "were"
+    return "\(names) \(verb) skipped — entirely inside a removed section."
+  }
+
   var showsExportStatus: Bool { !exportStatusMessage.isEmpty }
   var showsCancelExport: Bool { isExporting }
 
-  /// Surfaces why export is disabled while a timeline removal is pending: cuts collapse
-  /// the waveform and transcript but aren't applied to the rendered audio yet (that's
-  /// PR 2), so exporting now would silently ship the removed section. `nil` when there's
-  /// nothing to warn about.
-  var exportBlockedByRemovalsNote: String? {
-    timelineRemovals.isEmpty
+  /// Defensive, not routine: the mutation funnel normalizes every removal it accepts, so
+  /// `editedTimeline` is normally valid whenever `timelineRemovals` is non-empty. But if a
+  /// corrupt persisted removal set ever slipped past that funnel (e.g. loaded straight from
+  /// a stale sidecar), `EditedTimeline` would silently degrade to the identity mapping —
+  /// which would reintroduce the "removed" audio into every export. Export must refuse
+  /// outright rather than risk shipping that, so this is the one place export re-checks
+  /// validity directly instead of trusting the funnel (the BINDING PR-2 Codex contract).
+  var removalsInvalidNote: String? {
+    editedTimeline.isValid
       ? nil
-      : "Export is paused while a removed section is pending — cuts aren't applied to exports yet (coming next)."
+      : "Removed sections failed validation — export is disabled. Undo the last change or remove them."
   }
 
   var sliceRows: IdentifiedArrayOf<SliceRowState> {
     let sampleRate = editPlan.source.sampleRate
     return IdentifiedArray(
       uniqueElements: slices.map { slice in
-        SliceRowState(
+        let canExport = sliceIsExportable(slice)
+        return SliceRowState(
           id: slice.id,
           name: slice.name,
           durationLabel: sampleDurationLabel(
@@ -746,7 +803,10 @@ final class EditorModel: ViewModel {
           isActive: activeSliceID == slice.id,
           // The fine-tune button switches the edit target, which `sliceSelected` rejects while
           // another draft is unsaved — disable it then so it doesn't look broken when clicked.
-          canFineTune: !fineTune.hasUnsavedChange || activeSliceID == slice.id
+          canFineTune: !fineTune.hasUnsavedChange || activeSliceID == slice.id,
+          canExport: canExport,
+          removedLabel: canExport ? "" : removedBadgeLabel,
+          removedHelp: canExport ? "" : removedBadgeHelp
         )
       })
   }
@@ -804,8 +864,7 @@ final class EditorModel: ViewModel {
         let sourceSample: Int
         switch position.sample {
         case .edited(let editedSample):
-          playheadEditedSample = editedSample
-          sourceSample = playheadSourceSample
+          sourceSample = applyEditedPlaybackSample(editedSample)
         case .source(let source):
           placeCursor(atSource: source)
           sourceSample = source
@@ -835,6 +894,27 @@ final class EditorModel: ViewModel {
     }
   }
 
+  /// Lands an EDITED-axis playback sample (a tick or a pause freeze) on the cursor and returns the
+  /// SOURCE sample it represents.
+  ///
+  /// The main edited-timeline playback reports on the cursor's own axis, so it stores as-is. A
+  /// slice playlist reports on its SLICE-LOCAL axis instead — a number that would point at
+  /// unrelated audio if stored directly — so it converts back to an absolute source sample and
+  /// goes through `placeCursor`, which keeps the global edited cursor, the exact source anchor,
+  /// the transcript's current-word highlight and follow all correct through the same path the
+  /// old source ticks used. Inside a seam `editedToSource` resolves to the post-cut side, which
+  /// is exactly what the blended audio is making audible at that moment.
+  @discardableResult
+  private func applyEditedPlaybackSample(_ editedSample: Int) -> Int {
+    guard let conversion = slicePlaybackConversion else {
+      playheadEditedSample = editedSample
+      return playheadSourceSample
+    }
+    let source = conversion.sliceStart + conversion.localTimeline.editedToSource(editedSample)
+    placeCursor(atSource: source)
+    return source
+  }
+
   /// Clears the transport owner so a new playback can take over: it resets the phase/context/range
   /// to stopped (dropping the previous session, so the old suspended `play`'s post-await guard fails
   /// and its cleanup no-ops) and resets transcript follow so the new play reads as a rising edge. It
@@ -853,6 +933,7 @@ final class EditorModel: ViewModel {
     transportContext = .free
     transportOriginEditedSample = nil
     transportOriginSourceAnchor = nil
+    slicePlaybackConversion = nil
   }
 
   /// Stops the given session, or does nothing if it's nil. A nil session means THIS editor
@@ -1623,8 +1704,10 @@ final class EditorModel: ViewModel {
   /// slice) never touches it.
   func undoTapped() async {
     // Guard here too, not just on `canUndo`: a menu item or keyboard shortcut could fire this
-    // while an existing-slice edit is open, which would rewind `slices` under a live draft.
-    guard !hasUncommittedSliceEdit, let restored = documentUndo.undo(current: documentState)
+    // while an existing-slice edit is open, which would rewind `slices` under a live draft —
+    // or mid-export, which would leave the finished AIFFs stale.
+    guard !hasUncommittedSliceEdit, !isExporting,
+      let restored = documentUndo.undo(current: documentState)
     else { return }
     let removalsChanged = restored.timelineRemovals != timelineRemovals
     slices = restored.slices
@@ -1639,7 +1722,8 @@ final class EditorModel: ViewModel {
   /// Reapplies the next document snapshot on the redo branch, then reconciles playback. Same
   /// persist-only-on-change behavior as `undoTapped`.
   func redoTapped() async {
-    guard !hasUncommittedSliceEdit, let restored = documentUndo.redo(current: documentState)
+    guard !hasUncommittedSliceEdit, !isExporting,
+      let restored = documentUndo.redo(current: documentState)
     else { return }
     let removalsChanged = restored.timelineRemovals != timelineRemovals
     slices = restored.slices
@@ -1697,12 +1781,16 @@ final class EditorModel: ViewModel {
   /// slice start, tags the context so the row highlights, and lets the global Play/Pause/Stop govern
   /// it. Refuses an empty or past-EOF range (it would no-op `play()` without superseding, orphaning
   /// current playback) before touching the player.
+  ///
+  /// What it plays is what it would export: resolution routes a slice whose range crosses a removal
+  /// through the slice-local render plan, so a clip straddling a cut no longer auditions the audio
+  /// export drops. A slice entirely inside a removal has nothing to play and is refused.
   func playSliceTapped(_ id: Slice.ID) async {
     guard let slice = slices[id: id] else { return }
     let playableEnd = min(slice.endSample, editPlan.source.durationSamples)
     guard slice.startSample < playableEnd else { return }
     await beginTransportPlayback(
-      .sourceRange(slice.startSample..<slice.endSample), context: .slice(id))
+      .slice(slice.startSample..<slice.endSample), context: .slice(id))
   }
 
   /// Stops this editor's playback for a lifecycle cleanup (tab switch/close, reimport). Clears the
@@ -1781,22 +1869,42 @@ final class EditorModel: ViewModel {
       .editedTimeline(fromEdited: playheadEditedSample), context: .free)
   }
 
-  /// What the transport should play. `.sourceRange` = a range of the ORIGINAL audio (slice,
-  /// preview, audition, slice-edit modal — paths whose ranges are source data). `.editedTimeline`
+  /// What the transport should play. `.sourceRange` = a range of the ORIGINAL audio (preview,
+  /// audition, slice-edit modal — paths whose ranges are source data). `.editedTimeline`
   /// = the collapsed timeline from an EDITED sample (the main Play — removals collapsed, seams
   /// blended). With zero removals the edited plan is the identity playlist, so the two produce
-  /// the same audio.
+  /// the same audio. `.slice` = a saved clip, whose resolution decides between the two: with no
+  /// removal intersecting it, the plain source range; otherwise the slice-LOCAL render plan
+  /// export renders, so auditioning a clip and exporting it can never disagree.
   private enum TransportPlayback {
     case sourceRange(Range<Int>)
     case editedTimeline(fromEdited: Int)
+    case slice(Range<Int>)
   }
 
+  /// Set when a slice's playback must go through the edited playlist (its range intersects a
+  /// removal): the offset plan `playEdited` schedules, plus what's needed to convert the
+  /// player's slice-LOCAL edited positions back to absolute SOURCE samples for the cursor.
+  private struct SlicePlaybackPlaylist {
+    var plan: AudioEditRenderPlan
+    var localTimeline: EditedTimeline
+    var sliceStart: Int
+  }
+
+  /// The live slice playlist's conversion state, set while a removal-crossing slice plays and nil
+  /// for every other playback. That session's ticks and pause samples arrive on the SLICE-LOCAL
+  /// edited axis, which is meaningless to the global cursor — this is what maps them back.
+  /// Cleared by `resetTransportState`, so every stop/supersede/teardown path drops it.
+  @ObservationIgnored private var slicePlaybackConversion: SlicePlaybackPlaylist?
+
   /// A playback target clamped to its playable axis: where the cursor starts, where a natural
-  /// finish rests it, and — for the range path only — the SOURCE range handed to the player.
+  /// finish rests it, the SOURCE range handed to the player (range paths only), and — for a
+  /// removal-crossing slice — the slice-local playlist to schedule instead of that raw range.
   private struct ResolvedTransportPlayback {
     var startEditedSample: Int
     var finishEditedSample: Int
     var sourceRange: Range<Int>?
+    var slicePlaylist: SlicePlaybackPlaylist?
   }
 
   /// Clamps `playback` to the file/timeline so a natural finish can rest the cursor at a valid
@@ -1815,12 +1923,97 @@ final class EditorModel: ViewModel {
         startEditedSample: editedCursor(forSource: lower),
         finishEditedSample: editedCursor(forSource: upper),
         sourceRange: lower..<upper)
+    case .slice(let sliceRange):
+      let upper = min(sliceRange.upperBound, editPlan.source.durationSamples)
+      let lower = max(0, min(sliceRange.lowerBound, upper))
+      guard lower < upper else { return nil }
+      // The cursor semantics are the source range's either way: start/origin at the slice's
+      // first sample, a natural finish at its last. Only the AUDIO differs.
+      var resolved = ResolvedTransportPlayback(
+        startEditedSample: editedCursor(forSource: lower),
+        finishEditedSample: editedCursor(forSource: upper),
+        sourceRange: lower..<upper)
+      let render = SliceRenderPlanBuilder.plan(
+        sliceRange: lower..<upper, removals: Array(timelineRemovals))
+      // No removal reaches into this slice: the raw range IS the edited audio, so keep the
+      // tuned source-range path rather than route identical audio through the playlist.
+      guard !render.localTimeline.removals.isEmpty else { return resolved }
+      // Every sample of the slice is removed — export calls this unexportable, and there is
+      // likewise nothing to play. Nil here (before superseding) leaves the transport stopped.
+      guard render.editedDurationSamples > 0 else { return nil }
+      resolved.slicePlaylist = SlicePlaybackPlaylist(
+        plan: render.plan, localTimeline: render.localTimeline, sliceStart: render.sliceStart)
+      return resolved
     case .editedTimeline(let fromEdited):
       let editedDuration = editedWaveform.timeline.editedDurationSamples
       let start = max(0, min(fromEdited, editedDuration))
       guard start < editedDuration else { return nil }
       return ResolvedTransportPlayback(
         startEditedSample: start, finishEditedSample: editedDuration, sourceRange: nil)
+    }
+  }
+
+  /// How a playback ended, plus where a natural finish should rest the cursor: on the EDITED axis
+  /// for edited-timeline playback, and — for a slice playlist — the absolute SOURCE sample the
+  /// audio actually reached (`nil` when the player didn't report one).
+  private struct PlayerFinish {
+    var end: PlaybackEnd
+    var editedSample: Int
+    var sourceSample: Int?
+  }
+
+  /// Hands `resolved` to the player and stays suspended until it ends, returning how it ended plus
+  /// where a natural finish should rest the cursor.
+  ///
+  /// That resting position is the plan's declared end for the plain source-range path, but both
+  /// `playEdited` paths report the sample they ACTUALLY reached and that wins: against a
+  /// stale/short canonical file the schedule clamps and the audio stops early, so trusting the
+  /// plan would leave the cursor somewhere the audio never got to. A slice playlist reports on its
+  /// slice-LOCAL edited axis, so it is converted back to an absolute source sample here (and
+  /// clamped to the slice's end) — the caller's cursor lives on the global axis.
+  ///
+  /// The speed rides along with the start (not a separate awaited call), so no suspension point
+  /// sits between `.playing(session)` and the player marking the session current — a Stop or
+  /// selection snap can't slip in and orphan the audio.
+  private func runPlayer(
+    _ resolved: ResolvedTransportPlayback, timeline: EditedTimeline, session: PlaybackSessionID
+  ) async -> PlayerFinish {
+    do {
+      if let playlist = resolved.slicePlaylist {
+        // A removal-crossing slice plays the same plan export renders — absolute source ranges
+        // on a slice-local edited axis — so the cut is audible exactly where it will be exported.
+        let result = try await audioPlayer.playEdited(
+          canonicalAudioURL, playlist.plan, editPlan.source.sampleRate,
+          transcript.playbackRate, session)
+        let reachedSource = result.finishedEditedSample.map { local in
+          let source = playlist.sliceStart + playlist.localTimeline.editedToSource(local)
+          return min(source, resolved.sourceRange?.upperBound ?? source)
+        }
+        return PlayerFinish(
+          end: result.end, editedSample: resolved.finishEditedSample,
+          sourceSample: reachedSource)
+      }
+      if let sourceRange = resolved.sourceRange {
+        let end = try await audioPlayer.play(
+          canonicalAudioURL, sourceRange, editPlan.source.sampleRate,
+          transcript.playbackRate, session)
+        return PlayerFinish(end: end, editedSample: resolved.finishEditedSample, sourceSample: nil)
+      }
+      // Seek semantics ride on plan construction: the plan starts at the cursor's edited
+      // sample, and a start inside a seam yields a partial seam (`fadeOffset`) so the fade
+      // continues from the seek point rather than restarting.
+      let result = try await audioPlayer.playEdited(
+        canonicalAudioURL,
+        AudioEditRenderPlan(timeline: timeline, startEditedSample: resolved.startEditedSample),
+        editPlan.source.sampleRate, transcript.playbackRate, session)
+      return PlayerFinish(
+        end: result.end,
+        editedSample: result.finishedEditedSample ?? resolved.finishEditedSample,
+        sourceSample: nil)
+    } catch {
+      reportIssue(error)
+      return PlayerFinish(
+        end: .stopped, editedSample: resolved.finishEditedSample, sourceSample: nil)
     }
   }
 
@@ -1838,6 +2031,10 @@ final class EditorModel: ViewModel {
     beginExclusivePlayback()
     let session = PlaybackSessionID()
     transportContext = context
+    // Armed BEFORE the play call: the player starts ticking on its slice-local axis immediately,
+    // and `observePlayback` needs the conversion in place to read those ticks correctly.
+    // `beginExclusivePlayback` above just cleared any previous session's conversion.
+    slicePlaybackConversion = resolved.slicePlaylist
     transportOriginEditedSample = resolved.startEditedSample
     transportOriginSourceAnchor = resolved.sourceRange?.lowerBound
     if let sourceRange = resolved.sourceRange {
@@ -1849,39 +2046,21 @@ final class EditorModel: ViewModel {
     // selection snap deferred from before this Play must bail rather than stop us and snap back.
     cursorMoveGeneration &+= 1
     transportPhase = .playing(session)
-    let outcome: PlaybackEnd
-    do {
-      // The speed rides along with the start (not a separate awaited call), so no suspension point
-      // sits between `.playing(session)` and the player marking the session current — a Stop or
-      // selection snap can't slip in and orphan the audio.
-      if let sourceRange = resolved.sourceRange {
-        outcome = try await audioPlayer.play(
-          canonicalAudioURL, sourceRange, editPlan.source.sampleRate,
-          transcript.playbackRate, session)
-      } else {
-        // Seek semantics ride on plan construction: the plan starts at the cursor's edited
-        // sample, and a start inside a seam yields a partial seam (`fadeOffset`) so the fade
-        // continues from the seek point rather than restarting.
-        outcome = try await audioPlayer.playEdited(
-          canonicalAudioURL,
-          AudioEditRenderPlan(timeline: timeline, startEditedSample: resolved.startEditedSample),
-          editPlan.source.sampleRate, transcript.playbackRate, session)
-      }
-    } catch {
-      reportIssue(error)
-      outcome = .stopped
-    }
+    let finish = await runPlayer(resolved, timeline: timeline, session: session)
     // Clean up only if we're still the current playback (our own Stop/supersede already replaced the
     // session). Only a natural `.finished` lands the cursor at the range end. `.superseded` here
     // means ANOTHER tab took over the shared player — our session is still set because that tab never
     // touched it — so reset the transport WITHOUT jumping the cursor to the end. A failed play
     // (`.stopped`) likewise leaves the cursor put.
     guard transportPhase.session == session else { return }
-    if outcome == .finished {
+    if finish.end == .finished {
+      // Slice playback (playlist or not) always has a source range, so it rests on the SOURCE
+      // axis: at the sample a playlist actually reached (already converted off the slice-local
+      // axis and clamped), else at the slice's end.
       if let sourceRange = resolved.sourceRange {
-        placeCursor(atSource: sourceRange.upperBound)
+        placeCursor(atSource: finish.sourceSample ?? sourceRange.upperBound)
       } else {
-        playheadEditedSample = resolved.finishEditedSample
+        playheadEditedSample = finish.editedSample
       }
     }
     // Capture the slice-edit child (if this playback was the modal's) BEFORE the reset clears the
@@ -1910,7 +2089,7 @@ final class EditorModel: ViewModel {
     let sample = await audioPlayer.pause(session)
     guard transportPhase.session == session else { return }
     switch sample {
-    case .edited(let editedSample): playheadEditedSample = editedSample
+    case .edited(let editedSample): applyEditedPlaybackSample(editedSample)
     case .source(let source): placeCursor(atSource: source)
     case nil: break
     }
@@ -2270,17 +2449,19 @@ final class EditorModel: ViewModel {
 
   // MARK: - Export Actions
   func exportSliceTapped(_ id: Slice.ID) {
-    guard !isExporting, !hasUncommittedSliceEdit, timelineRemovals.isEmpty,
-      let slice = slices[id: id]
+    guard !isExporting, !hasUncommittedSliceEdit, editedTimeline.isValid,
+      let slice = slices[id: id], sliceIsExportable(slice)
     else { return }
+    lastExportSkippedRemovedNames = []
     startExport([slice])
   }
 
   func exportAllTapped() {
-    guard !isExporting, !hasUncommittedSliceEdit, timelineRemovals.isEmpty, !slices.isEmpty else {
-      return
-    }
-    startExport(Array(slices))
+    guard !isExporting, !hasUncommittedSliceEdit, editedTimeline.isValid else { return }
+    let targets = slices.filter(sliceIsExportable)
+    guard !targets.isEmpty else { return }
+    lastExportSkippedRemovedNames = slices.filter { !sliceIsExportable($0) }.map(\.name)
+    startExport(Array(targets))
   }
 
   func cancelExportTapped() {
@@ -2397,7 +2578,13 @@ final class EditorModel: ViewModel {
     }
     exportTask?.cancel()
     exportPhase = .exporting(current: 0, total: targets.count)
-    exportTask = Task { await performExport(targets) }
+    // Freeze the removal set the export gate just approved. `renderTargets` runs after the
+    // destination picker's await, and undo/redo are only *blocked* while exporting — this tap
+    // is still outside that window — so re-reading `timelineRemovals` there could render a
+    // timeline the export was never gated on (worst case, a slice that became fully removed
+    // mid-picker exporting as a 0-frame file "successfully").
+    let removals = Array(timelineRemovals)
+    exportTask = Task { await performExport(targets, removals: removals) }
   }
 
   /// Resolves the export destination, then re-checks the canonical audio is still on disk —
@@ -2415,59 +2602,140 @@ final class EditorModel: ViewModel {
     return destination
   }
 
-  private func performExport(_ targets: [Slice]) async {
+  /// Renders every target slice straight from the canonical AIFF (Swift-side, via
+  /// `exportRender`), then stamps markers into the rendered files in one batched call to
+  /// the engine's `inject-markers` subcommand — the engine no longer touches audio at all.
+  /// Each slice gets its own local `EditedTimeline`/`AudioEditRenderPlan` (built from
+  /// `removals` — the snapshot taken at the tap that passed the export gate), so a removal is
+  /// rendered out rather than silently shipped.
+  private func performExport(_ targets: [Slice], removals: [TimelineRemoval]) async {
     guard let destination = await exportDestination() else { return }
     exportPhase = .exporting(current: 0, total: targets.count)
 
+    // Re-check right before touching audio — see `removalsInvalidNote`'s doc comment for
+    // why this is defensive rather than routine (the BINDING PR-2 Codex contract).
+    guard editedTimeline.isValid else {
+      exportPhase = .failed(
+        removalsInvalidNote ?? "Removed sections failed validation — export is disabled.")
+      return
+    }
+
+    let scratchDir = FileManager.default.temporaryDirectory
+      .appendingPathComponent("qie-export-\(UUID().uuidString)", isDirectory: true)
     do {
-      var rendered: [RenderedSlice] = []
-      var workDir: URL?
-      for try await event in engine.renderSlices(renderRequest(for: targets)) {
-        switch event {
-        case .progress(let progress):
-          exportPhase = .exporting(
-            current: progress.index,
-            total: progress.total == 0 ? targets.count : progress.total)
-        case .completed(let result):
-          rendered = result.slices
-          workDir = result.workDir
-        }
-      }
+      try FileManager.default.createDirectory(at: scratchDir, withIntermediateDirectories: true)
+    } catch {
+      exportPhase = .failed(error.localizedDescription)
+      return
+    }
+
+    do {
+      let rendered = try await renderTargets(
+        targets, removals: removals, scratchDir: scratchDir)
       if Task.isCancelled {
-        await removeWorkDir(workDir)
+        await removeWorkDir(scratchDir)
         exportPhase = .failed(cancelMessage(copied: 0, total: targets.count))
         return
       }
-      // Copy off the main actor — copying many/large AIFFs (or to a slow/network
-      // folder) must not freeze the UI or block the cancel control.
-      let byID = Dictionary(
-        rendered.map { ($0.id, $0.url) }, uniquingKeysWith: { first, _ in first })
-      let stem = sourceURL.deletingPathExtension().lastPathComponent
-      let outcome = await Self.copyRenderedSlices(
-        stem: stem, targets: targets, renderedByID: byID, destination: destination)
-      await removeWorkDir(workDir)
-
-      if outcome.cancelled || Task.isCancelled {
-        // A cancel landing during the final copy also lands here, so the cancel
-        // button can never report success.
-        exportPhase = .failed(cancelMessage(copied: outcome.copied.count, total: targets.count))
-      } else if let message = outcome.errorMessage {
-        exportPhase = .failed(message)
-      } else if outcome.copied.count != targets.count {
-        // A short result means the engine didn't render every requested slice —
-        // report it rather than claiming success on a partial reveal.
-        exportPhase = .failed(
-          "The engine rendered \(outcome.copied.count) of \(targets.count) slices.")
-      } else {
-        workspace.reveal(outcome.copied)
-        lastExportTightNames = targets.filter { !$0.warnings.isEmpty }.map(\.name)
-        exportPhase = .done(count: outcome.copied.count)
-      }
+      try await engine.injectMarkers(rendered.injectionFiles)
+      await finishExport(
+        targets: targets, removals: removals, outputsByID: rendered.outputsByID,
+        scratchDir: scratchDir, destination: destination)
     } catch is CancellationError {
-      // The engine cleans up its own work-dir on a cancelled/failed run.
+      await removeWorkDir(scratchDir)
       exportPhase = .failed(cancelMessage(copied: 0, total: targets.count))
     } catch {
+      await removeWorkDir(scratchDir)
       exportPhase = .failed(error.localizedDescription)
+    }
+  }
+
+  /// One render pass's output: each target's rendered file, plus the SAME-order marker
+  /// list `injectMarkers` will stamp into those files.
+  private struct RenderedTargets {
+    var outputsByID: [Slice.ID: URL]
+    var injectionFiles: [MarkerInjectionFile]
+  }
+
+  /// Renders each target slice from the canonical AIFF into `scratchDir`. Each slice gets its
+  /// own local `EditedTimeline`/`AudioEditRenderPlan` built from `removals` — the snapshot
+  /// `startExport` took at the gating moment, NOT a fresh read of `timelineRemovals`, so the
+  /// exported audio is exactly the timeline that enabled the export.
+  private func renderTargets(
+    _ targets: [Slice], removals: [TimelineRemoval], scratchDir: URL
+  ) async throws -> RenderedTargets {
+    let sampleRate = editPlan.source.sampleRate
+    let sourceDurationSamples = editPlan.source.durationSamples
+    // RAW absolute source-sample marker positions straight from the loaded plan words —
+    // no global tie-nudge here. `SliceRenderPlanBuilder.markers` maps each marker into
+    // slice-relative EDITED space and applies the strictly-increasing nudge itself.
+    let sourceMarkers = editPlan.words.map { word in
+      RenderMarker(
+        position: word.startSample ?? Int(word.start * Double(sampleRate)), name: word.text)
+    }
+
+    var outputsByID: [Slice.ID: URL] = [:]
+    var injectionFiles: [MarkerInjectionFile] = []
+    for (offset, slice) in targets.enumerated() {
+      try Task.checkCancellation()
+      // The bounds check the Python `run_render` used to do (start >= 0, end > start,
+      // end <= frame count). A stale or hand-edited slice would otherwise trap forming the
+      // range, or read past the canonical file's end deep inside the renderer.
+      guard slice.startSample >= 0, slice.startSample < slice.endSample,
+        slice.endSample <= sourceDurationSamples
+      else {
+        throw ExportRenderError.invalidSliceRange(
+          name: slice.name, start: slice.startSample, end: slice.endSample,
+          duration: sourceDurationSamples)
+      }
+      exportPhase = .exporting(current: offset + 1, total: targets.count)
+      let sliceRange = slice.startSample..<slice.endSample
+      let plan = SliceRenderPlanBuilder.plan(sliceRange: sliceRange, removals: removals)
+      let outputURL = scratchDir.appendingPathComponent("\(slice.id.uuidString).aiff")
+      let job = ExportRenderJob(
+        canonicalAudioURL: canonicalAudioURL, plan: plan.plan,
+        editedDurationSamples: plan.editedDurationSamples, sampleRate: sampleRate,
+        sourceDurationSamples: sourceDurationSamples, outputURL: outputURL)
+      try await exportRender.renderSlice(job)
+      outputsByID[slice.id] = outputURL
+      let markers = SliceRenderPlanBuilder.markers(
+        sourceMarkers, sliceRange: sliceRange, localTimeline: plan.localTimeline)
+      injectionFiles.append(MarkerInjectionFile(url: outputURL, markers: markers))
+    }
+    return RenderedTargets(outputsByID: outputsByID, injectionFiles: injectionFiles)
+  }
+
+  /// Copies the rendered files to `destination` and sets the terminal `exportPhase` —
+  /// success, a copy failure, a mid-copy cancel, or (defensively) a count mismatch.
+  private func finishExport(
+    targets: [Slice], removals: [TimelineRemoval], outputsByID: [Slice.ID: URL],
+    scratchDir: URL, destination: URL
+  ) async {
+    // Copy off the main actor — copying many/large AIFFs (or to a slow/network
+    // folder) must not freeze the UI or block the cancel control.
+    let stem = sourceURL.deletingPathExtension().lastPathComponent
+    let outcome = await Self.copyRenderedSlices(
+      stem: stem, targets: targets, renderedByID: outputsByID, destination: destination)
+    await removeWorkDir(scratchDir)
+
+    if outcome.cancelled || Task.isCancelled {
+      // A cancel landing during the final copy also lands here, so the cancel
+      // button can never report success.
+      exportPhase = .failed(cancelMessage(copied: outcome.copied.count, total: targets.count))
+    } else if let message = outcome.errorMessage {
+      exportPhase = .failed(message)
+    } else if outcome.copied.count != targets.count {
+      // Defense-in-depth: `outputsByID` is built 1:1 with `targets` above, so this
+      // shouldn't be reachable — but report a short result rather than claim success.
+      exportPhase = .failed("Rendered \(outcome.copied.count) of \(targets.count) slices.")
+    } else {
+      workspace.reveal(outcome.copied)
+      // Warnings come from the SAME frozen removal set the render used, so they can never
+      // describe a different timeline than the shipped audio.
+      lastExportTightNames = targets.filter {
+        !exportWarnings(for: $0, removals: removals).isEmpty
+      }.map(\.name)
+      exportPhase = .done(count: outcome.copied.count)
     }
   }
 
@@ -2478,25 +2746,28 @@ final class EditorModel: ViewModel {
     return chosen
   }
 
-  private func renderRequest(for targets: [Slice]) -> RenderRequest {
-    let sampleRate = editPlan.source.sampleRate
-    // Walk words in spoken order and nudge any tie one frame forward so two markers
-    // never stack on the same position or get reordered by Logic — matching the
-    // engine's own `build_markers` invariant (aligned timestamps occasionally
-    // collide at the same rounded sample).
-    var lastPosition = Int.min
-    let markers = editPlan.words.map { word -> RenderMarker in
-      var position = word.startSample ?? Int(word.start * Double(sampleRate))
-      if position <= lastPosition { position = lastPosition + 1 }
-      lastPosition = position
-      return RenderMarker(position: position, name: word.text)
-    }
-    let specs = targets.map {
-      RenderSliceSpec(id: $0.id, startSample: $0.startSample, endSample: $0.endSample)
-    }
-    return RenderRequest(
-      audioURL: canonicalAudioURL, sampleRate: sampleRate,
-      durationSamples: editPlan.source.durationSamples, markers: markers, slices: specs)
+  /// Tight-join warnings computed from EXPORT-effective boundaries rather than the
+  /// slice's own stored (original) boundaries: when a cut point falls inside a removal,
+  /// export starts/ends from the surviving edge of that removal instead, so a boundary
+  /// that was tight against a silence originally can land somewhere entirely different
+  /// (or nowhere at all, if the whole slice was removed) once the timeline collapses.
+  /// Pass `removals` to evaluate against a frozen snapshot (the export path hands in the set
+  /// it actually rendered, so the warning can never drift from the shipped audio); defaults
+  /// to the live document.
+  func exportWarnings(for slice: Slice, removals: [TimelineRemoval]? = nil) -> [SliceWarning] {
+    // Same reversed-bounds defense as `sliceIsExportable`: nothing to warn about on a slice
+    // that can never render.
+    guard slice.startSample < slice.endSample else { return [] }
+    let sliceRange = slice.startSample..<slice.endSample
+    let localTimeline = SliceRenderPlanBuilder.localTimeline(
+      sliceRange: sliceRange, removals: removals ?? Array(timelineRemovals))
+    let kept = localTimeline.keptSegments.filter { !$0.source.isEmpty }
+    guard let first = kept.first, let last = kept.last else { return [] }
+    let effectiveStart = slice.startSample + first.source.lowerBound
+    let effectiveEnd = slice.startSample + last.source.upperBound
+    return sliceWarnings(
+      startSample: effectiveStart, endSample: effectiveEnd,
+      durationSamples: editPlan.source.durationSamples, silences: editPlan.silences)
   }
 
   /// The result of copying rendered slices to the destination, computed off the main
@@ -2623,6 +2894,11 @@ struct SliceRowState: Identifiable, Equatable {
   var playButtonLabel: String
   var isActive: Bool
   var canFineTune: Bool
+  /// False when the slice's audio is entirely inside a removed section — there is
+  /// nothing left to export, so the row shows `removedLabel` instead of an export button.
+  var canExport: Bool
+  var removedLabel: String
+  var removedHelp: String
 }
 
 /// The identity of a fine-tune edit session — the active slice, or a live transcript

@@ -320,201 +320,163 @@ enum LiveEngine {
     return min(max(value, 0), 1)
   }
 
-  // MARK: render
+  // MARK: injectMarkers
 
-  // swiftlint:disable function_body_length
-  /// Renders the request's slices to app-owned temp AIFFs (one per slice id) by
-  /// driving `logic_markers.cli render`. Mirrors `transcribe` (streaming progress,
-  /// process-group cancel), with one difference: on **success** the work-dir is
-  /// left in place because the caller (EditorModel) copies the AIFFs to the user's
-  /// folder and deletes the work-dir afterward. On failure/cancel it's removed here.
-  static func render(_ request: RenderRequest) -> AsyncThrowingStream<RenderEvent, Error> {
-    AsyncThrowingStream { continuation in
-      let procBox = Mutex<SpawnedProcess?>(nil)
+  /// Stamps MARK chunks into slice AIFFs the app already rendered itself, by driving
+  /// `logic_markers.cli inject-markers`. Unlike `render`, this modifies `files` in
+  /// place and produces no new files to keep, so the scratch work dir (holding only
+  /// the request JSON) is removed on every exit path — success, failure, or cancel.
+  /// No progress events are emitted on this path; stderr is still drained so a full
+  /// pipe can't stall the child.
+  static func injectMarkers(_ files: [MarkerInjectionFile]) async throws {
+    guard !files.isEmpty else { return }
 
-      let task = Task {
-        var succeeded = false
-        do {
-          let launch = resolvedLaunch()
-          guard FileManager.default.isExecutableFile(atPath: launch.executable.path) else {
-            throw EngineClientError.engineNotFound(launch.executable.path)
-          }
-          let work = try makeWorkDir()
-          // Keep the rendered AIFFs on success (the caller copies + cleans up);
-          // remove the scratch dir on every failure/cancel path.
-          defer { if !succeeded { try? FileManager.default.removeItem(at: work) } }
+    let launch = resolvedLaunch()
+    guard FileManager.default.isExecutableFile(atPath: launch.executable.path) else {
+      throw EngineClientError.engineNotFound(launch.executable.path)
+    }
+    let work = try makeWorkDir()
+    defer { try? FileManager.default.removeItem(at: work) }
 
-          let requestURL = work.appendingPathComponent("request.json")
-          try writeRequest(request, to: requestURL)
+    let requestURL = work.appendingPathComponent("request.json")
+    try writeInjectRequest(files, to: requestURL)
 
-          let proc = try SpawnedProcess(
-            executable: launch.executable,
-            arguments: launch.arguments(
-              subcommand: "render",
-              [
-                request.audioURL.path, "--request", requestURL.path,
-                "--work-dir", work.path, "--sample-rate", String(request.sampleRate),
-              ]
-            ),
-            currentDirectory: launch.workingDirectory,
-            extraEnvironment: launch.environment
-          )
-          procBox.withLock { $0 = proc }
-          if Task.isCancelled { proc.terminate() }
+    let proc = try SpawnedProcess(
+      executable: launch.executable,
+      arguments: launch.arguments(subcommand: "inject-markers", ["--request", requestURL.path]),
+      currentDirectory: launch.workingDirectory,
+      extraEnvironment: launch.environment
+    )
+    // The render path cancels its child through the stream's `onTermination`; this is a
+    // plain async function, so the equivalent hook is a cancellation handler. Killing the
+    // process group on cancel means a Cancel/tab-close never waits for — or hangs on —
+    // the subprocess; the awaits below then unwind via EOF + exit.
+    try await withTaskCancellationHandler {
+      async let stdoutData = proc.readStdoutToEnd()
+      async let exitCode = proc.waitForExit()
 
-          async let stdoutData = proc.readStdoutToEnd()
-          async let exitCode = proc.waitForExit()
+      // No QIE_EVENT progress is emitted here; drain and discard every stderr line
+      // anyway so the child can't stall on a full pipe.
+      for await _ in proc.stderrLines() {}
 
-          for await line in proc.stderrLines() {
-            guard line.hasPrefix("QIE_EVENT ") else { continue }
-            let json = Data(line.dropFirst("QIE_EVENT ".count).utf8)
-            guard
-              let wire = try? JSONDecoder().decode(RenderWireEvent.self, from: json),
-              wire.type == "progress"
-            else { continue }
-            continuation.yield(
-              .progress(
-                RenderProgress(
-                  message: wire.message ?? "", index: wire.index ?? 0, total: wire.total ?? 0)))
-          }
+      let out = await stdoutData
+      let code = await exitCode
+      let logURL = writeJobLog(
+        kind: "inject-markers", audio: files[0].url, exitCode: code, stdout: out,
+        stderr: proc.stderrTail())
 
-          let out = await stdoutData
-          let code = await exitCode
-          let logURL = writeJobLog(
-            kind: "render", audio: request.audioURL, exitCode: code, stdout: out,
-            stderr: proc.stderrTail())
-
-          if Task.isCancelled {
-            continuation.finish()
-            return
-          }
-          guard code == 0 else {
-            throw EngineClientError.renderFailed(proc.stderrTail() + logHint(logURL))
-          }
-          let expectedIDs = Set(request.slices.map(\.id))
-          let slices = try decodeRenderResult(
-            out, workDir: work, expectedIDs: expectedIDs, logURL: logURL)
-          succeeded = true
-          continuation.yield(.completed(RenderResult(slices: slices, workDir: work)))
-          continuation.finish()
-        } catch is CancellationError {
-          continuation.finish()
-        } catch {
-          continuation.finish(throwing: error)
-        }
+      // A cancel-triggered kill surfaces as a nonzero exit; report it as cancellation,
+      // not an engine failure.
+      if Task.isCancelled {
+        throw CancellationError()
       }
-
-      continuation.onTermination = { _ in
-        task.cancel()
-        procBox.withLock { $0 }?.terminate()
+      guard code == 0 else {
+        throw EngineClientError.injectFailed(proc.stderrTail() + logHint(logURL))
       }
+      let expectedMarkerCounts = Dictionary(
+        files.map { ($0.url.path, $0.markers.count) }, uniquingKeysWith: { first, _ in first })
+      try decodeInjectResult(out, expectedMarkerCounts: expectedMarkerCounts, logURL: logURL)
+    } onCancel: {
+      proc.terminate()
     }
   }
-  // swiftlint:enable function_body_length
 
-  private static func writeRequest(_ request: RenderRequest, to url: URL) throws {
-    let wire = RenderWireRequest(
-      sampleRate: request.sampleRate,
-      durationSamples: request.durationSamples,
-      markers: request.markers.map {
-        RenderWireRequest.Marker(position: $0.position, name: $0.name)
-      },
-      slices: request.slices.map {
-        RenderWireRequest.Slice(
-          id: $0.id.uuidString, startSample: $0.startSample, endSample: $0.endSample)
-      }
-    )
-    try JSONEncoder().encode(wire).write(to: url)
+  /// The request as the snake-cased JSON `logic_markers.cli inject-markers` reads.
+  /// Exposed (not private) so the Swift→Python wire contract is unit-tested without
+  /// spawning a subprocess.
+  static func encodedInjectRequest(_ files: [MarkerInjectionFile]) throws -> Data {
+    let wire = InjectWireRequest(
+      files: files.map { file in
+        InjectWireRequest.File(
+          path: file.url.path,
+          markers: file.markers.map {
+            InjectWireRequest.Marker(position: $0.position, name: $0.name)
+          }
+        )
+      })
+    return try JSONEncoder().encode(wire)
   }
 
-  /// Decodes the engine's result into `RenderedSlice`s. The engine's `path` field is
-  /// **ignored** — each output URL is derived from our own `workDir` and the returned
-  /// id (validated as a UUID), so a malformed/hostile result can never point the copy
-  /// at a file outside the scratch dir. The derived file must exist on disk.
-  private static func decodeRenderResult(
-    _ out: Data, workDir: URL, expectedIDs: Set<UUID>, logURL: URL?
-  ) throws -> [RenderedSlice] {
+  private static func writeInjectRequest(_ files: [MarkerInjectionFile], to url: URL) throws {
+    try encodedInjectRequest(files).write(to: url)
+  }
+
+  /// Decodes and validates the engine's inject-markers result against
+  /// `expectedMarkerCounts` (path → the number of markers that path was asked to receive).
+  /// Exposed (not private) so this is unit-tested without spawning a subprocess.
+  ///
+  /// A clean exit that silently drops/duplicates a requested file — or silently drops
+  /// markers from one — must not pass as success: the result's path set must equal the
+  /// requested one exactly, each file's reported `marker_count` must match what was
+  /// requested, and every path must still exist on disk (injection modifies the AIFF in
+  /// place; a missing file after a reported success means something went wrong).
+  static func decodeInjectResult(
+    _ out: Data, expectedMarkerCounts: [String: Int], logURL: URL? = nil
+  ) throws {
+    let expectedPaths = Set(expectedMarkerCounts.keys)
+    let wire: InjectWireResult
     do {
-      let wire = try JSONDecoder().decode(RenderWireResult.self, from: out)
-      let rendered = try wire.slices.map { slice -> RenderedSlice in
-        guard let id = UUID(uuidString: slice.id) else {
-          throw EngineClientError.renderDecodeFailed(
-            "engine returned an unrecognized slice id: \(slice.id)")
-        }
-        let url = workDir.appendingPathComponent("\(id.uuidString).aiff")
-        guard FileManager.default.fileExists(atPath: url.path) else {
-          throw EngineClientError.renderDecodeFailed(
-            "engine did not produce the expected file for slice \(id.uuidString)")
-        }
-        return RenderedSlice(id: id, url: url)
-      }
-      // A clean exit that omits (or duplicates/adds) a slice must not pass as
-      // success — the result has to cover exactly the requested set.
-      let renderedIDs = Set(rendered.map(\.id))
-      guard renderedIDs == expectedIDs, rendered.count == expectedIDs.count else {
-        let missing = expectedIDs.subtracting(renderedIDs).map(\.uuidString).sorted()
-        throw EngineClientError.renderDecodeFailed(
-          "engine returned an incomplete render result; missing [\(missing.joined(separator: ", "))]"
-            + logHint(logURL))
-      }
-      return rendered
-    } catch let error as EngineClientError {
-      throw error
+      wire = try JSONDecoder().decode(InjectWireResult.self, from: out)
     } catch {
       // swiftlint:disable:next optional_data_string_conversion
       let preview = String(decoding: out.prefix(500), as: UTF8.self)
-      throw EngineClientError.renderDecodeFailed(
+      throw EngineClientError.injectDecodeFailed(
         "\(error)\n\nEngine output was not valid JSON. It began with:\n\(preview)" + logHint(logURL)
       )
+    }
+    let resultPaths = Set(wire.files.map(\.path))
+    guard resultPaths == expectedPaths, wire.files.count == expectedPaths.count else {
+      let missing = expectedPaths.subtracting(resultPaths).sorted()
+      throw EngineClientError.injectDecodeFailed(
+        "engine returned an incomplete inject-markers result; missing [\(missing.joined(separator: ", "))]"
+          + logHint(logURL))
+    }
+    for file in wire.files.sorted(by: { $0.path < $1.path }) {
+      // Every result path is in `expectedMarkerCounts` — the set equality above proved it.
+      guard let expected = expectedMarkerCounts[file.path] else { continue }
+      if file.markerCount != expected {
+        throw EngineClientError.injectDecodeFailed(
+          "engine reported \(file.markerCount) markers for \(file.path), but \(expected) were requested"
+            + logHint(logURL))
+      }
+    }
+    for path in expectedPaths.sorted() {
+      guard FileManager.default.fileExists(atPath: path) else {
+        throw EngineClientError.injectDecodeFailed(
+          "engine reported success injecting markers into \(path), but the file no longer exists"
+            + logHint(logURL))
+      }
     }
   }
 
 }
 
-// MARK: - Render wire types
+// MARK: - Inject wire types
 
-/// Snake-cased JSON shapes exchanged with `logic_markers.cli render` — the request
-/// file Swift writes and the result/progress it reads back.
-private struct RenderWireRequest: Encodable {
-  var sampleRate: Int
-  var durationSamples: Int
-  var markers: [Marker]
-  var slices: [Slice]
-  enum CodingKeys: String, CodingKey {
-    case sampleRate = "sample_rate"
-    case durationSamples = "duration_samples"
-    case markers, slices
+/// Snake-cased JSON shapes exchanged with `logic_markers.cli inject-markers` — the
+/// request file Swift writes and the result it reads back.
+private struct InjectWireRequest: Encodable {
+  var files: [File]
+  struct File: Encodable {
+    var path: String
+    var markers: [Marker]
   }
   struct Marker: Encodable {
     var position: Int
     var name: String
   }
-  struct Slice: Encodable {
-    var id: String
-    var startSample: Int
-    var endSample: Int
+}
+
+private struct InjectWireResult: Decodable {
+  struct File: Decodable {
+    var path: String
+    var markerCount: Int
     enum CodingKeys: String, CodingKey {
-      case id
-      case startSample = "start_sample"
-      case endSample = "end_sample"
+      case path
+      case markerCount = "marker_count"
     }
   }
-}
-
-private struct RenderWireResult: Decodable {
-  struct Slice: Decodable {
-    var id: String
-    var path: String
-  }
-  var slices: [Slice]
-}
-
-private struct RenderWireEvent: Decodable {
-  var type: String
-  var phase: String?
-  var message: String?
-  var index: Int?
-  var total: Int?
+  var files: [File]
 }
 
 // MARK: - SpawnedProcess

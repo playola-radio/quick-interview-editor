@@ -113,9 +113,7 @@ struct RootTests {
 
   @Test func closingATabCancelsAnInFlightExport() async throws {
     let plan = Fixtures.editPlan()
-    let (stream, continuation) = AsyncThrowingStream<RenderEvent, Error>.makeStream()
-    let terminated = LockIsolated(false)
-    continuation.onTermination = { _ in terminated.setValue(true) }
+    let renderStarted = LockIsolated(false)
     let destination = FileManager.default.temporaryDirectory
       .appendingPathComponent("qie-root-export-\(UUID().uuidString)")
     try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
@@ -129,7 +127,16 @@ struct RootTests {
           $0.finish()
         }
       }
-      $0.engine.renderSlices = { _ in stream }
+      $0.exportRender.renderSlice = { _ in
+        renderStarted.setValue(true)
+        // Cooperative cancellation — never `Task.sleep` — busy-checks the flag that
+        // `closeTab`'s `cancelExportTapped()` sets, mirroring how `ExportAudioRenderer`
+        // honours `Task.checkCancellation()` between chunks. Bounded so a regression in
+        // `closeTab`'s cancellation fails the test instead of hanging it, and
+        // `checkCancellation` keeps the stub honest: it throws only on a real cancel.
+        for _ in 0..<100_000 where !Task.isCancelled { await Task.yield() }
+        try Task.checkCancellation()
+      }
       $0.workspace.reveal = { _ in }
       $0.audioPlayer.stop = { _ in }  // closeTab also stops playback
     } operation: {
@@ -145,11 +152,11 @@ struct RootTests {
           id: UUID(), name: "A", startSample: 0, endSample: 100, wordIDs: [], snippet: "x",
           warnings: []))
       editor.exportAllTapped()
+      for _ in 0..<1000 where !renderStarted.value { await Task.yield() }
       #expect(editor.isExporting)
 
       model.closeTab(tabID)  // must cancel the export, not let it outlive the tab
       await editor.exportTask?.value
-      #expect(terminated.value)
       guard case .failed = editor.exportPhase else {
         Issue.record("expected .failed after close, got \(editor.exportPhase)")
         return

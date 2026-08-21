@@ -55,9 +55,9 @@ struct EditorRulerTests {
   /// free play (`transportPlayTapped` from stopped), which now goes through `playEdited`.
   private func gatedPlayEdited(_ gate: RulerPlayGate)
     -> @Sendable (URL, AudioEditRenderPlan, Int, Double, PlaybackSessionID) async throws ->
-    PlaybackEnd
+    EditedPlaybackEnd
   {
-    { _, _, _, _, _ in await gate.play() }
+    { _, _, _, _, _ in EditedPlaybackEnd(end: await gate.play(), finishedEditedSample: nil) }
   }
 
   // MARK: - Mapping + clamping

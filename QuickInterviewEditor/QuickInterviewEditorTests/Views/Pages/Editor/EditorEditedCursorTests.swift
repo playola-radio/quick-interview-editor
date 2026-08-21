@@ -161,7 +161,7 @@ struct EditorEditedCursorTests {
     await withDependencies {
       $0.audioPlayer.playEdited = { url, plan, sampleRate, _, _ in
         recorded.setValue(RecordedPlayEdited(url: url, plan: plan, sampleRate: sampleRate))
-        return .finished
+        return EditedPlaybackEnd(end: .finished, finishedEditedSample: nil)
       }
     } operation: {
       await model.transportPlayTapped()
@@ -183,7 +183,7 @@ struct EditorEditedCursorTests {
     await withDependencies {
       $0.audioPlayer.playEdited = { _, plan, _, _, _ in
         recorded.setValue(plan)
-        return .finished
+        return EditedPlaybackEnd(end: .finished, finishedEditedSample: nil)
       }
     } operation: {
       await model.transportPlayTapped()
@@ -199,7 +199,9 @@ struct EditorEditedCursorTests {
     addRemoval(model, 40_000, 60_000, length: 4_800)
     model.playheadEditedSample = 10_000
     await withDependencies {
-      $0.audioPlayer.playEdited = { _, _, _, _, _ in .finished }
+      $0.audioPlayer.playEdited = { _, _, _, _, _ in
+        EditedPlaybackEnd(end: .finished, finishedEditedSample: nil)
+      }
     } operation: {
       await model.transportPlayTapped()
     }
@@ -223,7 +225,7 @@ struct EditorEditedCursorTests {
     await withDependencies {
       $0.audioPlayer.playEdited = { _, plan, _, _, _ in
         recorded.setValue(plan)
-        return .finished
+        return EditedPlaybackEnd(end: .finished, finishedEditedSample: nil)
       }
     } operation: {
       await model.transportPlayTapped()
@@ -299,7 +301,9 @@ struct EditorEditedCursorTests {
     let gate = EditedPlayGate()
     let stopped = LockIsolated(false)
     await withDependencies {
-      $0.audioPlayer.playEdited = { _, _, _, _, _ in await gate.play() }
+      $0.audioPlayer.playEdited = { _, _, _, _, _ in
+        EditedPlaybackEnd(end: await gate.play(), finishedEditedSample: nil)
+      }
       $0.audioPlayer.stop = { _ in stopped.setValue(true) }
     } operation: {
       let play = Task { await model.transportPlayTapped() }
@@ -328,7 +332,11 @@ struct EditorEditedCursorTests {
     model.mutateSlices { $0.append(slice) }
     let gate = EditedPlayGate()
     await withDependencies {
-      $0.audioPlayer.play = { _, _, _, _, _ in await gate.play() }
+      // The slice straddles the removal, so it plays through the slice-local PLAYLIST now — the
+      // cursor semantics under test (an exact source-anchored origin) are the same either way.
+      $0.audioPlayer.playEdited = { _, _, _, _, _ in
+        EditedPlaybackEnd(end: await gate.play(), finishedEditedSample: nil)
+      }
       $0.audioPlayer.stop = { _ in await gate.finish(.stopped) }
     } operation: {
       let play = Task { await model.playSliceTapped(slice.id) }
@@ -351,7 +359,11 @@ struct EditorEditedCursorTests {
     model.mutateSlices { $0.append(slice) }
     let gate = EditedPlayGate()
     await withDependencies {
-      $0.audioPlayer.play = { _, _, _, _, _ in await gate.play() }
+      // The slice straddles the removal, so it plays through the slice-local PLAYLIST now — the
+      // cursor semantics under test (an exact source-anchored origin) are the same either way.
+      $0.audioPlayer.playEdited = { _, _, _, _, _ in
+        EditedPlaybackEnd(end: await gate.play(), finishedEditedSample: nil)
+      }
       $0.audioPlayer.stop = { _ in await gate.finish(.stopped) }
     } operation: {
       let play = Task { await model.playSliceTapped(slice.id) }

@@ -35,25 +35,15 @@ struct EngineClientTests {
     #expect(got?.canonicalAudioURL != nil)
   }
 
-  @Test func testValueRenderSlicesFailsCleanlyWithoutOverride() async {
+  @Test func testValueInjectMarkersFailsCleanlyWithoutOverride() async {
     await withKnownIssue {
-      for try await _ in EngineClient.testValue.renderSlices(Self.sampleRequest) {}
+      try await EngineClient.testValue.injectMarkers([])
     }
   }
 
-  @Test func previewValueRenderSlicesFinishesWithoutEmitting() async throws {
-    var events = 0
-    for try await _ in EngineClient.previewValue.renderSlices(Self.sampleRequest) { events += 1 }
-    expectNoDifference(events, 0)
+  @Test func previewValueInjectMarkersFinishesWithoutThrowing() async throws {
+    try await EngineClient.previewValue.injectMarkers([])
   }
-
-  private static let sampleRequest = RenderRequest(
-    audioURL: URL(fileURLWithPath: "/clip.aiff"),
-    sampleRate: 44100,
-    durationSamples: 44100,
-    markers: [RenderMarker(position: 0, name: "So")],
-    slices: [RenderSliceSpec(id: UUID(), startSample: 0, endSample: 100)]
-  )
 }
 
 private final class EngineClientBundleToken {}
