@@ -2,8 +2,8 @@ import Foundation
 
 /// The one canonical way to turn a **sample range** into a `Slice`, shared by the
 /// editor's fine-tune / new-slice-from-range path (`EditorModel.makeSlice`) and the
-/// cut-suggestion accept path, so snippet and warnings are derived exactly one way.
-/// Word membership (`ids`) is supplied by the caller because the two paths need different
+/// cut-suggestion accept path, so the snippet is derived exactly one way. Word
+/// membership (`ids`) is supplied by the caller because the two paths need different
 /// rules: the editor uses **overlap** (spec §4 — a word is in a clip iff any of its audio
 /// overlaps), while the accept path uses **midpoint** so its post-build guard tolerates the
 /// slight end-overlaps forced alignment leaves between neighbouring words.
@@ -16,10 +16,7 @@ func buildSlice(id: UUID, name: String, range: Range<Int>, wordIDs ids: [Word.ID
     startSample: range.lowerBound,
     endSample: range.upperBound,
     wordIDs: ids,
-    snippet: displaySliceSnippet(sliceSnippet(for: ids, words: plan.words)),
-    warnings: sliceWarnings(
-      startSample: range.lowerBound, endSample: range.upperBound,
-      durationSamples: plan.source.durationSamples, silences: plan.silences))
+    snippet: displaySliceSnippet(sliceSnippet(for: ids, words: plan.words)))
 }
 
 /// Wraps a plain transcript snippet the way slice rows display it: curly-quoted and

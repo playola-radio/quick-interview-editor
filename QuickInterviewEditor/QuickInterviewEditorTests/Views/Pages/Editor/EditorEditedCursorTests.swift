@@ -248,7 +248,7 @@ struct EditorEditedCursorTests {
     addRemoval(model, 40_000, 60_000, length: 4_800)
     let slice = Slice(
       id: UUID(), name: "S", startSample: 5_000, endSample: 20_000, wordIDs: [],
-      snippet: "", warnings: [])
+      snippet: "")
     model.mutateSlices { $0.append(slice) }
     let recorded = LockIsolated<Range<Int>?>(nil)
     await withDependencies {
@@ -328,7 +328,7 @@ struct EditorEditedCursorTests {
     addRemoval(model, 40_000, 60_000, length: 4_800)
     let slice = Slice(
       id: UUID(), name: "S", startSample: 38_000, endSample: 70_000, wordIDs: [],
-      snippet: "", warnings: [])
+      snippet: "")
     model.mutateSlices { $0.append(slice) }
     let gate = EditedPlayGate()
     await withDependencies {
@@ -355,7 +355,7 @@ struct EditorEditedCursorTests {
     addRemoval(model, 40_000, 60_000, length: 4_800)
     let slice = Slice(
       id: UUID(), name: "S", startSample: 38_000, endSample: 70_000, wordIDs: [],
-      snippet: "", warnings: [])
+      snippet: "")
     model.mutateSlices { $0.append(slice) }
     let gate = EditedPlayGate()
     await withDependencies {

@@ -101,17 +101,6 @@ final class FineTuneModel: ViewModel {
     draftRange.map { sampleTimecodeLabel($0.upperBound, sampleRate: sampleRate) } ?? ""
   }
 
-  /// Live cut-safety of the draft, recomputed each frame. `tightStart` reddens the Cut-in
-  /// inset, `tightEnd` the Cut-out inset — distinct from snap, which only decides magnetism.
-  var draftWarnings: [SliceWarning] {
-    guard let draftRange else { return [] }
-    return sliceWarnings(
-      startSample: draftRange.lowerBound, endSample: draftRange.upperBound,
-      durationSamples: durationSamples, silences: silences)
-  }
-  var isCutInTight: Bool { draftWarnings.contains(.tightStart) }
-  var isCutOutTight: Bool { draftWarnings.contains(.tightEnd) }
-
   /// The kept portion of each inset (Cut-in keeps everything to the right of the line;
   /// Cut-out keeps everything to the left), for the red silhouette fill.
   var cutInKeptSpan: WaveformSpan? {
@@ -129,7 +118,7 @@ final class FineTuneModel: ViewModel {
   }
 
   /// Silence regions inside each inset window, as inset-x spans, so the view can shade the
-  /// "you can cut cleanly here" zones. Silence ends are inclusive (matching `sliceWarnings`).
+  /// "you can cut cleanly here" zones. Silence ends are inclusive.
   var cutInSafeZones: [WaveformSpan] { safeZones(in: cutInWindow) }
   var cutOutSafeZones: [WaveformSpan] { safeZones(in: cutOutWindow) }
 

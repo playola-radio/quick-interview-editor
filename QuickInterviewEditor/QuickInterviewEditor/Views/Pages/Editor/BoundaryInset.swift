@@ -13,7 +13,6 @@ struct BoundaryInset: View {
   let keptSpan: WaveformSpan?
   let discardedSpan: WaveformSpan?
   let lineX: CGFloat?
-  let isTight: Bool
   let nudgeBackLabel: String
   let nudgeForwardLabel: String
   let onNudgeBack: () -> Void
@@ -25,7 +24,6 @@ struct BoundaryInset: View {
   private let waveColor = Color(white: 0.42)
   private let keptColor = Color(red: 0.8, green: 0.4, blue: 0.4)
   private let safeColor = Color(red: 0.96, green: 0.86, blue: 0.4)
-  private let tightBorder = Color(red: 0.85, green: 0.42, blue: 0.42)
 
   var body: some View {
     VStack(alignment: .leading, spacing: 6) {
@@ -63,7 +61,7 @@ struct BoundaryInset: View {
       .clipShape(RoundedRectangle(cornerRadius: 7))
       .overlay(
         RoundedRectangle(cornerRadius: 7)
-          .stroke(isTight ? tightBorder : Color(white: 0.11), lineWidth: 1)
+          .stroke(Color(white: 0.11), lineWidth: 1)
       )
       .contentShape(Rectangle())
       .gesture(

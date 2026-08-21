@@ -415,9 +415,8 @@ struct CutSuggestionAcceptTests {
     expectNoDifference(slice.endSample, word5.endSample!)
   }
 
-  @Test func spanAtFileBoundsHasNoTightWarnings() {
-    // Span covers the whole file: start at sample 0, end at the file duration, so
-    // neither cut has a neighbour to tight-join.
+  @Test func spanAtFileBoundsBuildsTheExpectedSlice() {
+    // Span covers the whole file: start at sample 0, end at the file duration.
     let editPlan = plan(
       words: [
         WordSpec(1, "a", 0, 100),
@@ -436,27 +435,5 @@ struct CutSuggestionAcceptTests {
     }
     expectNoDifference(slice.startSample, 0)
     expectNoDifference(slice.endSample, 200)
-    expectNoDifference(slice.warnings, [])
-  }
-
-  @Test func midFileSpanWithoutSilenceIsTight() {
-    // A cut out at sample 200 sits mid-file with no silence touching it → tightEnd.
-    let editPlan = plan(
-      words: [
-        WordSpec(1, "a", 0, 100),
-        WordSpec(2, "b", 100, 200),
-      ],
-      durationSamples: 500)
-    let sug = suggestion(wordIDs: [1, 2])
-    let state = ProjectState(cutSuggestions: [sug])
-
-    guard
-      case .accepted(let slice, _) = acceptCutSuggestion(
-        sug.id, in: state, plan: editPlan, sourceFingerprint: "fp", transcriptHash: "t")
-    else {
-      Issue.record("expected .accepted")
-      return
-    }
-    expectNoDifference(slice.warnings, [.tightEnd])
   }
 }

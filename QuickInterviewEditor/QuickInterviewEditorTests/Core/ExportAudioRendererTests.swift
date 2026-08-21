@@ -123,9 +123,59 @@ struct ExportAudioRendererTests {
     return (0..<Int(buffer.frameLength)).map { channel[$0] }
   }
 
+  /// Asserts the rendered `output`'s first `fadeInCount` and last `fadeOutCount` frames
+  /// ramp exactly like `DeclickFade.gain` applied to the un-faded source, within int16
+  /// quantization tolerance. `fadeInSourceStart` is the source-file frame the clip's frame
+  /// 0 corresponds to; `fadeOutSourceStart` is the source-file frame the clip's *first*
+  /// fade-out frame corresponds to (both default to a simple contiguous copy — pass an
+  /// explicit `fadeOutSourceStart` when a removal's seam shifts the tail relative to the
+  /// head, so the two boundaries no longer share one offset).
+  private func expectBoundaryDeclick(
+    output: URL, totalFrames: Int, fadeInCount: Int, fadeOutCount: Int,
+    fadeInSourceStart: Int = 0, fadeOutSourceStart: Int? = nil
+  ) throws {
+    let tolerance: Float = 2.0 / 32768
+
+    if fadeInCount > 0 {
+      let rendered = try readFrames(output, from: 0, count: fadeInCount)
+      let expected = (0..<fadeInCount).map { frame -> Float in
+        let gain = DeclickFade.gain(
+          atFrame: frame, totalFrames: totalFrames, fadeInCount: fadeInCount,
+          fadeOutCount: fadeOutCount)
+        return Float(sourceSample(at: fadeInSourceStart + frame)) / 32768 * gain
+      }
+      let worst = zip(rendered, expected).map { abs($0 - $1) }.max() ?? 0
+      #expect(worst <= tolerance)
+      // The very first sample of a fade-in must be silent (or as close as int16 allows).
+      #expect(abs(rendered[0]) <= tolerance)
+    }
+
+    if fadeOutCount > 0 {
+      let start = totalFrames - fadeOutCount
+      // The source frame the clip's first fade-out frame corresponds to.
+      let tailSourceStart = fadeOutSourceStart ?? (fadeInSourceStart + start)
+      let rendered = try readFrames(output, from: start, count: fadeOutCount)
+      let expected = (0..<fadeOutCount).map { offset -> Float in
+        let frame = start + offset
+        let gain = DeclickFade.gain(
+          atFrame: frame, totalFrames: totalFrames, fadeInCount: fadeInCount,
+          fadeOutCount: fadeOutCount)
+        return Float(sourceSample(at: tailSourceStart + offset)) / 32768 * gain
+      }
+      let worst = zip(rendered, expected).map { abs($0 - $1) }.max() ?? 0
+      #expect(worst <= tolerance)
+      // The very last sample of a fade-out must be silent (or as close as int16 allows).
+      #expect(abs(rendered[fadeOutCount - 1]) <= tolerance)
+    }
+  }
+
   // MARK: - Tests
 
-  @Test func identityRenderReproducesTheSourceBytesExactly() throws {
+  /// Every rendered clip gets a short boundary declick (fade in at its first samples,
+  /// fade out at its last) so a hard cut never clicks — see `DeclickFade`. That means an
+  /// "identity" render is no longer byte-exact end to end; it's byte-exact in the
+  /// interior, and its edges must match `DeclickFade.gain` applied to the source.
+  @Test func identityRenderAppliesTheBoundaryDeclickAndReproducesTheInteriorExactly() throws {
     let dir = try makeSandbox()
     defer { try? FileManager.default.removeItem(at: dir) }
     let source = dir.appendingPathComponent("canonical.aiff")
@@ -144,12 +194,23 @@ struct ExportAudioRendererTests {
     expectNoDifference(actual.channels, expected.channels)
     expectNoDifference(actual.bitsPerSample, expected.bitsPerSample)
     expectNoDifference(actual.audio.count, expected.audio.count)
-    // Cornerstone: the int16 → float → int16 round trip through AVAudioFile is
-    // bit-exact, which is what makes audition == export a byte-level claim.
-    expectNoDifference(firstDifferingByte(actual.audio, expected.audio), nil)
+
+    let declickCount = DeclickFade.frameCount(
+      totalFrames: Self.sourceFrames, sampleRate: Self.sampleRate)
+    let interior = actual.audio.subdata(
+      in: (declickCount * Self.bytesPerFrame)..<((Self.sourceFrames - declickCount)
+        * Self.bytesPerFrame))
+    let expectedInterior = expected.audio.subdata(
+      in: (declickCount * Self.bytesPerFrame)..<((Self.sourceFrames - declickCount)
+        * Self.bytesPerFrame))
+    expectNoDifference(firstDifferingByte(interior, expectedInterior), nil)
+
+    try expectBoundaryDeclick(
+      output: output, totalFrames: Self.sourceFrames, fadeInCount: declickCount,
+      fadeOutCount: declickCount)
   }
 
-  @Test func subRangeSliceCopiesTheCorrespondingSourceBytes() throws {
+  @Test func subRangeSliceAppliesTheBoundaryDeclickAndReproducesTheInteriorExactly() throws {
     let dir = try makeSandbox()
     defer { try? FileManager.default.removeItem(at: dir) }
     let source = dir.appendingPathComponent("canonical.aiff")
@@ -165,10 +226,18 @@ struct ExportAudioRendererTests {
     let expected = try parseAIFF(source)
     let actual = try parseAIFF(output)
     expectNoDifference(actual.frameCount, 3000)
-    let slice = expected.audio.subdata(
-      in: (2000 * Self.bytesPerFrame)..<(5000 * Self.bytesPerFrame))
-    expectNoDifference(actual.audio.count, slice.count)
-    expectNoDifference(firstDifferingByte(actual.audio, slice), nil)
+
+    let declickCount = DeclickFade.frameCount(totalFrames: 3000, sampleRate: Self.sampleRate)
+    let interior = actual.audio.subdata(
+      in: (declickCount * Self.bytesPerFrame)..<((3000 - declickCount) * Self.bytesPerFrame))
+    let expectedInterior = expected.audio.subdata(
+      in: ((2000 + declickCount) * Self.bytesPerFrame)..<((5000 - declickCount) * Self.bytesPerFrame)
+    )
+    expectNoDifference(firstDifferingByte(interior, expectedInterior), nil)
+
+    try expectBoundaryDeclick(
+      output: output, totalFrames: 3000, fadeInCount: declickCount, fadeOutCount: declickCount,
+      fadeInSourceStart: 2000)
   }
 
   @Test func removalWithACrossfadeMatchesTheSharedRenderer() throws {
@@ -197,18 +266,35 @@ struct ExportAudioRendererTests {
     let actual = try parseAIFF(output)
     expectNoDifference(actual.frameCount, 5800)
 
-    // Everything outside the seam is untouched source audio.
-    let head = actual.audio.subdata(in: 0..<(2800 * Self.bytesPerFrame))
-    expectNoDifference(
-      firstDifferingByte(head, expected.audio.subdata(in: 0..<(2800 * Self.bytesPerFrame))), nil)
-    let tail = actual.audio.subdata(
-      in: (3000 * Self.bytesPerFrame)..<(5800 * Self.bytesPerFrame))
+    // Everything outside the seam AND outside the clip's boundary declick is untouched
+    // source audio. The declick (720 samples here) touches the head's leading edge and
+    // the tail's trailing edge, so those slivers are checked separately below.
+    let declickCount = DeclickFade.frameCount(totalFrames: 5800, sampleRate: Self.sampleRate)
+    let head = actual.audio.subdata(
+      in: (declickCount * Self.bytesPerFrame)..<(2800 * Self.bytesPerFrame))
     expectNoDifference(
       firstDifferingByte(
-        tail, expected.audio.subdata(in: (5200 * Self.bytesPerFrame)..<(8000 * Self.bytesPerFrame))),
+        head,
+        expected.audio.subdata(
+          in: (declickCount * Self.bytesPerFrame)..<(2800 * Self.bytesPerFrame))),
+      nil)
+    let tailEnd = 5800 - declickCount
+    let tail = actual.audio.subdata(
+      in: (3000 * Self.bytesPerFrame)..<(tailEnd * Self.bytesPerFrame))
+    expectNoDifference(
+      firstDifferingByte(
+        tail,
+        expected.audio.subdata(
+          in: (5200 * Self.bytesPerFrame)..<((5200 + (tailEnd - 3000)) * Self.bytesPerFrame))),
       nil)
 
-    // The seam itself is the shared renderer's blend, to within int16 quantization.
+    // The tail's first fade-out frame (edited [5080,5800)) is source frame 5200 + (5080-3000).
+    try expectBoundaryDeclick(
+      output: output, totalFrames: 5800, fadeInCount: declickCount, fadeOutCount: declickCount,
+      fadeOutSourceStart: 5200 + (5800 - declickCount - 3000))
+
+    // The seam itself is the shared renderer's blend, to within int16 quantization. It sits
+    // well inside the clip (frames 2800-3000 of 5800), so the boundary declick never reaches it.
     let outgoing = (2800..<3000).map { Float(sourceSample(at: $0)) / 32768 }
     let incoming = (5000..<5200).map { Float(sourceSample(at: $0)) / 32768 }
     let blended = CrossfadeRenderer.blend(
@@ -218,6 +304,98 @@ struct ExportAudioRendererTests {
     let tolerance: Float = 1.0 / 32768
     let worst = zip(rendered, blended).map { abs($0 - $1) }.max() ?? 0
     #expect(worst <= tolerance)
+  }
+
+  /// A seam can itself be the render's FIRST item — a removal that starts right at the clip's own
+  /// edge leaves no leading kept segment. The leading boundary declick must still reach into the
+  /// blended seam samples exactly as it would an ordinary segment's, since `writeSeam` applies
+  /// `DeclickFade` at the seam's own position in the whole clip rather than special-casing it away.
+  @Test func aSeamAsTheFirstItemAlsoReceivesTheLeadingBoundaryDeclick() throws {
+    let dir = try makeSandbox()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let source = dir.appendingPathComponent("canonical.aiff")
+    let output = dir.appendingPathComponent("slice.aiff")
+    try writeFixture(to: source)
+
+    let totalFrames = 2000
+    var plan = AudioEditRenderPlan(
+      timeline: EditedTimeline(sourceDurationSamples: Self.sourceFrames, removals: []))
+    plan.items = [
+      .seam(
+        id: UUID(uuidString: "00000000-0000-0000-0000-000000000004")!,
+        leftTail: 1000..<1800, rightHead: 3000..<3800, length: 800, editedStart: 0,
+        fadeOffset: 0),
+      .segment(source: 5000..<6200, editedStart: 800),
+    ]
+
+    try ExportAudioRenderer.render(
+      job(source: source, output: output, plan: plan, editedDuration: totalFrames))
+
+    let declickCount = DeclickFade.frameCount(totalFrames: totalFrames, sampleRate: Self.sampleRate)
+    expectNoDifference(declickCount, 720)  // the whole 800-sample seam extends past the fade window
+
+    let outgoing = (1000..<1800).map { Float(sourceSample(at: $0)) / 32768 }
+    let incoming = (3000..<3800).map { Float(sourceSample(at: $0)) / 32768 }
+    let blended = CrossfadeRenderer.blend(
+      out: [outgoing], incoming: [incoming], curve: .equalPower, fadeOffset: 0, fadeTotal: 800)[0]
+    let expected = (0..<800).map { index in
+      blended[index]
+        * DeclickFade.gain(
+          atFrame: index, totalFrames: totalFrames, fadeInCount: declickCount,
+          fadeOutCount: declickCount)
+    }
+    let rendered = try readFrames(output, from: 0, count: 800)
+    let tolerance: Float = 1.0 / 32768
+    let worst = zip(rendered, expected).map { abs($0 - $1) }.max() ?? 0
+    #expect(worst <= tolerance)
+    // The seam's very first sample sits at the clip's outer edge, so the fade must silence it
+    // exactly like an ordinary segment's leading edge.
+    #expect(abs(rendered[0]) <= tolerance)
+  }
+
+  /// The mirror case: a seam as the render's LAST item (a removal ending right at the clip's own
+  /// edge, so there is no trailing kept segment). The trailing boundary declick must reach into
+  /// the blended seam samples the same way.
+  @Test func aSeamAsTheLastItemAlsoReceivesTheTrailingBoundaryDeclick() throws {
+    let dir = try makeSandbox()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let source = dir.appendingPathComponent("canonical.aiff")
+    let output = dir.appendingPathComponent("slice.aiff")
+    try writeFixture(to: source)
+
+    let totalFrames = 2000
+    var plan = AudioEditRenderPlan(
+      timeline: EditedTimeline(sourceDurationSamples: Self.sourceFrames, removals: []))
+    plan.items = [
+      .segment(source: 0..<1200, editedStart: 0),
+      .seam(
+        id: UUID(uuidString: "00000000-0000-0000-0000-000000000005")!,
+        leftTail: 1000..<1800, rightHead: 3000..<3800, length: 800, editedStart: 1200,
+        fadeOffset: 0),
+    ]
+
+    try ExportAudioRenderer.render(
+      job(source: source, output: output, plan: plan, editedDuration: totalFrames))
+
+    let declickCount = DeclickFade.frameCount(totalFrames: totalFrames, sampleRate: Self.sampleRate)
+    expectNoDifference(declickCount, 720)  // the fade window reaches 80 samples into the seam
+
+    let outgoing = (1000..<1800).map { Float(sourceSample(at: $0)) / 32768 }
+    let incoming = (3000..<3800).map { Float(sourceSample(at: $0)) / 32768 }
+    let blended = CrossfadeRenderer.blend(
+      out: [outgoing], incoming: [incoming], curve: .equalPower, fadeOffset: 0, fadeTotal: 800)[0]
+    let expected = (0..<800).map { index in
+      blended[index]
+        * DeclickFade.gain(
+          atFrame: 1200 + index, totalFrames: totalFrames, fadeInCount: declickCount,
+          fadeOutCount: declickCount)
+    }
+    let rendered = try readFrames(output, from: 1200, count: 800)
+    let tolerance: Float = 1.0 / 32768
+    let worst = zip(rendered, expected).map { abs($0 - $1) }.max() ?? 0
+    #expect(worst <= tolerance)
+    // The seam's very last sample sits at the clip's outer edge, so the fade must silence it too.
+    #expect(abs(rendered[799]) <= tolerance)
   }
 
   @Test func renderingTheSameJobTwiceProducesIdenticalFiles() throws {

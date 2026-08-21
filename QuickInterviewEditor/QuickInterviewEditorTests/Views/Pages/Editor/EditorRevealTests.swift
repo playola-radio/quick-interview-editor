@@ -113,7 +113,7 @@ struct EditorRevealTests {
     model.acceptCutSuggestionSlice(
       Slice(
         id: id, name: "A clip", startSample: 150_000, endSample: 250_000,
-        wordIDs: [2, 3], snippet: "two three", warnings: []))
+        wordIDs: [2, 3], snippet: "two three"))
 
     model.sliceRevealTapped(id)
 

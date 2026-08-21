@@ -53,10 +53,22 @@ struct SliceEditKeyMonitor: NSViewRepresentable {
         let isSpace =
           event.keyCode == 49
           && event.modifierFlags.isDisjoint(with: [.command, .control, .option])
-        guard zoomKey != nil || isSpace else { return event }
+        // ⌘Z undo / ⌘⇧Z redo. The main editor's undo shortcut lives on a `SlicesPanelView` button in
+        // a window that is not key while this sheet is up, so a modal removal (a document edit on the
+        // shared undo stack) would otherwise be un-undoable from inside the sheet. `charactersIgnoring-
+        // Modifiers` keeps Shift/Caps-Lock, so ⌘⇧Z reads as "Z" — lowercase before comparing.
+        let modifierKeys: NSEvent.ModifierFlags = [.command, .shift, .option, .control]
+        let isZ = event.charactersIgnoringModifiers?.lowercased() == "z"
+        let activeModifiers = event.modifierFlags.intersection(modifierKeys)
+        let isUndo = isZ && activeModifiers == .command
+        let isRedo = isZ && activeModifiers == [.command, .shift]
+        guard zoomKey != nil || isSpace || isUndo || isRedo else { return event }
         let isARepeat = event.isARepeat
         let consumed = MainActor.assumeIsolated {
-          self?.handle(zoomKey: zoomKey, isSpace: isSpace, isARepeat: isARepeat) ?? false
+          self?.handle(
+            zoomKey: zoomKey, isSpace: isSpace, isUndo: isUndo, isRedo: isRedo, isARepeat: isARepeat
+          )
+            ?? false
         }
         return consumed ? nil : event
       }
@@ -68,19 +80,33 @@ struct SliceEditKeyMonitor: NSViewRepresentable {
     }
 
     /// Performs the classified key if focus allows it. Returns whether the key was consumed (so the
-    /// caller swallows it instead of letting it beep). Only the zoom keys and Space act here; the
-    /// speed keys, section-removal, and the removal boundary-nudge keys (Task 9) are main-editor
-    /// concerns and fall through untouched — this sheet edits an existing slice's cut points via
-    /// its own scoped `EditSliceModel`, not the removal-only `fineTune.target == .pendingSelection`
-    /// session.
-    private func handle(zoomKey: EditorKey?, isSpace: Bool, isARepeat: Bool) -> Bool {
+    /// caller swallows it instead of letting it beep). The zoom keys, Space (transport), ⌫ (remove
+    /// the marquee selection / restore the selected seam), and ⌘Z/⌘⇧Z (undo/redo of the shared
+    /// document) act here; the speed keys and the removal boundary-nudge keys (Task 9) are
+    /// main-editor concerns and fall through untouched — this sheet edits an existing slice's cut
+    /// points via its own scoped `EditSliceModel`, not the removal-only
+    /// `fineTune.target == .pendingSelection` session.
+    private func handle(
+      zoomKey: EditorKey?, isSpace: Bool, isUndo: Bool, isRedo: Bool, isARepeat: Bool
+    ) -> Bool {
       // Only act when this sheet's window is key (a local monitor sees every window's keys).
       guard let window = host?.window, window.isKeyWindow else { return false }
-      // Stand down while a text field is being edited (e.g. renaming a slice inside the sheet).
+      // Stand down while a text field is being edited (e.g. renaming a slice inside the sheet) so its
+      // own ⌘Z field-undo still works.
       if let responder = window.firstResponder as? NSText, responder.isEditable { return false }
       guard let model else { return false }
       if let zoomKey { return handleZoom(zoomKey, isARepeat: isARepeat, model: model) }
       if isSpace { return handleSpace(isARepeat: isARepeat, window: window, model: model) }
+      // Swallow auto-repeat so holding ⌘Z fires one undo per press (matching the main editor's
+      // single-fire shortcut). The parent's own guards no-op when there is nothing to undo/redo.
+      if isUndo {
+        if !isARepeat { Task { await model.undoTapped() } }
+        return true
+      }
+      if isRedo {
+        if !isARepeat { Task { await model.redoTapped() } }
+        return true
+      }
       return false
     }
 
@@ -97,7 +123,13 @@ struct SliceEditKeyMonitor: NSViewRepresentable {
         if isARepeat { return true }
         model.zoomFitTapped()
         return true
-      case .speedUp, .speedDown, .removeSection, .escape, .nudgeCutInEarlier, .nudgeCutInLater,
+      case .removeSection:
+        // ⌫ removes the marquee selection or restores the selected seam — a document edit on the
+        // shared undo stack, like ⌘Z below. Swallow auto-repeat so holding it fires once per press;
+        // the model no-ops when nothing is selected (so ⌫ never beeps in the sheet).
+        if !isARepeat { Task { await model.removeSectionKeyPressed() } }
+        return true
+      case .speedUp, .speedDown, .escape, .nudgeCutInEarlier, .nudgeCutInLater,
         .nudgeCutOutEarlier, .nudgeCutOutLater:
         return false
       }

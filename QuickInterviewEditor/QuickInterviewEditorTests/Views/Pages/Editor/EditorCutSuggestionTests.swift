@@ -16,7 +16,7 @@ struct EditorCutSuggestionTests {
   private func slice(_ id: UUID) -> Slice {
     Slice(
       id: id, name: "A story", startSample: 44_100, endSample: 88_200,
-      wordIDs: [10, 11, 12], snippet: "a story", warnings: [])
+      wordIDs: [10, 11, 12], snippet: "a story")
   }
 
   @Test func acceptingASuggestionSliceAddsItToTheEditor() {

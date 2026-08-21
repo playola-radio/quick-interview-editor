@@ -202,6 +202,31 @@ struct EditedTimeline: Equatable {
     return ranges
   }
 
+  /// The EDITED-axis footprint of a SOURCE range: the union of the edited positions of every kept
+  /// sample that falls within `source`. Segments overlap by their crossfade length on the edited
+  /// axis, so this spans from the earliest kept sample's edited position to the latest, covering the
+  /// crossfade tails that belong to the range. Returns nil when no kept audio survives inside
+  /// `source` (e.g. it lies entirely within removed spans) — callers pin an empty lane rather than
+  /// falling back to the whole timeline. Unlike bracketing the two endpoints with `sourceToEdited`
+  /// biases, this is correct when an endpoint lands inside a removal or the range spans several
+  /// removals.
+  func editedFootprint(ofSource source: Range<Int>) -> Range<Int>? {
+    guard !source.isEmpty else { return nil }
+    var lower: Int?
+    var upper: Int?
+    for segment in keptSegments {
+      let lo = max(source.lowerBound, segment.source.lowerBound)
+      let hi = min(source.upperBound, segment.source.upperBound)
+      guard lo < hi else { continue }
+      let editedLo = segment.editedStart + (lo - segment.source.lowerBound)
+      let editedHi = segment.editedStart + (hi - segment.source.lowerBound)
+      lower = Swift.min(lower ?? editedLo, editedLo)
+      upper = Swift.max(upper ?? editedHi, editedHi)
+    }
+    guard let lower, let upper, lower < upper else { return nil }
+    return lower..<upper
+  }
+
   /// Maps a SOURCE sample to its EDITED position, for marker mapping (PR6 export). Returns nil
   /// when the sample falls inside a removed range (the plan's `.nilInsideRemoval` policy) or is
   /// outside every kept segment (e.g. past the end of the source). Segments and removals are

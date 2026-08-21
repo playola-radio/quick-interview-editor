@@ -83,10 +83,19 @@ struct EditedWaveformAdapterTests {
     expectNoDifference(adapter.span(forSource: 0..<10), WaveformSpan(positionX: 0, width: 5))
   }
 
+  @Test func spanForSourceKeepsTheCrossfadeTailWhenAnEndLandsInsideARemoval() {
+    let adapter = makeAdapter(viewportWidth: 15, samplesPerPixel: 2)
+    // [0,30): the [0,24) part covers all of K0 (edited [0,24)); the tail sits inside the removal
+    // [24,40) and touches no kept audio. The footprint is edited [0,24) -> x [0,12). Endpoint
+    // bracketing used to snap the end to K1's crossfade start (edited 16 -> x 8), dropping the
+    // 4pt crossfade tail; the footprint keeps it.
+    expectNoDifference(adapter.span(forSource: 0..<30), WaveformSpan(positionX: 0, width: 12))
+  }
+
   @Test func spanForSourceNilWhenEntirelyInsideARemoval() {
     let adapter = makeAdapter(viewportWidth: 15, samplesPerPixel: 2)
-    // [26,34) is entirely inside the removal [24,40): leftEdge -> edited 24, rightEdge ->
-    // edited 16 (start of K1's crossfade overlap) — inverted, so there's nothing to draw.
+    // [26,34) is entirely inside the removal [24,40): it overlaps no kept segment, so the footprint
+    // is empty and there's nothing to draw.
     #expect(adapter.span(forSource: 26..<34) == nil)
   }
 
@@ -278,5 +287,54 @@ struct EditedWaveformAdapterTests {
     expectNoDifference(adapter.visibleStartSample, 50_000)
     // spp 100 is still within [min, fit=150], so the zoom level is preserved (not reset).
     expectNoDifference(adapter.samplesPerPixel, 100)
+  }
+
+  // MARK: - navigableEditedRange viewport pin
+
+  @Test func navigableRangePinConfinesTheViewportToTheSubRange() {
+    // Whole edited axis is 0..<40; pin to the middle 20 samples.
+    let adapter = makeAdapter(viewportWidth: 10, samplesPerPixel: 2)
+    adapter.setNavigableEditedRange(10..<30)
+
+    // The pin immediately floors the viewport at its lower bound...
+    expectNoDifference(adapter.visibleStartSample, 10)
+    // ...and neither a left nor a right scroll can escape it (fit shows the whole 20-sample pin).
+    adapter.scrolled(toStartEditedSample: 0)
+    expectNoDifference(adapter.visibleStartSample, 10)
+    adapter.scrolled(toStartEditedSample: 100)
+    expectNoDifference(adapter.visibleStartSample, 10)
+  }
+
+  @Test func clearingThePinRestoresWholeTimelineNavigation() {
+    let adapter = makeAdapter(viewportWidth: 10, samplesPerPixel: 2)
+    adapter.setNavigableEditedRange(10..<20)
+    adapter.setNavigableEditedRange(nil)
+
+    // With the pin gone the viewport can reach sample 0 again — it could not under the 10..<20 pin.
+    adapter.scrolled(toStartEditedSample: 0)
+    expectNoDifference(adapter.visibleStartSample, 0)
+  }
+
+  @Test func emptyPinMakesGeometryUnusable() {
+    // A removal that swallows the whole pinned slice collapses its edited extent to zero.
+    let adapter = makeAdapter(viewportWidth: 10, samplesPerPixel: 2)
+    adapter.setNavigableEditedRange(20..<20)
+
+    #expect(adapter.hasUsableGeometry == false)
+    expectNoDifference(adapter.visibleColumns(), [])
+  }
+
+  @Test func changingThePinClearsTheArmedFitRestore() {
+    // Zoomed in (spp 2, fit is 4 for a 40-sample axis at width 10).
+    let adapter = makeAdapter(viewportWidth: 10, samplesPerPixel: 2)
+    adapter.zoomFitToggled(sourceSelection: nil)  // arms a restore (spp 2), fits all -> spp 4
+    expectNoDifference(adapter.samplesPerPixel, 4)
+
+    adapter.setNavigableEditedRange(0..<40)  // same extent, but must clear the armed restore
+
+    // With the restore cleared, a second toggle FITS again (stays 4). Had it survived, the toggle
+    // would have restored the pre-fit spp of 2.
+    adapter.zoomFitToggled(sourceSelection: nil)
+    expectNoDifference(adapter.samplesPerPixel, 4)
   }
 }

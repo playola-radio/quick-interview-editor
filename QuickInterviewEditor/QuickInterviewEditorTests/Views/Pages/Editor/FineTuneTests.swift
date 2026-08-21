@@ -178,25 +178,6 @@ struct FineTuneTests {
     #expect(model.draftRange!.upperBound <= duration)
   }
 
-  // MARK: - Live warnings
-
-  @Test func draftWarningsRedactPerBoundary() {
-    // start sits inside a silence (clean); end does not (tight).
-    let model = model(silences: [silence(99_000, 101_000)])
-    model.begin(target: .slice(UUID()), range: 100_000..<300_000)
-    expectNoDifference(model.draftWarnings, [.tightEnd])
-    #expect(!model.isCutInTight)
-    #expect(model.isCutOutTight)
-  }
-
-  @Test func draftWarningsFollowTheDraftAsItMoves() {
-    let model = model(silences: [silence(299_000, 301_000)])
-    model.begin(target: .slice(UUID()), range: 100_000..<298_800)  // end just short of the silence
-    #expect(model.isCutOutTight)
-    model.nudgeCutOut(byMs: 10)  // +441 → 299_241 lands inside [299_000, 301_000]
-    #expect(!model.isCutOutTight)
-  }
-
   // MARK: - Safe zones
 
   @Test func safeZonesSpanSilencesInsideTheWindow() {
