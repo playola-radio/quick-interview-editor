@@ -816,6 +816,36 @@ struct EditSliceTests {
     #expect(model.isPlaying == true)
   }
 
+  /// A body click at/after the cut-out while playing suspends inside `waveformSeeked`'s `onStop`,
+  /// then `]` starts an audition before the stop resolves. The stale continuation must not fire its
+  /// deferred park-the-cursor seek — that would yank the playhead out from under the newer audition.
+  @Test func waveformSeekedPastCutOutSupersededByAuditionOutTappedDropsTheStaleSeek() async {
+    let model = laneModel()  // slice 10_000..<20_000, spp 10 — x=1000 maps to the cut-out
+    var seeks: [Int] = []
+    model.onPlay = { _ in }
+    model.onSeek = { seeks.append($0) }
+    let stopGate = VoidGate()
+    model.onStop = { await stopGate.suspend() }
+
+    // Establishes playback, no suspension (onPlay is a no-op).
+    await model.auditionInTapped()
+    #expect(model.isPlaying == true)
+
+    // Past the cut-out → suspends in onStop.
+    let staleSeek = Task { await model.waveformSeeked(toX: 1000) }
+    await Task.yield()
+
+    await model.auditionOutTapped()  // races ahead of the still-suspended seek
+    #expect(model.isAuditioningOut == true)
+
+    await stopGate.release()
+    await staleSeek.value
+
+    expectNoDifference(seeks, [])
+    #expect(model.activeAudition == .cutOut)
+    #expect(model.isPlaying == true)
+  }
+
   /// Space (pause) suspends inside `playPauseTapped`'s `onPause`, then `[` starts an audition
   /// before the pause resolves. The stale pause continuation must not clear `isPlaying` out from
   /// under the audition that superseded it.

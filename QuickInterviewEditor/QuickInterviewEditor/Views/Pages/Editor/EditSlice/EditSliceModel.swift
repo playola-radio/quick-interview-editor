@@ -425,8 +425,12 @@ final class EditSliceModel: ViewModel, Identifiable {
       await onPlay(max(sample, slice.lowerBound)..<slice.upperBound)  // re-anchor, keep playing
     } else {
       // Clicked at/after the cut-out while playing — nothing left to play. Stop (so the next
-      // position tick can't snap the playhead back), then park the cursor at the click.
+      // position tick can't snap the playhead back), then park the cursor at the click. `onStop`
+      // suspends, so guard the generation like `stopTapped` does: a newer action (an audition, a
+      // fresh seek) started mid-stop must not have its cursor yanked by this stale park.
+      let generation = transportActionGeneration
       await onStop()
+      guard generation == transportActionGeneration else { return }
       await seekTapped(toSample: sample)
     }
   }
