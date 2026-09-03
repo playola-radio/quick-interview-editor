@@ -33,7 +33,6 @@ struct EditSliceView: View {
         Spacer()
         Button(model.cancelLabel) { model.cancelTapped() }
         Button(model.saveLabel) { model.saveTapped() }
-          .keyboardShortcut(.defaultAction)
           .disabled(!model.canSave)
       }
     }

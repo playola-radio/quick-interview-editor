@@ -3,7 +3,8 @@ import SwiftUI
 
 /// A logic-free bridge, sibling to ``EditorKeyMonitor``: while the slice-edit sheet is the key
 /// window, it forwards the zoom keys (⌘← / ⌘→ step-zoom, Z zoom-to-fit) to the sheet's
-/// ``EditSliceModel`` lane, Space to its Play/Pause transport, and `[` / `]` to its audition
+/// ``EditSliceModel`` lane, Space to its Play/Pause transport, Return / keypad Enter to jump the
+/// playhead to the clip's cut-in, and `[` / `]` to its audition
 /// In/Out (otherwise these would beep — the sheet mounts no other key handler). The main editor's
 /// own monitors stand down while the sheet is up (their window is not key), so nothing
 /// double-fires. It reuses ``EditorKeyMonitor``'s pure key classifier so the zoom keys stay in
@@ -40,6 +41,7 @@ struct SliceEditKeyMonitor: NSViewRepresentable {
   enum SliceEditKey: Equatable {
     case zoom(EditorKey)
     case space
+    case returnToStart
     case undo
     case redo
     case auditionIn
@@ -94,6 +96,10 @@ struct SliceEditKeyMonitor: NSViewRepresentable {
       // ``AuditionKeyMonitor`` uses in the main editor. Auto-repeat is classified here too (so it
       // gets swallowed in `handle` rather than beeping) but only the first press acts.
       if keyCode == 49, !hasActionModifier { return .space }
+      // Return / keypad Enter (keyCodes 36 / 76, no ⌘/⌃/⌥) jumps the playhead to the clip's cut-in.
+      // The sheet mounts no other Return handler (the Save button's default-action binding was
+      // removed for exactly this), so this is the sole meaning of Return here.
+      if keyCode == 36 || keyCode == 76, !hasActionModifier { return .returnToStart }
       // ⌘Z undo / ⌘⇧Z redo. The main editor's undo shortcut lives on a `SlicesPanelView` button in
       // a window that is not key while this sheet is up, so a modal removal (a document edit on the
       // shared undo stack) would otherwise be un-undoable from inside the sheet. `charactersIgnoring-
@@ -112,9 +118,10 @@ struct SliceEditKeyMonitor: NSViewRepresentable {
     }
 
     /// Performs the classified key if focus allows it. Returns whether the key was consumed (so the
-    /// caller swallows it instead of letting it beep). The zoom keys, Space (transport), ⌫ (remove
-    /// the marquee selection / restore the selected seam), `[` / `]` (audition the In/Out cut
-    /// edges), and ⌘Z/⌘⇧Z (undo/redo of the shared document) act here; the speed keys and the
+    /// caller swallows it instead of letting it beep). The zoom keys, Space (transport), Return /
+    /// keypad Enter (jump to the clip's cut-in), ⌫ (remove the marquee selection / restore the
+    /// selected seam), `[` / `]` (audition the In/Out cut edges), and ⌘Z/⌘⇧Z (undo/redo of the
+    /// shared document) act here; the speed keys and the
     /// removal boundary-nudge keys (Task 9) are
     /// main-editor concerns and fall through untouched — this sheet edits an existing slice's cut
     /// points via its own scoped `EditSliceModel`, not the removal-only
@@ -131,6 +138,8 @@ struct SliceEditKeyMonitor: NSViewRepresentable {
         return handleZoom(zoomKey, isARepeat: isARepeat, model: model)
       case .space:
         return handleSpace(isARepeat: isARepeat, window: window, model: model)
+      case .returnToStart:
+        return handleReturn(isARepeat: isARepeat, window: window, model: model)
       // Swallow auto-repeat so holding ⌘Z / [ / ] fires once per press (matching the main
       // editor's single-fire shortcuts). The model's own guards no-op when there is nothing to
       // undo/redo or audition.
@@ -173,6 +182,17 @@ struct SliceEditKeyMonitor: NSViewRepresentable {
         .nudgeCutOutEarlier, .nudgeCutOutLater:
         return false
       }
+    }
+
+    private func handleReturn(isARepeat: Bool, window: NSWindow, model: EditSliceModel) -> Bool {
+      // Let a focused control keep its own Return activation (Full Keyboard Access), matching how
+      // Space stands down over a focused button.
+      if window.firstResponder is NSControl { return false }
+      // Swallow auto-repeat so holding Return fires one seek per press (the seek is idempotent, but
+      // this matches the sheet's other single-fire keys).
+      if isARepeat { return true }
+      Task { await model.returnToStartTapped() }
+      return true
     }
 
     private func handleSpace(isARepeat: Bool, window: NSWindow, model: EditSliceModel) -> Bool {
