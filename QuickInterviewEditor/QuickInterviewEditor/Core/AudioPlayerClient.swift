@@ -63,6 +63,22 @@ struct AudioPlayerClient: Sendable {
   /// an `isPlaying: false` tick on stop/finish. Additive to `play`/`stop` so the waveform
   /// playhead gets real positions without disturbing the tuned slice-playback path.
   var positions: @Sendable () -> AsyncStream<PlaybackPosition>
+
+  /// The slice/source path's played-frame → plan-sample mapping, capped at `ceiling` so a live
+  /// tick's free-running frame clock can't report a position past the play range's end (a visible
+  /// overshoot on the magnified fine-tune insets). Pure so the overshoot clamp is unit-testable
+  /// without a live audio node.
+  static func sourcePlanSample(
+    startPlanSample: Int, framesPlayed: Int, ratio: Double, ceiling: Int?
+  ) -> Int {
+    let raw = startPlanSample + Int(Double(framesPlayed) / max(ratio, .ulpOfOne))
+    return clamped(raw, ceiling: ceiling)
+  }
+
+  static func clamped(_ sample: Int, ceiling: Int?) -> Int {
+    guard let ceiling else { return sample }
+    return min(sample, ceiling)
+  }
 }
 
 /// A playback position's sample tagged with its coordinate axis, so a consumer can never mistake
@@ -189,6 +205,12 @@ private actor LivePlayerBox {
   private var tickTask: Task<Void, Never>?
   private var startPlanSample = 0
   private var playRatio = 1.0
+  /// The largest sample a live position tick may report, on whichever axis is active (a plan
+  /// sample for the slice/source path, an edited sample for the playlist path). The node's frame
+  /// clock keeps advancing in the ~tens of ms between the last real sample and the completion
+  /// callback that stops playback, so without this ceiling a tick can report a position past the
+  /// range's end — a visible overshoot on the magnified fine-tune insets. Nil clamps nothing.
+  private var positionCeiling: Int?
   /// Set only while an *edited-timeline* playlist plays (`playEdited`); maps the node's
   /// played input frames straight to EDITED samples. When set, position reporting uses it
   /// instead of the single-offset `startPlanSample`/`playRatio` math the slice path uses.
@@ -241,6 +263,7 @@ private actor LivePlayerBox {
     currentSession = session
     startPlanSample = max(0, range.lowerBound)
     playRatio = ratio
+    positionCeiling = max(0, range.upperBound)
     if node.engine == nil { engine.attach(node) }
     if timePitch.engine == nil { engine.attach(timePitch) }
     // Rebuild the fixed graph node -> timePitch -> mixer with the file's format. Reconnecting here
@@ -322,6 +345,9 @@ private actor LivePlayerBox {
     // is short of the plan's declared end; the caller rests its cursor on the truth.
     let finishedSample = frameTimeline.editedSample(
       forFramesPlayed: scheduledEntries.reduce(0) { $0 + $1.nativeFrameCount })
+    // A live tick's frame clock can run past the last scheduled frame before the completion
+    // callback stops the node, so cap reported edited samples at the true finish.
+    positionCeiling = finishedSample
 
     if node.engine == nil { engine.attach(node) }
     if timePitch.engine == nil { engine.attach(timePitch) }
@@ -616,14 +642,20 @@ private actor LivePlayerBox {
   /// slice path's SOURCE plan sample from the single start offset.
   private func positionSample(forFramesPlayed framesPlayed: Int) -> PlaybackSample {
     if let editedFrameTimeline {
-      return .edited(editedFrameTimeline.editedSample(forFramesPlayed: framesPlayed))
+      let edited = editedFrameTimeline.editedSample(forFramesPlayed: framesPlayed)
+      return .edited(AudioPlayerClient.clamped(edited, ceiling: positionCeiling))
     }
-    return .source(startPlanSample + Int(Double(framesPlayed) / max(playRatio, .ulpOfOne)))
+    return .source(
+      AudioPlayerClient.sourcePlanSample(
+        startPlanSample: startPlanSample, framesPlayed: framesPlayed, ratio: playRatio,
+        ceiling: positionCeiling))
   }
 
   private func stopNode() {
     node.stop()
     editedFrameTimeline = nil  // back to slice-path position math until the next `playEdited`
+    // Cleared with the axis state so a stale ceiling can't clamp the wrong axis.
+    positionCeiling = nil
 
     // Clear the time-pitch unit's internal overlap/latency buffers so a stop, supersede, or slice
     // switch can't smear the tail of the old segment into the start of the next one.
