@@ -772,7 +772,8 @@ struct EditSliceTests {
     let stopGate = VoidGate()
     model.onStop = { await stopGate.suspend() }
 
-    await model.auditionInTapped()  // establishes the in-cut audition, no suspension (onPlay is a no-op)
+    // Establishes the in-cut audition, no suspension (onPlay is a no-op).
+    await model.auditionInTapped()
     #expect(model.isAuditioningIn == true)
 
     let toggleOff = Task { await model.auditionInTapped() }  // toggles off → suspends in onStop
