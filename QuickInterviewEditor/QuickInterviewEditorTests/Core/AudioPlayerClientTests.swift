@@ -44,4 +44,14 @@ struct AudioPlayerClientTests {
       startPlanSample: 0, framesPlayed: 1_000_000, ratio: 1.0, ceiling: nil)
     #expect(sample == 1_000_000)
   }
+
+  /// The EDITED (playlist) tick path caps its edited sample through the same `clamped` helper, so an
+  /// edited overshoot stops at the finish sample and a nil ceiling passes through untouched. This
+  /// pins the edited axis to the ceiling too — the source-only tests above would still pass if the
+  /// edited branch dropped the clamp.
+  @Test func clampedCapsAnEditedOvershootAndPassesNilThrough() {
+    #expect(AudioPlayerClient.clamped(30_000, ceiling: 25_000) == 25_000)
+    #expect(AudioPlayerClient.clamped(20_000, ceiling: 25_000) == 20_000)
+    #expect(AudioPlayerClient.clamped(1_000_000, ceiling: nil) == 1_000_000)
+  }
 }

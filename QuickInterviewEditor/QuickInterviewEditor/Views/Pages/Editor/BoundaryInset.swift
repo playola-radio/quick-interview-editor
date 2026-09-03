@@ -54,7 +54,10 @@ struct BoundaryInset: View {
         Rectangle().fill(Color(white: 0.16)).frame(width: 1, height: boxHeight)
           .offset(x: width / 2)
         if let playheadX {
-          Rectangle().fill(playheadColor).frame(width: 1.5, height: boxHeight).offset(x: playheadX)
+          // Center the 1.5pt line on the sample (shift left by half its width) so it sits exactly on
+          // the cut marker, and clamp it inside the box so the right edge isn't clipped away.
+          Rectangle().fill(playheadColor).frame(width: 1.5, height: boxHeight)
+            .offset(x: min(max(0, playheadX - 0.75), width - 1.5))
         }
         if let lineX {
           // The handle is `cutLineHandle` wide and centered in its ZStack, so shift left by half
