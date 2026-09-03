@@ -249,6 +249,42 @@ struct EditSliceTests {
     #expect(model.isPlaying == false)
   }
 
+  @Test func returnToStartTappedSeeksToTheCutInWhilePaused() async {
+    let (model, slice) = makeModel()
+    var sought: [Int] = []
+    model.onSeek = { sought.append($0) }
+
+    await model.returnToStartTapped()
+
+    expectNoDifference(sought, [slice.startSample])
+  }
+
+  @Test func returnToStartTappedUsesTheLiveDraftCutInAfterNudging() async {
+    let (model, _) = makeModel()
+    var sought: [Int] = []
+    model.onSeek = { sought.append($0) }
+    model.fineTune.nudgeCutIn(byMs: 20)
+    let cutIn = model.fineTune.draftRange?.lowerBound
+
+    await model.returnToStartTapped()
+
+    expectNoDifference(sought, [cutIn].compactMap { $0 })
+  }
+
+  @Test func returnToStartTappedWhilePlayingReAnchorsToTheCutIn() async {
+    let model = laneModel()  // slice 10_000..<20_000
+    var played: [Range<Int>] = []
+    var sought: [Int] = []
+    model.onPlay = { played.append($0) }
+    model.onSeek = { sought.append($0) }
+    model.updatePlayback(sample: 15_000, isPlaying: true)
+
+    await model.returnToStartTapped()
+
+    expectNoDifference(played, [10_000..<20_000])  // restarts from the cut-in
+    #expect(sought.isEmpty)  // it re-anchors, it does not merely reposition
+  }
+
   @Test func seekTappedForwardsTheRequestedSampleToOnSeek() async {
     let (model, _) = makeModel()
     var sought: [Int] = []

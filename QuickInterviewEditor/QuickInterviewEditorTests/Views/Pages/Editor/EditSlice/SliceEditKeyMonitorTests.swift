@@ -32,6 +32,24 @@ struct SliceEditKeyMonitorTests {
   @Test func modifiedSpaceFallsThrough() {
     expectNoDifference(key(49, .command), nil)  // ⌘Space (Spotlight)
     expectNoDifference(key(49, .option), nil)  // ⌥Space
+    expectNoDifference(key(49, .control), nil)  // ⌃Space
+  }
+
+  @Test func returnAndKeypadEnterJumpToTheClipStart() {
+    expectNoDifference(key(36), .returnToStart)  // Return
+    expectNoDifference(key(76), .returnToStart)  // keypad Enter
+  }
+
+  @Test func shiftReturnStillJumpsToTheClipStart() {
+    // Shift is ignored (only ⌘/⌃/⌥ stand the key down), matching Space's modifier handling.
+    expectNoDifference(key(36, .shift), .returnToStart)
+  }
+
+  @Test func hardModifiedReturnFallsThrough() {
+    expectNoDifference(key(36, .command), nil)  // ⌘Return
+    expectNoDifference(key(36, .option), nil)  // ⌥Return
+    expectNoDifference(key(36, .control), nil)  // ⌃Return
+    expectNoDifference(key(76, .command), nil)  // ⌘ keypad Enter
   }
 
   @Test func commandZUndoesAndCommandShiftZRedoes() {

@@ -280,6 +280,19 @@ final class EditSliceModel: ViewModel, Identifiable {
 
   func seekTapped(toSample sample: Int) async { await onSeek(sample) }
 
+  /// Return jumps the playhead to the clip's beginning — the live cut-in (the draft while editing,
+  /// otherwise the committed cut). The original slice edge is never used. Paused or stopped it just
+  /// repositions the cursor; while playing it re-anchors so audio restarts from the cut-in (Logic
+  /// parity with a lane seek). A no-op when the slice has no playable range.
+  func returnToStartTapped() async {
+    guard let slice = slicePlaybackRange, slice.lowerBound < slice.upperBound else { return }
+    if isPlaying {
+      await onPlay(slice.lowerBound..<slice.upperBound)
+    } else {
+      await seekTapped(toSample: slice.lowerBound)
+    }
+  }
+
   /// ⌘Z / ⌘⇧Z inside the sheet — rewinds/replays the shared document (a modal removal is a document
   /// edit). Forwarded from ``SliceEditKeyMonitor`` because the main editor's undo shortcut lives in a
   /// window that is not key while the sheet is up. The parent's own guards decide whether anything
