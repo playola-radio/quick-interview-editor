@@ -13,6 +13,7 @@ struct BoundaryInset: View {
   let keptSpan: WaveformSpan?
   let discardedSpan: WaveformSpan?
   let lineX: CGFloat?
+  let playheadX: CGFloat?
   let nudgeBackLabel: String
   let nudgeForwardLabel: String
   let onNudgeBack: () -> Void
@@ -24,6 +25,7 @@ struct BoundaryInset: View {
   private let waveColor = Color(white: 0.42)
   private let keptColor = Color(red: 0.8, green: 0.4, blue: 0.4)
   private let safeColor = Color(red: 0.96, green: 0.86, blue: 0.4)
+  private let playheadColor = Color(red: 0.96, green: 0.86, blue: 0.4)
 
   var body: some View {
     VStack(alignment: .leading, spacing: 6) {
@@ -51,6 +53,9 @@ struct BoundaryInset: View {
         }
         Rectangle().fill(Color(white: 0.16)).frame(width: 1, height: boxHeight)
           .offset(x: width / 2)
+        if let playheadX {
+          Rectangle().fill(playheadColor).frame(width: 1.5, height: boxHeight).offset(x: playheadX)
+        }
         if let lineX {
           // The handle is `cutLineHandle` wide and centered in its ZStack, so shift left by half
           // its width to sit the visible line exactly on the boundary rather than 4.5pt right.

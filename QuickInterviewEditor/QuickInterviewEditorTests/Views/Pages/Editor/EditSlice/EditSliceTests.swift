@@ -258,6 +258,33 @@ struct EditSliceTests {
     expectNoDifference(played, [slice.startSample..<slice.endSample])
   }
 
+  // MARK: - Boundary inset playhead (the fixed-window cursor line on the red Cut-in / Cut-out insets)
+
+  @Test func noInsetPlayheadWithoutACursor() {
+    let (model, _) = makeModel()
+    #expect(model.cutInPlayheadX == nil)
+    #expect(model.cutOutPlayheadX == nil)
+  }
+
+  /// The cursor maps into the cut-in inset's fixed window exactly like the cut line does: slice
+  /// 10_000..<40_000, sr 44_100 -> 175 samples/inset-px, window centered on the committed cut-in, so
+  /// the boundary itself sits at the inset center (126 px) and 1_750 samples right of it is +10 px.
+  @Test func cutInPlayheadMapsTheCursorIntoTheFixedInsetWindow() {
+    let (model, _) = makeModel()
+    model.playheadSample = 11_750
+    expectNoDifference(model.cutInPlayheadX, 136)
+    #expect(model.cutOutPlayheadX == nil)  // the cursor is outside the cut-out window
+  }
+
+  /// The cut-out inset is centered on the committed cut-out (40_000), so a cursor there is centered
+  /// (126 px); the same cursor is outside the cut-in window and draws no cut-in playhead.
+  @Test func cutOutPlayheadMapsTheCursorIntoTheFixedInsetWindow() {
+    let (model, _) = makeModel()
+    model.playheadSample = 40_000
+    expectNoDifference(model.cutOutPlayheadX, 126)
+    #expect(model.cutInPlayheadX == nil)
+  }
+
   // MARK: - Waveform lane (the sheet's own EDITED adapter, pinned to the slice; insets still edit)
 
   /// A model whose collapsed lane is seeded and laid out with predictable geometry, so view-x ↔

@@ -167,6 +167,19 @@ final class EditSliceModel: ViewModel, Identifiable {
       ?? min(max(0, sample), timeline.editedDurationSamples)
   }
 
+  /// The playback cursor mapped into each fixed inset window, in inset-x — the yellow playhead line
+  /// on the red Cut-in / Cut-out insets, mirroring ``FineTuneModel/cutInLineX``. Nil when there is no
+  /// cursor or it falls outside the window: the inset never scrolls, so an off-window cursor simply
+  /// isn't drawn (matching the lane playhead's off-viewport nil). The cursor is a SOURCE sample and
+  /// the inset windows are SOURCE-sample ranges, so no timeline mapping is needed.
+  var cutInPlayheadX: CGFloat? { insetPlayheadX(in: fineTune.cutInWindow) }
+  var cutOutPlayheadX: CGFloat? { insetPlayheadX(in: fineTune.cutOutWindow) }
+
+  private func insetPlayheadX(in window: Range<Int>?) -> CGFloat? {
+    guard let sample = playheadSample, let window, window.contains(sample) else { return nil }
+    return fineTune.insetX(forSample: sample, in: window)
+  }
+
   /// The slice's collapsed extent on the EDITED axis — what the pinned lane may show. The EDITED
   /// footprint of the slice's surviving (kept) SOURCE audio; identity (no removals) makes it the
   /// slice window verbatim. Using the footprint rather than bracketing the two endpoints with
