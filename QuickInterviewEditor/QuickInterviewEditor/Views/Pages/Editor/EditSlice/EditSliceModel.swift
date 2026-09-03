@@ -228,9 +228,22 @@ final class EditSliceModel: ViewModel, Identifiable {
   func cutOutNudgedBack() { fineTune.nudgeCutOut(byMs: -fineTune.nudgeMs) }
   func cutOutNudgedForward() { fineTune.nudgeCutOut(byMs: fineTune.nudgeMs) }
 
+  /// Bumped at the start of every transport-mutating user action (Play/Pause, Stop, the audition
+  /// hotkeys, a waveform seek). `stopTapped`'s `onStop` and `playPauseTapped`'s pause-branch
+  /// `onPause` both suspend, and a newer action can start and finish entirely while one of those is
+  /// still in flight (e.g. `[` toggles an audition off — suspending in `stopTapped`'s `onStop` — then
+  /// `]` starts a new audition before the old continuation resumes). Capturing the generation before
+  /// the await and checking it after lets that stale continuation detect it lost the race and skip
+  /// overwriting the newer state. Mirrors `EditorModel`'s `cursorMoveGeneration` guard.
+  @ObservationIgnored private var transportActionGeneration = 0
+
   func playPauseTapped() async {
+    transportActionGeneration += 1
+    activeAudition = nil
     if isPlaying {
+      let generation = transportActionGeneration
       await onPause()
+      guard generation == transportActionGeneration else { return }
       isPlaying = false
     } else {
       guard let range = playFromCursorRange else { return }
@@ -244,8 +257,12 @@ final class EditSliceModel: ViewModel, Identifiable {
   }
 
   func stopTapped() async {
+    transportActionGeneration += 1
+    let generation = transportActionGeneration
     await onStop()
+    guard generation == transportActionGeneration else { return }
     isPlaying = false
+    activeAudition = nil
   }
 
   func seekTapped(toSample sample: Int) async { await onSeek(sample) }
@@ -256,6 +273,69 @@ final class EditSliceModel: ViewModel, Identifiable {
   /// happens, so these are safe no-ops when there is nothing to undo/redo.
   func undoTapped() async { await onUndo() }
   func redoTapped() async { await onRedo() }
+
+  // MARK: - Audition
+  enum AuditionMode: Equatable {
+    case cutIn
+    case cutOut
+  }
+
+  let auditionPreRollSeconds = 2.0
+  let auditionPanelCaption = "To preview:"
+  let auditionInButtonTitle = "▶ In"
+  let auditionInHotkey = "["
+  let auditionOutButtonTitle = "▶ Out"
+  let auditionOutHotkey = "]"
+
+  private(set) var activeAudition: AuditionMode?
+
+  /// Samples of pre-roll for the out-cut audition, from the slice's sample rate.
+  private var auditionPreRollSamples: Int {
+    max(0, Int(auditionPreRollSeconds * Double(fineTune.sampleRate)))
+  }
+
+  var isAuditioningIn: Bool { activeAudition == .cutIn }
+  var isAuditioningOut: Bool { activeAudition == .cutOut }
+  var auditionStatusText: String? {
+    switch activeAudition {
+    case .cutIn: return "Auditioning in-cut — Space to pause"
+    case .cutOut: return "Auditioning out-cut — Space to pause"
+    case nil: return nil
+    }
+  }
+
+  /// In-cut: play the whole draft (falls back to the committed range) through the transport. A
+  /// toggle: tapping while it's the active audition stops it; tapping the other edge switches
+  /// (supersedes) without an explicit stop.
+  func auditionInTapped() async {
+    transportActionGeneration += 1
+    if activeAudition == .cutIn {
+      await stopTapped()
+      return
+    }
+    guard let range = slicePlaybackRange, range.lowerBound < range.upperBound else { return }
+    activeAudition = .cutIn
+    // Reflect "playing" NOW, not after `onPlay` returns — see `playPauseTapped`'s note: the
+    // await stays suspended until playback truly ends.
+    isPlaying = true
+    await onPlay(range)
+  }
+
+  /// Out-cut: play a pre-roll ending exactly at the range's out-point, through the transport. A
+  /// toggle, mirroring `auditionInTapped`. The pre-roll is clamped to the range's own start.
+  func auditionOutTapped() async {
+    transportActionGeneration += 1
+    if activeAudition == .cutOut {
+      await stopTapped()
+      return
+    }
+    guard let range = slicePlaybackRange else { return }
+    let start = max(range.lowerBound, range.upperBound - auditionPreRollSamples)
+    guard start < range.upperBound else { return }
+    activeAudition = .cutOut
+    isPlaying = true
+    await onPlay(start..<range.upperBound)
+  }
 
   // MARK: - Marquee removal
   /// A body drag on the collapsed lane starts a Logic-style marquee for an interior removal. Clears
@@ -331,6 +411,8 @@ final class EditSliceModel: ViewModel, Identifiable {
   /// the cursor so the next Play starts there. No-ops until the lane geometry is usable (mirrors the
   /// main editor's guard against storing a garbage cursor mid-decode).
   func waveformSeeked(toX positionX: CGFloat) async {
+    transportActionGeneration += 1
+    activeAudition = nil
     guard editedWaveform.hasUsableGeometry else { return }
     let sample = min(
       max(editedWaveform.xToSourceSample(positionX), overviewWindow.lowerBound),
@@ -343,8 +425,12 @@ final class EditSliceModel: ViewModel, Identifiable {
       await onPlay(max(sample, slice.lowerBound)..<slice.upperBound)  // re-anchor, keep playing
     } else {
       // Clicked at/after the cut-out while playing — nothing left to play. Stop (so the next
-      // position tick can't snap the playhead back), then park the cursor at the click.
+      // position tick can't snap the playhead back), then park the cursor at the click. `onStop`
+      // suspends, so guard the generation like `stopTapped` does: a newer action (an audition, a
+      // fresh seek) started mid-stop must not have its cursor yanked by this stale park.
+      let generation = transportActionGeneration
       await onStop()
+      guard generation == transportActionGeneration else { return }
       await seekTapped(toSample: sample)
     }
   }
@@ -381,6 +467,7 @@ final class EditSliceModel: ViewModel, Identifiable {
   func updatePlayback(sample: Int?, isPlaying: Bool) {
     playheadSample = sample
     self.isPlaying = isPlaying
+    if !isPlaying { activeAudition = nil }
     transcript.playheadChanged(sample: sample, isPlaying: isPlaying)
     transcript.currentWordChanged(toSample: sample)
   }

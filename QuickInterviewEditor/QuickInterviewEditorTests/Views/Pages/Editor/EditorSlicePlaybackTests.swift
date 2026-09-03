@@ -209,6 +209,60 @@ struct EditorSlicePlaybackTests {
     #expect(!playedEdited.value)
   }
 
+  /// If the sheet's slice is entirely buried inside a removal (unexportable — nothing to play),
+  /// Play/Pause optimistically flips `isPlaying` before `beginTransportPlayback` discovers there is
+  /// no resolvable playback. Without publishing "stopped" back on that early-return path, the sheet
+  /// would get stuck showing Pause with no audio ever starting.
+  @Test func modalPlayOnAFullyRemovedSlicePublishesStoppedBack() async {
+    let model = editor()
+    addRemoval(model, 40_000, 60_000, length: 4_800)
+    let slice = addSlice(model, 42_000, 58_000)
+    model.editSliceTapped(slice.id)
+    let child = model.editSlice!
+    let played = LockIsolated(false)
+    await withDependencies {
+      $0.audioPlayer.play = { _, _, _, _, _ in
+        played.setValue(true)
+        return .finished
+      }
+      $0.audioPlayer.playEdited = { _, _, _, _, _ in
+        played.setValue(true)
+        return EditedPlaybackEnd(end: .finished, finishedEditedSample: nil)
+      }
+    } operation: {
+      await child.playPauseTapped()
+    }
+    #expect(!played.value)
+    #expect(!child.isPlaying)
+  }
+
+  /// Same fully-removed-slice scenario, exercised through an audition hotkey instead of Play/Pause —
+  /// `auditionInTapped` flips `activeAudition` before the same early-return path, so it must clear
+  /// too rather than leaving the sheet's audition status text stuck on.
+  @Test func modalAuditionOnAFullyRemovedSlicePublishesStoppedBack() async {
+    let model = editor()
+    addRemoval(model, 40_000, 60_000, length: 4_800)
+    let slice = addSlice(model, 42_000, 58_000)
+    model.editSliceTapped(slice.id)
+    let child = model.editSlice!
+    let played = LockIsolated(false)
+    await withDependencies {
+      $0.audioPlayer.play = { _, _, _, _, _ in
+        played.setValue(true)
+        return .finished
+      }
+      $0.audioPlayer.playEdited = { _, _, _, _, _ in
+        played.setValue(true)
+        return EditedPlaybackEnd(end: .finished, finishedEditedSample: nil)
+      }
+    } operation: {
+      await child.auditionInTapped()
+    }
+    #expect(!played.value)
+    #expect(!child.isPlaying)
+    #expect(child.activeAudition == nil)
+  }
+
   // MARK: - Slice-local axis conversion
 
   @Test func slicePlaylistTickLandsCursorAtTheGlobalEditedPosition() async {
@@ -393,6 +447,41 @@ struct EditorSlicePlaybackTests {
       }
       expectNoDifference(model.transportPhase, .stopped)
       await play.value
+    }
+  }
+
+  /// Same mid-play removal, but through an audition hotkey rather than plain Play, and asserting on
+  /// the SHEET's own state rather than the transport's. `syncEditedTimeline`'s reset kills the
+  /// session directly (`resetTransportState` + `stopOwnedPlayback`) without ever routing back through
+  /// `beginTransportPlayback`'s own finish/session-guard path, so nothing else ticks the sheet's
+  /// `isPlaying`/`activeAudition` back to false — without an explicit publish the sheet would stay
+  /// stuck showing an active audition with no audio playing.
+  @Test func addingARemovalDuringModalAuditionPublishesStoppedBackToTheSheet() async {
+    let model = editor()
+    addRemoval(model, 40_000, 60_000, length: 4_800)
+    let slice = addSlice(model, 30_000, 80_000)
+    model.editSliceTapped(slice.id)
+    let child = model.editSlice!
+    let gate = PlayGate()
+    await withDependencies {
+      $0.audioPlayer.playEdited = { _, _, _, _, _ in
+        EditedPlaybackEnd(end: await gate.play(), finishedEditedSample: nil)
+      }
+      $0.audioPlayer.stop = { _ in await gate.finish(.stopped) }
+    } operation: {
+      let audition = Task { await child.auditionInTapped() }
+      await settle(until: model.isTransportPlaying)
+      #expect(child.isPlaying == true)
+      #expect(child.activeAudition == .cutIn)
+      model.mutateDocument { doc in
+        doc.timelineRemovals.append(
+          TimelineRemoval(
+            id: Fixtures.uuid(2), removedRange: 70_000..<74_000,
+            crossfade: Crossfade(lengthSamples: 0, curve: .equalPower)))
+      }
+      await audition.value
+      #expect(child.isPlaying == false)
+      #expect(child.activeAudition == nil)
     }
   }
 

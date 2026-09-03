@@ -73,13 +73,21 @@ private struct SliceWaveformLane: View {
         onAreaSelectEnded: { positionX in model.waveformAreaSelectEnded(toX: positionX) },
         seams: model.seamOverlays,
         onContextMenu: { positionX in model.waveformContextMenuItems(atX: positionX) },
-        auditionOverlay: { _ in EmptyView() }
+        // No on-lane audition buttons here — pinned to the band edges they read as in/out
+        // markers, not transport. The sheet's audition controls live in ``AuditionPreviewPanel``
+        // beside the boundary insets instead.
+        auditionOverlay: { _ in }
       )
     }
   }
 
   private var zoomHeader: some View {
     HStack(spacing: 8) {
+      if let status = model.auditionStatusText {
+        Text(status)
+          .font(.system(size: 11, weight: .medium))
+          .foregroundStyle(Color(red: 0.96, green: 0.86, blue: 0.4))
+      }
       Spacer()
       WaveformAmplitudeZoomButton(waveform: model.waveform)
         .disabled(!model.waveform.canAmplitudeZoom)
@@ -130,7 +138,56 @@ private struct FineTuneInsets: View {
         onNudgeBack: { model.cutOutNudgedBack() },
         onNudgeForward: { model.cutOutNudgedForward() },
         onDrag: { model.cutOutDragged(toInsetX: $0) })
+      AuditionPreviewPanel(model: model)
       Spacer(minLength: 0)
     }
+  }
+}
+
+/// The audition transport, parked in the open space beside the boundary insets. Off the waveform
+/// (where edge-pinned buttons read as in/out markers) and captioned "To preview:", it reads as
+/// "play me this edit" — and the ``KeycapChip``s advertise the `[` / `]` hotkeys.
+private struct AuditionPreviewPanel: View {
+  let model: EditSliceModel
+
+  private let activeYellow = Color(red: 0.96, green: 0.86, blue: 0.4)
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 7) {
+      Text(model.auditionPanelCaption)
+        .font(.system(size: 10.5, weight: .semibold)).tracking(0.8)
+        .foregroundStyle(Color(white: 0.48))
+      previewButton(
+        title: model.auditionInButtonTitle, key: model.auditionInHotkey,
+        active: model.isAuditioningIn
+      ) { Task { await model.auditionInTapped() } }
+      previewButton(
+        title: model.auditionOutButtonTitle, key: model.auditionOutHotkey,
+        active: model.isAuditioningOut
+      ) { Task { await model.auditionOutTapped() } }
+    }
+    .padding(.top, 2)
+  }
+
+  private func previewButton(
+    title: String, key: String, active: Bool, action: @escaping () -> Void
+  ) -> some View {
+    Button(action: action) {
+      HStack(spacing: 6) {
+        Text(title)
+          .font(.system(size: 11, weight: .semibold))
+        Spacer(minLength: 0)
+        KeycapChip(key: key, active: active)
+      }
+      .frame(width: 68)
+      .padding(.vertical, 4)
+      .padding(.horizontal, 9)
+    }
+    .buttonStyle(.borderless)
+    .background(
+      RoundedRectangle(cornerRadius: 4)
+        .fill(active ? activeYellow.opacity(0.28) : Color.white.opacity(0.12))
+    )
+    .foregroundStyle(active ? activeYellow : Color(white: 0.85))
   }
 }

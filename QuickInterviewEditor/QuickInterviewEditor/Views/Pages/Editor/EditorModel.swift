@@ -302,7 +302,11 @@ final class EditorModel: ViewModel {
     }
     let newTimeline = editedTimeline
     guard newTimeline != editedWaveform.timeline else { return }
+    // Captured BEFORE `resetTransportState` clears `transportContext` to `.free` below — it's the
+    // only way to know, after the reset, whether the session we just killed belonged to the sheet.
+    var wasSliceEditPlayback = false
     if let session = transportPhase.session, playbackDependsOnChangedRemovals() {
+      if case .sliceEdit = transportContext { wasSliceEditPlayback = true }
       resetTransportState()
       endTranscriptFollow()
       Task { await stopOwnedPlayback(session) }
@@ -320,6 +324,12 @@ final class EditorModel: ViewModel {
     // Fan the same timeline into an open slice-edit sheet so its collapsed lane reflects the change
     // (a removal / undo / redo on the main timeline) immediately, re-pinned to the slice's new span.
     editSlice?.syncTimeline(newTimeline)
+    // The reset above killed the sheet's own session, but its position loop died with it — nothing
+    // else ever ticks `isPlaying`/`activeAudition` back to false, so the sheet would otherwise get
+    // stuck showing an active Play/Pause or audition state with no audio. Publish "stopped" now.
+    if wasSliceEditPlayback {
+      editSlice?.updatePlayback(sample: editSlice?.playheadSample, isPlaying: false)
+    }
   }
 
   /// Whether the live playback's audio was built from the removal set that just changed. Free
@@ -2079,7 +2089,16 @@ final class EditorModel: ViewModel {
     _ playback: TransportPlayback, context: TransportContext
   ) async {
     let timeline = editedWaveform.timeline
-    guard let resolved = resolvedTransportPlayback(playback) else { return }
+    guard let resolved = resolvedTransportPlayback(playback) else {
+      // Nothing playable (e.g. the slice's whole range has been removed): the caller (Play/Pause,
+      // an audition hotkey) already flipped `isPlaying`/`activeAudition` optimistically before this
+      // await, and there is no later tick to correct it — publish "stopped" back now so the sheet
+      // doesn't get stuck showing an active Play/Pause or audition state with no audio playing.
+      if case .sliceEdit = context {
+        editSlice?.updatePlayback(sample: editSlice?.playheadSample, isPlaying: false)
+      }
+      return
+    }
     beginExclusivePlayback()
     let session = PlaybackSessionID()
     transportContext = context
@@ -2427,8 +2446,10 @@ final class EditorModel: ViewModel {
 
   // MARK: - Audition
   let auditionPreRollSeconds = 2.0
-  let auditionInButtonLabel = "▶ In  ["
-  let auditionOutButtonLabel = "]  Out ▶"
+  let auditionInButtonTitle = "▶ In"
+  let auditionInHotkey = "["
+  let auditionOutButtonTitle = "Out ▶"
+  let auditionOutHotkey = "]"
 
   /// Samples of pre-roll for the out-cut audition, from the plan sample rate.
   private var auditionPreRollSamples: Int {
