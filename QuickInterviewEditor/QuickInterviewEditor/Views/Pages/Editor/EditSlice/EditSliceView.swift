@@ -73,13 +73,33 @@ private struct SliceWaveformLane: View {
         onAreaSelectEnded: { positionX in model.waveformAreaSelectEnded(toX: positionX) },
         seams: model.seamOverlays,
         onContextMenu: { positionX in model.waveformContextMenuItems(atX: positionX) },
-        auditionOverlay: { _ in EmptyView() }
+        auditionOverlay: { span in
+          // While a marquee removal is selected, the highlighted band (and this span) is the
+          // interior removal selection, not the slice's cut edges — the audition actions always
+          // play the slice's In/Out bounds, so showing edge buttons here would audition the wrong
+          // thing. Hide them until the removal selection clears.
+          if !model.canRemoveSelection {
+            AuditionEdgeButtons(
+              span: span,
+              inLabel: model.auditionInButtonLabel,
+              outLabel: model.auditionOutButtonLabel,
+              isInActive: model.isAuditioningIn,
+              isOutActive: model.isAuditioningOut,
+              onIn: { Task { await model.auditionInTapped() } },
+              onOut: { Task { await model.auditionOutTapped() } })
+          }
+        }
       )
     }
   }
 
   private var zoomHeader: some View {
     HStack(spacing: 8) {
+      if let status = model.auditionStatusText {
+        Text(status)
+          .font(.system(size: 11, weight: .medium))
+          .foregroundStyle(Color(red: 0.96, green: 0.86, blue: 0.4))
+      }
       Spacer()
       WaveformAmplitudeZoomButton(waveform: model.waveform)
         .disabled(!model.waveform.canAmplitudeZoom)

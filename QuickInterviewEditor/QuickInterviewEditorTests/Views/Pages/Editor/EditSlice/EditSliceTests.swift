@@ -4,6 +4,19 @@ import Testing
 
 @testable import QuickInterviewEditor
 
+/// Suspends a single caller until `release()`, for putting a transport action's `onStop`/`onPause`
+/// mid-flight so a second action can race it. Mirrors `EditorSlicePlaybackTests`'s `PlayGate`.
+private actor VoidGate {
+  private var continuation: CheckedContinuation<Void, Never>?
+  func suspend() async {
+    await withCheckedContinuation { continuation = $0 }
+  }
+  func release() {
+    continuation?.resume()
+    continuation = nil
+  }
+}
+
 @MainActor
 struct EditSliceTests {
   private func makeModel() -> (EditSliceModel, Slice) {
@@ -611,5 +624,192 @@ struct EditSliceTests {
     await model.redoTapped()
 
     expectNoDifference(events, ["undo", "redo"])
+  }
+
+  // MARK: - Audition (In/Out) — mirrors EditorModel's audition feature, scoped to the slice
+
+  @Test func auditionInPlaysDraftRangeFromCutIn() async {
+    let (model, slice) = makeModel()
+    var played: [Range<Int>] = []
+    model.onPlay = { played.append($0) }
+
+    await model.auditionInTapped()
+
+    expectNoDifference(played, [slice.startSample..<slice.endSample])
+    #expect(model.isPlaying == true)
+    #expect(model.isAuditioningIn == true)
+  }
+
+  @Test func auditionOutPlaysLastTwoSecondsBeforeCutOut() async {
+    let plan = Fixtures.editPlan()
+    let slice = Slice(
+      id: UUID(), name: "S", startSample: 0, endSample: 200_000,
+      wordIDs: [], snippet: "")
+    let model = EditSliceModel(slice: slice, editPlan: plan)
+    var played: [Range<Int>] = []
+    model.onPlay = { played.append($0) }
+    let preRoll = Int(2.0 * Double(model.fineTune.sampleRate))
+
+    await model.auditionOutTapped()
+
+    expectNoDifference(played, [(200_000 - preRoll)..<200_000])
+    #expect(model.isAuditioningOut == true)
+  }
+
+  /// The makeModel() slice is 30_000 samples wide — shorter than the 2s (88_200-sample) pre-roll —
+  /// so the pre-roll clamps to the cut-in and the whole draft plays.
+  @Test func auditionOutPreRollClampsToCutIn() async {
+    let (model, slice) = makeModel()
+    var played: [Range<Int>] = []
+    model.onPlay = { played.append($0) }
+
+    await model.auditionOutTapped()
+
+    expectNoDifference(played, [slice.startSample..<slice.endSample])
+  }
+
+  @Test func auditionInTappedAgainStops() async {
+    let (model, _) = makeModel()
+    var stops = 0
+    model.onStop = { stops += 1 }
+    model.onPlay = { _ in }
+
+    await model.auditionInTapped()
+    await model.auditionInTapped()
+
+    #expect(stops == 1)
+    #expect(model.activeAudition == nil)
+    #expect(model.isPlaying == false)
+  }
+
+  @Test func switchingAuditionsSupersedes() async {
+    let plan = Fixtures.editPlan()
+    let slice = Slice(
+      id: UUID(), name: "S", startSample: 0, endSample: 200_000,
+      wordIDs: [], snippet: "")
+    let model = EditSliceModel(slice: slice, editPlan: plan)
+    var played: [Range<Int>] = []
+    model.onPlay = { played.append($0) }
+    let preRoll = Int(2.0 * Double(model.fineTune.sampleRate))
+
+    await model.auditionInTapped()
+    await model.auditionOutTapped()
+
+    #expect(model.isAuditioningOut == true)
+    expectNoDifference(played.last, (200_000 - preRoll)..<200_000)
+  }
+
+  @Test func playbackEndClearsAudition() async {
+    let (model, _) = makeModel()
+    model.onPlay = { _ in }
+    await model.auditionInTapped()
+    #expect(model.activeAudition != nil)
+
+    model.updatePlayback(sample: 12_000, isPlaying: false)
+
+    #expect(model.activeAudition == nil)
+  }
+
+  @Test func playPauseTappedClearsAudition() async {
+    let (model, _) = makeModel()
+    model.onPlay = { _ in }
+    await model.auditionInTapped()
+    #expect(model.activeAudition != nil)
+
+    await model.playPauseTapped()  // isPlaying, so this pauses — and ends the audition
+
+    #expect(model.activeAudition == nil)
+  }
+
+  @Test func waveformSeekedClearsAudition() async {
+    let model = laneModel()  // slice 10_000..<20_000, spp 10, start 10_000
+    model.onPlay = { _ in }
+    model.onSeek = { _ in }
+    await model.auditionInTapped()
+    #expect(model.activeAudition != nil)
+
+    await model.waveformSeeked(toX: 150)
+
+    #expect(model.activeAudition == nil)
+  }
+
+  @Test func auditionLabelsShowHotkeys() {
+    let (model, _) = makeModel()
+    #expect(model.auditionInButtonLabel.contains("["))
+    #expect(model.auditionOutButtonLabel.contains("]"))
+  }
+
+  @Test func statusTextWhileAuditioning() async {
+    let (model, _) = makeModel()
+    model.onPlay = { _ in }
+    model.onStop = {}
+    #expect(model.auditionStatusText == nil)
+
+    await model.auditionInTapped()
+    expectNoDifference(model.auditionStatusText, "Auditioning in-cut — Space to pause")
+
+    await model.auditionInTapped()  // toggle off
+    #expect(model.auditionStatusText == nil)
+
+    await model.auditionOutTapped()
+    expectNoDifference(model.auditionStatusText, "Auditioning out-cut — Space to pause")
+  }
+
+  // MARK: - Transport action races (stale-continuation guard)
+
+  /// `[` toggles the in-cut audition off — suspending inside `stopTapped`'s `onStop` — then `]`
+  /// starts the out-cut audition before that `onStop` resolves. The old `stopTapped` continuation
+  /// must lose the race: it resumes into a world where a NEWER audition already started, so it must
+  /// not stomp `activeAudition`/`isPlaying` back to nil/false.
+  @Test func stopTappedSupersededByAuditionOutTappedKeepsTheNewerAudition() async {
+    let plan = Fixtures.editPlan()
+    let slice = Slice(
+      id: UUID(), name: "S", startSample: 0, endSample: 200_000,
+      wordIDs: [], snippet: "")
+    let model = EditSliceModel(slice: slice, editPlan: plan)
+    model.onPlay = { _ in }
+    let stopGate = VoidGate()
+    model.onStop = { await stopGate.suspend() }
+
+    await model.auditionInTapped()  // establishes the in-cut audition, no suspension (onPlay is a no-op)
+    #expect(model.isAuditioningIn == true)
+
+    let toggleOff = Task { await model.auditionInTapped() }  // toggles off → suspends in onStop
+    await Task.yield()
+
+    await model.auditionOutTapped()  // races ahead of the still-suspended stopTapped
+    #expect(model.isAuditioningOut == true)
+    #expect(model.isPlaying == true)
+
+    await stopGate.release()
+    await toggleOff.value
+
+    #expect(model.activeAudition == .cutOut)
+    #expect(model.isPlaying == true)
+  }
+
+  /// Space (pause) suspends inside `playPauseTapped`'s `onPause`, then `[` starts an audition
+  /// before the pause resolves. The stale pause continuation must not clear `isPlaying` out from
+  /// under the audition that superseded it.
+  @Test func playPauseTappedPauseSupersededByAuditionInTappedKeepsPlaying() async {
+    let (model, _) = makeModel()
+    model.onPlay = { _ in }
+    let pauseGate = VoidGate()
+    model.onPause = { await pauseGate.suspend() }
+
+    await model.playPauseTapped()  // starts playing, no suspension (onPlay is a no-op)
+    #expect(model.isPlaying == true)
+
+    let pause = Task { await model.playPauseTapped() }  // pauses → suspends in onPause
+    await Task.yield()
+
+    await model.auditionInTapped()  // races ahead of the still-suspended pause
+    #expect(model.isAuditioningIn == true)
+    #expect(model.isPlaying == true)
+
+    await pauseGate.release()
+    await pause.value
+
+    #expect(model.isPlaying == true)
   }
 }

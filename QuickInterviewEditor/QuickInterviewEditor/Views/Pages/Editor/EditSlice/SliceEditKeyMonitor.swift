@@ -3,12 +3,13 @@ import SwiftUI
 
 /// A logic-free bridge, sibling to ``EditorKeyMonitor``: while the slice-edit sheet is the key
 /// window, it forwards the zoom keys (⌘← / ⌘→ step-zoom, Z zoom-to-fit) to the sheet's
-/// ``EditSliceModel`` lane and Space to its Play/Pause transport (otherwise Space would beep — the
-/// sheet mounts no other key handler). The main editor's own monitors stand down while the sheet is
-/// up (their window is not key), so nothing double-fires. It reuses ``EditorKeyMonitor``'s pure key
-/// classifier so the zoom keys stay in lockstep, and stands down while a text field is being edited
-/// (e.g. renaming). Mirrors the concurrency shape of ``EditorKeyMonitor`` / ``AuditionKeyMonitor``
-/// so it survives Swift 6 strict concurrency.
+/// ``EditSliceModel`` lane, Space to its Play/Pause transport, and `[` / `]` to its audition
+/// In/Out (otherwise these would beep — the sheet mounts no other key handler). The main editor's
+/// own monitors stand down while the sheet is up (their window is not key), so nothing
+/// double-fires. It reuses ``EditorKeyMonitor``'s pure key classifier so the zoom keys stay in
+/// lockstep, and stands down while a text field is being edited (e.g. renaming). Mirrors the
+/// concurrency shape of ``EditorKeyMonitor`` / ``AuditionKeyMonitor`` so it survives Swift 6 strict
+/// concurrency.
 struct SliceEditKeyMonitor: NSViewRepresentable {
   let model: EditSliceModel
 
@@ -32,6 +33,27 @@ struct SliceEditKeyMonitor: NSViewRepresentable {
   /// A zero-size marker view; its only job is to give the coordinator a handle on the window.
   final class TrackingView: NSView {}
 
+  /// The one key this monitor recognizes, collapsed from the event's raw classification so
+  /// `handle` can switch on a single value instead of juggling a pile of booleans.
+  private enum SliceEditKey {
+    case zoom(EditorKey)
+    case space
+    case undo
+    case redo
+    case auditionIn
+    case auditionOut
+  }
+
+  /// The non-zoom keys this monitor recognizes, bundled so `classify` reads one value instead of
+  /// five loose booleans.
+  private struct RawKeyFlags {
+    let isSpace: Bool
+    let isUndo: Bool
+    let isRedo: Bool
+    let isAuditionIn: Bool
+    let isAuditionOut: Bool
+  }
+
   @MainActor
   final class Coordinator {
     var model: EditSliceModel?
@@ -53,6 +75,12 @@ struct SliceEditKeyMonitor: NSViewRepresentable {
         let isSpace =
           event.keyCode == 49
           && event.modifierFlags.isDisjoint(with: [.command, .control, .option])
+        // [ / ] audition the cut edges (Logic parity with `AuditionKeyMonitor` in the main
+        // editor) — keyCode 33/30, same physical keys.
+        let noAuditionModifiers = event.modifierFlags.isDisjoint(
+          with: [.command, .control, .option])
+        let isAuditionIn = event.keyCode == 33 && noAuditionModifiers
+        let isAuditionOut = event.keyCode == 30 && noAuditionModifiers
         // ⌘Z undo / ⌘⇧Z redo. The main editor's undo shortcut lives on a `SlicesPanelView` button in
         // a window that is not key while this sheet is up, so a modal removal (a document edit on the
         // shared undo stack) would otherwise be un-undoable from inside the sheet. `charactersIgnoring-
@@ -62,13 +90,13 @@ struct SliceEditKeyMonitor: NSViewRepresentable {
         let activeModifiers = event.modifierFlags.intersection(modifierKeys)
         let isUndo = isZ && activeModifiers == .command
         let isRedo = isZ && activeModifiers == [.command, .shift]
-        guard zoomKey != nil || isSpace || isUndo || isRedo else { return event }
+        let flags = RawKeyFlags(
+          isSpace: isSpace, isUndo: isUndo, isRedo: isRedo, isAuditionIn: isAuditionIn,
+          isAuditionOut: isAuditionOut)
+        guard let key = Self.classify(zoomKey: zoomKey, flags: flags) else { return event }
         let isARepeat = event.isARepeat
         let consumed = MainActor.assumeIsolated {
-          self?.handle(
-            zoomKey: zoomKey, isSpace: isSpace, isUndo: isUndo, isRedo: isRedo, isARepeat: isARepeat
-          )
-            ?? false
+          self?.handle(key, isARepeat: isARepeat) ?? false
         }
         return consumed ? nil : event
       }
@@ -79,6 +107,19 @@ struct SliceEditKeyMonitor: NSViewRepresentable {
       monitor = nil
     }
 
+    /// Collapses the event's raw classification into the one key this monitor recognizes, or
+    /// `nil` if it recognizes none of them. Pure and `Sendable`, so it runs in the monitor's
+    /// nonisolated handler.
+    private static func classify(zoomKey: EditorKey?, flags: RawKeyFlags) -> SliceEditKey? {
+      if let zoomKey { return .zoom(zoomKey) }
+      if flags.isSpace { return .space }
+      if flags.isUndo { return .undo }
+      if flags.isRedo { return .redo }
+      if flags.isAuditionIn { return .auditionIn }
+      if flags.isAuditionOut { return .auditionOut }
+      return nil
+    }
+
     /// Performs the classified key if focus allows it. Returns whether the key was consumed (so the
     /// caller swallows it instead of letting it beep). The zoom keys, Space (transport), ⌫ (remove
     /// the marquee selection / restore the selected seam), and ⌘Z/⌘⇧Z (undo/redo of the shared
@@ -86,28 +127,35 @@ struct SliceEditKeyMonitor: NSViewRepresentable {
     /// main-editor concerns and fall through untouched — this sheet edits an existing slice's cut
     /// points via its own scoped `EditSliceModel`, not the removal-only
     /// `fineTune.target == .pendingSelection` session.
-    private func handle(
-      zoomKey: EditorKey?, isSpace: Bool, isUndo: Bool, isRedo: Bool, isARepeat: Bool
-    ) -> Bool {
+    private func handle(_ key: SliceEditKey, isARepeat: Bool) -> Bool {
       // Only act when this sheet's window is key (a local monitor sees every window's keys).
       guard let window = host?.window, window.isKeyWindow else { return false }
       // Stand down while a text field is being edited (e.g. renaming a slice inside the sheet) so its
       // own ⌘Z field-undo still works.
       if let responder = window.firstResponder as? NSText, responder.isEditable { return false }
       guard let model else { return false }
-      if let zoomKey { return handleZoom(zoomKey, isARepeat: isARepeat, model: model) }
-      if isSpace { return handleSpace(isARepeat: isARepeat, window: window, model: model) }
-      // Swallow auto-repeat so holding ⌘Z fires one undo per press (matching the main editor's
-      // single-fire shortcut). The parent's own guards no-op when there is nothing to undo/redo.
-      if isUndo {
-        if !isARepeat { Task { await model.undoTapped() } }
-        return true
+      switch key {
+      case .zoom(let zoomKey):
+        return handleZoom(zoomKey, isARepeat: isARepeat, model: model)
+      case .space:
+        return handleSpace(isARepeat: isARepeat, window: window, model: model)
+      // Swallow auto-repeat so holding ⌘Z / [ / ] fires once per press (matching the main
+      // editor's single-fire shortcuts). The model's own guards no-op when there is nothing to
+      // undo/redo or audition.
+      case .undo:
+        return fireOnce(isARepeat: isARepeat) { await model.undoTapped() }
+      case .redo:
+        return fireOnce(isARepeat: isARepeat) { await model.redoTapped() }
+      case .auditionIn:
+        return fireOnce(isARepeat: isARepeat) { await model.auditionInTapped() }
+      case .auditionOut:
+        return fireOnce(isARepeat: isARepeat) { await model.auditionOutTapped() }
       }
-      if isRedo {
-        if !isARepeat { Task { await model.redoTapped() } }
-        return true
-      }
-      return false
+    }
+
+    private func fireOnce(isARepeat: Bool, _ action: @escaping () async -> Void) -> Bool {
+      if !isARepeat { Task { await action() } }
+      return true
     }
 
     private func handleZoom(_ key: EditorKey, isARepeat: Bool, model: EditSliceModel) -> Bool {
