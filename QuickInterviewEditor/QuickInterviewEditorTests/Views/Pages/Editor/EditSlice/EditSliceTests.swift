@@ -682,6 +682,20 @@ struct EditSliceTests {
     #expect(model.isPlaying == false)
   }
 
+  @Test func auditionOutTappedAgainStops() async {
+    let (model, _) = makeModel()
+    var stops = 0
+    model.onStop = { stops += 1 }
+    model.onPlay = { _ in }
+
+    await model.auditionOutTapped()
+    await model.auditionOutTapped()
+
+    #expect(stops == 1)
+    #expect(model.activeAudition == nil)
+    #expect(model.isPlaying == false)
+  }
+
   @Test func switchingAuditionsSupersedes() async {
     let plan = Fixtures.editPlan()
     let slice = Slice(
