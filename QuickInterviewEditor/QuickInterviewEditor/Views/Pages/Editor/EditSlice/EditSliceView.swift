@@ -81,8 +81,10 @@ private struct SliceWaveformLane: View {
           if !model.canRemoveSelection {
             AuditionEdgeButtons(
               span: span,
-              inLabel: model.auditionInButtonLabel,
-              outLabel: model.auditionOutButtonLabel,
+              inTitle: model.auditionInButtonTitle,
+              inHotkey: model.auditionInHotkey,
+              outTitle: model.auditionOutButtonTitle,
+              outHotkey: model.auditionOutHotkey,
               isInActive: model.isAuditioningIn,
               isOutActive: model.isAuditioningOut,
               onIn: { Task { await model.auditionInTapped() } },

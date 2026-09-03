@@ -2446,8 +2446,10 @@ final class EditorModel: ViewModel {
 
   // MARK: - Audition
   let auditionPreRollSeconds = 2.0
-  let auditionInButtonLabel = "▶ In  ["
-  let auditionOutButtonLabel = "]  Out ▶"
+  let auditionInButtonTitle = "▶ In"
+  let auditionInHotkey = "["
+  let auditionOutButtonTitle = "Out ▶"
+  let auditionOutHotkey = "]"
 
   /// Samples of pre-roll for the out-cut audition, from the plan sample rate.
   private var auditionPreRollSamples: Int {

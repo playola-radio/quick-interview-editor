@@ -281,8 +281,10 @@ final class EditSliceModel: ViewModel, Identifiable {
   }
 
   let auditionPreRollSeconds = 2.0
-  let auditionInButtonLabel = "▶ In  ["
-  let auditionOutButtonLabel = "]  Out ▶"
+  let auditionInButtonTitle = "▶ In"
+  let auditionInHotkey = "["
+  let auditionOutButtonTitle = "Out ▶"
+  let auditionOutHotkey = "]"
 
   private(set) var activeAudition: AuditionMode?
 

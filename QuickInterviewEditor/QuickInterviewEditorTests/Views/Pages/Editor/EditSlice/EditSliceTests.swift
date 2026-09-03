@@ -735,8 +735,8 @@ struct EditSliceTests {
 
   @Test func auditionLabelsShowHotkeys() {
     let (model, _) = makeModel()
-    #expect(model.auditionInButtonLabel.contains("["))
-    #expect(model.auditionOutButtonLabel.contains("]"))
+    #expect(model.auditionInHotkey == "[")
+    #expect(model.auditionOutHotkey == "]")
   }
 
   @Test func statusTextWhileAuditioning() async {
