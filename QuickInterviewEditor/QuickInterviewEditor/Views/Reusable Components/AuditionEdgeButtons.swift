@@ -67,6 +67,19 @@ struct AuditionEdgeButtons: View {
   }
 
   private func keycap(_ key: String, active: Bool) -> some View {
+    KeycapChip(key: key, active: active)
+  }
+}
+
+/// A small bordered square that renders a single hotkey the way menu shortcut glyphs do, so a key
+/// hint reads as "press this key" rather than punctuation baked into a label.
+struct KeycapChip: View {
+  let key: String
+  var active = false
+
+  private let activeYellow = Color(red: 0.96, green: 0.86, blue: 0.4)
+
+  var body: some View {
     Text(key)
       .font(.system(size: 10, weight: .bold, design: .monospaced))
       .frame(width: 15, height: 15)

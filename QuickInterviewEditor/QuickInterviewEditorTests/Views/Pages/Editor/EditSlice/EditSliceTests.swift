@@ -737,6 +737,7 @@ struct EditSliceTests {
     let (model, _) = makeModel()
     #expect(model.auditionInHotkey == "[")
     #expect(model.auditionOutHotkey == "]")
+    #expect(model.auditionPanelCaption.localizedCaseInsensitiveContains("preview"))
   }
 
   @Test func statusTextWhileAuditioning() async {
