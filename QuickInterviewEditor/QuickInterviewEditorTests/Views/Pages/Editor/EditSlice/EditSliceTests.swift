@@ -5,15 +5,27 @@ import Testing
 @testable import QuickInterviewEditor
 
 /// Suspends a single caller until `release()`, for putting a transport action's `onStop`/`onPause`
-/// mid-flight so a second action can race it. Mirrors `EditorSlicePlaybackTests`'s `PlayGate`.
+/// mid-flight so a second action can race it. Mirrors `EditorSlicePlaybackTests`'s `PlayGate`,
+/// but buffers an early `release()` — if the scheduler hasn't parked the suspending task yet
+/// (a lone `Task.yield()` doesn't guarantee it), the release is remembered instead of dropped,
+/// so `suspend()` returns immediately and the test can't hang.
 private actor VoidGate {
   private var continuation: CheckedContinuation<Void, Never>?
+  private var bufferedReleases = 0
   func suspend() async {
+    if bufferedReleases > 0 {
+      bufferedReleases -= 1
+      return
+    }
     await withCheckedContinuation { continuation = $0 }
   }
   func release() {
-    continuation?.resume()
-    continuation = nil
+    if let continuation {
+      continuation.resume()
+      self.continuation = nil
+    } else {
+      bufferedReleases += 1
+    }
   }
 }
 
