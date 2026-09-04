@@ -57,8 +57,8 @@ targets:
         # Single source of truth for the app version. sparkle:version ==
         # CFBundleVersion (CURRENT_PROJECT_VERSION) — a monotonically increasing
         # integer; CFBundleShortVersionString (MARKETING_VERSION) is the display.
-        MARKETING_VERSION: "1.1.0"
-        CURRENT_PROJECT_VERSION: "2"
+        MARKETING_VERSION: "1.2.0"
+        CURRENT_PROJECT_VERSION: "3"
         GENERATE_INFOPLIST_FILE: YES
         ENABLE_TESTABILITY: YES
         CODE_SIGN_STYLE: Automatic
