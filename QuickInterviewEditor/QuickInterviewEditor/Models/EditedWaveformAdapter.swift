@@ -105,6 +105,16 @@ final class EditedWaveformAdapter {
     visibleStartSample = clampedStart(visibleStartSample)
   }
 
+  /// Applies a live crossfade-stretch preview atomically: renders `timeline` and moves the viewport
+  /// to `targetVisibleStart` (clamped into the navigable axis), so the stretched seam grows about a
+  /// fixed screen center while everything downstream reflows continuously. Timeline and viewport
+  /// move in lockstep, which makes committing the same length a visual no-op (no reposition on
+  /// release). No zoom change and no armed-`Z` reset — a drag isn't a fit.
+  func previewStretch(timeline previewTimeline: EditedTimeline, targetVisibleStart: Int) {
+    timeline = previewTimeline
+    visibleStartSample = clampedStart(targetVisibleStart)
+  }
+
   // MARK: - Rendering
   /// One min/max column per horizontal pixel on the EDITED axis. Each pixel's EDITED sample
   /// window is translated to one or more SOURCE ranges via `timeline.sourceRanges(forEdited:)`

@@ -87,6 +87,7 @@ struct WaveformLaneView<Overlay: View>: View {
 
   var body: some View {
     let highlight = highlightRange.flatMap { waveform.laneSpan(forSource: $0) }
+    let cursorEdgeXs = resizeCursorEdgeXs()
     VStack(alignment: .leading, spacing: 8) {
       rulerStrip
       ZStack(alignment: .leading) {
@@ -136,12 +137,28 @@ struct WaveformLaneView<Overlay: View>: View {
           auditionOverlay(highlight)
         }
       }
+      // TOPMOST, hit-through: owns the resize cursor for every draggable edge (selection + bowtie).
+      // Cursor resolution goes to the frontmost view under the pointer, so this must sit above every
+      // other overlay; the layers beneath no longer manage the cursor themselves.
+      .overlay(WaveformResizeCursorLayer(edgeXs: cursorEdgeXs))
       .onGeometryChange(for: CGFloat.self) {
         $0.size.width
       } action: {
         waveform.viewportResized(width: $0)
       }
     }
+  }
+
+  /// The lane-x of every edge that shows a horizontal-resize cursor on hover: each bowtie's two edges
+  /// plus (only where edge drag is supported) the selection's two edges. View-geometry glue, mirroring
+  /// how `WaveformEdgeHandleLayer` derives its edge x's inline above.
+  private func resizeCursorEdgeXs() -> [CGFloat] {
+    var xs = seams.flatMap { [$0.leadingHandleX, $0.trailingHandleX].compactMap { $0 } }
+    if supportsEdgeDrag, let range = highlightRange {
+      if let startX = waveform.laneX(forSource: range.lowerBound) { xs.append(startX) }
+      if let endX = waveform.laneX(forSource: range.upperBound) { xs.append(endX) }
+    }
+    return xs
   }
 
   private var rulerStrip: some View {
@@ -513,7 +530,6 @@ private struct WaveformEdgeHandleLayer: NSViewRepresentable {
     view.onEdgeDragged = onEdgeDragged
     view.onEdgeDragEnded = onEdgeDragEnded
     view.onContextMenu = onContextMenu
-    view.window?.invalidateCursorRects(for: view)
   }
 
   final class HandleView: NSView {
@@ -553,20 +569,6 @@ private struct WaveformEdgeHandleLayer: NSViewRepresentable {
 
     private func localX(_ event: NSEvent) -> CGFloat {
       convert(event.locationInWindow, from: nil).x
-    }
-
-    override func resetCursorRects() {
-      let cursor = NSCursor.resizeLeftRight
-      if let startX {
-        addCursorRect(
-          CGRect(x: startX - grabTolerance, y: 0, width: grabTolerance * 2, height: bounds.height),
-          cursor: cursor)
-      }
-      if let endX {
-        addCursorRect(
-          CGRect(x: endX - grabTolerance, y: 0, width: grabTolerance * 2, height: bounds.height),
-          cursor: cursor)
-      }
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -624,7 +626,6 @@ private struct SeamStretchHandleLayer: NSViewRepresentable {
     view.onStretchEnded = onStretchEnded
     view.onBodyClick = onBodyClick
     view.onContextMenu = onContextMenu
-    view.window?.invalidateCursorRects(for: view)
   }
 
   final class HandleView: NSView {
@@ -678,18 +679,6 @@ private struct SeamStretchHandleLayer: NSViewRepresentable {
       convert(event.locationInWindow, from: nil).x
     }
 
-    override func resetCursorRects() {
-      let cursor = NSCursor.resizeLeftRight
-      for seam in seams {
-        for edgeX in [seam.leadingHandleX, seam.trailingHandleX] {
-          guard let edgeX else { continue }
-          addCursorRect(
-            CGRect(x: edgeX - grabTolerance, y: 0, width: grabTolerance * 2, height: bounds.height),
-            cursor: cursor)
-        }
-      }
-    }
-
     override func mouseDown(with event: NSEvent) {
       let posX = localX(event)
       active = handle(nearestToX: posX)
@@ -728,6 +717,65 @@ private struct SeamStretchHandleLayer: NSViewRepresentable {
     override func menu(for event: NSEvent) -> NSMenu? {
       waveformContextMenu(from: onContextMenu?(localX(event)) ?? [])
     }
+  }
+}
+
+/// A transparent, hit-through layer that sits ABOVE every other band overlay and owns the single job
+/// of showing the horizontal-resize cursor over each draggable edge — both selection edges and
+/// crossfade-bowtie edges. Cursor resolution goes to the frontmost view under the pointer, so cursor
+/// management must live on the topmost view: when it lived on the seam-stretch / selection-edge layers
+/// beneath, the full-frame selection-edge layer shadowed the seam cursor and it never appeared in the
+/// main editor. This layer never claims a mouse event (`hitTest` always returns nil), so every drag
+/// still falls through to the layers beneath — it only paints the cursor. `.cursorUpdate` keeps the
+/// cursor asserted as the pointer moves inside a zone; enter/exit set it at the boundaries, which is
+/// robust even for a hit-through view. It reads nothing from the model: the edge x's are handed in.
+private struct WaveformResizeCursorLayer: NSViewRepresentable {
+  let edgeXs: [CGFloat]
+
+  func makeNSView(context: Context) -> CursorView {
+    let view = CursorView()
+    view.edgeXs = edgeXs
+    view.rebuildCursorAreas()
+    return view
+  }
+
+  func updateNSView(_ nsView: CursorView, context: Context) {
+    nsView.edgeXs = edgeXs
+    nsView.rebuildCursorAreas()
+  }
+
+  final class CursorView: NSView {
+    var edgeXs: [CGFloat] = []
+
+    private let grabTolerance: CGFloat = 6
+    private var cursorAreas: [NSTrackingArea] = []
+
+    override var acceptsFirstResponder: Bool { false }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func updateTrackingAreas() {
+      super.updateTrackingAreas()
+      rebuildCursorAreas()
+    }
+
+    fileprivate func rebuildCursorAreas() {
+      for area in cursorAreas { removeTrackingArea(area) }
+      cursorAreas.removeAll()
+      guard bounds.height > 0 else { return }
+      for edgeX in edgeXs {
+        let area = NSTrackingArea(
+          rect: CGRect(
+            x: edgeX - grabTolerance, y: 0, width: grabTolerance * 2, height: bounds.height),
+          options: [.cursorUpdate, .mouseEnteredAndExited, .activeInKeyWindow], owner: self)
+        addTrackingArea(area)
+        cursorAreas.append(area)
+      }
+    }
+
+    override func cursorUpdate(with event: NSEvent) { NSCursor.resizeLeftRight.set() }
+    override func mouseEntered(with event: NSEvent) { NSCursor.resizeLeftRight.set() }
+    override func mouseExited(with event: NSEvent) { NSCursor.arrow.set() }
   }
 }
 

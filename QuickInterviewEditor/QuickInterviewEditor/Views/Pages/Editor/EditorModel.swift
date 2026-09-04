@@ -306,8 +306,11 @@ final class EditorModel: ViewModel {
       self.selectedSeamID = nil
     }
     // Drop a live stretch draft whose seam is gone — its preview would target a removal the
-    // timeline no longer has. (Reconciled here for the same reason as the selection above.)
+    // timeline no longer has. (Reconciled here for the same reason as the selection above.) Undo
+    // the draft's viewport compensation first, so the rebuild below re-clamps from the pre-drag
+    // scroll position rather than a shifted one.
     if let crossfadeStretchDraft, timelineRemovals[id: crossfadeStretchDraft.id] == nil {
+      editedWaveform.visibleStartSample = crossfadeStretchDraft.frozenVisibleStart
       self.crossfadeStretchDraft = nil
     }
     let newTimeline = editedTimeline
@@ -662,12 +665,8 @@ final class EditorModel: ViewModel {
   /// every read.
   var seamOverlays: [SeamOverlay] {
     editedWaveform.timeline.seams.compactMap { seam in
-      let previewLength = crossfadeStretchDraft.flatMap { $0.id == seam.id ? $0.length : nil }
-      let span =
-        previewLength.map { editedWaveform.spanForSeam(seam, previewLength: $0) }
-        ?? editedWaveform.spanForSeam(seam)
-      guard let span else { return nil }
-      let handles = editedWaveform.seamHandleXs(seam, previewLength: previewLength)
+      guard let span = editedWaveform.spanForSeam(seam) else { return nil }
+      let handles = editedWaveform.seamHandleXs(seam, previewLength: nil)
       return SeamOverlay(
         id: seam.id, span: span, isSelected: seam.id == selectedSeamID,
         leadingHandleX: handles.leading, trailingHandleX: handles.trailing)
@@ -1769,32 +1768,65 @@ final class EditorModel: ViewModel {
   func crossfadeStretchBegan(id: TimelineRemoval.ID) {
     guard let removal = timelineRemovals[id: id] else { return }
     selectSeam(id)
-    crossfadeStretchDraft = CrossfadeStretchDraft(id: id, length: removal.crossfade.lengthSamples)
+    let seam = editedWaveform.timeline.seams.first { $0.id == id }
+    crossfadeStretchDraft = CrossfadeStretchDraft(
+      id: id,
+      length: removal.crossfade.lengthSamples,
+      committedLength: seam?.crossfadeLength ?? removal.crossfade.lengthSamples,
+      committedCenterEdited: seam?.editedCrossfadeCenter ?? 0,
+      frozenVisibleStart: editedWaveform.visibleStartSample,
+      frozenSamplesPerPixel: editedWaveform.samplesPerPixel)
   }
 
   /// A stretch drag to view-x: map x → edited sample and derive the symmetric length from the
-  /// dragged edge's distance to the seam center. Geometry wrapper over the tested core, mirroring
-  /// `selectionEdgeDragged`.
+  /// dragged edge's distance to the seam center. Reads the geometry frozen at `crossfadeStretchBegan`
+  /// (viewport and center), not the live adapter — the live preview reflows the timeline and shifts
+  /// the viewport under the drag, so mapping against live geometry would feed back on itself.
   func crossfadeStretched(_ edge: CrossfadeEdge, toX posX: CGFloat) {
-    guard let draft = crossfadeStretchDraft,
-      let seam = editedWaveform.timeline.seams.first(where: { $0.id == draft.id })
-    else { return }
-    let editedSample = editedWaveform.xToEditedSample(posX)
+    guard let draft = crossfadeStretchDraft else { return }
+    let editedSample = WaveformViewport.xToSample(
+      posX, visibleStartSample: draft.frozenVisibleStart,
+      samplesPerPixel: draft.frozenSamplesPerPixel)
     let halfWidth =
       edge == .leading
-      ? seam.editedCrossfadeCenter - editedSample
-      : editedSample - seam.editedCrossfadeCenter
+      ? draft.committedCenterEdited - editedSample
+      : editedSample - draft.committedCenterEdited
     crossfadeStretched(toLength: halfWidth * 2)
   }
 
-  /// Geometry-free core: clamp the proposed length to `[0, available handle]` and hold it as the
-  /// draft. The clamp bound is read from the COMMITTED timeline (unchanged mid-drag), so a
-  /// neighbor can't shift under the drag. No document mutation — the commit is on release.
+  /// Geometry-free core: clamp the proposed length to `[0, available handle]`, hold it as the draft,
+  /// and reflow the collapsed waveform to it live. The clamp bound is read from the COMMITTED
+  /// timeline (unchanged mid-drag), so a neighbor can't shift under the drag. The document is still
+  /// untouched — `applyStretchPreview` only repaints the adapter; the commit is on release.
   func crossfadeStretched(toLength proposed: Int) {
     guard var draft = crossfadeStretchDraft else { return }
     let maxLength = editedTimeline.maxCrossfadeLength(forSeamID: draft.id) ?? 0
     draft.length = max(0, min(proposed, maxLength))
     crossfadeStretchDraft = draft
+    applyStretchPreview(draft)
+  }
+
+  /// Reflows the collapsed waveform to the drafted length and shifts the viewport by −ΔL/2 so the
+  /// seam grows symmetrically about its start-of-drag screen center (Item ②: the downstream slide
+  /// that used to happen on release now happens continuously during the drag). The preview timeline
+  /// is built exactly as the commit builds it — the target removal's length overridden, everything
+  /// else the document's — so releasing the drag repositions nothing.
+  private func applyStretchPreview(_ draft: CrossfadeStretchDraft) {
+    let preview = previewTimeline(seamID: draft.id, length: draft.length)
+    let shift = (draft.length - draft.committedLength) / 2
+    editedWaveform.previewStretch(
+      timeline: preview, targetVisibleStart: draft.frozenVisibleStart - shift)
+  }
+
+  /// The edited timeline as it will render with seam `id`'s crossfade set to `length`, built the
+  /// same way the commit is (override that one removal, rebuild). A no-op-shaped fallback to the
+  /// committed timeline for an unknown id.
+  private func previewTimeline(seamID id: TimelineRemoval.ID, length: Int) -> EditedTimeline {
+    var removals = Array(timelineRemovals)
+    guard let index = removals.firstIndex(where: { $0.id == id }) else { return editedTimeline }
+    removals[index].crossfade.lengthSamples = length
+    return EditedTimeline(
+      sourceDurationSamples: editPlan.source.durationSamples, removals: removals)
   }
 
   /// Release: commit the drafted length as one undo step (via `updateCrossfade`) and clear the
@@ -1806,6 +1838,12 @@ final class EditorModel: ViewModel {
     guard let removal = timelineRemovals[id: draft.id],
       draft.length != removal.crossfade.lengthSamples
     else { return }
+    // Rewind the adapter to the pre-drag committed timeline (the viewport stays where the preview
+    // left it — already clamped into the shorter axis, so it doesn't move). The live preview had
+    // installed the timeline the commit is about to produce, which would make `syncEditedTimeline`'s
+    // equality guard short-circuit and skip its reconciliation (playback / cursor / transport-origin
+    // remap, zoom re-clamp, slice-sheet sync). Rewinding forces a real diff so that body runs.
+    editedWaveform.timeline = editedTimeline
     var crossfade = removal.crossfade
     crossfade.lengthSamples = draft.length
     updateCrossfade(id: draft.id, crossfade)
