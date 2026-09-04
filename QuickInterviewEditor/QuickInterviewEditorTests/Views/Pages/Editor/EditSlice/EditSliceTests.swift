@@ -672,19 +672,165 @@ struct EditSliceTests {
     expectNoDifference(model.seamOverlays.map(\.id), [removal.id])
   }
 
-  /// The slice sheet still DRAWS bowties (crossfades exist and render), but exposes no stretch
-  /// handles: the sheet edits/clamps on the GLOBAL timeline while the slice renders on its own
-  /// windowed timeline, so a boundary crossfade could otherwise be dragged into a fade the slice
-  /// plays/exports as a hard cut. Handles return in the slice-local seam-projection follow-on.
-  @Test func seamOverlaysExposeNoStretchHandlesInTheSliceSheet() {
-    let model = laneModel()
+  // MARK: - Crossfade stretch handles (interior seams only)
+
+  /// A seam whose removal lies strictly inside the slice renders its crossfade as stored on the
+  /// slice's own timeline, so the sheet offers stretch handles — on the bowtie's true edges, exactly
+  /// where the main editor puts them.
+  @Test func interiorSeamExposesStretchHandlesOnTheBowtieEdges() throws {
+    let model = laneModel()  // slice 10_000..<20_000
     let removal = TimelineRemoval(
       id: UUID(), removedRange: 12_000..<15_000, crossfade: Crossfade(lengthSamples: 600))
     model.syncTimeline(EditedTimeline(sourceDurationSamples: 100_000, removals: [removal]))
 
-    let overlay = model.seamOverlays[0]
-    #expect(overlay.leadingHandleX == nil)
-    #expect(overlay.trailingHandleX == nil)
+    let overlay = try #require(model.seamOverlays.first)
+    expectNoDifference(overlay.leadingHandleX, overlay.span.positionX)
+    expectNoDifference(overlay.trailingHandleX, overlay.span.positionX + overlay.span.width)
+  }
+
+  /// A seam whose removal crosses or touches a slice edge collapses to a hard cut on the slice's
+  /// own timeline (no kept audio on that side), so a handle here would author a fade the slice
+  /// plays/exports as a hard cut. The bowtie still draws; only the drag affordance is withheld.
+  @Test(arguments: [8_000..<12_000, 10_000..<12_000, 18_000..<22_000, 18_000..<20_000])
+  func boundarySeamStaysBowtieOnly(removedRange: Range<Int>) throws {
+    let model = laneModel()  // slice 10_000..<20_000
+    let removal = TimelineRemoval(
+      id: UUID(), removedRange: removedRange, crossfade: Crossfade(lengthSamples: 600))
+    model.syncTimeline(EditedTimeline(sourceDurationSamples: 100_000, removals: [removal]))
+
+    let overlay = try #require(model.seamOverlays.first)
+    expectNoDifference(overlay.leadingHandleX, nil)
+    expectNoDifference(overlay.trailingHandleX, nil)
+  }
+
+  /// Interior-ness is judged against the LIVE cut (the draft while editing): nudging the cut-in past
+  /// a removal turns it into a boundary seam, and its handles go away with it.
+  @Test func stretchHandlesFollowTheLiveDraftCut() throws {
+    let model = laneModel()  // slice 10_000..<20_000
+    let removal = TimelineRemoval(
+      id: UUID(), removedRange: 10_001..<10_200, crossfade: Crossfade(lengthSamples: 0))
+    model.syncTimeline(EditedTimeline(sourceDurationSamples: 100_000, removals: [removal]))
+    #expect(try #require(model.seamOverlays.first).leadingHandleX != nil)
+
+    model.cutInNudgedForward()
+    let draft = try #require(model.fineTune.draftRange)
+    #expect(draft.lowerBound > removal.removedRange.lowerBound)
+
+    let overlay = try #require(model.seamOverlays.first)
+    expectNoDifference(overlay.leadingHandleX, nil)
+    expectNoDifference(overlay.trailingHandleX, nil)
+  }
+
+  /// The model, not just the view, refuses to stretch a boundary seam: a begin for one seeds no draft.
+  @Test func crossfadeStretchBeganIsANoOpForABoundarySeam() {
+    let model = laneModel()
+    let removal = TimelineRemoval(
+      id: UUID(), removedRange: 8_000..<12_000, crossfade: Crossfade(lengthSamples: 600))
+    model.currentCrossfadeLength = { $0 == removal.id ? 600 : nil }
+    model.syncTimeline(EditedTimeline(sourceDurationSamples: 100_000, removals: [removal]))
+
+    model.crossfadeStretchBegan(id: removal.id)
+
+    expectNoDifference(model.crossfadeStretchDraft, nil)
+  }
+
+  /// During a drag the handles sit on the DRAFT bowtie's edges (the preview widens live), so the
+  /// grabbed edge stays under the cursor.
+  @Test func stretchHandlesTrackTheDraftBowtieDuringADrag() throws {
+    let model = laneModel()
+    let removal = TimelineRemoval(
+      id: UUID(), removedRange: 12_000..<15_000, crossfade: Crossfade(lengthSamples: 600))
+    model.currentCrossfadeLength = { $0 == removal.id ? 600 : nil }
+    model.syncTimeline(EditedTimeline(sourceDurationSamples: 100_000, removals: [removal]))
+
+    model.crossfadeStretchBegan(id: removal.id)
+    model.crossfadeStretched(toLength: 1_200)
+
+    let overlay = try #require(model.seamOverlays.first)
+    let leading = try #require(overlay.leadingHandleX)
+    let trailing = try #require(overlay.trailingHandleX)
+    expectNoDifference(leading, overlay.span.positionX)
+    expectNoDifference(trailing, overlay.span.positionX + overlay.span.width)
+    expectNoDifference(trailing - leading, 1_200 / model.editedWaveform.samplesPerPixel)
+  }
+
+  /// An edge drag to a view-x on the sheet's lane commits the length that geometry implies, through
+  /// the parent funnel. Slice 10_000..<20_000 with removal 12_000..<15_000 (fade 1_000): the pinned
+  /// lane spans edited 10_000..<16_000 over 1000 px (spp 6); the seam's crossfade runs edited
+  /// 11_000..<12_000 (doubled center 23_000). Dragging the trailing edge to x=400 → edited 12_400 →
+  /// length 2·12_400 − 23_000 = 1_800, and the trailing handle lands under the cursor.
+  @Test func trailingEdgeDragCommitsTheGeometricLengthThroughTheParent() throws {
+    let model = laneModel()
+    var committed: [(TimelineRemoval.ID, Int)] = []
+    model.onStretchCrossfade = { committed.append(($0, $1)) }
+    let removal = TimelineRemoval(
+      id: UUID(), removedRange: 12_000..<15_000, crossfade: Crossfade(lengthSamples: 1_000))
+    model.currentCrossfadeLength = { $0 == removal.id ? 1_000 : nil }
+    model.syncTimeline(EditedTimeline(sourceDurationSamples: 100_000, removals: [removal]))
+    expectNoDifference(model.editedWaveform.samplesPerPixel, 6)
+
+    model.crossfadeStretchBegan(id: removal.id)
+    model.crossfadeStretched(.trailing, toX: 400)
+    expectNoDifference(try #require(model.seamOverlays.first?.trailingHandleX), 400)
+    model.crossfadeStretchEnded()
+
+    expectNoDifference(committed.map(\.0), [removal.id])
+    expectNoDifference(committed.map(\.1), [1_800])
+  }
+
+  /// A drag that nets no change against the seam's stored length (dragged out and back) commits
+  /// nothing, so no undo entry is pushed — parity with the main editor.
+  @Test func netZeroStretchOnTheSheetCommitsNothing() {
+    let model = laneModel()
+    var committed: [Int] = []
+    model.onStretchCrossfade = { committed.append($1) }
+    let removal = TimelineRemoval(
+      id: UUID(), removedRange: 12_000..<15_000, crossfade: Crossfade(lengthSamples: 600))
+    model.currentCrossfadeLength = { $0 == removal.id ? 600 : nil }
+    model.syncTimeline(EditedTimeline(sourceDurationSamples: 100_000, removals: [removal]))
+
+    model.crossfadeStretchBegan(id: removal.id)
+    model.crossfadeStretched(toLength: 1_200)
+    model.crossfadeStretched(toLength: 600)
+    model.crossfadeStretchEnded()
+
+    expectNoDifference(committed, [])
+    expectNoDifference(model.crossfadeStretchDraft, nil)
+  }
+
+  /// A drag torn down before mouse-up (sheet dismissed, lane removed) cancels: the draft is dropped,
+  /// the bowtie and handles snap back to the committed seam, and nothing is committed.
+  @Test func crossfadeStretchCancelledRestoresThePreDragBowtieAndCommitsNothing() {
+    let model = laneModel()
+    var committed: [Int] = []
+    model.onStretchCrossfade = { committed.append($1) }
+    let removal = TimelineRemoval(
+      id: UUID(), removedRange: 12_000..<15_000, crossfade: Crossfade(lengthSamples: 600))
+    model.currentCrossfadeLength = { $0 == removal.id ? 600 : nil }
+    model.syncTimeline(EditedTimeline(sourceDurationSamples: 100_000, removals: [removal]))
+    _ = model.waveformContextMenuItems(atX: model.seamOverlays[0].span.positionX)  // select it
+    let committedOverlays = model.seamOverlays
+
+    model.crossfadeStretchBegan(id: removal.id)
+    model.crossfadeStretched(toLength: 1_200)
+    #expect(model.seamOverlays != committedOverlays)
+
+    model.crossfadeStretchCancelled()
+
+    expectNoDifference(model.crossfadeStretchDraft, nil)
+    expectNoDifference(model.seamOverlays, committedOverlays)
+    expectNoDifference(committed, [])
+  }
+
+  @Test func crossfadeStretchCancelledIsANoOpWithoutALiveDrag() {
+    let model = laneModel()
+    var committed: [Int] = []
+    model.onStretchCrossfade = { committed.append($1) }
+
+    model.crossfadeStretchCancelled()
+
+    expectNoDifference(model.crossfadeStretchDraft, nil)
+    expectNoDifference(committed, [])
   }
 
   /// Right-clicking a seam selects it and offers Restore, which forwards the seam's id to `onRestore`

@@ -34,6 +34,16 @@ enum SliceRenderPlanBuilder {
     return EditedTimeline(sourceDurationSamples: sliceRange.count, removals: rebased)
   }
 
+  /// Whether a removal lies strictly inside the slice, with kept audio on BOTH sides. Only such a
+  /// removal renders its crossfade as stored on the slice-local timeline: one that crosses or
+  /// merely touches a slice edge has no handle on that side after clipping, so `EditedTimeline`
+  /// collapses it to a hard cut in this slice. The slice sheet keys its stretch handles on this, so
+  /// the sheet and the renderer can never disagree about which seams the slice really fades.
+  static func isInterior(_ removedRange: Range<Int>, in sliceRange: Range<Int>) -> Bool {
+    sliceRange.lowerBound < removedRange.lowerBound
+      && removedRange.upperBound < sliceRange.upperBound
+  }
+
   static func plan(sliceRange: Range<Int>, removals: [TimelineRemoval]) -> SliceRenderPlan {
     let timeline = localTimeline(sliceRange: sliceRange, removals: removals)
     return SliceRenderPlan(

@@ -132,14 +132,28 @@ final class EditSliceModel: ViewModel, Identifiable {
         previewLength.map { editedWaveform.spanForSeam(seam, previewLength: $0) }
         ?? editedWaveform.spanForSeam(seam)
       guard let span else { return nil }
-      // No stretch handles on the slice sheet: it edits/clamps on the GLOBAL timeline, but the slice
-      // renders on its own windowed timeline, so a boundary crossfade dragged here could author a
-      // fade the slice plays/exports as a hard cut. The bowtie still draws; only the drag affordance
-      // is withheld until the slice-local seam projection lands (follow-on PR).
+      // Stretch handles only on INTERIOR seams. The sheet edits the GLOBAL removal, but the slice
+      // renders/exports on its own windowed timeline, where a removal crossing or touching a slice
+      // edge collapses to a hard cut — a handle there would author a fade this slice never plays.
+      // Such seams stay bowtie-only. Handles track the draft bowtie during a drag (`previewLength`).
+      let handles =
+        isInteriorSeam(seam)
+        ? editedWaveform.seamHandleXs(seam, previewLength: previewLength)
+        : (leading: nil, trailing: nil)
       return SeamOverlay(
         id: seam.id, span: span, isSelected: seam.id == selectedSeamID,
-        leadingHandleX: nil, trailingHandleX: nil)
+        leadingHandleX: handles.leading, trailingHandleX: handles.trailing)
     }
+  }
+
+  /// Whether the seam's removal lies strictly inside the slice's LIVE cut (the draft while editing),
+  /// per the renderer's own rule (`SliceRenderPlanBuilder.isInterior`), so a stretch here is honest:
+  /// the slice plays/exports the fade being authored.
+  private func isInteriorSeam(_ seam: TimelineSeam) -> Bool {
+    guard let slice = slicePlaybackRange,
+      let removal = editedWaveform.timeline.removals.first(where: { $0.id == seam.id })
+    else { return false }
+    return SliceRenderPlanBuilder.isInterior(removal.removedRange, in: slice)
   }
 
   private static let seamHitTolerance: CGFloat = 4
@@ -435,10 +449,18 @@ final class EditSliceModel: ViewModel, Identifiable {
 
   // MARK: - Crossfade stretch
   /// Begins an edge-drag stretch of seam `id` on the sheet's lane: selects it and seeds the draft
-  /// with the seam's current (clamped) length. A no-op for a seam not on this lane.
+  /// with the removal's stored length. A no-op for a seam not on this lane (unknown to the parent,
+  /// or with no derivable seam — the main editor's unrecoverable-seam guard) and for a boundary
+  /// seam, which the lane offers no handle for (`seamOverlays`) — the model refuses too, so the
+  /// view can never author a fade this slice would play as a hard cut. No transport teardown is
+  /// needed here, unlike the main editor: the sheet's preview only widens the bowtie overlay and
+  /// never reflows the lane's timeline, so the playhead keeps tracking the audio that is actually
+  /// playing; the commit on release reflows through the parent, whose timeline sync stops a
+  /// slice-edit session that depended on the changed removal and publishes "stopped" back here.
   func crossfadeStretchBegan(id: TimelineRemoval.ID) {
     guard let length = currentCrossfadeLength(id),
-      editedWaveform.timeline.seams.contains(where: { $0.id == id })
+      let seam = editedWaveform.timeline.seams.first(where: { $0.id == id }),
+      isInteriorSeam(seam)
     else { return }
     selectSeam(id)
     crossfadeStretchDraft = CrossfadeStretchDraft(id: id, length: length, committedLength: length)
@@ -480,6 +502,16 @@ final class EditSliceModel: ViewModel, Identifiable {
     crossfadeStretchDraft = nil
     guard let current = currentCrossfadeLength(draft.id), draft.length != current else { return }
     onStretchCrossfade(draft.id, draft.length)
+  }
+
+  /// Aborts an in-flight stretch without committing — for a drag torn down before mouse-up (sheet
+  /// dismissed, lane removed), when `crossfadeStretchEnded` can never run. The sheet's drag mutates
+  /// only the draft (its preview is derived from it in `seamOverlays`; the lane's timeline and
+  /// viewport are untouched, unlike the main editor's live reflow), so dropping the draft restores
+  /// the committed bowtie and handles. A no-op if no drag is live.
+  func crossfadeStretchCancelled() {
+    guard crossfadeStretchDraft != nil else { return }
+    crossfadeStretchDraft = nil
   }
 
   private func updateMarqueeSelection() {
