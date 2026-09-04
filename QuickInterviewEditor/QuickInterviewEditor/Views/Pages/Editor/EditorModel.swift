@@ -140,6 +140,9 @@ final class EditorModel: ViewModel {
 
   // MARK: - Properties
   var slices: IdentifiedArrayOf<Slice> = []
+  /// The slice the slices list should scroll into view. Set to a freshly created clip's id so a
+  /// new clip appended below the fold becomes visible; the list observes this and scrolls to it.
+  var sliceScrollTarget: Slice.ID?
   /// Removed source ranges (with their crossfades) that collapse the timeline. Mutated
   /// only through `mutateDocument`, alongside `slices`, so the two move together on undo.
   var timelineRemovals: IdentifiedArrayOf<TimelineRemoval> = []
@@ -1444,6 +1447,7 @@ final class EditorModel: ViewModel {
     nudged.startSample = range.lowerBound
     nudged.endSample = range.upperBound
     mutateSlices { $0.append(nudged) }
+    sliceScrollTarget = nudged.id
   }
 
   // MARK: - Listen pass

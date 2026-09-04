@@ -45,22 +45,28 @@ struct SlicesPanelView: View {
           .font(.system(size: 12)).foregroundStyle(Color(white: 0.5))
           .frame(maxWidth: .infinity, alignment: .leading)
       } else {
-        List {
-          ForEach(model.sliceRows) { row in
-            SliceCard(model: model, row: row)
-              .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
-              .listRowSeparator(.hidden)
-              .listRowBackground(Color.clear)
+        ScrollViewReader { proxy in
+          List {
+            ForEach(model.sliceRows) { row in
+              SliceCard(model: model, row: row)
+                .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
+            }
+            .onMove { model.moveSlices(fromOffsets: $0, toOffset: $1) }
+            .onDelete { indexSet in
+              let ids = indexSet.map { model.sliceRows[$0].id }
+              Task { await model.deleteSlices(ids) }
+            }
           }
-          .onMove { model.moveSlices(fromOffsets: $0, toOffset: $1) }
-          .onDelete { indexSet in
-            let ids = indexSet.map { model.sliceRows[$0].id }
-            Task { await model.deleteSlices(ids) }
+          .listStyle(.plain)
+          .scrollContentBackground(.hidden)
+          .animation(.default, value: model.sliceRows.map(\.id))
+          .onChange(of: model.sliceScrollTarget) { _, target in
+            guard let target else { return }
+            withAnimation { proxy.scrollTo(target, anchor: .bottom) }
           }
         }
-        .listStyle(.plain)
-        .scrollContentBackground(.hidden)
-        .animation(.default, value: model.sliceRows.map(\.id))
       }
     }
     .padding(12)
