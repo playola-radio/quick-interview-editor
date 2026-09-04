@@ -16,6 +16,42 @@ struct SliceRenderPlanTests {
     UUID(uuidString: "00000000-0000-0000-0000-0000000000\(String(format: "%02u", number))")!
   }
 
+  // MARK: - Interior classification (shared with the slice sheet's stretch handles)
+
+  /// A removal with kept audio on both sides inside the slice renders its crossfade as stored —
+  /// the slice-local timeline leaves it uncollapsed — so the slice sheet may offer stretch handles.
+  @Test func removalStrictlyInsideTheSliceIsInterior() {
+    let inside = removal(1400, 1500, length: 50)
+    #expect(SliceRenderPlanBuilder.isInterior(inside.removedRange, in: 1000..<2000))
+    let local = SliceRenderPlanBuilder.localTimeline(sliceRange: 1000..<2000, removals: [inside])
+    expectNoDifference(local.seams.map(\.crossfadeLength), [50])
+  }
+
+  @Test func removalStraddlingTheSliceStartIsNotInterior() {
+    #expect(!SliceRenderPlanBuilder.isInterior(900..<1100, in: 1000..<2000))
+  }
+
+  @Test func removalStraddlingTheSliceEndIsNotInterior() {
+    #expect(!SliceRenderPlanBuilder.isInterior(1900..<2100, in: 1000..<2000))
+  }
+
+  /// Clipping leaves a removal that merely TOUCHES a slice edge unchanged, but the slice-local
+  /// timeline has no kept audio on that side, so the crossfade collapses to a hard cut there. It is
+  /// therefore not interior: a handle would author a fade the slice can't play.
+  @Test func removalAbuttingTheSliceStartIsNotInterior() {
+    let abutting = removal(1000, 1100, length: 50)
+    #expect(!SliceRenderPlanBuilder.isInterior(abutting.removedRange, in: 1000..<2000))
+    let local = SliceRenderPlanBuilder.localTimeline(sliceRange: 1000..<2000, removals: [abutting])
+    expectNoDifference(local.seams.map(\.crossfadeLength), [0])
+  }
+
+  @Test func removalAbuttingTheSliceEndIsNotInterior() {
+    let abutting = removal(1900, 2000, length: 50)
+    #expect(!SliceRenderPlanBuilder.isInterior(abutting.removedRange, in: 1000..<2000))
+    let local = SliceRenderPlanBuilder.localTimeline(sliceRange: 1000..<2000, removals: [abutting])
+    expectNoDifference(local.seams.map(\.crossfadeLength), [0])
+  }
+
   // MARK: - Plan geometry
 
   @Test func removalInsideTheSliceKeepsSourceRangesAbsolute() {

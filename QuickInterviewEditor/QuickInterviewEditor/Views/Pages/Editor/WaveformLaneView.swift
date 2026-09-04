@@ -75,14 +75,14 @@ struct WaveformLaneView<Overlay: View>: View {
   var supportsEdgeDrag = true
   /// Stretch handles on each crossfade bowtie's two edges. A grab within a few points of a bowtie's
   /// leading/trailing edge fires these to lengthen/shorten that seam's fade; a mouse-down elsewhere
-  /// falls through to the marquee below. Default no-ops so call sites without seam stretching (the
-  /// slice-edit sheet, until Stage 4) compile unchanged.
+  /// falls through to the marquee below. Default no-ops so call sites without seam stretching
+  /// compile unchanged.
   var onSeamStretchBegan: (UUID) -> Void = { _ in }
   var onSeamStretched: (CrossfadeEdge, CGFloat) -> Void = { _, _ in }
   var onSeamStretchEnded: () -> Void = {}
   /// A live drag torn down before mouse-up (sheet dismissed, tab switched, lane removed): drops the
   /// draft and restores the committed preview rather than stranding it. Default no-op so call sites
-  /// without seam stretching (the slice-edit sheet, until Stage 4) compile unchanged.
+  /// without seam stretching compile unchanged.
   var onSeamStretchCancelled: () -> Void = {}
   @ViewBuilder let auditionOverlay: (WaveformSpan) -> Overlay
 

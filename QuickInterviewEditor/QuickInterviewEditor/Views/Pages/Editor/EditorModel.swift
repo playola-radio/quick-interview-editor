@@ -1573,6 +1573,9 @@ final class EditorModel: ViewModel {
     child.currentCrossfadeLength = { [weak self] removalID in
       self?.timelineRemovals[id: removalID]?.crossfade.lengthSamples
     }
+    // Mirror the main lane's begin-time refusal: `updateCrossfade` is frozen mid-export, so the sheet
+    // must not preview a stretch its release would discard.
+    child.canEditCrossfade = { [weak self] in self?.isExporting == false }
     // ⌘Z/⌘⇧Z pressed inside the sheet route here: a modal removal lives on this document's undo
     // stack, and `undoTapped`/`redoTapped` fan the restored timeline back into the open sheet via
     // `syncEditedTimeline`. The main window's SwiftUI undo shortcut can't fire while the sheet is key.
@@ -1763,9 +1766,12 @@ final class EditorModel: ViewModel {
   /// routes through (the edge-drag stretch below; the numeric inspector and curve/center drags when
   /// they land). The stored length is the user's intent; `EditedTimeline` clamps it per-seam on
   /// build (a too-long fade is clamped for rendering without losing the stored value), mirroring how
-  /// `removeSelectedSectionTapped` stores the default length. A no-op for an unknown id.
+  /// `removeSelectedSectionTapped` stores the default length. A no-op for an unknown id, and while
+  /// exporting: export froze the removal set it was gated on, so a fade edit landing mid-run would
+  /// leave the finished AIFFs stale relative to what the user sees (the same reason
+  /// `removeSourceRange` refuses). Guarding the funnel covers every surface that commits through it.
   func updateCrossfade(id: TimelineRemoval.ID, _ crossfade: Crossfade) {
-    guard timelineRemovals[id: id] != nil else { return }
+    guard !isExporting, timelineRemovals[id: id] != nil else { return }
     mutateDocument { doc in
       doc.timelineRemovals[id: id]?.crossfade = crossfade
     }
@@ -1775,9 +1781,11 @@ final class EditorModel: ViewModel {
   /// Begins an edge-drag stretch of seam `id`: selects it and seeds the draft with its current
   /// length. A no-op for an unknown removal OR one with no derivable seam (an invalid timeline —
   /// e.g. overlapping removals — unreachable through the normal remove-section UI, but a fallback
-  /// here would seed `committedLength = 0`, letting the drag commit a silent hard cut).
+  /// here would seed `committedLength = 0`, letting the drag commit a silent hard cut). Also a
+  /// no-op mid-export: `updateCrossfade` would refuse the commit, so the lane must not preview a
+  /// reflow the release would then silently discard.
   func crossfadeStretchBegan(id: TimelineRemoval.ID) {
-    guard let removal = timelineRemovals[id: id],
+    guard !isExporting, let removal = timelineRemovals[id: id],
       let seam = editedWaveform.timeline.seams.first(where: { $0.id == id })
     else { return }
     stopPlaybackForTimelineEdit()

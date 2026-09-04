@@ -285,6 +285,31 @@ struct EditorEditSlicePresentationTests {
     }
   }
 
+  /// Mid-export the parent's `updateCrossfade` funnel refuses, so the sheet must refuse to START a
+  /// stretch too — the main lane's begin-time refusal, mirrored — instead of letting a drag preview
+  /// and then vanish on release.
+  @Test func stretchInTheSheetRefusesToStartMidExport() async {
+    let fileSystem = LockIsolated<[URL: Data]>([:])
+    await withDependencies {
+      $0.defaultFileStorage = FileStorage.inMemory(fileSystem: fileSystem)
+    } operation: {
+      let model = editor()
+      addSlice(model, 0, 5)
+      let slice = model.slices[0]
+      model.editSliceTapped(slice.id)
+      let child = model.editSlice!
+
+      selectWords(model.transcript, 1, 2)
+      await model.removeSelectedSectionTapped()
+      let id = model.timelineRemovals[0].id
+      model.exportPhase = .exporting(current: 0, total: 1)
+
+      child.crossfadeStretchBegan(id: id)
+
+      expectNoDifference(child.crossfadeStretchDraft, nil)
+    }
+  }
+
   /// ⌘Z pressed INSIDE the sheet (forwarded by `SliceEditKeyMonitor` to `child.undoTapped`) rewinds
   /// the shared document and fans the restored timeline back into the open sheet — the modal removal
   /// is undoable without focus ever leaving the sheet.
