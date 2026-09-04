@@ -89,6 +89,7 @@ struct EditorTests {
     #expect(model.sliceScrollTarget == nil)
     selectWords(model.transcript, 0, 3)
     model.addSliceTapped()
+    #expect(model.slices.count == 1)
     expectNoDifference(model.sliceScrollTarget, model.slices.last?.id)
   }
 

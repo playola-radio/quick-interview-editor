@@ -66,6 +66,13 @@ struct SlicesPanelView: View {
             guard let target else { return }
             withAnimation { proxy.scrollTo(target, anchor: .bottom) }
           }
+          // A clip accepted from the Suggestions tab sets the target while this panel is
+          // unmounted, so `onChange` never sees it. Re-apply any pending target on appear so
+          // switching to the Slices tab reveals the newly accepted clip.
+          .onAppear {
+            guard let target = model.sliceScrollTarget else { return }
+            proxy.scrollTo(target, anchor: .bottom)
+          }
         }
       }
     }
