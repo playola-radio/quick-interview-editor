@@ -931,6 +931,27 @@ struct EditSliceTests {
     expectNoDifference(committed, [currentMax])
   }
 
+  /// The release re-clamp must not touch a drag that never moved: a fade stored longer than this
+  /// seam's handle seeds the draft at the stored length, and grabbing a handle then letting go would
+  /// otherwise commit the clamped value and silently collapse the latent fade.
+  @Test func noMotionReleaseOnALatentFadeCommitsNothing() {
+    let model = laneModel()  // slice 10_000..<20_000
+    let id = UUID()
+    let removal = TimelineRemoval(
+      id: id, removedRange: 12_000..<15_000, crossfade: Crossfade(lengthSamples: 20_000))
+    model.currentCrossfadeLength = { $0 == id ? 20_000 : nil }
+    var committed: [Int] = []
+    model.onStretchCrossfade = { committed.append($1) }
+    let timeline = EditedTimeline(sourceDurationSamples: 100_000, removals: [removal])
+    #expect(timeline.maxCrossfadeLength(forSeamID: id)! < 20_000)
+    model.syncTimeline(timeline)
+
+    model.crossfadeStretchBegan(id: id)
+    model.crossfadeStretchEnded()
+
+    expectNoDifference(committed, [])
+  }
+
   /// The parent decides when crossfade edits are allowed at all (it refuses mid-export). The sheet
   /// asks before seeding a draft, so it never previews a stretch the release would then discard.
   @Test func crossfadeStretchBeganIsANoOpWhenTheParentRefusesCrossfadeEdits() {

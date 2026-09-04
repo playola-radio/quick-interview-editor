@@ -508,11 +508,14 @@ final class EditSliceModel: ViewModel, Identifiable {
   /// would overwrite a restored value, or author a fade this slice plays as a hard cut — so it
   /// commits nothing. The length is re-clamped to the seam's CURRENT handle too: a re-fan that
   /// restored a neighbouring removal shrinks the handle without touching this removal's stored
-  /// length, so the draft survives holding a length the lane can no longer show.
+  /// length, so the draft survives holding a length the lane can no longer show. A drag that never
+  /// moved skips that clamp: its draft still holds the stored length, which may legitimately exceed
+  /// the handle (a latent fade), and clamping it would collapse the fade on a mere grab-and-release.
   func crossfadeStretchEnded() {
     guard let draft = crossfadeStretchDraft else { return }
     crossfadeStretchDraft = nil
-    guard let current = currentCrossfadeLength(draft.id), current == draft.committedLength,
+    guard draft.length != draft.committedLength,
+      let current = currentCrossfadeLength(draft.id), current == draft.committedLength,
       let seam = editedWaveform.timeline.seams.first(where: { $0.id == draft.id }),
       isInteriorSeam(seam),
       let maxLength = editedWaveform.timeline.maxCrossfadeLength(forSeamID: draft.id)
