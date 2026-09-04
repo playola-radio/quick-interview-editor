@@ -74,6 +74,10 @@ final class EditSliceModel: ViewModel, Identifiable {
   /// the main editor uses — so the two surfaces draft and commit identically, and a no-op modal drag
   /// never collapses latent fade intent.
   var currentCrossfadeLength: (TimelineRemoval.ID) -> Int? = { _ in nil }
+  /// Whether the parent will accept a crossfade edit right now (it refuses mid-export, when the
+  /// removal set is frozen). Asked before a stretch starts, so the sheet never previews a drag the
+  /// parent's `updateCrossfade` funnel would discard on release — the main lane's begin-time refusal.
+  var canEditCrossfade: () -> Bool = { true }
   /// Undo / redo the shared document (routed to the parent's `undoTapped`/`redoTapped`). A modal
   /// removal is a document edit on the parent's undo stack, so ⌘Z inside the sheet rewinds it — the
   /// sheet's own key monitor forwards ⌘Z/⌘⇧Z here because the main window's undo shortcut is not in
@@ -458,7 +462,7 @@ final class EditSliceModel: ViewModel, Identifiable {
   /// playing; the commit on release reflows through the parent, whose timeline sync stops a
   /// slice-edit session that depended on the changed removal and publishes "stopped" back here.
   func crossfadeStretchBegan(id: TimelineRemoval.ID) {
-    guard let length = currentCrossfadeLength(id),
+    guard canEditCrossfade(), let length = currentCrossfadeLength(id),
       let seam = editedWaveform.timeline.seams.first(where: { $0.id == id }),
       isInteriorSeam(seam)
     else { return }
@@ -502,15 +506,20 @@ final class EditSliceModel: ViewModel, Identifiable {
   /// the parent never fans) and the seam's interior status (the key monitor stays live during a
   /// drag, so a nudge can move the cut onto the seam). Either way the drag's intent is stale — it
   /// would overwrite a restored value, or author a fade this slice plays as a hard cut — so it
-  /// commits nothing.
+  /// commits nothing. The length is re-clamped to the seam's CURRENT handle too: a re-fan that
+  /// restored a neighbouring removal shrinks the handle without touching this removal's stored
+  /// length, so the draft survives holding a length the lane can no longer show.
   func crossfadeStretchEnded() {
     guard let draft = crossfadeStretchDraft else { return }
     crossfadeStretchDraft = nil
     guard let current = currentCrossfadeLength(draft.id), current == draft.committedLength,
       let seam = editedWaveform.timeline.seams.first(where: { $0.id == draft.id }),
-      isInteriorSeam(seam), draft.length != current
+      isInteriorSeam(seam),
+      let maxLength = editedWaveform.timeline.maxCrossfadeLength(forSeamID: draft.id)
     else { return }
-    onStretchCrossfade(draft.id, draft.length)
+    let length = min(draft.length, maxLength)
+    guard length != current else { return }
+    onStretchCrossfade(draft.id, length)
   }
 
   /// Aborts an in-flight stretch without committing — for a drag torn down before mouse-up (sheet

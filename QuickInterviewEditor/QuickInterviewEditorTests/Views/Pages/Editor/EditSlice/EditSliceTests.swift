@@ -902,6 +902,51 @@ struct EditSliceTests {
     expectNoDifference(committed, [])
   }
 
+  /// A parent re-fan during the drag can shrink the seam's available handle without touching the
+  /// dragged removal's stored length (undo restores a neighbouring removal), so the surviving draft
+  /// may hold a length the lane can no longer render. Release clamps to the CURRENT handle, the same
+  /// bound every drag event clamps to, so the commit never exceeds what the lane showed.
+  @Test func releaseReClampsTheDraftToTheSeamsCurrentHandle() {
+    let model = laneModel()  // slice 10_000..<20_000
+    let id = UUID()
+    let removal = TimelineRemoval(
+      id: id, removedRange: 12_000..<15_000, crossfade: Crossfade(lengthSamples: 600))
+    model.currentCrossfadeLength = { $0 == id ? 600 : nil }
+    var committed: [Int] = []
+    model.onStretchCrossfade = { committed.append($1) }
+    model.syncTimeline(EditedTimeline(sourceDurationSamples: 100_000, removals: [removal]))
+    model.crossfadeStretchBegan(id: id)
+    model.crossfadeStretched(toLength: 1_200)
+    #expect(model.crossfadeStretchDraft?.length == 1_200)
+
+    let neighbour = TimelineRemoval(
+      id: UUID(), removedRange: 11_000..<11_800, crossfade: Crossfade(lengthSamples: 0))
+    let narrowed = EditedTimeline(sourceDurationSamples: 100_000, removals: [neighbour, removal])
+    let currentMax = narrowed.maxCrossfadeLength(forSeamID: id)!
+    #expect(currentMax < 1_200)
+    model.syncTimeline(narrowed)
+    #expect(model.crossfadeStretchDraft != nil)  // stored length unchanged: the drag survives
+    model.crossfadeStretchEnded()
+
+    expectNoDifference(committed, [currentMax])
+  }
+
+  /// The parent decides when crossfade edits are allowed at all (it refuses mid-export). The sheet
+  /// asks before seeding a draft, so it never previews a stretch the release would then discard.
+  @Test func crossfadeStretchBeganIsANoOpWhenTheParentRefusesCrossfadeEdits() {
+    let model = laneModel()
+    let id = UUID()
+    let removal = TimelineRemoval(
+      id: id, removedRange: 12_000..<15_000, crossfade: Crossfade(lengthSamples: 600))
+    model.currentCrossfadeLength = { $0 == id ? 600 : nil }
+    model.canEditCrossfade = { false }
+    model.syncTimeline(EditedTimeline(sourceDurationSamples: 100_000, removals: [removal]))
+
+    model.crossfadeStretchBegan(id: id)
+
+    expectNoDifference(model.crossfadeStretchDraft, nil)
+  }
+
   /// Right-clicking a seam selects it and offers Restore, which forwards the seam's id to `onRestore`
   /// (the parent's restore funnel).
   @Test func contextMenuOnASeamSelectsAndRestores() {

@@ -1573,6 +1573,9 @@ final class EditorModel: ViewModel {
     child.currentCrossfadeLength = { [weak self] removalID in
       self?.timelineRemovals[id: removalID]?.crossfade.lengthSamples
     }
+    // Mirror the main lane's begin-time refusal: `updateCrossfade` is frozen mid-export, so the sheet
+    // must not preview a stretch its release would discard.
+    child.canEditCrossfade = { [weak self] in self?.isExporting == false }
     // ⌘Z/⌘⇧Z pressed inside the sheet route here: a modal removal lives on this document's undo
     // stack, and `undoTapped`/`redoTapped` fan the restored timeline back into the open sheet via
     // `syncEditedTimeline`. The main window's SwiftUI undo shortcut can't fire while the sheet is key.
