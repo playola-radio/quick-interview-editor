@@ -8,6 +8,40 @@ import Testing
 
 @testable import QuickInterviewEditor
 
+/// Suspends a play call until released, reporting when it started. A minimal local mirror of
+/// `EditorTransportTests`' `TransportGate`, scoped to the one playback-interruption test below.
+private final class PlaybackGate: @unchecked Sendable {
+  private let lock = NSLock()
+  private var continuations: [CheckedContinuation<Void, Never>] = []
+  private let startedContinuation: AsyncStream<Void>.Continuation
+  let started: AsyncStream<Void>
+  init() {
+    var continuation: AsyncStream<Void>.Continuation!
+    started = AsyncStream { continuation = $0 }
+    startedContinuation = continuation
+  }
+  func play() async -> PlaybackEnd {
+    startedContinuation.yield(())
+    await withCheckedContinuation { cont in
+      lock.lock()
+      continuations.append(cont)
+      lock.unlock()
+    }
+    return .finished
+  }
+  func release() {
+    lock.lock()
+    let conts = continuations
+    continuations = []
+    lock.unlock()
+    for cont in conts { cont.resume() }
+  }
+  func awaitStarted() async {
+    var it = started.makeAsyncIterator()
+    _ = await it.next()
+  }
+}
+
 @MainActor
 struct EditorCrossfadeStretchTests {
   private func editor(fingerprint: String) -> EditorModel {
@@ -51,6 +85,26 @@ struct EditorCrossfadeStretchTests {
       $0.defaultFileStorage = FileStorage.inMemory(fileSystem: LockIsolated([:]))
     } operation: {
       try body()
+    }
+  }
+
+  // MARK: - Seam guard
+
+  @Test func stretchBeganNoOpsWhenTheSeamIsUnrecoverable() {
+    withStorage {
+      let model = editor(fingerprint: "fp-stretch-invalid-seam")
+      // Two overlapping removals make `TimelineRemovals.normalize` return nil, so
+      // `EditedTimeline.seams` is empty even though the document still holds both removals — the
+      // no-seam state the guard defends against. (Unreachable through the normal remove-section UI,
+      // which never authors overlapping removals; defensive here.)
+      let id = addRemoval(model, id: Fixtures.uuid(1), range: 48_000..<96_000, length: 600)
+      addRemoval(model, id: Fixtures.uuid(2), range: 60_000..<120_000, length: 600)
+      #expect(model.editedWaveform.timeline.seams.isEmpty)
+
+      model.crossfadeStretchBegan(id: id)
+
+      expectNoDifference(model.crossfadeStretchDraft, nil)
+      expectNoDifference(model.selectedSeamID, nil)
     }
   }
 
@@ -242,6 +296,73 @@ struct EditorCrossfadeStretchTests {
       model.crossfadeStretched(.trailing, toX: CGFloat(end + 1000))
 
       #expect((model.crossfadeStretchDraft?.length ?? 0) % 2 == 1)
+    }
+  }
+
+  // MARK: - Playback interruption
+
+  @Test func stretchBeganStopsActiveTransportPlayback() async {
+    let gate = PlaybackGate()
+    await withDependencies {
+      $0.defaultFileStorage = FileStorage.inMemory(fileSystem: LockIsolated([:]))
+      $0.audioPlayer.playEdited = { _, _, _, _, _ in
+        EditedPlaybackEnd(end: await gate.play(), finishedEditedSample: nil)
+      }
+      $0.audioPlayer.stop = { _ in gate.release() }
+    } operation: {
+      let model = editor(fingerprint: "fp-stretch-playback-stop")
+      let id = addRemoval(model)
+      let task = Task { await model.transportPlayTapped() }
+      await gate.awaitStarted()
+      #expect(model.isTransportPlaying)
+
+      model.crossfadeStretchBegan(id: id)
+
+      // Synchronous: the transport state is torn down (and the draft seeded) before this call
+      // returns, without waiting on the fire-and-forget audio-node stop below.
+      #expect(!model.isTransportPlaying)
+      expectNoDifference(model.crossfadeStretchDraft?.id, id)
+
+      await task.value
+    }
+  }
+
+  // MARK: - Cancellation (torn-down handle mid-drag)
+
+  @Test func cancellingAStretchRestoresTheCommittedPreviewAndLeavesTheDocumentUntouched() {
+    withStorage {
+      let model = editor(fingerprint: "fp-stretch-cancel")
+      let id = addRemoval(model, range: 48_000..<96_000, length: 600)
+      let committedDuration = model.editedWaveform.timeline.editedDurationSamples
+
+      model.crossfadeStretchBegan(id: id)
+      model.crossfadeStretched(toLength: 24_000)
+      #expect(model.editedWaveform.timeline.editedDurationSamples != committedDuration)
+
+      model.crossfadeStretchCancelled()
+
+      expectNoDifference(model.crossfadeStretchDraft, nil)
+      expectNoDifference(model.editedWaveform.timeline.editedDurationSamples, committedDuration)
+      expectNoDifference(model.timelineRemovals[id: id]?.crossfade.lengthSamples, 600)
+    }
+  }
+
+  /// A ⌘-scroll forwarded through the handle zone (fix for the scroll-swallowing bug) can zoom
+  /// mid-drag without ending it — `samplesPerPixel` isn't part of the drag's own preview math, so
+  /// nothing else resets it. Cancelling is documented as restoring "the committed timeline/viewport";
+  /// a zoom that leaked through the live drag is part of that viewport and must roll back too.
+  @Test func cancellingAStretchRestoresTheFrozenZoomLevel() {
+    withStorage {
+      let model = editor(fingerprint: "fp-stretch-cancel-zoom")
+      let id = addRemoval(model, range: 48_000..<96_000, length: 600)
+      primeGeometry(model)
+      let committedSamplesPerPixel = model.editedWaveform.samplesPerPixel
+
+      model.crossfadeStretchBegan(id: id)
+      model.editedWaveform.samplesPerPixel = committedSamplesPerPixel * 2
+      model.crossfadeStretchCancelled()
+
+      expectNoDifference(model.editedWaveform.samplesPerPixel, committedSamplesPerPixel)
     }
   }
 

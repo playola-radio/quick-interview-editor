@@ -80,6 +80,10 @@ struct WaveformLaneView<Overlay: View>: View {
   var onSeamStretchBegan: (UUID) -> Void = { _ in }
   var onSeamStretched: (CrossfadeEdge, CGFloat) -> Void = { _, _ in }
   var onSeamStretchEnded: () -> Void = {}
+  /// A live drag torn down before mouse-up (sheet dismissed, tab switched, lane removed): drops the
+  /// draft and restores the committed preview rather than stranding it. Default no-op so call sites
+  /// without seam stretching (the slice-edit sheet, until Stage 4) compile unchanged.
+  var onSeamStretchCancelled: () -> Void = {}
   @ViewBuilder let auditionOverlay: (WaveformSpan) -> Overlay
 
   private let bandHeight: CGFloat = 148
@@ -111,9 +115,11 @@ struct WaveformLaneView<Overlay: View>: View {
       .overlay(
         SeamStretchHandleLayer(
           seams: seams,
+          waveform: waveform,
           onStretchBegan: onSeamStretchBegan,
           onStretched: onSeamStretched,
           onStretchEnded: onSeamStretchEnded,
+          onStretchCancelled: onSeamStretchCancelled,
           onBodyClick: onBodyClick,
           onContextMenu: onContextMenu)
       )
@@ -126,6 +132,7 @@ struct WaveformLaneView<Overlay: View>: View {
           WaveformEdgeHandleLayer(
             startX: highlightRange.flatMap { waveform.laneX(forSource: $0.lowerBound) },
             endX: highlightRange.flatMap { waveform.laneX(forSource: $0.upperBound) },
+            waveform: waveform,
             onEdgeDragBegan: onEdgeDragBegan,
             onEdgeDragged: onEdgeDragged,
             onEdgeDragEnded: onEdgeDragEnded,
@@ -505,6 +512,7 @@ private final class ClosureMenuItem: NSMenuItem {
 private struct WaveformEdgeHandleLayer: NSViewRepresentable {
   let startX: CGFloat?
   let endX: CGFloat?
+  let waveform: any WaveformLaneDriving
   let onEdgeDragBegan: (SelectionEdge) -> Void
   let onEdgeDragged: (SelectionEdge, CGFloat) -> Void
   let onEdgeDragEnded: (SelectionEdge) -> Void
@@ -526,6 +534,7 @@ private struct WaveformEdgeHandleLayer: NSViewRepresentable {
   private func apply(to view: HandleView) {
     view.startX = startX
     view.endX = endX
+    view.waveform = waveform
     view.onEdgeDragBegan = onEdgeDragBegan
     view.onEdgeDragged = onEdgeDragged
     view.onEdgeDragEnded = onEdgeDragEnded
@@ -535,6 +544,7 @@ private struct WaveformEdgeHandleLayer: NSViewRepresentable {
   final class HandleView: NSView {
     var startX: CGFloat?
     var endX: CGFloat?
+    var waveform: (any WaveformLaneDriving)?
     var onEdgeDragBegan: ((SelectionEdge) -> Void)?
     var onEdgeDragged: ((SelectionEdge, CGFloat) -> Void)?
     var onEdgeDragEnded: ((SelectionEdge) -> Void)?
@@ -591,6 +601,21 @@ private struct WaveformEdgeHandleLayer: NSViewRepresentable {
     override func menu(for event: NSEvent) -> NSMenu? {
       waveformContextMenu(from: onContextMenu?(localX(event)) ?? [])
     }
+
+    /// Forward ⌘-scroll zoom and plain-scroll pan through, exactly like `WaveformInteractionLayer`'s
+    /// `InteractionView` — otherwise the ~6pt selection-edge zone this view claims would swallow the
+    /// gesture and drop it, the same bug `SeamStretchHandleLayer` has for the bowtie-edge zones.
+    override func scrollWheel(with event: NSEvent) {
+      let flags = event.modifierFlags
+      waveform?.scrolled(
+        deltaX: event.scrollingDeltaX,
+        deltaY: event.scrollingDeltaY,
+        hasPreciseDeltas: event.hasPreciseScrollingDeltas,
+        optionDown: flags.contains(.option),
+        commandDown: flags.contains(.command),
+        atX: localX(event))
+      // Consume: do NOT call super, so an enclosing ScrollView never double-scrolls.
+    }
   }
 }
 
@@ -603,9 +628,11 @@ private struct WaveformEdgeHandleLayer: NSViewRepresentable {
 /// it forwards the grabbed seam id, edge, and raw gesture x to the closures.
 private struct SeamStretchHandleLayer: NSViewRepresentable {
   let seams: [SeamOverlay]
+  let waveform: any WaveformLaneDriving
   let onStretchBegan: (UUID) -> Void
   let onStretched: (CrossfadeEdge, CGFloat) -> Void
   let onStretchEnded: () -> Void
+  let onStretchCancelled: () -> Void
   let onBodyClick: (CGFloat, Bool) -> Void
   let onContextMenu: (CGFloat) -> [WaveformMenuItem]
 
@@ -621,18 +648,22 @@ private struct SeamStretchHandleLayer: NSViewRepresentable {
 
   private func apply(to view: HandleView) {
     view.seams = seams
+    view.waveform = waveform
     view.onStretchBegan = onStretchBegan
     view.onStretched = onStretched
     view.onStretchEnded = onStretchEnded
+    view.onStretchCancelled = onStretchCancelled
     view.onBodyClick = onBodyClick
     view.onContextMenu = onContextMenu
   }
 
   final class HandleView: NSView {
     var seams: [SeamOverlay] = []
+    var waveform: (any WaveformLaneDriving)?
     var onStretchBegan: ((UUID) -> Void)?
     var onStretched: ((CrossfadeEdge, CGFloat) -> Void)?
     var onStretchEnded: (() -> Void)?
+    var onStretchCancelled: (() -> Void)?
     var onBodyClick: ((CGFloat, Bool) -> Void)?
     var onContextMenu: ((CGFloat) -> [WaveformMenuItem])?
 
@@ -718,6 +749,34 @@ private struct SeamStretchHandleLayer: NSViewRepresentable {
     /// here) shows no menu, same as the marquee and selection-edge layers.
     override func menu(for event: NSEvent) -> NSMenu? {
       waveformContextMenu(from: onContextMenu?(localX(event)) ?? [])
+    }
+
+    /// Forward ⌘-scroll zoom and plain-scroll pan through, exactly like `WaveformInteractionLayer`'s
+    /// `InteractionView` — otherwise the grab-tolerance zone around each bowtie edge would swallow the
+    /// gesture and drop it.
+    override func scrollWheel(with event: NSEvent) {
+      let flags = event.modifierFlags
+      waveform?.scrolled(
+        deltaX: event.scrollingDeltaX,
+        deltaY: event.scrollingDeltaY,
+        hasPreciseDeltas: event.hasPreciseScrollingDeltas,
+        optionDown: flags.contains(.option),
+        commandDown: flags.contains(.command),
+        atX: localX(event))
+      // Consume: do NOT call super, so an enclosing ScrollView never double-scrolls.
+    }
+
+    /// Torn down mid-drag (sheet dismissed, tab switched, lane removed) — mouse-up never arrives to
+    /// run `onStretchEnded`, so without this the live preview timeline (and the draft) would strand.
+    /// Cancel instead of committing: the drag was never confirmed.
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+      super.viewWillMove(toWindow: newWindow)
+      if newWindow == nil, didDrag {
+        onStretchCancelled?()
+        active = nil
+        downX = nil
+        didDrag = false
+      }
     }
   }
 }

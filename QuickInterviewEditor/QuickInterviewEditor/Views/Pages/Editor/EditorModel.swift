@@ -1769,18 +1769,36 @@ final class EditorModel: ViewModel {
 
   // MARK: - Crossfade stretch (edge drag)
   /// Begins an edge-drag stretch of seam `id`: selects it and seeds the draft with its current
-  /// length. A no-op for an unknown removal.
+  /// length. A no-op for an unknown removal OR one with no derivable seam (an invalid timeline —
+  /// e.g. overlapping removals — unreachable through the normal remove-section UI, but a fallback
+  /// here would seed `committedLength = 0`, letting the drag commit a silent hard cut).
   func crossfadeStretchBegan(id: TimelineRemoval.ID) {
-    guard let removal = timelineRemovals[id: id] else { return }
+    guard let removal = timelineRemovals[id: id],
+      let seam = editedWaveform.timeline.seams.first(where: { $0.id == id })
+    else { return }
+    stopPlaybackForTimelineEdit()
     selectSeam(id)
-    let seam = editedWaveform.timeline.seams.first { $0.id == id }
     crossfadeStretchDraft = CrossfadeStretchDraft(
       id: id,
       length: removal.crossfade.lengthSamples,
-      committedLength: seam?.crossfadeLength ?? removal.crossfade.lengthSamples,
-      committedDoubledCenterEdited: seam?.editedCrossfadeDoubledCenter ?? 0,
+      committedLength: seam.crossfadeLength,
+      committedDoubledCenterEdited: seam.editedCrossfadeDoubledCenter,
       frozenVisibleStart: editedWaveform.visibleStartSample,
       frozenSamplesPerPixel: editedWaveform.samplesPerPixel)
+  }
+
+  /// Stops any active/paused transport before an edit that reflows the timeline (crossfade
+  /// stretch), so the playhead can't be drawn against preview geometry while audio plays the old
+  /// timeline. Synchronous: clears transport state so the position loop stops ticking immediately
+  /// (the draft must be seeded before this method returns — the AppKit drag emits
+  /// `onStretchBegan` then `onStretched` in the same event); the audio node stop is fire-and-forget
+  /// (own session only, mirroring `endTransportPlayback`).
+  private func stopPlaybackForTimelineEdit() {
+    guard isTransportPlaying || isTransportPaused else { return }
+    let session = transportPhase.session
+    resetTransportState()
+    endTranscriptFollow()
+    Task { await stopOwnedPlayback(session) }
   }
 
   /// A stretch drag to view-x: map x → edited sample and derive the symmetric length from the
@@ -1854,6 +1872,21 @@ final class EditorModel: ViewModel {
     var crossfade = removal.crossfade
     crossfade.lengthSamples = draft.length
     updateCrossfade(id: draft.id, crossfade)
+  }
+
+  /// Aborts an in-flight stretch without committing: drops the draft and restores the committed
+  /// timeline/viewport the live preview had replaced. For a drag torn down before mouse-up (sheet
+  /// dismissed, tab switched, lane removed) — the only other exit, `crossfadeStretchEnded`, needs
+  /// mouse-up to run, so without this the preview timeline (and the stale draft) would strand until
+  /// some later, unrelated document change forced a sync. A no-op if no drag is live. Also restores
+  /// `samplesPerPixel`: a ⌘-scroll forwarded through the handle zone can zoom mid-drag without ending
+  /// it, and the drag's own preview math never touches that property, so nothing else resets it.
+  func crossfadeStretchCancelled() {
+    guard let draft = crossfadeStretchDraft else { return }
+    crossfadeStretchDraft = nil
+    editedWaveform.timeline = editedTimeline
+    editedWaveform.visibleStartSample = draft.frozenVisibleStart
+    editedWaveform.samplesPerPixel = draft.frozenSamplesPerPixel
   }
 
   func renameSlice(_ id: Slice.ID, to name: String) {

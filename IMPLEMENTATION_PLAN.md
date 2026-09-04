@@ -32,12 +32,16 @@ promoted to a top-level domain enum. `WaveformView` forwards the callbacks.
 ## Stage 4: Edit Slice modal parity
 **Goal**: forward the stretch through the parent `EditorModel.updateCrossfade`
 funnel (mirror `onRestore`); wire the same handle layer into `EditSliceView`.
-**Status**: Complete — `EditSliceModel` mirrors the stretch interaction against
-its own parent-synced lane, delegating the commit via `onStretchCrossfade` and
-seeding/comparing against the stored length via `currentCrossfadeLength` (so a
-no-op modal drag never collapses latent fade intent). Same
-`SeamStretchHandleLayer` wired into `EditSliceView`. Cross-surface identity +
-no-op tests green (`EditorEditSlicePresentationTests`).
+**Status**: Deferred (commit `7490e52`) — `EditSliceModel` still mirrors the
+stretch interaction and its model-level tests stay green, but the drag handles
+are withheld on the sheet: the sheet edits and clamps a crossfade on the
+*global* edited timeline, while a slice plays and exports on its own
+*windowed* timeline, where a boundary-straddling crossfade collapses to a hard
+cut. Dragging a boundary bowtie in the sheet could therefore author a fade the
+slice renders as a hard cut — what you edit would not be what you hear or
+export. `seamOverlays` withholds the drag handles (the bowtie still draws) on
+the sheet until the slice-local seam projection lands in a follow-on PR; the
+stretch machinery and its tests remain in place for that work.
 
 ## Codex adversarial review (round 2) — triage
 
