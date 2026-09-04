@@ -132,10 +132,13 @@ final class EditSliceModel: ViewModel, Identifiable {
         previewLength.map { editedWaveform.spanForSeam(seam, previewLength: $0) }
         ?? editedWaveform.spanForSeam(seam)
       guard let span else { return nil }
-      let handles = editedWaveform.seamHandleXs(seam, previewLength: previewLength)
+      // No stretch handles on the slice sheet: it edits/clamps on the GLOBAL timeline, but the slice
+      // renders on its own windowed timeline, so a boundary crossfade dragged here could author a
+      // fade the slice plays/exports as a hard cut. The bowtie still draws; only the drag affordance
+      // is withheld until the slice-local seam projection lands (follow-on PR).
       return SeamOverlay(
         id: seam.id, span: span, isSelected: seam.id == selectedSeamID,
-        leadingHandleX: handles.leading, trailingHandleX: handles.trailing)
+        leadingHandleX: nil, trailingHandleX: nil)
     }
   }
 

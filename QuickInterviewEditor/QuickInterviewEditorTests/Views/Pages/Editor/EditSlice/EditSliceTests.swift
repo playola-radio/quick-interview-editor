@@ -672,6 +672,21 @@ struct EditSliceTests {
     expectNoDifference(model.seamOverlays.map(\.id), [removal.id])
   }
 
+  /// The slice sheet still DRAWS bowties (crossfades exist and render), but exposes no stretch
+  /// handles: the sheet edits/clamps on the GLOBAL timeline while the slice renders on its own
+  /// windowed timeline, so a boundary crossfade could otherwise be dragged into a fade the slice
+  /// plays/exports as a hard cut. Handles return in the slice-local seam-projection follow-on.
+  @Test func seamOverlaysExposeNoStretchHandlesInTheSliceSheet() {
+    let model = laneModel()
+    let removal = TimelineRemoval(
+      id: UUID(), removedRange: 12_000..<15_000, crossfade: Crossfade(lengthSamples: 600))
+    model.syncTimeline(EditedTimeline(sourceDurationSamples: 100_000, removals: [removal]))
+
+    let overlay = model.seamOverlays[0]
+    #expect(overlay.leadingHandleX == nil)
+    #expect(overlay.trailingHandleX == nil)
+  }
+
   /// Right-clicking a seam selects it and offers Restore, which forwards the seam's id to `onRestore`
   /// (the parent's restore funnel).
   @Test func contextMenuOnASeamSelectsAndRestores() {
