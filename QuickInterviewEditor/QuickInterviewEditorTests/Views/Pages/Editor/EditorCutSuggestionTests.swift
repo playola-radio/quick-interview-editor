@@ -27,6 +27,13 @@ struct EditorCutSuggestionTests {
     expectNoDifference(model.slices[id: id]?.name, "A story")
   }
 
+  @Test func acceptingASuggestionTargetsItForScrolling() {
+    let model = editor()
+    let id = Fixtures.uuid(1)
+    model.acceptCutSuggestionSlice(slice(id))
+    expectNoDifference(model.sliceScrollTarget, id)
+  }
+
   @Test func acceptingIsIdempotentByID() {
     let model = editor()
     let id = Fixtures.uuid(1)

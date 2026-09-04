@@ -84,6 +84,15 @@ struct EditorTests {
     #expect(!slice.snippet.isEmpty)
   }
 
+  @Test func addSliceTargetsNewClipForScrolling() {
+    let model = editor()
+    #expect(model.sliceScrollTarget == nil)
+    selectWords(model.transcript, 0, 3)
+    model.addSliceTapped()
+    #expect(model.slices.count == 1)
+    expectNoDifference(model.sliceScrollTarget, model.slices.last?.id)
+  }
+
   // MARK: - Snippet middle-truncation
 
   @Test func shortSnippetPassesThroughUnchanged() {

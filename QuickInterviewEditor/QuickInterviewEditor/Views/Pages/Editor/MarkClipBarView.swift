@@ -10,6 +10,7 @@ struct MarkClipBarView: View {
   var body: some View {
     HStack(spacing: 12) {
       Button(model.markAsClipLabel) { model.addSliceTapped() }
+        .keyboardShortcut("d", modifiers: .command)
         .disabled(!model.canAddSlice)
 
       Button(model.clearButtonLabel) { model.clearSelectionTapped() }
