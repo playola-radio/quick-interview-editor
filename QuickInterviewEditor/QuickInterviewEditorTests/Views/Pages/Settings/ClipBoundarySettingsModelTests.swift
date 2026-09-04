@@ -70,6 +70,28 @@ struct ClipBoundarySettingsModelTests {
     }
   }
 
+  @Test func fractionalStoredValueIsRoundedOnInit() {
+    withDependencies {
+      $0.defaultAppStorage = UserDefaults(suiteName: "clip-settings-fractional-\(UUID())")!
+    } operation: {
+      @Shared(.clipStartOffsetMs) var startOffsetMs = 0.5
+      @Shared(.clipEndOffsetMs) var endOffsetMs = -12.4
+
+      let model = ClipBoundarySettingsModel()
+
+      // Applied offset now matches the rounded readout ("+1 ms" / "−12 ms") exactly.
+      expectNoDifference(model.startOffsetMs, 1)
+      expectNoDifference(model.endOffsetMs, -12)
+      expectNoDifference(model.startOffsetLabel, "+1 ms")
+      expectNoDifference(model.endOffsetLabel, "\u{2212}12 ms")
+
+      @Shared(.clipStartOffsetMs) var persistedStart
+      @Shared(.clipEndOffsetMs) var persistedEnd
+      expectNoDifference(persistedStart, 1)
+      expectNoDifference(persistedEnd, -12)
+    }
+  }
+
   @Test func readoutLabelFormatting() {
     withDependencies {
       $0.defaultAppStorage = UserDefaults(suiteName: "clip-settings-labels-\(UUID())")!

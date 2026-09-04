@@ -58,7 +58,9 @@ final class ClipBoundarySettingsModel: ViewModel {
 
   // MARK: - Private Helpers
   private func clamped(_ ms: Double) -> Double {
-    min(max(ms, minMs), maxMs)
+    // Round to whole ms so the integer readout never diverges from the offset
+    // `offsetClipRange` actually applies (e.g. a stored 0.5 would read "+1 ms" but cut at 0.5 ms).
+    min(max(ms, minMs), maxMs).rounded()
   }
 
   private static func readoutLabel(for ms: Double) -> String {
