@@ -405,4 +405,43 @@ struct EditorCrossfadeStretchTests {
       expectNoDifference(model.crossfadeStretchDraft, nil)
     }
   }
+
+  // MARK: - Export guard
+
+  /// Export freezes the removal set it was gated on at tap time, so a fade edit that lands while
+  /// the files render would leave the finished AIFFs stale relative to what the user sees. The
+  /// commit funnel refuses, like `removeSourceRange` does, which covers every surface that routes
+  /// through it (the main lane's drag and the slice sheet's) at once.
+  @Test func updateCrossfadeIsANoOpMidExport() async {
+    await withDependencies {
+      $0.defaultFileStorage = FileStorage.inMemory(fileSystem: LockIsolated([:]))
+    } operation: {
+      let model = editor(fingerprint: "fp-stretch-export-commit")
+      let id = addRemoval(model, length: 600)
+      model.exportPhase = .exporting(current: 0, total: 1)
+
+      model.updateCrossfade(id: id, Crossfade(lengthSamples: 1_200, curve: .equalPower))
+
+      expectNoDifference(model.timelineRemovals[id: id]?.crossfade.lengthSamples, 600)
+      // No undo entry was pushed: the next undo rewinds the removal itself, not a fade edit.
+      model.exportPhase = .idle
+      await model.undoTapped()
+      expectNoDifference(model.timelineRemovals[id: id], nil)
+    }
+  }
+
+  /// The drag refuses to start too, so the lane never previews a reflow the release would then
+  /// silently discard.
+  @Test func crossfadeStretchBeganIsANoOpMidExport() {
+    withStorage {
+      let model = editor(fingerprint: "fp-stretch-export-begin")
+      let id = addRemoval(model)
+      model.exportPhase = .exporting(current: 0, total: 1)
+
+      model.crossfadeStretchBegan(id: id)
+
+      expectNoDifference(model.crossfadeStretchDraft, nil)
+      expectNoDifference(model.selectedSeamID, nil)
+    }
+  }
 }

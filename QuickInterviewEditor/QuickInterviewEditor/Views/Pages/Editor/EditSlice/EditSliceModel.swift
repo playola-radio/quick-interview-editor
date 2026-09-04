@@ -496,11 +496,20 @@ final class EditSliceModel: ViewModel, Identifiable {
 
   /// Release: commit the drafted length through the parent's `updateCrossfade` funnel (one undo
   /// step) and clear the draft. A drag that netted no change against the seam's current length pushes
-  /// no entry, matching the main editor.
+  /// no entry, matching the main editor. Re-validates what `crossfadeStretchBegan` checked, because
+  /// both can change while the mouse is down without a fan reaching `syncTimeline`: the stored
+  /// length (an undo restoring a latent, clamped-away length leaves the rendered timeline equal, so
+  /// the parent never fans) and the seam's interior status (the key monitor stays live during a
+  /// drag, so a nudge can move the cut onto the seam). Either way the drag's intent is stale — it
+  /// would overwrite a restored value, or author a fade this slice plays as a hard cut — so it
+  /// commits nothing.
   func crossfadeStretchEnded() {
     guard let draft = crossfadeStretchDraft else { return }
     crossfadeStretchDraft = nil
-    guard let current = currentCrossfadeLength(draft.id), draft.length != current else { return }
+    guard let current = currentCrossfadeLength(draft.id), current == draft.committedLength,
+      let seam = editedWaveform.timeline.seams.first(where: { $0.id == draft.id }),
+      isInteriorSeam(seam), draft.length != current
+    else { return }
     onStretchCrossfade(draft.id, draft.length)
   }
 
@@ -596,15 +605,17 @@ final class EditSliceModel: ViewModel, Identifiable {
     if let selectedSeamID, !timeline.seams.contains(where: { $0.id == selectedSeamID }) {
       self.selectedSeamID = nil
     }
-    // Drop a live stretch draft whose baseline no longer matches the fanned timeline — its seam is
-    // gone, or the seam's crossfade length changed underneath it (an undo/redo reverted the very seam
-    // being dragged). An absent seam reads as `nil != committedLength`, so this one check subsumes the
-    // missing-seam case too. Mirrors the main editor's `syncEditedTimeline` guard.
-    if let crossfadeStretchDraft,
-      timeline.seams.first(where: { $0.id == crossfadeStretchDraft.id })?.crossfadeLength
-        != crossfadeStretchDraft.committedLength
+    // Drop a live stretch draft whose baseline no longer matches the document — its seam is gone, or
+    // the removal's STORED crossfade length changed underneath it (an undo/redo reverted the very seam
+    // being dragged). Compared against the stored length the draft was seeded from, not the lane's
+    // clamped `crossfadeLength`: a fade stored longer than this seam can render must survive an
+    // unrelated re-fan, or the drag would vanish under the pointer. Mirrors the main editor's
+    // `syncEditedTimeline` guard.
+    if let draft = crossfadeStretchDraft,
+      !timeline.seams.contains(where: { $0.id == draft.id })
+        || currentCrossfadeLength(draft.id) != draft.committedLength
     {
-      self.crossfadeStretchDraft = nil
+      crossfadeStretchDraft = nil
     }
     editedWaveform.timeline = timeline
     editedWaveform.setNavigableEditedRange(pinnedEditedRange)

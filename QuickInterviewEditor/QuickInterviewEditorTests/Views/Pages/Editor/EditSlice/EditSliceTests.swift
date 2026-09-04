@@ -515,7 +515,8 @@ struct EditSliceTests {
     let id = UUID()
     let removal = TimelineRemoval(
       id: id, removedRange: 12_000..<15_000, crossfade: Crossfade(lengthSamples: 600))
-    model.currentCrossfadeLength = { $0 == id ? 600 : nil }
+    var stored = 600
+    model.currentCrossfadeLength = { $0 == id ? stored : nil }
     model.syncTimeline(EditedTimeline(sourceDurationSamples: 100_000, removals: [removal]))
     model.crossfadeStretchBegan(id: id)
     model.crossfadeStretched(toLength: 1_200)
@@ -524,6 +525,7 @@ struct EditSliceTests {
     // The parent reverts the seam to a different committed length under the live drag.
     let reverted = TimelineRemoval(
       id: id, removedRange: 12_000..<15_000, crossfade: Crossfade(lengthSamples: 900))
+    stored = 900
     model.syncTimeline(EditedTimeline(sourceDurationSamples: 100_000, removals: [reverted]))
 
     expectNoDifference(model.crossfadeStretchDraft, nil)
@@ -830,6 +832,73 @@ struct EditSliceTests {
     model.crossfadeStretchCancelled()
 
     expectNoDifference(model.crossfadeStretchDraft, nil)
+    expectNoDifference(committed, [])
+  }
+
+  /// The stored length can change under a live drag without the fanned timeline changing: an undo
+  /// that only restores a latent, clamped-away length leaves the rendered seam identical, so the
+  /// parent's timeline-equality guard never fans here. Release re-reads the stored value — a
+  /// baseline that moved means the drag's intent is stale, so it commits nothing rather than
+  /// overwrite the restored value.
+  @Test func releaseAfterTheStoredLengthChangedUnderTheDragCommitsNothing() {
+    let model = laneModel()
+    let id = UUID()
+    let removal = TimelineRemoval(
+      id: id, removedRange: 12_000..<15_000, crossfade: Crossfade(lengthSamples: 600))
+    var stored = 600
+    model.currentCrossfadeLength = { $0 == id ? stored : nil }
+    var committed: [Int] = []
+    model.onStretchCrossfade = { committed.append($1) }
+    model.syncTimeline(EditedTimeline(sourceDurationSamples: 100_000, removals: [removal]))
+    model.crossfadeStretchBegan(id: id)
+    model.crossfadeStretched(toLength: 1_200)
+
+    stored = 900
+    model.crossfadeStretchEnded()
+
+    expectNoDifference(committed, [])
+    expectNoDifference(model.crossfadeStretchDraft, nil)
+  }
+
+  /// The sync-time staleness check compares STORED lengths, not the lane's clamped ones: a fade
+  /// stored longer than this seam can render (a latent intent the timeline clamps) must survive an
+  /// unrelated re-fan, or the drag would vanish under the pointer for no reason the user can see.
+  @Test func syncTimelineKeepsADraftWhoseStoredLengthIsUnchanged() {
+    let model = laneModel()
+    let id = UUID()
+    // Left handle 12_000: the stored 20_000 renders clamped to 12_000.
+    let removal = TimelineRemoval(
+      id: id, removedRange: 12_000..<15_000, crossfade: Crossfade(lengthSamples: 20_000))
+    model.currentCrossfadeLength = { $0 == id ? 20_000 : nil }
+    let timeline = EditedTimeline(sourceDurationSamples: 100_000, removals: [removal])
+    model.syncTimeline(timeline)
+    model.crossfadeStretchBegan(id: id)
+    model.crossfadeStretched(toLength: 1_200)
+
+    model.syncTimeline(timeline)
+
+    expectNoDifference(model.crossfadeStretchDraft?.length, 1_200)
+  }
+
+  /// A keyboard nudge can move the slice's cut onto the seam while the mouse is still down (the key
+  /// monitor stays live during a drag). The seam is no longer interior, so release commits nothing:
+  /// the fade would play as a hard cut in this slice, exactly what withholding the handle prevents.
+  @Test func releaseAfterTheCutMovedOntoTheSeamCommitsNothing() {
+    let model = laneModel()
+    let id = UUID()
+    let removal = TimelineRemoval(
+      id: id, removedRange: 10_001..<10_200, crossfade: Crossfade(lengthSamples: 0))
+    model.currentCrossfadeLength = { $0 == id ? 0 : nil }
+    var committed: [Int] = []
+    model.onStretchCrossfade = { committed.append($1) }
+    model.syncTimeline(EditedTimeline(sourceDurationSamples: 100_000, removals: [removal]))
+    model.crossfadeStretchBegan(id: id)
+    model.crossfadeStretched(toLength: 400)
+    #expect(model.crossfadeStretchDraft?.length == 400)
+
+    model.cutInNudgedForward()
+    model.crossfadeStretchEnded()
+
     expectNoDifference(committed, [])
   }
 
