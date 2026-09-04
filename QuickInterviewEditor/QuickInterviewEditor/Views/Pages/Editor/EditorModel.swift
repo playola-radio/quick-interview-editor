@@ -305,11 +305,16 @@ final class EditorModel: ViewModel {
     if let selectedSeamID, timelineRemovals[id: selectedSeamID] == nil {
       self.selectedSeamID = nil
     }
-    // Drop a live stretch draft whose seam is gone — its preview would target a removal the
-    // timeline no longer has. (Reconciled here for the same reason as the selection above.) Undo
-    // the draft's viewport compensation first, so the rebuild below re-clamps from the pre-drag
-    // scroll position rather than a shifted one.
-    if let crossfadeStretchDraft, timelineRemovals[id: crossfadeStretchDraft.id] == nil {
+    // Drop a live stretch draft whose baseline no longer matches the document — its seam is gone
+    // (restore/undo/redo removed it) OR the seam's committed crossfade length changed underneath it
+    // (an undo/redo reverted the very seam being dragged). Either way its preview would target stale
+    // geometry, so releasing it would rewrite the restored value. (Our own commit clears the draft
+    // before mutating, so this never fires on the normal drag reflow.) Undo the draft's viewport
+    // compensation first, so the rebuild below re-clamps from the pre-drag scroll position.
+    if let crossfadeStretchDraft,
+      timelineRemovals[id: crossfadeStretchDraft.id]?.crossfade.lengthSamples
+        != crossfadeStretchDraft.committedLength
+    {
       editedWaveform.visibleStartSample = crossfadeStretchDraft.frozenVisibleStart
       self.crossfadeStretchDraft = nil
     }
@@ -1773,7 +1778,7 @@ final class EditorModel: ViewModel {
       id: id,
       length: removal.crossfade.lengthSamples,
       committedLength: seam?.crossfadeLength ?? removal.crossfade.lengthSamples,
-      committedCenterEdited: seam?.editedCrossfadeCenter ?? 0,
+      committedDoubledCenterEdited: seam?.editedCrossfadeDoubledCenter ?? 0,
       frozenVisibleStart: editedWaveform.visibleStartSample,
       frozenSamplesPerPixel: editedWaveform.samplesPerPixel)
   }
@@ -1787,11 +1792,13 @@ final class EditorModel: ViewModel {
     let editedSample = WaveformViewport.xToSample(
       posX, visibleStartSample: draft.frozenVisibleStart,
       samplesPerPixel: draft.frozenSamplesPerPixel)
-    let halfWidth =
+    // Symmetric length from the dragged edge and the exact doubled center, so odd lengths are
+    // reachable: length = 2·edited − doubledCenter (trailing) or doubledCenter − 2·edited (leading).
+    let length =
       edge == .leading
-      ? draft.committedCenterEdited - editedSample
-      : editedSample - draft.committedCenterEdited
-    crossfadeStretched(toLength: halfWidth * 2)
+      ? draft.committedDoubledCenterEdited - 2 * editedSample
+      : 2 * editedSample - draft.committedDoubledCenterEdited
+    crossfadeStretched(toLength: length)
   }
 
   /// Geometry-free core: clamp the proposed length to `[0, available handle]`, hold it as the draft,

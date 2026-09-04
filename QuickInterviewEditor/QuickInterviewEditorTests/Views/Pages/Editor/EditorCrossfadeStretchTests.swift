@@ -222,7 +222,52 @@ struct EditorCrossfadeStretchTests {
     }
   }
 
+  // MARK: - Exact-center length (odd lengths reachable)
+
+  @Test func draggingAnOddLengthSeamKeepsOddParity() {
+    withStorage {
+      let model = editor(fingerprint: "fp-stretch-odd")
+      let id = addRemoval(model, range: 48_000..<96_000, length: 601)
+      // Set geometry AFTER the removal: the timeline rebuild re-fits zoom, so geometry set earlier
+      // would be overwritten. 1 sample/pixel keeps x → edited-sample identity so the drag lands exact.
+      model.editedWaveform.viewportWidth = 1000
+      model.editedWaveform.samplesPerPixel = 1
+      model.editedWaveform.visibleStartSample = 0
+      let seam = model.editedTimeline.seams.first { $0.id == id }!
+      let end = seam.editedCrossfadeStart + seam.crossfadeLength
+
+      model.crossfadeStretchBegan(id: id)
+      // Drag the trailing edge outward. With a truncated center the proposed length is always even, so
+      // an odd stored length could never be retained or reached; the exact doubled center fixes that.
+      model.crossfadeStretched(.trailing, toX: CGFloat(end + 1000))
+
+      #expect((model.crossfadeStretchDraft?.length ?? 0) % 2 == 1)
+    }
+  }
+
   // MARK: - Stale-draft reconciliation
+
+  @Test func undoingTheSameSeamMidDragDropsTheStaleDraft() async {
+    await withDependencies {
+      $0.defaultFileStorage = FileStorage.inMemory(fileSystem: LockIsolated([:]))
+    } operation: {
+      let model = editor(fingerprint: "fp-stretch-undo-mid")
+      let id = addRemoval(model, range: 48_000..<96_000, length: 600)
+      model.crossfadeStretchBegan(id: id)
+      model.crossfadeStretched(toLength: 24_000)
+      model.crossfadeStretchEnded()
+
+      // A new drag is live when an undo reverts the same seam's crossfade under it. The draft's
+      // baseline no longer matches the document, so releasing it would rewrite the restored value —
+      // the sync must drop the stale draft.
+      model.crossfadeStretchBegan(id: id)
+      model.crossfadeStretched(toLength: 30_000)
+      await model.undoTapped()
+
+      expectNoDifference(model.crossfadeStretchDraft, nil)
+      expectNoDifference(model.timelineRemovals[id: id]?.crossfade.lengthSamples, 600)
+    }
+  }
 
   @Test func restoringTheSeamMidDragDropsTheStaleDraft() {
     withStorage {

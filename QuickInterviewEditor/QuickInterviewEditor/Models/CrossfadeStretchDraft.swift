@@ -15,9 +15,11 @@ struct CrossfadeStretchDraft: Equatable {
   /// compensation (ΔL = `length − committedLength`). Defaults keep the plain `id`/`length`
   /// construction the tests and the modal use valid.
   var committedLength: Int = 0
-  /// The seam's edited center when the drag began, frozen so cursor→length maps against a stable
-  /// axis even as the live preview reflows the timeline underneath.
-  var committedCenterEdited: Int = 0
+  /// Twice the seam's exact edited center (`2·start + length`) when the drag began, frozen so
+  /// cursor→length maps against a stable axis even as the live preview reflows the timeline
+  /// underneath. Doubled (not the rounded center) so odd lengths stay reachable — see
+  /// `TimelineSeam.editedCrossfadeDoubledCenter`.
+  var committedDoubledCenterEdited: Int = 0
   /// The viewport when the drag began, frozen so cursor→edited-sample stays stable while the
   /// preview shifts the live viewport to keep the seam growing symmetrically on screen.
   var frozenVisibleStart: Int = 0

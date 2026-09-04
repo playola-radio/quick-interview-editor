@@ -704,7 +704,9 @@ private struct SeamStretchHandleLayer: NSViewRepresentable {
         // A click that never crossed the drag threshold isn't a stretch. Because we claimed the
         // mouse-down, the marquee/body layer beneath never sees it, so forward it to the same
         // body-click path — a plain click on a bowtie edge still selects the seam (Logic parity).
-        onBodyClick?(localX(event), event.modifierFlags.contains(.shift))
+        // Forward the mouse-DOWN x (not the up position): a below-threshold wobble should seek to
+        // where the user pressed, matching what the body layer would have reported.
+        onBodyClick?(downX ?? localX(event), event.modifierFlags.contains(.shift))
       }
       active = nil
       downX = nil

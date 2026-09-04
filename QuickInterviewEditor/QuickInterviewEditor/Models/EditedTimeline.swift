@@ -28,6 +28,12 @@ struct TimelineSeam: Equatable, Identifiable {
 
   /// The visual/edit center of the crossfade region, used by fade editing (PR5).
   var editedCrossfadeCenter: Int { editedCrossfadeStart + crossfadeLength / 2 }
+
+  /// Twice the exact (unrounded) crossfade center — `2·start + length`. Edge-drag length math derives
+  /// the symmetric length from a dragged edge and this value (`length = 2·edited − doubledCenter` for
+  /// a trailing edge), which avoids the half-sample truncation in `editedCrossfadeCenter` that would
+  /// otherwise make every proposed length even, so an odd stored length could never be retained.
+  var editedCrossfadeDoubledCenter: Int { 2 * editedCrossfadeStart + crossfadeLength }
 }
 
 /// Maps between SOURCE sample coordinates (the original recording) and EDITED

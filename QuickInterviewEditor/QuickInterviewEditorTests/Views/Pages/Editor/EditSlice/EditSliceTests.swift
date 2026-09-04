@@ -507,6 +507,28 @@ struct EditSliceTests {
     expectNoDifference(model.crossfadeStretchDraft, nil)
   }
 
+  /// The guard also fires when an undo/redo changes the dragged seam's crossfade length (not just
+  /// removes it): the draft's baseline no longer matches the fanned timeline, so releasing it would
+  /// rewrite the restored value — the sync must drop the stale draft.
+  @Test func syncTimelineDropsADraftWhenTheSeamLengthChangesUnderIt() {
+    let model = laneModel()
+    let id = UUID()
+    let removal = TimelineRemoval(
+      id: id, removedRange: 12_000..<15_000, crossfade: Crossfade(lengthSamples: 600))
+    model.currentCrossfadeLength = { $0 == id ? 600 : nil }
+    model.syncTimeline(EditedTimeline(sourceDurationSamples: 100_000, removals: [removal]))
+    model.crossfadeStretchBegan(id: id)
+    model.crossfadeStretched(toLength: 1_200)
+    #expect(model.crossfadeStretchDraft != nil)
+
+    // The parent reverts the seam to a different committed length under the live drag.
+    let reverted = TimelineRemoval(
+      id: id, removedRange: 12_000..<15_000, crossfade: Crossfade(lengthSamples: 900))
+    model.syncTimeline(EditedTimeline(sourceDurationSamples: 100_000, removals: [reverted]))
+
+    expectNoDifference(model.crossfadeStretchDraft, nil)
+  }
+
   // MARK: - FIX 2: updatePlayback highlights the current word in the scoped transcript
 
   @Test func updatePlaybackHighlightsTheCurrentWordInTheScopedTranscript() {

@@ -438,7 +438,7 @@ final class EditSliceModel: ViewModel, Identifiable {
       editedWaveform.timeline.seams.contains(where: { $0.id == id })
     else { return }
     selectSeam(id)
-    crossfadeStretchDraft = CrossfadeStretchDraft(id: id, length: length)
+    crossfadeStretchDraft = CrossfadeStretchDraft(id: id, length: length, committedLength: length)
   }
 
   /// A stretch drag to view-x on the sheet's lane: map x → edited sample and derive the symmetric
@@ -449,11 +449,14 @@ final class EditSliceModel: ViewModel, Identifiable {
       let seam = editedWaveform.timeline.seams.first(where: { $0.id == draft.id })
     else { return }
     let editedSample = editedWaveform.xToEditedSample(positionX)
-    let halfWidth =
+    // Symmetric length from the dragged edge and the exact doubled center, so odd lengths are
+    // reachable (a truncated center forces even proposals) — mirrors the main editor.
+    let doubled = seam.editedCrossfadeDoubledCenter
+    let length =
       edge == .leading
-      ? seam.editedCrossfadeCenter - editedSample
-      : editedSample - seam.editedCrossfadeCenter
-    crossfadeStretched(toLength: halfWidth * 2)
+      ? doubled - 2 * editedSample
+      : 2 * editedSample - doubled
+    crossfadeStretched(toLength: length)
   }
 
   /// Geometry-free core: clamp the proposed length to `[0, available handle]`, read from this lane's
@@ -558,8 +561,13 @@ final class EditSliceModel: ViewModel, Identifiable {
     if let selectedSeamID, !timeline.seams.contains(where: { $0.id == selectedSeamID }) {
       self.selectedSeamID = nil
     }
+    // Drop a live stretch draft whose baseline no longer matches the fanned timeline — its seam is
+    // gone, or the seam's crossfade length changed underneath it (an undo/redo reverted the very seam
+    // being dragged). An absent seam reads as `nil != committedLength`, so this one check subsumes the
+    // missing-seam case too. Mirrors the main editor's `syncEditedTimeline` guard.
     if let crossfadeStretchDraft,
-      !timeline.seams.contains(where: { $0.id == crossfadeStretchDraft.id })
+      timeline.seams.first(where: { $0.id == crossfadeStretchDraft.id })?.crossfadeLength
+        != crossfadeStretchDraft.committedLength
     {
       self.crossfadeStretchDraft = nil
     }
