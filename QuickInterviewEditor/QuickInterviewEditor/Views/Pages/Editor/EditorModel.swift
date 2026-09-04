@@ -41,6 +41,11 @@ final class EditorModel: ViewModel {
   /// `cutSuggestions` shares, so both stay backed by one file. Only `timelineRemovals`
   /// is written through here; the sidecar's other sections are `cutSuggestions`' concern.
   @ObservationIgnored @Shared var projectState: ProjectState
+  /// The user's global clip-boundary offset preference (Settings → Editing) — nudges every
+  /// NEW clip's cut points by up to ±50 ms. Read only by `appendNewClip`; manual boundary
+  /// re-edits never consult these.
+  @ObservationIgnored @Shared(.clipStartOffsetMs) var clipStartOffsetMs: Double
+  @ObservationIgnored @Shared(.clipEndOffsetMs) var clipEndOffsetMs: Double
 
   // MARK: - Initialization
   /// The user's original file — used **only** to name exported clips (its stem).
@@ -1416,12 +1421,29 @@ final class EditorModel: ViewModel {
   }
 
   /// Adds an accepted suggestion's slice to the editor. Idempotent by `Slice.id` (a
-  /// re-accept is a no-op), routed through `mutateSlices` so it's exportable and undoable.
+  /// re-accept is a no-op), routed through `appendNewClip` so it's exportable and undoable.
   /// Known limitation: undoing/deleting the slice later does not un-accept the suggestion
   /// in the sidecar — full accept/reject reconciliation is deferred.
   func acceptCutSuggestionSlice(_ slice: Slice) {
     guard slices[id: slice.id] == nil else { return }
-    mutateSlices { $0.append(slice) }
+    appendNewClip(slice)
+  }
+
+  /// The single funnel for every NEW clip (Mark as Clip, fine-tune commit, accepted
+  /// suggestion): nudges its cut points by the user's clip-boundary offset setting, then
+  /// appends. Word membership and snippet are intentionally left AS BUILT — the offset is a
+  /// small audio padding, not a content change — so the clip stays "the same words" with a
+  /// slightly earlier/later cut. Manual boundary re-edits (`updatedSlice`) deliberately do NOT
+  /// pass through here (new cuts only).
+  private func appendNewClip(_ slice: Slice) {
+    let range = offsetClipRange(
+      slice.startSample..<slice.endSample,
+      startOffsetMs: clipStartOffsetMs, endOffsetMs: clipEndOffsetMs,
+      sampleRate: editPlan.source.sampleRate, totalSamples: editPlan.source.durationSamples)
+    var nudged = slice
+    nudged.startSample = range.lowerBound
+    nudged.endSample = range.upperBound
+    mutateSlices { $0.append(nudged) }
   }
 
   // MARK: - Listen pass
@@ -1594,15 +1616,10 @@ final class EditorModel: ViewModel {
     // belongs to the clip.
     let wordIDs = wordIDs(anyOverlap: range, words: editPlan.words)
     guard !wordIDs.isEmpty else { return }
-    let slice = Slice(
-      id: UUID(),
-      name: "Slice \(nextSliceNumber)",
-      startSample: range.lowerBound,
-      endSample: range.upperBound,
-      wordIDs: wordIDs,
-      snippet: displaySnippet(sliceSnippet(for: wordIDs, words: editPlan.words))
-    )
-    mutateSlices { $0.append(slice) }
+    let slice = buildSlice(
+      id: UUID(), name: "Slice \(nextSliceNumber)", range: range, wordIDs: wordIDs,
+      plan: editPlan)
+    appendNewClip(slice)
     nextSliceNumber += 1
     transcript.clearSelectionTapped()
   }
@@ -2398,7 +2415,7 @@ final class EditorModel: ViewModel {
       fineTune.markCommitted(draft)
     case .pendingSelection:
       let slice = makeSlice(range: draft)
-      mutateSlices { $0.append(slice) }
+      appendNewClip(slice)
       nextSliceNumber += 1
       // Closing the pane removes the region, so stop any preview or audition of the draft first.
       cancelPreviewOrAuditionIfNeeded()

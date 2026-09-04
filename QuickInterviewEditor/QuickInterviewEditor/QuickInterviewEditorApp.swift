@@ -4,6 +4,7 @@ import SwiftUI
 struct QuickInterviewEditorApp: App {
   @State private var model = AppLaunchModel()
   @State private var settings = SettingsModel()
+  @State private var clipSettings = ClipBoundarySettingsModel()
 
   var body: some Scene {
     WindowGroup {
@@ -17,8 +18,13 @@ struct QuickInterviewEditorApp: App {
     }
 
     Settings {
-      SettingsView(model: settings)
-        .preferredColorScheme(.dark)
+      TabView {
+        SettingsView(model: settings)
+          .tabItem { Label("Cut Suggestions", systemImage: "scissors") }
+        ClipBoundarySettingsView(model: clipSettings)
+          .tabItem { Label("Editing", systemImage: "slider.horizontal.3") }
+      }
+      .preferredColorScheme(.dark)
     }
   }
 }
