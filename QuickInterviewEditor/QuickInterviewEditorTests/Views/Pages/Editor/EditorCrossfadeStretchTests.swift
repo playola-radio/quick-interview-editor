@@ -1,0 +1,408 @@
+import ConcurrencyExtras
+import CustomDump
+import Dependencies
+import Foundation
+import IdentifiedCollections
+@_spi(Internals) import Sharing
+import Testing
+
+@testable import QuickInterviewEditor
+
+/// Suspends a play call until released, reporting when it started. A minimal local mirror of
+/// `EditorTransportTests`' `TransportGate`, scoped to the one playback-interruption test below.
+private final class PlaybackGate: @unchecked Sendable {
+  private let lock = NSLock()
+  private var continuations: [CheckedContinuation<Void, Never>] = []
+  private let startedContinuation: AsyncStream<Void>.Continuation
+  let started: AsyncStream<Void>
+  init() {
+    var continuation: AsyncStream<Void>.Continuation!
+    started = AsyncStream { continuation = $0 }
+    startedContinuation = continuation
+  }
+  func play() async -> PlaybackEnd {
+    startedContinuation.yield(())
+    await withCheckedContinuation { cont in
+      lock.lock()
+      continuations.append(cont)
+      lock.unlock()
+    }
+    return .finished
+  }
+  func release() {
+    lock.lock()
+    let conts = continuations
+    continuations = []
+    lock.unlock()
+    for cont in conts { cont.resume() }
+  }
+  func awaitStarted() async {
+    var it = started.makeAsyncIterator()
+    _ = await it.next()
+  }
+}
+
+@MainActor
+struct EditorCrossfadeStretchTests {
+  private func editor(fingerprint: String) -> EditorModel {
+    EditorModel(
+      sourceURL: URL(fileURLWithPath: "/clip.m4a"),
+      canonicalAudioURL: Fixtures.canonicalAudioURL,
+      editPlan: Fixtures.editPlan(), sourceFingerprint: fingerprint)
+  }
+
+  @discardableResult
+  private func addRemoval(
+    _ model: EditorModel, id: UUID = Fixtures.uuid(1),
+    range: Range<Int> = 48_000..<96_000, length: Int = 600
+  ) -> UUID {
+    model.mutateDocument { doc in
+      doc.timelineRemovals.append(
+        TimelineRemoval(
+          id: id, removedRange: range,
+          crossfade: Crossfade(lengthSamples: length, curve: .equalPower)))
+    }
+    return id
+  }
+
+  /// Fixed zoom so a seam's view-x/width stays stable for bowtie-width assertions.
+  private func primeGeometry(_ model: EditorModel) {
+    model.editedWaveform.viewportWidth = 1000
+    model.editedWaveform.samplesPerPixel = 200
+    model.editedWaveform.visibleStartSample = 0
+  }
+
+  private func withStorage(_ body: () -> Void) {
+    withDependencies {
+      $0.defaultFileStorage = FileStorage.inMemory(fileSystem: LockIsolated([:]))
+    } operation: {
+      body()
+    }
+  }
+
+  private func withStorageThrowing(_ body: () throws -> Void) rethrows {
+    try withDependencies {
+      $0.defaultFileStorage = FileStorage.inMemory(fileSystem: LockIsolated([:]))
+    } operation: {
+      try body()
+    }
+  }
+
+  // MARK: - Seam guard
+
+  @Test func stretchBeganNoOpsWhenTheSeamIsUnrecoverable() {
+    withStorage {
+      let model = editor(fingerprint: "fp-stretch-invalid-seam")
+      // Two overlapping removals make `TimelineRemovals.normalize` return nil, so
+      // `EditedTimeline.seams` is empty even though the document still holds both removals — the
+      // no-seam state the guard defends against. (Unreachable through the normal remove-section UI,
+      // which never authors overlapping removals; defensive here.)
+      let id = addRemoval(model, id: Fixtures.uuid(1), range: 48_000..<96_000, length: 600)
+      addRemoval(model, id: Fixtures.uuid(2), range: 60_000..<120_000, length: 600)
+      #expect(model.editedWaveform.timeline.seams.isEmpty)
+
+      model.crossfadeStretchBegan(id: id)
+
+      expectNoDifference(model.crossfadeStretchDraft, nil)
+      expectNoDifference(model.selectedSeamID, nil)
+    }
+  }
+
+  // MARK: - Draft clamping
+
+  @Test func stretchClampsToAvailableHandle() {
+    withStorage {
+      let model = editor(fingerprint: "fp-stretch-clamp")
+      // Remove [48_000,96_000): left handle 48_000, right handle (large) — max = 48_000.
+      let id = addRemoval(model, range: 48_000..<96_000, length: 600)
+
+      model.crossfadeStretchBegan(id: id)
+      model.crossfadeStretched(toLength: 5_000_000)
+
+      expectNoDifference(model.crossfadeStretchDraft?.length, 48_000)
+    }
+  }
+
+  @Test func stretchFloorsAtZero() {
+    withStorage {
+      let model = editor(fingerprint: "fp-stretch-floor")
+      let id = addRemoval(model)
+
+      model.crossfadeStretchBegan(id: id)
+      model.crossfadeStretched(toLength: -100)
+
+      expectNoDifference(model.crossfadeStretchDraft?.length, 0)
+    }
+  }
+
+  // MARK: - Commit
+
+  @Test func endingStretchCommitsClampedLengthUndoably() async {
+    await withDependencies {
+      $0.defaultFileStorage = FileStorage.inMemory(fileSystem: LockIsolated([:]))
+    } operation: {
+      let model = editor(fingerprint: "fp-stretch-commit")
+      let id = addRemoval(model, length: 600)
+
+      model.crossfadeStretchBegan(id: id)
+      model.crossfadeStretched(toLength: 24_000)
+      model.crossfadeStretchEnded()
+
+      expectNoDifference(model.crossfadeStretchDraft, nil)
+      expectNoDifference(model.timelineRemovals[id: id]?.crossfade.lengthSamples, 24_000)
+      #expect(model.canUndo)
+
+      await model.undoTapped()
+      expectNoDifference(model.timelineRemovals[id: id]?.crossfade.lengthSamples, 600)
+    }
+  }
+
+  @Test func endingStretchWithNoChangeRecordsNoUndoEntry() async {
+    await withDependencies {
+      $0.defaultFileStorage = FileStorage.inMemory(fileSystem: LockIsolated([:]))
+    } operation: {
+      let model = editor(fingerprint: "fp-stretch-noop")
+      let id = addRemoval(model, length: 600)
+
+      model.crossfadeStretchBegan(id: id)
+      model.crossfadeStretchEnded()
+
+      // A single undo returns the ONE real mutation (the setup add) to empty: the no-op
+      // stretch pushed no entry of its own.
+      await model.undoTapped()
+      expectNoDifference(model.timelineRemovals.count, 0)
+    }
+  }
+
+  // MARK: - Live preview (no commit)
+
+  @Test func draggingWidensBowtieWithoutCommitting() {
+    withStorage {
+      let model = editor(fingerprint: "fp-stretch-preview")
+      primeGeometry(model)
+      // Seam near the start so its bowtie sits inside the 1000pt viewport (spp 200).
+      let id = addRemoval(model, range: 48_000..<96_000, length: 600)
+      let committedWidth = model.seamOverlays.first { $0.id == id }!.span.width
+
+      model.crossfadeStretchBegan(id: id)
+      model.crossfadeStretched(toLength: 24_000)
+
+      let previewWidth = model.seamOverlays.first { $0.id == id }!.span.width
+      #expect(previewWidth > committedWidth)
+      // The document is untouched until release.
+      expectNoDifference(model.timelineRemovals[id: id]?.crossfade.lengthSamples, 600)
+    }
+  }
+
+  // MARK: - Live reflow (Item ②: no reposition on release)
+
+  @Test func draggingReflowsTheCollapsedTimelineLive() {
+    withStorage {
+      let model = editor(fingerprint: "fp-stretch-reflow")
+      primeGeometry(model)
+      let id = addRemoval(model, range: 48_000..<96_000, length: 600)
+      let committedDuration = model.editedWaveform.timeline.editedDurationSamples
+
+      model.crossfadeStretchBegan(id: id)
+      model.crossfadeStretched(toLength: 24_000)
+
+      // A longer crossfade overlaps more audio, so the collapsed timeline shortens by the growth
+      // live — the reflow the commit used to defer to mouse-up.
+      expectNoDifference(
+        model.editedWaveform.timeline.editedDurationSamples,
+        committedDuration - (24_000 - 600))
+    }
+  }
+
+  @Test func committingAStretchLeavesTheWaveformWhereThePreviewHadIt() {
+    withStorage {
+      let model = editor(fingerprint: "fp-stretch-nojump")
+      primeGeometry(model)
+      let id = addRemoval(model, range: 48_000..<96_000, length: 600)
+
+      model.crossfadeStretchBegan(id: id)
+      model.crossfadeStretched(toLength: 24_000)
+      let previewOverlays = model.seamOverlays
+      let previewStart = model.editedWaveform.visibleStartSample
+
+      model.crossfadeStretchEnded()
+
+      // Release repositions nothing: the committed geometry equals the last preview frame.
+      expectNoDifference(model.seamOverlays, previewOverlays)
+      expectNoDifference(model.editedWaveform.visibleStartSample, previewStart)
+    }
+  }
+
+  @Test func theGrabbedEdgeStaysUnderTheCursorAsTheTimelineReflows() throws {
+    try withStorageThrowing {
+      let model = editor(fingerprint: "fp-stretch-track")
+      model.editedWaveform.viewportWidth = 1000
+      model.editedWaveform.samplesPerPixel = 200
+      // Center the seam (edited center 479_700) in the viewport so there is room to shift the
+      // viewport as the seam grows, keeping the grabbed edge under the cursor.
+      model.editedWaveform.visibleStartSample = 379_700
+      let id = addRemoval(model, range: 480_000..<528_000, length: 600)
+
+      model.crossfadeStretchBegan(id: id)
+      let targetX: CGFloat = 600
+      model.crossfadeStretched(.trailing, toX: targetX)
+
+      let overlay = try #require(model.seamOverlays.first { $0.id == id })
+      let trailing = try #require(overlay.trailingHandleX)
+      expectNoDifference(trailing, targetX)
+    }
+  }
+
+  @Test func committingAStretchRunsTimelineReconciliation() {
+    withStorage {
+      let model = editor(fingerprint: "fp-stretch-reconcile")
+      let id = addRemoval(model, range: 48_000..<96_000, length: 600)
+      // Fit the whole committed timeline in the viewport (max zoom-out).
+      model.editedWaveform.viewportResized(width: 1000)
+      let fitBefore = model.editedWaveform.samplesPerPixel
+
+      model.crossfadeStretchBegan(id: id)
+      model.crossfadeStretched(toLength: 48_000)
+      // The live preview reflows the timeline but never re-fits zoom, so the zoom stays too wide
+      // for the now-shorter timeline until the commit reconciles it.
+      expectNoDifference(model.editedWaveform.samplesPerPixel, fitBefore)
+
+      model.crossfadeStretchEnded()
+
+      // Release must run the full timeline-change reconciliation instead of short-circuiting on
+      // the equality guard (the preview already installed the committed timeline). Re-fitting the
+      // zoom to the shorter timeline is the observable proof the reconciliation body ran.
+      #expect(model.editedWaveform.samplesPerPixel < fitBefore)
+    }
+  }
+
+  // MARK: - Exact-center length (odd lengths reachable)
+
+  @Test func draggingAnOddLengthSeamKeepsOddParity() {
+    withStorage {
+      let model = editor(fingerprint: "fp-stretch-odd")
+      let id = addRemoval(model, range: 48_000..<96_000, length: 601)
+      // Set geometry AFTER the removal: the timeline rebuild re-fits zoom, so geometry set earlier
+      // would be overwritten. 1 sample/pixel keeps x → edited-sample identity so the drag lands exact.
+      model.editedWaveform.viewportWidth = 1000
+      model.editedWaveform.samplesPerPixel = 1
+      model.editedWaveform.visibleStartSample = 0
+      let seam = model.editedTimeline.seams.first { $0.id == id }!
+      let end = seam.editedCrossfadeStart + seam.crossfadeLength
+
+      model.crossfadeStretchBegan(id: id)
+      // Drag the trailing edge outward. With a truncated center the proposed length is always even, so
+      // an odd stored length could never be retained or reached; the exact doubled center fixes that.
+      model.crossfadeStretched(.trailing, toX: CGFloat(end + 1000))
+
+      #expect((model.crossfadeStretchDraft?.length ?? 0) % 2 == 1)
+    }
+  }
+
+  // MARK: - Playback interruption
+
+  @Test func stretchBeganStopsActiveTransportPlayback() async {
+    let gate = PlaybackGate()
+    await withDependencies {
+      $0.defaultFileStorage = FileStorage.inMemory(fileSystem: LockIsolated([:]))
+      $0.audioPlayer.playEdited = { _, _, _, _, _ in
+        EditedPlaybackEnd(end: await gate.play(), finishedEditedSample: nil)
+      }
+      $0.audioPlayer.stop = { _ in gate.release() }
+    } operation: {
+      let model = editor(fingerprint: "fp-stretch-playback-stop")
+      let id = addRemoval(model)
+      let task = Task { await model.transportPlayTapped() }
+      await gate.awaitStarted()
+      #expect(model.isTransportPlaying)
+
+      model.crossfadeStretchBegan(id: id)
+
+      // Synchronous: the transport state is torn down (and the draft seeded) before this call
+      // returns, without waiting on the fire-and-forget audio-node stop below.
+      #expect(!model.isTransportPlaying)
+      expectNoDifference(model.crossfadeStretchDraft?.id, id)
+
+      await task.value
+    }
+  }
+
+  // MARK: - Cancellation (torn-down handle mid-drag)
+
+  @Test func cancellingAStretchRestoresTheCommittedPreviewAndLeavesTheDocumentUntouched() {
+    withStorage {
+      let model = editor(fingerprint: "fp-stretch-cancel")
+      let id = addRemoval(model, range: 48_000..<96_000, length: 600)
+      let committedDuration = model.editedWaveform.timeline.editedDurationSamples
+
+      model.crossfadeStretchBegan(id: id)
+      model.crossfadeStretched(toLength: 24_000)
+      #expect(model.editedWaveform.timeline.editedDurationSamples != committedDuration)
+
+      model.crossfadeStretchCancelled()
+
+      expectNoDifference(model.crossfadeStretchDraft, nil)
+      expectNoDifference(model.editedWaveform.timeline.editedDurationSamples, committedDuration)
+      expectNoDifference(model.timelineRemovals[id: id]?.crossfade.lengthSamples, 600)
+    }
+  }
+
+  /// A ⌘-scroll forwarded through the handle zone (fix for the scroll-swallowing bug) can zoom
+  /// mid-drag without ending it — `samplesPerPixel` isn't part of the drag's own preview math, so
+  /// nothing else resets it. Cancelling is documented as restoring "the committed timeline/viewport";
+  /// a zoom that leaked through the live drag is part of that viewport and must roll back too.
+  @Test func cancellingAStretchRestoresTheFrozenZoomLevel() {
+    withStorage {
+      let model = editor(fingerprint: "fp-stretch-cancel-zoom")
+      let id = addRemoval(model, range: 48_000..<96_000, length: 600)
+      primeGeometry(model)
+      let committedSamplesPerPixel = model.editedWaveform.samplesPerPixel
+
+      model.crossfadeStretchBegan(id: id)
+      model.editedWaveform.samplesPerPixel = committedSamplesPerPixel * 2
+      model.crossfadeStretchCancelled()
+
+      expectNoDifference(model.editedWaveform.samplesPerPixel, committedSamplesPerPixel)
+    }
+  }
+
+  // MARK: - Stale-draft reconciliation
+
+  @Test func undoingTheSameSeamMidDragDropsTheStaleDraft() async {
+    await withDependencies {
+      $0.defaultFileStorage = FileStorage.inMemory(fileSystem: LockIsolated([:]))
+    } operation: {
+      let model = editor(fingerprint: "fp-stretch-undo-mid")
+      let id = addRemoval(model, range: 48_000..<96_000, length: 600)
+      model.crossfadeStretchBegan(id: id)
+      model.crossfadeStretched(toLength: 24_000)
+      model.crossfadeStretchEnded()
+
+      // A new drag is live when an undo reverts the same seam's crossfade under it. The draft's
+      // baseline no longer matches the document, so releasing it would rewrite the restored value —
+      // the sync must drop the stale draft.
+      model.crossfadeStretchBegan(id: id)
+      model.crossfadeStretched(toLength: 30_000)
+      await model.undoTapped()
+
+      expectNoDifference(model.crossfadeStretchDraft, nil)
+      expectNoDifference(model.timelineRemovals[id: id]?.crossfade.lengthSamples, 600)
+    }
+  }
+
+  @Test func restoringTheSeamMidDragDropsTheStaleDraft() {
+    withStorage {
+      let model = editor(fingerprint: "fp-stretch-stale")
+      let id = addRemoval(model, range: 48_000..<96_000, length: 600)
+
+      model.crossfadeStretchBegan(id: id)
+      model.crossfadeStretched(toLength: 24_000)
+      #expect(model.crossfadeStretchDraft != nil)
+
+      // A restore retires the seam the draft targets; the funnel must drop the orphaned draft.
+      model.restoreRemoval(id: id)
+
+      expectNoDifference(model.crossfadeStretchDraft, nil)
+    }
+  }
+}

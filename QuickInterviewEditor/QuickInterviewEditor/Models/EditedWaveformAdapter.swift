@@ -105,6 +105,16 @@ final class EditedWaveformAdapter {
     visibleStartSample = clampedStart(visibleStartSample)
   }
 
+  /// Applies a live crossfade-stretch preview atomically: renders `timeline` and moves the viewport
+  /// to `targetVisibleStart` (clamped into the navigable axis), so the stretched seam grows about a
+  /// fixed screen center while everything downstream reflows continuously. Timeline and viewport
+  /// move in lockstep, which makes committing the same length a visual no-op (no reposition on
+  /// release). No zoom change and no armed-`Z` reset — a drag isn't a fit.
+  func previewStretch(timeline previewTimeline: EditedTimeline, targetVisibleStart: Int) {
+    timeline = previewTimeline
+    visibleStartSample = clampedStart(targetVisibleStart)
+  }
+
   // MARK: - Rendering
   /// One min/max column per horizontal pixel on the EDITED axis. Each pixel's EDITED sample
   /// window is translated to one or more SOURCE ranges via `timeline.sourceRanges(forEdited:)`
@@ -179,6 +189,52 @@ final class EditedWaveformAdapter {
     }
     return span(
       forEdited: seam.editedCrossfadeStart..<(seam.editedCrossfadeStart + seam.crossfadeLength))
+  }
+
+  /// A draft bowtie span for an in-progress stretch: `previewLength` samples wide, grown
+  /// symmetrically about the seam's current edited center so the bowtie widens/narrows live while
+  /// the underlying waveform stays put (it reflows only on commit). A zero-length draft collapses
+  /// to the same zero-width hard-cut marker `spanForSeam` draws.
+  func spanForSeam(_ seam: TimelineSeam, previewLength: Int) -> WaveformSpan? {
+    guard previewLength > 0 else {
+      let positionX = editedSampleToX(seam.editedCrossfadeCenter)
+      guard positionX >= 0, positionX <= viewportWidth else { return nil }
+      return WaveformSpan(positionX: positionX, width: 0)
+    }
+    let start = seam.editedCrossfadeCenter - previewLength / 2
+    return span(forEdited: start..<(start + previewLength))
+  }
+
+  /// The view-x of a seam's two crossfade edges — the draggable stretch handles — each nil when it
+  /// falls outside the viewport. Unlike the drawn bowtie span (which is CLIPPED to the viewport, so
+  /// a partly-scrolled crossfade's boundary snaps to the viewport edge), a handle must sit on the
+  /// TRUE edge or nowhere: a clipped boundary is not a grabbable edge, and placing a handle there
+  /// would both swallow gestures at the viewport edge and stretch against a phantom coordinate.
+  /// `previewLength` overrides the committed length during a live drag, mirroring `spanForSeam`.
+  /// A zero-length hard cut collapses both edges onto the join (grabbable when visible, so a hard
+  /// cut can be dragged out into a fade).
+  func seamHandleXs(_ seam: TimelineSeam, previewLength: Int?) -> (
+    leading: CGFloat?, trailing: CGFloat?
+  ) {
+    let start: Int
+    let length: Int
+    if let previewLength {
+      length = previewLength
+      start = seam.editedCrossfadeCenter - previewLength / 2
+    } else {
+      length = seam.crossfadeLength
+      start = seam.editedCrossfadeStart
+    }
+    return (visibleEdgeX(start), visibleEdgeX(start + length))
+  }
+
+  /// The view-x of an edited sample, or nil when it maps outside the viewport — the per-edge basis
+  /// for `seamHandleXs`, matching `viewX(forSource:)`'s nil-when-off-screen contract.
+  private func visibleEdgeX(_ editedSample: Int) -> CGFloat? {
+    guard viewportWidth > 0 else { return nil }
+    let posX = editedSampleToX(editedSample)
+    guard posX >= 0, posX <= viewportWidth else { return nil }
+    return posX
   }
 
   // MARK: - Coordinate transforms

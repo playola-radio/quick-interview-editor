@@ -473,6 +473,62 @@ struct EditSliceTests {
     expectNoDifference(model.laneCursorSample, 15_000)
   }
 
+  /// A parent restore/undo can retire the seam this sheet had selected. `syncTimeline` must drop the
+  /// stale selection before the lane reads it, or ⌫ would restore a removal the timeline no longer
+  /// has (the `removeSectionKeyPressed` seam branch).
+  @Test func syncTimelineDropsAStaleSeamSelection() {
+    let model = laneModel()
+    let removal = TimelineRemoval(
+      id: UUID(), removedRange: 12_000..<15_000, crossfade: Crossfade(lengthSamples: 0))
+    model.syncTimeline(EditedTimeline(sourceDurationSamples: 100_000, removals: [removal]))
+    _ = model.waveformContextMenuItems(atX: model.seamOverlays[0].span.positionX)
+    #expect(model.selectedSeamID == removal.id)
+
+    // The parent restores the removal: the synced timeline no longer contains that seam.
+    model.syncTimeline(EditedTimeline(sourceDurationSamples: 100_000, removals: []))
+
+    expectNoDifference(model.selectedSeamID, nil)
+  }
+
+  /// Same reconciliation for a live stretch draft: if the parent retires the seam mid-drag, the
+  /// orphaned draft (which would preview a gone seam) is dropped on the next sync.
+  @Test func syncTimelineDropsAStaleStretchDraft() {
+    let model = laneModel()
+    let removal = TimelineRemoval(
+      id: UUID(), removedRange: 12_000..<15_000, crossfade: Crossfade(lengthSamples: 600))
+    model.currentCrossfadeLength = { $0 == removal.id ? 600 : nil }
+    model.syncTimeline(EditedTimeline(sourceDurationSamples: 100_000, removals: [removal]))
+    model.crossfadeStretchBegan(id: removal.id)
+    model.crossfadeStretched(toLength: 1_200)
+    #expect(model.crossfadeStretchDraft != nil)
+
+    model.syncTimeline(EditedTimeline(sourceDurationSamples: 100_000, removals: []))
+
+    expectNoDifference(model.crossfadeStretchDraft, nil)
+  }
+
+  /// The guard also fires when an undo/redo changes the dragged seam's crossfade length (not just
+  /// removes it): the draft's baseline no longer matches the fanned timeline, so releasing it would
+  /// rewrite the restored value — the sync must drop the stale draft.
+  @Test func syncTimelineDropsADraftWhenTheSeamLengthChangesUnderIt() {
+    let model = laneModel()
+    let id = UUID()
+    let removal = TimelineRemoval(
+      id: id, removedRange: 12_000..<15_000, crossfade: Crossfade(lengthSamples: 600))
+    model.currentCrossfadeLength = { $0 == id ? 600 : nil }
+    model.syncTimeline(EditedTimeline(sourceDurationSamples: 100_000, removals: [removal]))
+    model.crossfadeStretchBegan(id: id)
+    model.crossfadeStretched(toLength: 1_200)
+    #expect(model.crossfadeStretchDraft != nil)
+
+    // The parent reverts the seam to a different committed length under the live drag.
+    let reverted = TimelineRemoval(
+      id: id, removedRange: 12_000..<15_000, crossfade: Crossfade(lengthSamples: 900))
+    model.syncTimeline(EditedTimeline(sourceDurationSamples: 100_000, removals: [reverted]))
+
+    expectNoDifference(model.crossfadeStretchDraft, nil)
+  }
+
   // MARK: - FIX 2: updatePlayback highlights the current word in the scoped transcript
 
   @Test func updatePlaybackHighlightsTheCurrentWordInTheScopedTranscript() {
@@ -614,6 +670,21 @@ struct EditSliceTests {
     model.syncTimeline(EditedTimeline(sourceDurationSamples: 100_000, removals: [removal]))
 
     expectNoDifference(model.seamOverlays.map(\.id), [removal.id])
+  }
+
+  /// The slice sheet still DRAWS bowties (crossfades exist and render), but exposes no stretch
+  /// handles: the sheet edits/clamps on the GLOBAL timeline while the slice renders on its own
+  /// windowed timeline, so a boundary crossfade could otherwise be dragged into a fade the slice
+  /// plays/exports as a hard cut. Handles return in the slice-local seam-projection follow-on.
+  @Test func seamOverlaysExposeNoStretchHandlesInTheSliceSheet() {
+    let model = laneModel()
+    let removal = TimelineRemoval(
+      id: UUID(), removedRange: 12_000..<15_000, crossfade: Crossfade(lengthSamples: 600))
+    model.syncTimeline(EditedTimeline(sourceDurationSamples: 100_000, removals: [removal]))
+
+    let overlay = model.seamOverlays[0]
+    #expect(overlay.leadingHandleX == nil)
+    #expect(overlay.trailingHandleX == nil)
   }
 
   /// Right-clicking a seam selects it and offers Restore, which forwards the seam's id to `onRestore`

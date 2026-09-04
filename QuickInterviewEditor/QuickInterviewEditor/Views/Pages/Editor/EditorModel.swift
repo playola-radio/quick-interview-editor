@@ -308,6 +308,19 @@ final class EditorModel: ViewModel {
     if let selectedSeamID, timelineRemovals[id: selectedSeamID] == nil {
       self.selectedSeamID = nil
     }
+    // Drop a live stretch draft whose baseline no longer matches the document — its seam is gone
+    // (restore/undo/redo removed it) OR the seam's committed crossfade length changed underneath it
+    // (an undo/redo reverted the very seam being dragged). Either way its preview would target stale
+    // geometry, so releasing it would rewrite the restored value. (Our own commit clears the draft
+    // before mutating, so this never fires on the normal drag reflow.) Undo the draft's viewport
+    // compensation first, so the rebuild below re-clamps from the pre-drag scroll position.
+    if let crossfadeStretchDraft,
+      timelineRemovals[id: crossfadeStretchDraft.id]?.crossfade.lengthSamples
+        != crossfadeStretchDraft.committedLength
+    {
+      editedWaveform.visibleStartSample = crossfadeStretchDraft.frozenVisibleStart
+      self.crossfadeStretchDraft = nil
+    }
     let newTimeline = editedTimeline
     guard newTimeline != editedWaveform.timeline else { return }
     // Captured BEFORE `resetTransportState` clears `transportContext` to `.free` below — it's the
@@ -458,6 +471,11 @@ final class EditorModel: ViewModel {
   func deselectSeam() {
     selectedSeamID = nil
   }
+
+  /// The live edge-drag stretch of a seam's crossfade (`CrossfadeStretchDraft`): non-nil only for
+  /// the duration of a drag. The document is untouched while it lives — `seamOverlays` previews the
+  /// bowtie from it, and `crossfadeStretchEnded` is the one place that commits.
+  private(set) var crossfadeStretchDraft: CrossfadeStretchDraft?
 
   /// Read facade every downstream reader migrates onto (spec §6). Backed by `audioSelection`.
   var selectedSourceRange: Range<Int>? { audioSelection }
@@ -656,7 +674,10 @@ final class EditorModel: ViewModel {
   var seamOverlays: [SeamOverlay] {
     editedWaveform.timeline.seams.compactMap { seam in
       guard let span = editedWaveform.spanForSeam(seam) else { return nil }
-      return SeamOverlay(id: seam.id, span: span, isSelected: seam.id == selectedSeamID)
+      let handles = editedWaveform.seamHandleXs(seam, previewLength: nil)
+      return SeamOverlay(
+        id: seam.id, span: span, isSelected: seam.id == selectedSeamID,
+        leadingHandleX: handles.leading, trailingHandleX: handles.trailing)
     }
   }
 
@@ -1540,6 +1561,18 @@ final class EditorModel: ViewModel {
     // result back into the open sheet.
     child.onRemoveSection = { [weak self] range in await self?.removeSourceRange(range) }
     child.onRestore = { [weak self] removalID in self?.restoreRemoval(id: removalID) }
+    // A crossfade stretch inside the sheet commits through the SAME `updateCrossfade` funnel the main
+    // editor uses, so a stretch is identical on both surfaces and one ⌘Z step. The sheet drafts the
+    // length against its own (parent-synced) lane and hands the committed length here; the parent
+    // preserves the removal's curve/center and fans the result back into the open sheet.
+    child.onStretchCrossfade = { [weak self] removalID, length in
+      guard let self, var crossfade = timelineRemovals[id: removalID]?.crossfade else { return }
+      crossfade.lengthSamples = length
+      updateCrossfade(id: removalID, crossfade)
+    }
+    child.currentCrossfadeLength = { [weak self] removalID in
+      self?.timelineRemovals[id: removalID]?.crossfade.lengthSamples
+    }
     // ⌘Z/⌘⇧Z pressed inside the sheet route here: a modal removal lives on this document's undo
     // stack, and `undoTapped`/`redoTapped` fan the restored timeline back into the open sheet via
     // `syncEditedTimeline`. The main window's SwiftUI undo shortcut can't fire while the sheet is key.
@@ -1726,16 +1759,138 @@ final class EditorModel: ViewModel {
     restoreRemoval(id: selectedSeamID)
   }
 
-  /// Updates a removal's crossfade as one undo step. Model API ONLY for PR 4 — there is no
-  /// fade-editing UI yet; PR 5's edge/center/curve drags and the numeric inspector call this. The
-  /// stored length is kept as the user's intent; `EditedTimeline` clamps it per-seam on build (a
-  /// too-long fade is clamped for rendering without losing the stored value), mirroring how
+  /// Updates a removal's crossfade as one undo step — the single commit funnel every fade edit
+  /// routes through (the edge-drag stretch below; the numeric inspector and curve/center drags when
+  /// they land). The stored length is the user's intent; `EditedTimeline` clamps it per-seam on
+  /// build (a too-long fade is clamped for rendering without losing the stored value), mirroring how
   /// `removeSelectedSectionTapped` stores the default length. A no-op for an unknown id.
   func updateCrossfade(id: TimelineRemoval.ID, _ crossfade: Crossfade) {
     guard timelineRemovals[id: id] != nil else { return }
     mutateDocument { doc in
       doc.timelineRemovals[id: id]?.crossfade = crossfade
     }
+  }
+
+  // MARK: - Crossfade stretch (edge drag)
+  /// Begins an edge-drag stretch of seam `id`: selects it and seeds the draft with its current
+  /// length. A no-op for an unknown removal OR one with no derivable seam (an invalid timeline —
+  /// e.g. overlapping removals — unreachable through the normal remove-section UI, but a fallback
+  /// here would seed `committedLength = 0`, letting the drag commit a silent hard cut).
+  func crossfadeStretchBegan(id: TimelineRemoval.ID) {
+    guard let removal = timelineRemovals[id: id],
+      let seam = editedWaveform.timeline.seams.first(where: { $0.id == id })
+    else { return }
+    stopPlaybackForTimelineEdit()
+    selectSeam(id)
+    crossfadeStretchDraft = CrossfadeStretchDraft(
+      id: id,
+      length: removal.crossfade.lengthSamples,
+      committedLength: seam.crossfadeLength,
+      committedDoubledCenterEdited: seam.editedCrossfadeDoubledCenter,
+      frozenVisibleStart: editedWaveform.visibleStartSample,
+      frozenSamplesPerPixel: editedWaveform.samplesPerPixel)
+  }
+
+  /// Stops any active/paused transport before an edit that reflows the timeline (crossfade
+  /// stretch), so the playhead can't be drawn against preview geometry while audio plays the old
+  /// timeline. Synchronous: clears transport state so the position loop stops ticking immediately
+  /// (the draft must be seeded before this method returns — the AppKit drag emits
+  /// `onStretchBegan` then `onStretched` in the same event); the audio node stop is fire-and-forget
+  /// (own session only, mirroring `endTransportPlayback`).
+  private func stopPlaybackForTimelineEdit() {
+    guard isTransportPlaying || isTransportPaused else { return }
+    let session = transportPhase.session
+    resetTransportState()
+    endTranscriptFollow()
+    Task { await stopOwnedPlayback(session) }
+  }
+
+  /// A stretch drag to view-x: map x → edited sample and derive the symmetric length from the
+  /// dragged edge's distance to the seam center. Reads the geometry frozen at `crossfadeStretchBegan`
+  /// (viewport and center), not the live adapter — the live preview reflows the timeline and shifts
+  /// the viewport under the drag, so mapping against live geometry would feed back on itself.
+  func crossfadeStretched(_ edge: CrossfadeEdge, toX posX: CGFloat) {
+    guard let draft = crossfadeStretchDraft else { return }
+    let editedSample = WaveformViewport.xToSample(
+      posX, visibleStartSample: draft.frozenVisibleStart,
+      samplesPerPixel: draft.frozenSamplesPerPixel)
+    // Symmetric length from the dragged edge and the exact doubled center, so odd lengths are
+    // reachable: length = 2·edited − doubledCenter (trailing) or doubledCenter − 2·edited (leading).
+    let length =
+      edge == .leading
+      ? draft.committedDoubledCenterEdited - 2 * editedSample
+      : 2 * editedSample - draft.committedDoubledCenterEdited
+    crossfadeStretched(toLength: length)
+  }
+
+  /// Geometry-free core: clamp the proposed length to `[0, available handle]`, hold it as the draft,
+  /// and reflow the collapsed waveform to it live. The clamp bound is read from the COMMITTED
+  /// timeline (unchanged mid-drag), so a neighbor can't shift under the drag. The document is still
+  /// untouched — `applyStretchPreview` only repaints the adapter; the commit is on release.
+  func crossfadeStretched(toLength proposed: Int) {
+    guard var draft = crossfadeStretchDraft else { return }
+    let maxLength = editedTimeline.maxCrossfadeLength(forSeamID: draft.id) ?? 0
+    draft.length = max(0, min(proposed, maxLength))
+    crossfadeStretchDraft = draft
+    applyStretchPreview(draft)
+  }
+
+  /// Reflows the collapsed waveform to the drafted length and shifts the viewport by −ΔL/2 so the
+  /// seam grows symmetrically about its start-of-drag screen center (Item ②: the downstream slide
+  /// that used to happen on release now happens continuously during the drag). The preview timeline
+  /// is built exactly as the commit builds it — the target removal's length overridden, everything
+  /// else the document's — so releasing the drag repositions nothing.
+  private func applyStretchPreview(_ draft: CrossfadeStretchDraft) {
+    let preview = previewTimeline(seamID: draft.id, length: draft.length)
+    let shift = (draft.length - draft.committedLength) / 2
+    editedWaveform.previewStretch(
+      timeline: preview, targetVisibleStart: draft.frozenVisibleStart - shift)
+  }
+
+  /// The edited timeline as it will render with seam `id`'s crossfade set to `length`, built the
+  /// same way the commit is (override that one removal, rebuild). A no-op-shaped fallback to the
+  /// committed timeline for an unknown id.
+  private func previewTimeline(seamID id: TimelineRemoval.ID, length: Int) -> EditedTimeline {
+    var removals = Array(timelineRemovals)
+    guard let index = removals.firstIndex(where: { $0.id == id }) else { return editedTimeline }
+    removals[index].crossfade.lengthSamples = length
+    return EditedTimeline(
+      sourceDurationSamples: editPlan.source.durationSamples, removals: removals)
+  }
+
+  /// Release: commit the drafted length as one undo step (via `updateCrossfade`) and clear the
+  /// draft. A drag that netted no change pushes no entry. A no-op if no drag is live or the
+  /// removal vanished mid-drag.
+  func crossfadeStretchEnded() {
+    guard let draft = crossfadeStretchDraft else { return }
+    crossfadeStretchDraft = nil
+    guard let removal = timelineRemovals[id: draft.id],
+      draft.length != removal.crossfade.lengthSamples
+    else { return }
+    // Rewind the adapter to the pre-drag committed timeline (the viewport stays where the preview
+    // left it — already clamped into the shorter axis, so it doesn't move). The live preview had
+    // installed the timeline the commit is about to produce, which would make `syncEditedTimeline`'s
+    // equality guard short-circuit and skip its reconciliation (playback / cursor / transport-origin
+    // remap, zoom re-clamp, slice-sheet sync). Rewinding forces a real diff so that body runs.
+    editedWaveform.timeline = editedTimeline
+    var crossfade = removal.crossfade
+    crossfade.lengthSamples = draft.length
+    updateCrossfade(id: draft.id, crossfade)
+  }
+
+  /// Aborts an in-flight stretch without committing: drops the draft and restores the committed
+  /// timeline/viewport the live preview had replaced. For a drag torn down before mouse-up (sheet
+  /// dismissed, tab switched, lane removed) — the only other exit, `crossfadeStretchEnded`, needs
+  /// mouse-up to run, so without this the preview timeline (and the stale draft) would strand until
+  /// some later, unrelated document change forced a sync. A no-op if no drag is live. Also restores
+  /// `samplesPerPixel`: a ⌘-scroll forwarded through the handle zone can zoom mid-drag without ending
+  /// it, and the drag's own preview math never touches that property, so nothing else resets it.
+  func crossfadeStretchCancelled() {
+    guard let draft = crossfadeStretchDraft else { return }
+    crossfadeStretchDraft = nil
+    editedWaveform.timeline = editedTimeline
+    editedWaveform.visibleStartSample = draft.frozenVisibleStart
+    editedWaveform.samplesPerPixel = draft.frozenSamplesPerPixel
   }
 
   func renameSlice(_ id: Slice.ID, to name: String) {

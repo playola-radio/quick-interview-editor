@@ -25,6 +25,10 @@ struct WaveformView: View {
         onEdgeDragBegan: { model.selectionEdgeDragBegan($0) },
         onEdgeDragged: { model.selectionEdgeDragged($0, toX: $1) },
         onEdgeDragEnded: { model.selectionEdgeDragEnded($0) },
+        onSeamStretchBegan: { model.crossfadeStretchBegan(id: $0) },
+        onSeamStretched: { model.crossfadeStretched($0, toX: $1) },
+        onSeamStretchEnded: { model.crossfadeStretchEnded() },
+        onSeamStretchCancelled: { model.crossfadeStretchCancelled() },
         auditionOverlay: { span in
           if model.canAudition {
             AuditionEdgeButtons(

@@ -28,6 +28,12 @@ struct TimelineSeam: Equatable, Identifiable {
 
   /// The visual/edit center of the crossfade region, used by fade editing (PR5).
   var editedCrossfadeCenter: Int { editedCrossfadeStart + crossfadeLength / 2 }
+
+  /// Twice the exact (unrounded) crossfade center — `2·start + length`. Edge-drag length math derives
+  /// the symmetric length from a dragged edge and this value (`length = 2·edited − doubledCenter` for
+  /// a trailing edge), which avoids the half-sample truncation in `editedCrossfadeCenter` that would
+  /// otherwise make every proposed length even, so an odd stored length could never be retained.
+  var editedCrossfadeDoubledCenter: Int { 2 * editedCrossfadeStart + crossfadeLength }
 }
 
 /// Maps between SOURCE sample coordinates (the original recording) and EDITED
@@ -240,6 +246,20 @@ struct EditedTimeline: Equatable {
       return nil
     }
     return segment.editedStart + (sourceSample - segment.source.lowerBound)
+  }
+
+  /// The largest crossfade length a seam can take given its neighbors, mirroring the sequential
+  /// clamp in `init`: bounded by the full kept segment on its right and by the kept segment on its
+  /// left minus whatever the previous seam already claimed of that shared island. This is the live
+  /// bound a stretch drag clamps to, so a manual stretch never over-runs into neighbor audio.
+  /// Returns nil for an unknown id (including an invalid timeline, whose `seams` are empty).
+  func maxCrossfadeLength(forSeamID id: TimelineRemoval.ID) -> Int? {
+    guard let index = seams.firstIndex(where: { $0.id == id }) else { return nil }
+    let leftHandle =
+      keptSegments[index].source.count
+      - (index > 0 ? seams[index - 1].crossfadeLength : 0)
+    let rightHandle = keptSegments[index + 1].source.count
+    return max(0, min(rightHandle, leftHandle))
   }
 
   func seam(containingEdited editedSample: Int) -> TimelineSeam? {

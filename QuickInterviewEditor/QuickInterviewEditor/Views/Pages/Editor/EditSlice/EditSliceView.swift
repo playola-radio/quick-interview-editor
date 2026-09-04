@@ -72,6 +72,10 @@ private struct SliceWaveformLane: View {
         onAreaSelectEnded: { positionX in model.waveformAreaSelectEnded(toX: positionX) },
         seams: model.seamOverlays,
         onContextMenu: { positionX in model.waveformContextMenuItems(atX: positionX) },
+        supportsEdgeDrag: false,
+        // Crossfade stretch is intentionally not wired on the slice sheet: `seamOverlays` withholds the
+        // drag handles until the slice-local seam projection lands (follow-on PR). The model's stretch
+        // methods remain for that work and its tests.
         // No on-lane audition buttons here — pinned to the band edges they read as in/out
         // markers, not transport. The sheet's audition controls live in ``AuditionPreviewPanel``
         // beside the boundary insets instead.
