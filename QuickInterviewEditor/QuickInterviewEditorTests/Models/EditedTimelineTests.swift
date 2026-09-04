@@ -70,6 +70,33 @@ struct EditedTimelineTests {
     expectNoDifference(timeline.editedDurationSamples, 5)
   }
 
+  private func uuid(_ id: UInt) -> UUID {
+    UUID(uuidString: "00000000-0000-0000-0000-0000000000\(String(format: "%02u", id))")!
+  }
+
+  @Test func maxCrossfadeLengthForIsolatedSeamIsMinOfHandles() {
+    // Remove [10,20). K0=[0,10)=10, K1=[20,100)=80. max = min(right 80, left 10) = 10.
+    let timeline = EditedTimeline(
+      sourceDurationSamples: 100, removals: [removal(10, 20, length: 5, id: 1)])
+    expectNoDifference(timeline.maxCrossfadeLength(forSeamID: uuid(1)), 10)
+  }
+
+  @Test func maxCrossfadeLengthAccountsForPreviousSeamClaim() {
+    // Two removals share island K1=[40,60)=20. K0=[0,30)=30, K2=[70,100)=30.
+    // seam0 max = min(right K1=20, left K0=30) = 20.
+    // seam1 max = min(right K2=30, left K1=20 − seam0 claim 5) = 15.
+    let timeline = EditedTimeline(
+      sourceDurationSamples: 100,
+      removals: [removal(30, 40, length: 5, id: 1), removal(60, 70, length: 5, id: 2)])
+    expectNoDifference(timeline.maxCrossfadeLength(forSeamID: uuid(1)), 20)
+    expectNoDifference(timeline.maxCrossfadeLength(forSeamID: uuid(2)), 15)
+  }
+
+  @Test func maxCrossfadeLengthForUnknownSeamIsNil() {
+    let timeline = EditedTimeline(sourceDurationSamples: 100, removals: [])
+    expectNoDifference(timeline.maxCrossfadeLength(forSeamID: uuid(1)), nil)
+  }
+
   @Test func sourceRangesForEditedSpansSeam() {
     let timeline = EditedTimeline(
       sourceDurationSamples: 100, removals: [removal(40, 60, length: 10)])

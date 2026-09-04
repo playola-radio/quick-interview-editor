@@ -72,6 +72,10 @@ private struct SliceWaveformLane: View {
         onAreaSelectEnded: { positionX in model.waveformAreaSelectEnded(toX: positionX) },
         seams: model.seamOverlays,
         onContextMenu: { positionX in model.waveformContextMenuItems(atX: positionX) },
+        supportsEdgeDrag: false,
+        onSeamStretchBegan: { model.crossfadeStretchBegan(id: $0) },
+        onSeamStretched: { model.crossfadeStretched($0, toX: $1) },
+        onSeamStretchEnded: { model.crossfadeStretchEnded() },
         // No on-lane audition buttons here — pinned to the band edges they read as in/out
         // markers, not transport. The sheet's audition controls live in ``AuditionPreviewPanel``
         // beside the boundary insets instead.

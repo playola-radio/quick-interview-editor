@@ -135,6 +135,36 @@ struct EditedWaveformAdapterTests {
     #expect(adapter.spanForSeam(seam) == nil)
   }
 
+  // MARK: - seamHandleXs
+
+  @Test func seamHandleXsReportBothEdgesWhenOnscreen() {
+    let adapter = makeAdapter(viewportWidth: 15, samplesPerPixel: 2)
+    let seam = adapter.timeline.seams[0]
+    // edited 16 -> x 8 (leading), edited 24 -> x 12 (trailing); both inside a 15pt viewport.
+    let handles = adapter.seamHandleXs(seam, previewLength: nil)
+    #expect(handles.leading == 8)
+    #expect(handles.trailing == 12)
+  }
+
+  @Test func seamHandleXsAreNilForOffscreenEdges() {
+    // Viewport only 10pt wide: leading (x 8) stays grabbable, trailing (x 12) is off-screen -> nil,
+    // so the stretch layer can't grab a phantom handle clamped to the viewport edge.
+    let adapter = makeAdapter(viewportWidth: 10, samplesPerPixel: 2)
+    let seam = adapter.timeline.seams[0]
+    let handles = adapter.seamHandleXs(seam, previewLength: nil)
+    #expect(handles.leading == 8)
+    #expect(handles.trailing == nil)
+  }
+
+  @Test func seamHandleXsFollowThePreviewLengthAroundTheCenter() {
+    let adapter = makeAdapter(viewportWidth: 15, samplesPerPixel: 2)
+    let seam = adapter.timeline.seams[0]
+    // Center stays at edited 20 (x 10); a length-4 preview -> edited [18,22) -> x [9,11).
+    let handles = adapter.seamHandleXs(seam, previewLength: 4)
+    #expect(handles.leading == 9)
+    #expect(handles.trailing == 11)
+  }
+
   // MARK: - visibleColumns across a seam
 
   @Test func visibleColumnsMergePeaksAcrossASeam() {

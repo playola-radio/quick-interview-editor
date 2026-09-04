@@ -493,6 +493,12 @@ struct SeamOverlay: Equatable, Identifiable {
   let id: UUID
   let span: WaveformSpan
   let isSelected: Bool
+  /// View-x of the seam's leading/trailing crossfade edge — the stretch grab handles — each nil when
+  /// that edge is off-screen. Distinct from `span` (which is clipped to the viewport): a handle sits
+  /// on the TRUE edge or nowhere, so a partly-scrolled bowtie never grows a phantom handle at the
+  /// viewport boundary.
+  let leadingHandleX: CGFloat?
+  let trailingHandleX: CGFloat?
 }
 
 /// One item in the waveform's AppKit right-click menu. The model builds these (title + what to do);

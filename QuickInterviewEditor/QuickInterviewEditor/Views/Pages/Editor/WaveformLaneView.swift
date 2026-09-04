@@ -69,6 +69,17 @@ struct WaveformLaneView<Overlay: View>: View {
   var onEdgeDragBegan: (SelectionEdge) -> Void = { _ in }
   var onEdgeDragged: (SelectionEdge, CGFloat) -> Void = { _, _ in }
   var onEdgeDragEnded: (SelectionEdge) -> Void = { _ in }
+  /// Whether the highlight's edges offer drag-to-resize. The main editor turns this on (its selection
+  /// boundary is draggable); the slice-edit sheet leaves it off so its no-op edge layer is never
+  /// mounted and never shadows the seam-stretch handles beneath at the highlight's boundary.
+  var supportsEdgeDrag = true
+  /// Stretch handles on each crossfade bowtie's two edges. A grab within a few points of a bowtie's
+  /// leading/trailing edge fires these to lengthen/shorten that seam's fade; a mouse-down elsewhere
+  /// falls through to the marquee below. Default no-ops so call sites without seam stretching (the
+  /// slice-edit sheet, until Stage 4) compile unchanged.
+  var onSeamStretchBegan: (UUID) -> Void = { _ in }
+  var onSeamStretched: (CrossfadeEdge, CGFloat) -> Void = { _, _ in }
+  var onSeamStretchEnded: () -> Void = {}
   @ViewBuilder let auditionOverlay: (WaveformSpan) -> Overlay
 
   private let bandHeight: CGFloat = 148
@@ -93,17 +104,33 @@ struct WaveformLaneView<Overlay: View>: View {
           onAreaSelectEnded: onAreaSelectEnded,
           onContextMenu: onContextMenu)
       )
-      // Sits ABOVE the marquee layer: it claims only the few points at each edge of the highlight, so
-      // an edge grab starts a boundary drag while every other mouse-down falls through to the marquee.
+      // Sits above the marquee and BELOW the selection-edge layer, so a selection-edge grab keeps
+      // priority where the two coincide. Claims only the points at each bowtie edge; every other
+      // mouse-down falls through to the marquee.
       .overlay(
-        WaveformEdgeHandleLayer(
-          startX: highlightRange.flatMap { waveform.laneX(forSource: $0.lowerBound) },
-          endX: highlightRange.flatMap { waveform.laneX(forSource: $0.upperBound) },
-          onEdgeDragBegan: onEdgeDragBegan,
-          onEdgeDragged: onEdgeDragged,
-          onEdgeDragEnded: onEdgeDragEnded,
+        SeamStretchHandleLayer(
+          seams: seams,
+          onStretchBegan: onSeamStretchBegan,
+          onStretched: onSeamStretched,
+          onStretchEnded: onSeamStretchEnded,
+          onBodyClick: onBodyClick,
           onContextMenu: onContextMenu)
       )
+      // Sits ABOVE the marquee layer: it claims only the few points at each edge of the highlight, so
+      // an edge grab starts a boundary drag while every other mouse-down falls through to the marquee.
+      // Only mounted where edge drag is supported, so a no-op edge layer never shadows the seam-stretch
+      // handles beneath (the slice-edit sheet shows a highlight it can't resize).
+      .overlay {
+        if supportsEdgeDrag {
+          WaveformEdgeHandleLayer(
+            startX: highlightRange.flatMap { waveform.laneX(forSource: $0.lowerBound) },
+            endX: highlightRange.flatMap { waveform.laneX(forSource: $0.upperBound) },
+            onEdgeDragBegan: onEdgeDragBegan,
+            onEdgeDragged: onEdgeDragged,
+            onEdgeDragEnded: onEdgeDragEnded,
+            onContextMenu: onContextMenu)
+        }
+      }
       .overlay(alignment: .topLeading) {
         if let highlight {
           auditionOverlay(highlight)
@@ -559,6 +586,145 @@ private struct WaveformEdgeHandleLayer: NSViewRepresentable {
 
     /// Right-click on an edge zone: forward to the seam menu so a bowtie sitting under a selection
     /// edge stays restorable. Empty result (no seam here) shows no menu, same as the marquee layer.
+    override func menu(for event: NSEvent) -> NSMenu? {
+      waveformContextMenu(from: onContextMenu?(localX(event)) ?? [])
+    }
+  }
+}
+
+/// A transparent AppKit layer over the band that claims ONLY the few points at each edge of each
+/// crossfade bowtie and turns a drag there into a fade-length stretch. Sits above the marquee (and
+/// below the selection-edge layer, which keeps priority where a selection edge coincides), so its
+/// `hitTest` returns `self` only inside a bowtie-edge zone and `nil` everywhere else — a mouse-down
+/// away from a bowtie edge falls through to the layers beneath, unchanged. It reads nothing from the
+/// model: the per-seam edge x-positions come from the same `SeamOverlay` spans the bowtie draws, and
+/// it forwards the grabbed seam id, edge, and raw gesture x to the closures.
+private struct SeamStretchHandleLayer: NSViewRepresentable {
+  let seams: [SeamOverlay]
+  let onStretchBegan: (UUID) -> Void
+  let onStretched: (CrossfadeEdge, CGFloat) -> Void
+  let onStretchEnded: () -> Void
+  let onBodyClick: (CGFloat, Bool) -> Void
+  let onContextMenu: (CGFloat) -> [WaveformMenuItem]
+
+  func makeNSView(context: Context) -> HandleView {
+    let view = HandleView()
+    apply(to: view)
+    return view
+  }
+
+  func updateNSView(_ nsView: HandleView, context: Context) {
+    apply(to: nsView)
+  }
+
+  private func apply(to view: HandleView) {
+    view.seams = seams
+    view.onStretchBegan = onStretchBegan
+    view.onStretched = onStretched
+    view.onStretchEnded = onStretchEnded
+    view.onBodyClick = onBodyClick
+    view.onContextMenu = onContextMenu
+    view.window?.invalidateCursorRects(for: view)
+  }
+
+  final class HandleView: NSView {
+    var seams: [SeamOverlay] = []
+    var onStretchBegan: ((UUID) -> Void)?
+    var onStretched: ((CrossfadeEdge, CGFloat) -> Void)?
+    var onStretchEnded: (() -> Void)?
+    var onBodyClick: ((CGFloat, Bool) -> Void)?
+    var onContextMenu: ((CGFloat) -> [WaveformMenuItem])?
+
+    /// Half-width of a grab zone: a mouse-down within this many points of a bowtie edge grabs it.
+    private let grabTolerance: CGFloat = 6
+    /// Minimum travel before a grab becomes a stretch, so a click (or hair-trigger jitter) on a
+    /// handle never opens a draft or commits a no-op undo entry. Matches the area-select layer.
+    private let dragThreshold: CGFloat = 6
+    private var active: (id: UUID, edge: CrossfadeEdge)?
+    private var downX: CGFloat?
+    private var didDrag = false
+
+    override var acceptsFirstResponder: Bool { false }
+
+    /// Claim only the bowtie-edge zones. `point` arrives in the superview's coordinates; convert into
+    /// our own bounds before testing so the zones track our frame origin.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+      let local = convert(point, from: superview)
+      guard bounds.contains(local) else { return nil }
+      return handle(nearestToX: local.x) != nil ? self : nil
+    }
+
+    /// The bowtie edge whose x is within `grabTolerance` of `x`, across every seam, choosing the
+    /// nearest when zones overlap. Nil when no edge is in range. A hard-cut seam (zero-width bowtie)
+    /// has both edges at the cut; the tie resolves to `.leading`, and dragging it out starts a fade.
+    private func handle(nearestToX posX: CGFloat) -> (id: UUID, edge: CrossfadeEdge)? {
+      var best: (handle: (id: UUID, edge: CrossfadeEdge), distance: CGFloat)?
+      for seam in seams {
+        for (edge, edgeX) in [
+          (CrossfadeEdge.leading, seam.leadingHandleX), (.trailing, seam.trailingHandleX),
+        ] {
+          guard let edgeX else { continue }
+          let distance = abs(posX - edgeX)
+          if best == nil || distance < best!.distance {
+            best = ((seam.id, edge), distance)
+          }
+        }
+      }
+      guard let best, best.distance <= grabTolerance else { return nil }
+      return best.handle
+    }
+
+    private func localX(_ event: NSEvent) -> CGFloat {
+      convert(event.locationInWindow, from: nil).x
+    }
+
+    override func resetCursorRects() {
+      let cursor = NSCursor.resizeLeftRight
+      for seam in seams {
+        for edgeX in [seam.leadingHandleX, seam.trailingHandleX] {
+          guard let edgeX else { continue }
+          addCursorRect(
+            CGRect(x: edgeX - grabTolerance, y: 0, width: grabTolerance * 2, height: bounds.height),
+            cursor: cursor)
+        }
+      }
+    }
+
+    override func mouseDown(with event: NSEvent) {
+      let posX = localX(event)
+      active = handle(nearestToX: posX)
+      downX = posX
+      didDrag = false
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+      guard let active, let downX else { return }
+      let currentX = localX(event)
+      if !didDrag {
+        guard abs(currentX - downX) >= dragThreshold else { return }
+        didDrag = true
+        onStretchBegan?(active.id)
+      }
+      onStretched?(active.edge, currentX)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+      if didDrag {
+        onStretchEnded?()
+      } else {
+        // A click that never crossed the drag threshold isn't a stretch. Because we claimed the
+        // mouse-down, the marquee/body layer beneath never sees it, so forward it to the same
+        // body-click path — a plain click on a bowtie edge still selects the seam (Logic parity).
+        onBodyClick?(localX(event), event.modifierFlags.contains(.shift))
+      }
+      active = nil
+      downX = nil
+      didDrag = false
+    }
+
+    /// Right-click on a bowtie-edge zone: forward to the seam menu so the restore/remove actions stay
+    /// reachable at the exact pixels this layer claims from the marquee beneath. Empty result (no seam
+    /// here) shows no menu, same as the marquee and selection-edge layers.
     override func menu(for event: NSEvent) -> NSMenu? {
       waveformContextMenu(from: onContextMenu?(localX(event)) ?? [])
     }

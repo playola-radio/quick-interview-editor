@@ -242,6 +242,20 @@ struct EditedTimeline: Equatable {
     return segment.editedStart + (sourceSample - segment.source.lowerBound)
   }
 
+  /// The largest crossfade length a seam can take given its neighbors, mirroring the sequential
+  /// clamp in `init`: bounded by the full kept segment on its right and by the kept segment on its
+  /// left minus whatever the previous seam already claimed of that shared island. This is the live
+  /// bound a stretch drag clamps to, so a manual stretch never over-runs into neighbor audio.
+  /// Returns nil for an unknown id (including an invalid timeline, whose `seams` are empty).
+  func maxCrossfadeLength(forSeamID id: TimelineRemoval.ID) -> Int? {
+    guard let index = seams.firstIndex(where: { $0.id == id }) else { return nil }
+    let leftHandle =
+      keptSegments[index].source.count
+      - (index > 0 ? seams[index - 1].crossfadeLength : 0)
+    let rightHandle = keptSegments[index + 1].source.count
+    return max(0, min(rightHandle, leftHandle))
+  }
+
   func seam(containingEdited editedSample: Int) -> TimelineSeam? {
     seams.first {
       editedSample >= $0.editedCrossfadeStart

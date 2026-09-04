@@ -214,6 +214,77 @@ struct EditorEditSlicePresentationTests {
     }
   }
 
+  // MARK: - Stage 4: crossfade stretch parity (modal == main editor)
+
+  /// A crossfade stretch inside the sheet drives the SHARED document exactly like the same stretch on
+  /// the main editor — same clamp, same committed crossfade, one ⌘Z — because both seed from the
+  /// stored length and route through the parent's `updateCrossfade` funnel against the one synced
+  /// timeline. This is the sync guarantee: an edit on the clip screen equals one on the main screen.
+  @Test func stretchInTheSheetCommitsIdenticallyToTheMainEditor() async {
+    let fileSystem = LockIsolated<[URL: Data]>([:])
+    await withDependencies {
+      $0.defaultFileStorage = FileStorage.inMemory(fileSystem: fileSystem)
+    } operation: {
+      let model = editor()
+      addSlice(model, 0, 5)
+      let slice = model.slices[0]
+      model.editSliceTapped(slice.id)
+      let child = model.editSlice!
+
+      selectWords(model.transcript, 1, 2)  // seed one removal inside the slice
+      await model.removeSelectedSectionTapped()
+      let id = model.timelineRemovals[0].id
+      let seededLength = model.timelineRemovals[id: id]!.crossfade.lengthSamples
+      let target = seededLength / 2  // a real shrink, below the seeded default and any handle
+
+      // Stretch on the MAIN editor and capture the committed crossfade.
+      model.crossfadeStretchBegan(id: id)
+      model.crossfadeStretched(toLength: target)
+      model.crossfadeStretchEnded()
+      let mainEditorCrossfade = model.timelineRemovals[id: id]?.crossfade
+      #expect(mainEditorCrossfade?.lengthSamples != seededLength)  // a real change, not a no-op
+
+      await model.undoTapped()  // revert to the seeded fade (one ⌘Z)
+      expectNoDifference(model.timelineRemovals[id: id]?.crossfade.lengthSamples, seededLength)
+
+      // The SAME stretch, driven from the SHEET, lands on the shared document identically.
+      child.crossfadeStretchBegan(id: id)
+      child.crossfadeStretched(toLength: target)
+      child.crossfadeStretchEnded()
+
+      expectNoDifference(model.timelineRemovals[id: id]?.crossfade, mainEditorCrossfade)
+    }
+  }
+
+  /// A no-op stretch inside the sheet (grab a bowtie edge, release without moving) pushes no undo
+  /// entry and never collapses the stored fade — the sheet seeds and compares against the stored
+  /// length, so a length that renders clamped below what's stored is preserved, matching the main
+  /// editor.
+  @Test func noOpStretchInTheSheetPushesNoUndoEntry() async {
+    let fileSystem = LockIsolated<[URL: Data]>([:])
+    await withDependencies {
+      $0.defaultFileStorage = FileStorage.inMemory(fileSystem: fileSystem)
+    } operation: {
+      let model = editor()
+      addSlice(model, 0, 5)
+      let slice = model.slices[0]
+      model.editSliceTapped(slice.id)
+      let child = model.editSlice!
+
+      selectWords(model.transcript, 1, 2)
+      await model.removeSelectedSectionTapped()
+      let id = model.timelineRemovals[0].id
+      let seededLength = model.timelineRemovals[id: id]!.crossfade.lengthSamples
+
+      child.crossfadeStretchBegan(id: id)
+      child.crossfadeStretchEnded()  // released without a drag
+
+      expectNoDifference(model.timelineRemovals[id: id]?.crossfade.lengthSamples, seededLength)
+      await model.undoTapped()  // the ONE real edit (the removal) undoes to empty
+      #expect(model.timelineRemovals.isEmpty)
+    }
+  }
+
   /// ⌘Z pressed INSIDE the sheet (forwarded by `SliceEditKeyMonitor` to `child.undoTapped`) rewinds
   /// the shared document and fans the restored timeline back into the open sheet — the modal removal
   /// is undoable without focus ever leaving the sheet.
