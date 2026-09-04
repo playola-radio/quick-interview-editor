@@ -66,13 +66,12 @@ final class EditSliceModel: ViewModel, Identifiable {
   var onRemoveSection: (Range<Int>) async -> Void = { _ in }
   /// Restores a removal by id (routed to the parent's `restoreRemoval`).
   var onRestore: (TimelineRemoval.ID) -> Void = { _ in }
-  /// Commits a stretched crossfade length for a removal (routed to the parent's `updateCrossfade`
-  /// funnel, so a stretch on the sheet is identical to one on the main timeline and one ⌘Z step).
+  /// Commits a stretched crossfade length through the parent's `updateCrossfade` funnel as one undo
+  /// step. The sheet supplies the slice-local length it can actually play.
   var onStretchCrossfade: (TimelineRemoval.ID, Int) -> Void = { _, _ in }
   /// The removal's current STORED crossfade length (from the parent's document), which can exceed the
-  /// seam's rendered/clamped length. A stretch seeds and no-op-compares against this — the same value
-  /// the main editor uses — so the two surfaces draft and commit identically, and a no-op modal drag
-  /// never collapses latent fade intent.
+  /// seam's slice-local rendered length. A stretch retains it as the document baseline so a stale
+  /// drag cannot overwrite a concurrent change and a no-op drag never collapses latent fade intent.
   var currentCrossfadeLength: (TimelineRemoval.ID) -> Int? = { _ in nil }
   /// Whether the parent will accept a crossfade edit right now (it refuses mid-export, when the
   /// removal set is frozen). Asked before a stretch starts, so the sheet never previews a drag the
@@ -100,9 +99,9 @@ final class EditSliceModel: ViewModel, Identifiable {
 
   // MARK: - Crossfade stretch (edge drag)
   /// The live edge-drag stretch on this sheet's lane; previews the bowtie via `seamOverlays` and
-  /// commits through the parent on release. Same draft/clamp mechanism as the main editor, run
-  /// against this sheet's own (parent-synced) lane so the geometry and clamp match exactly.
+  /// commits through the parent on release, clamped to what this slice can play.
   private(set) var crossfadeStretchDraft: CrossfadeStretchDraft?
+  @ObservationIgnored private var crossfadeStretchInitialRenderedLength: Int?
 
   // MARK: - Display Text
   let saveLabel = "Save cut"
@@ -126,23 +125,32 @@ final class EditSliceModel: ViewModel, Identifiable {
   var canRemoveSelection: Bool { waveformSelection != nil }
 
   // MARK: - Seam overlays
-  /// The bowtie spans the lane draws at each seam, mapped to the collapsed lane's view coordinates —
-  /// identical derivation to the main editor's `seamOverlays`, reading the shared timeline the parent
-  /// keeps synced. The view only binds; it never derives geometry.
+  /// The bowtie spans the lane draws at each seam, mapped to the collapsed lane's view coordinates.
+  /// The lane runs in GLOBAL coordinates (it adopts the whole-file pyramid and the parent's global
+  /// timeline), but every seam draws at the length THIS slice actually plays — the slice-local
+  /// clamped crossfade (``sliceLocalTimeline``) — not the parent's global clamped length. A fade may
+  /// never pull audio from outside the slice's cut points, so a latent fade stored longer than the
+  /// slice-local handle renders shorter here, and a seam crossing/touching a slice edge collapses to
+  /// a hard cut (length 0) — drawing what the slice plays rather than a bowtie it never fades. During
+  /// a drag the draft length (already clamped to the slice-local handle) drives both the bowtie and
+  /// the handles so the grabbed edge stays under the cursor. The view only binds; it never derives
+  /// geometry.
   var seamOverlays: [SeamOverlay] {
-    editedWaveform.timeline.seams.compactMap { seam in
-      let previewLength = crossfadeStretchDraft.flatMap { $0.id == seam.id ? $0.length : nil }
-      let span =
-        previewLength.map { editedWaveform.spanForSeam(seam, previewLength: $0) }
-        ?? editedWaveform.spanForSeam(seam)
-      guard let span else { return nil }
-      // Stretch handles only on INTERIOR seams. The sheet edits the GLOBAL removal, but the slice
-      // renders/exports on its own windowed timeline, where a removal crossing or touching a slice
-      // edge collapses to a hard cut — a handle there would author a fade this slice never plays.
-      // Such seams stay bowtie-only. Handles track the draft bowtie during a drag (`previewLength`).
+    let localTimeline = sliceLocalTimeline
+    return editedWaveform.timeline.seams.compactMap { seam in
+      guard
+        let localLength = localTimeline?.seams.first(where: { $0.id == seam.id })?
+          .crossfadeLength
+      else { return nil }
+      let length =
+        crossfadeStretchDraft.flatMap { $0.id == seam.id ? $0.length : nil } ?? localLength
+      guard let span = editedWaveform.spanForSeam(seam, previewLength: length) else { return nil }
+      // Stretch handles only on INTERIOR seams — those the slice renders with a real fade. A
+      // boundary seam (a removal crossing or touching a slice edge) plays as a hard cut here, so it
+      // gets no handle: a drag would author a fade this slice never plays.
       let handles =
         isInteriorSeam(seam)
-        ? editedWaveform.seamHandleXs(seam, previewLength: previewLength)
+        ? editedWaveform.seamHandleXs(seam, previewLength: length)
         : (leading: nil, trailing: nil)
       return SeamOverlay(
         id: seam.id, span: span, isSelected: seam.id == selectedSeamID,
@@ -162,18 +170,19 @@ final class EditSliceModel: ViewModel, Identifiable {
 
   private static let seamHitTolerance: CGFloat = 4
 
-  /// The removal id whose bowtie the view-x lands on, or nil — same hit-test as the main editor
-  /// (nearest bowtie center wins when widened targets overlap).
+  /// The removal id whose drawn bowtie the view-x lands on, or nil. Hit-tests the slice-local
+  /// overlays rather than the parent's wider global bowties; nearest center wins when widened
+  /// targets overlap.
   func seamID(atX positionX: CGFloat) -> TimelineRemoval.ID? {
     var best: (id: TimelineRemoval.ID, distance: CGFloat)?
-    for seam in editedWaveform.timeline.seams {
-      guard let span = editedWaveform.spanForSeam(seam) else { continue }
+    for overlay in seamOverlays {
+      let span = overlay.span
       guard positionX >= span.positionX - Self.seamHitTolerance,
         positionX <= span.positionX + span.width + Self.seamHitTolerance
       else { continue }
       let distance = abs(positionX - (span.positionX + span.width / 2))
       if best == nil || distance < best!.distance {
-        best = (seam.id, distance)
+        best = (overlay.id, distance)
       }
     }
     return best?.id
@@ -240,6 +249,28 @@ final class EditSliceModel: ViewModel, Identifiable {
 
   /// The slice's current playable bounds — the live draft while editing, the committed cut otherwise.
   private var slicePlaybackRange: Range<Int>? { fineTune.draftRange ?? fineTune.committedRange }
+
+  /// The slice-LOCAL timeline: the parent's removals clipped to the live cut and rebased to
+  /// slice-relative samples (`SliceRenderPlanBuilder.localTimeline`, the same view slice playback and
+  /// export build). This is the honest lens on what THIS slice actually plays — a fade may never pull
+  /// audio from outside the slice's cut points — so the stretch clamp (``crossfadeStretched(toLength:)``,
+  /// ``crossfadeStretchEnded``) and the drawn bowtie lengths (``seamOverlays``) read their ceiling
+  /// here, not from the parent's global timeline. Removal ids survive the rebase, so seam-id lookups
+  /// line up with the global lane, and a length is coordinate-independent. Nil when the slice has no
+  /// live playable range.
+  private var sliceLocalTimeline: EditedTimeline? {
+    guard let slice = slicePlaybackRange else { return nil }
+    return SliceRenderPlanBuilder.localTimeline(
+      sliceRange: slice, removals: editedWaveform.timeline.removals)
+  }
+
+  /// The largest crossfade seam `id` can take on THIS slice — its slice-local handle. For an interior
+  /// seam the slice can only shrink the available audio, so this is always <= the global handle and
+  /// `min(global, local)` reduces to local; the sheet clamps to this alone. 0 when the slice has no
+  /// live range or the seam has no handle on a clipped side.
+  private func sliceLocalMaxCrossfade(forSeamID id: TimelineRemoval.ID) -> Int {
+    sliceLocalTimeline?.maxCrossfadeLength(forSeamID: id) ?? 0
+  }
 
   /// What Play plays: from the playhead to the slice's cut-out (Logic parity — Play always starts at
   /// the playhead). When the cursor sits outside the slice (before the cut-in or at/after the
@@ -453,21 +484,20 @@ final class EditSliceModel: ViewModel, Identifiable {
 
   // MARK: - Crossfade stretch
   /// Begins an edge-drag stretch of seam `id` on the sheet's lane: selects it and seeds the draft
-  /// with the removal's stored length. A no-op for a seam not on this lane (unknown to the parent,
-  /// or with no derivable seam — the main editor's unrecoverable-seam guard) and for a boundary
-  /// seam, which the lane offers no handle for (`seamOverlays`) — the model refuses too, so the
-  /// view can never author a fade this slice would play as a hard cut. No transport teardown is
-  /// needed here, unlike the main editor: the sheet's preview only widens the bowtie overlay and
-  /// never reflows the lane's timeline, so the playhead keeps tracking the audio that is actually
-  /// playing; the commit on release reflows through the parent, whose timeline sync stops a
-  /// slice-edit session that depended on the changed removal and publishes "stopped" back here.
+  /// with the slice-local rendered length while retaining the stored document length as its stale-
+  /// write baseline. A no-op for a seam not on this lane and for a boundary seam, which the lane
+  /// offers no handle for (`seamOverlays`). No transport teardown is needed here, unlike the main
+  /// editor: the sheet's preview only widens the bowtie overlay and never reflows the lane's timeline.
   func crossfadeStretchBegan(id: TimelineRemoval.ID) {
     guard canEditCrossfade(), let length = currentCrossfadeLength(id),
       let seam = editedWaveform.timeline.seams.first(where: { $0.id == id }),
+      let renderedLength = sliceLocalTimeline?.seams.first(where: { $0.id == id })?.crossfadeLength,
       isInteriorSeam(seam)
     else { return }
     selectSeam(id)
-    crossfadeStretchDraft = CrossfadeStretchDraft(id: id, length: length, committedLength: length)
+    crossfadeStretchInitialRenderedLength = renderedLength
+    crossfadeStretchDraft = CrossfadeStretchDraft(
+      id: id, length: renderedLength, committedLength: length)
   }
 
   /// A stretch drag to view-x on the sheet's lane: map x → edited sample and derive the symmetric
@@ -488,19 +518,22 @@ final class EditSliceModel: ViewModel, Identifiable {
     crossfadeStretched(toLength: length)
   }
 
-  /// Geometry-free core: clamp the proposed length to `[0, available handle]`, read from this lane's
-  /// parent-synced timeline — the same bound the main editor clamps to, so the two surfaces agree.
-  /// No document mutation; the commit is on release.
+  /// Geometry-free core: clamp the proposed length to `[0, slice-local handle]` — the ceiling THIS
+  /// slice can play (``sliceLocalMaxCrossfade``), which for an interior seam is <= the global handle
+  /// the main editor clamps to. Unlike PR #68's cross-surface parity, the sheet must never author a
+  /// fade longer than the slice actually plays, so when audio outside the slice would widen the
+  /// global handle the sheet clamps shorter than the main editor. No document mutation; the commit is
+  /// on release.
   func crossfadeStretched(toLength proposed: Int) {
     guard var draft = crossfadeStretchDraft else { return }
-    let maxLength = editedWaveform.timeline.maxCrossfadeLength(forSeamID: draft.id) ?? 0
+    let maxLength = sliceLocalMaxCrossfade(forSeamID: draft.id)
     draft.length = max(0, min(proposed, maxLength))
     crossfadeStretchDraft = draft
   }
 
   /// Release: commit the drafted length through the parent's `updateCrossfade` funnel (one undo
-  /// step) and clear the draft. A drag that netted no change against the seam's current length pushes
-  /// no entry, matching the main editor. Re-validates what `crossfadeStretchBegan` checked, because
+  /// step) and clear the draft. A drag that netted no visible change against its initial slice-local
+  /// length pushes no entry. Re-validates what `crossfadeStretchBegan` checked, because
   /// both can change while the mouse is down without a fan reaching `syncTimeline`: the stored
   /// length (an undo restoring a latent, clamped-away length leaves the rendered timeline equal, so
   /// the parent never fans) and the seam's interior status (the key monitor stays live during a
@@ -509,18 +542,19 @@ final class EditSliceModel: ViewModel, Identifiable {
   /// commits nothing. The length is re-clamped to the seam's CURRENT handle too: a re-fan that
   /// restored a neighbouring removal shrinks the handle without touching this removal's stored
   /// length, so the draft survives holding a length the lane can no longer show. A drag that never
-  /// moved skips that clamp: its draft still holds the stored length, which may legitimately exceed
-  /// the handle (a latent fade), and clamping it would collapse the fade on a mere grab-and-release.
+  /// moved remains at its initial rendered length and commits nothing, preserving any longer latent
+  /// fade stored in the document.
   func crossfadeStretchEnded() {
     guard let draft = crossfadeStretchDraft else { return }
+    let initialRenderedLength = crossfadeStretchInitialRenderedLength
     crossfadeStretchDraft = nil
-    guard draft.length != draft.committedLength,
+    crossfadeStretchInitialRenderedLength = nil
+    guard let initialRenderedLength, draft.length != initialRenderedLength,
       let current = currentCrossfadeLength(draft.id), current == draft.committedLength,
       let seam = editedWaveform.timeline.seams.first(where: { $0.id == draft.id }),
-      isInteriorSeam(seam),
-      let maxLength = editedWaveform.timeline.maxCrossfadeLength(forSeamID: draft.id)
+      isInteriorSeam(seam)
     else { return }
-    let length = min(draft.length, maxLength)
+    let length = min(draft.length, sliceLocalMaxCrossfade(forSeamID: draft.id))
     guard length != current else { return }
     onStretchCrossfade(draft.id, length)
   }
@@ -533,6 +567,7 @@ final class EditSliceModel: ViewModel, Identifiable {
   func crossfadeStretchCancelled() {
     guard crossfadeStretchDraft != nil else { return }
     crossfadeStretchDraft = nil
+    crossfadeStretchInitialRenderedLength = nil
   }
 
   private func updateMarqueeSelection() {
@@ -628,6 +663,7 @@ final class EditSliceModel: ViewModel, Identifiable {
         || currentCrossfadeLength(draft.id) != draft.committedLength
     {
       crossfadeStretchDraft = nil
+      crossfadeStretchInitialRenderedLength = nil
     }
     editedWaveform.timeline = timeline
     editedWaveform.setNavigableEditedRange(pinnedEditedRange)

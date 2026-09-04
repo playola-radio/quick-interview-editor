@@ -256,6 +256,51 @@ struct EditorEditSlicePresentationTests {
     }
   }
 
+  /// PR #68 locked "an identical drag commits an identical length on both surfaces." This relaxes
+  /// that invariant for the one case where the slice-local handle is shorter than the global one: a
+  /// slice may never pull audio from outside its cut points, so when the global handle exceeds the
+  /// slice-local handle the sheet commits the SLICE-LOCAL ceiling while the main editor still commits
+  /// the higher global value. The main waveform shows/stores the global truth; that slice simply
+  /// renders it shorter — which is what the slice plays.
+  @Test func stretchInTheSheetClampsToTheSliceLocalCeilingWhenGlobalExceedsIt() async {
+    let fileSystem = LockIsolated<[URL: Data]>([:])
+    await withDependencies {
+      $0.defaultFileStorage = FileStorage.inMemory(fileSystem: fileSystem)
+    } operation: {
+      let model = editor()
+      addSlice(model, 1, 8)  // a slice that starts well into the recording (audio before it)
+      let slice = model.slices[0]
+      model.editSliceTapped(slice.id)
+      let child = model.editSlice!
+
+      selectWords(model.transcript, 2, 2)  // remove a word just inside the slice's start
+      await model.removeSelectedSectionTapped()
+      let id = model.timelineRemovals[0].id
+
+      let sliceRange = slice.startSample..<slice.endSample
+      let global = child.editedWaveform.timeline
+      let globalMax = global.maxCrossfadeLength(forSeamID: id)!
+      let localMax = SliceRenderPlanBuilder.localTimeline(
+        sliceRange: sliceRange, removals: global.removals
+      ).maxCrossfadeLength(forSeamID: id)!
+      #expect(localMax < globalMax)  // the audio before the slice widens the global handle
+
+      // MAIN editor: drag to the global ceiling and commit it.
+      model.crossfadeStretchBegan(id: id)
+      model.crossfadeStretched(toLength: globalMax)
+      model.crossfadeStretchEnded()
+      expectNoDifference(model.timelineRemovals[id: id]?.crossfade.lengthSamples, globalMax)
+
+      await model.undoTapped()  // back to the seeded fade
+
+      // SHEET: the SAME drag clamps to the shorter slice-local ceiling.
+      child.crossfadeStretchBegan(id: id)
+      child.crossfadeStretched(toLength: globalMax)
+      child.crossfadeStretchEnded()
+      expectNoDifference(model.timelineRemovals[id: id]?.crossfade.lengthSamples, localMax)
+    }
+  }
+
   /// A no-op stretch inside the sheet (grab a bowtie edge, release without moving) pushes no undo
   /// entry and never collapses the stored fade — the sheet seeds and compares against the stored
   /// length, so a length that renders clamped below what's stored is preserved, matching the main

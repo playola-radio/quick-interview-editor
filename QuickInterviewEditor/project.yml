@@ -93,8 +93,6 @@ targets:
         DEVELOPMENT_TEAM: FSRSPV9N9Q
     dependencies:
       - target: QuickInterviewEditor
-      - package: CustomDump
-        product: CustomDump
 schemes:
   QuickInterviewEditor:
     build:
