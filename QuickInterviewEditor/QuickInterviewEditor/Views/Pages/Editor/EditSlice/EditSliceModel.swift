@@ -127,23 +127,24 @@ final class EditSliceModel: ViewModel, Identifiable {
   // MARK: - Seam overlays
   /// The bowtie spans the lane draws at each seam, mapped to the collapsed lane's view coordinates.
   /// The lane runs in GLOBAL coordinates (it adopts the whole-file pyramid and the parent's global
-  /// timeline), but every seam draws at the length THIS slice actually plays — the slice-local
-  /// clamped crossfade (``sliceLocalTimeline``) — not the parent's global clamped length. A fade may
-  /// never pull audio from outside the slice's cut points, so a latent fade stored longer than the
-  /// slice-local handle renders shorter here, and a seam crossing/touching a slice edge collapses to
-  /// a hard cut (length 0) — drawing what the slice plays rather than a bowtie it never fades. During
-  /// a drag the draft length (already clamped to the slice-local handle) drives both the bowtie and
-  /// the handles so the grabbed edge stays under the cursor. The view only binds; it never derives
+  /// timeline), but every seam draws at the position and length THIS slice actually plays. Slice-
+  /// local positions are translated onto the lane at the live slice's first surviving sample, so an
+  /// earlier locally clamped fade shifts every later seam exactly as playback and export do. A fade
+  /// may never pull audio from outside the slice's cut points, so a latent fade stored longer than
+  /// the slice-local handle renders shorter here, and a seam crossing/touching a slice edge collapses
+  /// to a hard cut (length 0). During a drag the current local handle clamps only the displayed draft;
+  /// the stored draft remains intact for release comparisons. The view only binds; it never derives
   /// geometry.
   var seamOverlays: [SeamOverlay] {
-    let localTimeline = sliceLocalTimeline
-    return editedWaveform.timeline.seams.compactMap { seam in
-      guard
-        let localLength = localTimeline?.seams.first(where: { $0.id == seam.id })?
-          .crossfadeLength
-      else { return nil }
-      let length =
-        crossfadeStretchDraft.flatMap { $0.id == seam.id ? $0.length : nil } ?? localLength
+    guard let localTimeline = sliceLocalTimeline else { return [] }
+    return localTimeline.seams.compactMap { localSeam in
+      guard let seam = laneSeam(for: localSeam) else { return nil }
+      let draftOrStoredLength =
+        crossfadeStretchDraft.flatMap { $0.id == seam.id ? $0.length : nil }
+        ?? localSeam.crossfadeLength
+      let length = min(
+        draftOrStoredLength,
+        localTimeline.maxCrossfadeLength(forSeamID: seam.id) ?? 0)
       guard let span = editedWaveform.spanForSeam(seam, previewLength: length) else { return nil }
       // Stretch handles only on INTERIOR seams — those the slice renders with a real fade. A
       // boundary seam (a removal crossing or touching a slice edge) plays as a hard cut here, so it
@@ -166,6 +167,16 @@ final class EditSliceModel: ViewModel, Identifiable {
       let removal = editedWaveform.timeline.removals.first(where: { $0.id == seam.id })
     else { return false }
     return SliceRenderPlanBuilder.isInterior(removal.removedRange, in: slice)
+  }
+
+  private func laneSeam(for localSeam: TimelineSeam) -> TimelineSeam? {
+    guard let slice = slicePlaybackRange,
+      let origin = editedWaveform.timeline.sourceToEdited(slice.lowerBound, bias: .rightEdge)
+    else { return nil }
+    var seam = localSeam
+    seam.sourceCut += slice.lowerBound
+    seam.editedCrossfadeStart += origin
+    return seam
   }
 
   private static let seamHitTolerance: CGFloat = 4
@@ -256,8 +267,7 @@ final class EditSliceModel: ViewModel, Identifiable {
   /// audio from outside the slice's cut points — so the stretch clamp (``crossfadeStretched(toLength:)``,
   /// ``crossfadeStretchEnded``) and the drawn bowtie lengths (``seamOverlays``) read their ceiling
   /// here, not from the parent's global timeline. Removal ids survive the rebase, so seam-id lookups
-  /// line up with the global lane, and a length is coordinate-independent. Nil when the slice has no
-  /// live playable range.
+  /// line up with the global lane. Nil when the slice has no live playable range.
   private var sliceLocalTimeline: EditedTimeline? {
     guard let slice = slicePlaybackRange else { return nil }
     return SliceRenderPlanBuilder.localTimeline(
@@ -505,7 +515,8 @@ final class EditSliceModel: ViewModel, Identifiable {
   /// core, using this sheet's own lane geometry — the mirror of the main editor's same-named method.
   func crossfadeStretched(_ edge: CrossfadeEdge, toX positionX: CGFloat) {
     guard let draft = crossfadeStretchDraft,
-      let seam = editedWaveform.timeline.seams.first(where: { $0.id == draft.id })
+      let localSeam = sliceLocalTimeline?.seams.first(where: { $0.id == draft.id }),
+      let seam = laneSeam(for: localSeam)
     else { return }
     let editedSample = editedWaveform.xToEditedSample(positionX)
     // Symmetric length from the dragged edge and the exact doubled center, so odd lengths are
