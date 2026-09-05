@@ -10,11 +10,13 @@ struct TranscriptionQueueClientTests {
 
   /// A fake `transcribe` whose streams never finish on their own: each call records its
   /// continuation and signals a start, so the test drives completion explicitly (no sleeps).
-  private func controllableTranscribe() -> (
-    transcribe: @Sendable (URL, String, CachePolicy) -> AsyncThrowingStream<EngineEvent, Error>,
-    continuations: LockIsolated<[AsyncThrowingStream<EngineEvent, Error>.Continuation]>,
-    starts: AsyncStream<Int>
-  ) {
+  private struct Controllable {
+    let transcribe: @Sendable (URL, String, CachePolicy) -> AsyncThrowingStream<EngineEvent, Error>
+    let continuations: LockIsolated<[AsyncThrowingStream<EngineEvent, Error>.Continuation]>
+    let starts: AsyncStream<Int>
+  }
+
+  private func controllableTranscribe() -> Controllable {
     let continuations = LockIsolated<[AsyncThrowingStream<EngineEvent, Error>.Continuation]>([])
     let (starts, startsContinuation) = AsyncStream<Int>.makeStream()
     let transcribe:
@@ -28,17 +30,18 @@ struct TranscriptionQueueClientTests {
           startsContinuation.yield(index)
         }
       }
-    return (transcribe, continuations, starts)
+    return Controllable(transcribe: transcribe, continuations: continuations, starts: starts)
   }
 
   private let job = TranscriptionJob(
     source: URL(fileURLWithPath: "/clip.m4a"), sourceFingerprint: "fp", policy: .useCache)
 
   @Test func thirdJobWaitsUntilASlotFrees() async {
-    let (transcribe, continuations, starts) = controllableTranscribe()
+    let fake = controllableTranscribe()
+    let continuations = fake.continuations
 
     await withMainSerialExecutor {
-      let queue = TranscriptionQueue(maxConcurrent: 2, transcribe: transcribe)
+      let queue = TranscriptionQueue(maxConcurrent: 2, transcribe: fake.transcribe)
       for _ in 0..<3 {
         Task {
           let stream = await queue.enqueue(job)
@@ -46,7 +49,7 @@ struct TranscriptionQueueClientTests {
         }
       }
 
-      var startIterator = starts.makeAsyncIterator()
+      var startIterator = fake.starts.makeAsyncIterator()
       _ = await startIterator.next()  // first slot
       _ = await startIterator.next()  // second slot
       // The cap is 2, so the third job is parked and never reached the fake yet.
