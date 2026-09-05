@@ -109,6 +109,9 @@ targets:
         buildPhase: resources
       - path: Resources/Fixtures/project-state.json
         buildPhase: resources
+      - path: QuickInterviewEditorTests/Fixtures/project-v1.pie
+        type: folder
+        buildPhase: resources
     settings:
       base:
         SWIFT_VERSION: "6.0"

@@ -107,4 +107,19 @@ struct ProjectPackageTests {
       try ProjectPackage.verifyAudio(FileWrapper(regularFileWithContents: audioData), against: source)
     }
   }
+
+  // MARK: - Bundled fixture
+
+  @Test func decodesBundledProjectV1Fixture() throws {
+    let url = Bundle(for: BundleToken.self)
+      .url(forResource: "project-v1", withExtension: "pie")!
+    let root = try FileWrapper(url: url, options: [.immediate])
+
+    let decoded = try ProjectPackage.decode(root)
+    try ProjectPackage.verifyAudio(decoded.audioWrapper, against: decoded.file.source)
+
+    expectNoDifference(decoded.file.schemaVersion, 1)
+  }
 }
+
+private final class BundleToken {}
