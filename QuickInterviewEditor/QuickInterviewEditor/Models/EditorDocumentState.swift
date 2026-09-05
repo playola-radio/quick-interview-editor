@@ -13,8 +13,8 @@ struct EditorDocumentState: Equatable, Codable, Sendable {
   var speakerDisplayNames: [String: String]
 
   init(
-    slices: IdentifiedArrayOf<Slice>,
-    timelineRemovals: IdentifiedArrayOf<TimelineRemoval>,
+    slices: IdentifiedArrayOf<Slice> = [],
+    timelineRemovals: IdentifiedArrayOf<TimelineRemoval> = [],
     cutSuggestions: IdentifiedArrayOf<CutSuggestion> = [],
     speakerCountOverride: Int? = nil,
     speakerDisplayNames: [String: String] = [:]

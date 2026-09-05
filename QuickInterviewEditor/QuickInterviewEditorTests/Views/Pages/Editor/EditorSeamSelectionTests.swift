@@ -228,21 +228,6 @@ struct EditorSeamSelectionTests {
     }
   }
 
-  @Test func restoreRemovalPersistsSidecar() throws {
-    let fingerprint = "fp-restore-persist"
-    let url = ProjectState.sidecarURL(fingerprint: fingerprint)
-    let fileSystem = LockIsolated<[URL: Data]>([:])
-    try withDependencies {
-      $0.defaultFileStorage = FileStorage.inMemory(fileSystem: fileSystem)
-    } operation: {
-      let model = editor(fingerprint: fingerprint)
-      let id = addRemoval(model)
-      model.restoreRemoval(id: id)
-      let onDisk = try JSONDecoder().decode(ProjectState.self, from: fileSystem.value[url]!)
-      expectNoDifference(onDisk.timelineRemovals.count, 0)
-    }
-  }
-
   @Test func restoreControlGatingFollowsSeamSelection() {
     withStorage {
       let model = editor(fingerprint: "fp-restore-gating")

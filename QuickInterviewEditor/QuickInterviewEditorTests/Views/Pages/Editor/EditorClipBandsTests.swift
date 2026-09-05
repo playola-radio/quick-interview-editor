@@ -1,9 +1,6 @@
-import ConcurrencyExtras
 import CustomDump
-import Dependencies
 import Foundation
 import IdentifiedCollections
-@_spi(Internals) import Sharing
 import Testing
 
 @testable import PlayolaInterviewEditor
@@ -17,23 +14,18 @@ struct EditorClipBandsTests {
       wordIDs: wordIDs, snippet: "a story")
   }
 
-  /// Builds an editor whose sidecar is pre-seeded with the given suggestions, backed by an
-  /// isolated in-memory file system (no disk, no network).
+  /// Builds an editor seeded with the given cut suggestions via its initial document. PR 2 made
+  /// the editor's document the source of truth for bands; persistence flows out through the tab's
+  /// sidecar bridge, so these band tests need no file storage at all.
   private func withEditor(
     suggestions: [CutSuggestion], _ body: (EditorModel) -> Void
   ) {
-    withDependencies {
-      $0.defaultFileStorage = FileStorage.inMemory(fileSystem: LockIsolated([:]))
-    } operation: {
-      let fingerprint = "fp-clip-bands"
-      @Shared(.projectState(fingerprint: fingerprint)) var state = ProjectState(
-        cutSuggestions: IdentifiedArray(uniqueElements: suggestions))
-      let model = EditorModel(
-        sourceURL: URL(fileURLWithPath: "/clip.m4a"),
-        canonicalAudioURL: Fixtures.canonicalAudioURL, editPlan: Fixtures.editPlan(),
-        sourceFingerprint: fingerprint)
-      body(model)
-    }
+    let model = EditorModel(
+      sourceURL: URL(fileURLWithPath: "/clip.m4a"),
+      canonicalAudioURL: Fixtures.canonicalAudioURL, editPlan: Fixtures.editPlan(),
+      initialDocument: EditorDocumentState(
+        cutSuggestions: IdentifiedArray(uniqueElements: suggestions)))
+    body(model)
   }
 
   @Test func noSlicesOrSuggestionsProducesNoBands() {

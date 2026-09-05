@@ -1,6 +1,7 @@
 import Dependencies
 import Foundation
 import Observation
+import Sharing
 
 @MainActor
 @Observable
@@ -159,11 +160,7 @@ final class SongTabModel: ViewModel, Identifiable {
         case .progress(let progress):
           applyProgress(progress)
         case .completed(let result):
-          editor = withDependencies(from: self) {
-            EditorModel(
-              sourceURL: sourceURL, canonicalAudioURL: result.canonicalAudioURL,
-              editPlan: result.editPlan, sourceFingerprint: fingerprint)
-          }
+          editor = makeEditor(for: result, fingerprint: fingerprint)
           phase = .loaded
           stopTicking()
         }
@@ -202,6 +199,38 @@ final class SongTabModel: ViewModel, Identifiable {
   }
 
   // MARK: - Private Helpers
+  /// Builds the editor for a completed transcription and owns the sidecar bridge: it seeds
+  /// the editor's document from the legacy per-file `.projectState` sidecar (which carries
+  /// no slices) and installs `onDocumentStateChanged` so every document mutation the editor
+  /// funnels through `mutateDocument` is written straight back to that same sidecar. This
+  /// keeps persistence entirely on the tab; the editor no longer touches `@Shared`.
+  private func makeEditor(
+    for result: TranscriptionResult, fingerprint: String
+  ) -> EditorModel {
+    @Shared(.projectState(fingerprint: fingerprint)) var projectState = ProjectState()
+    let seed = EditorDocumentState(
+      slices: [],
+      timelineRemovals: projectState.timelineRemovals,
+      cutSuggestions: projectState.cutSuggestions,
+      speakerCountOverride: projectState.speakerCountOverride,
+      speakerDisplayNames: projectState.speakerDisplayNames)
+    let newEditor = withDependencies(from: self) {
+      EditorModel(
+        sourceURL: sourceURL, canonicalAudioURL: result.canonicalAudioURL,
+        editPlan: result.editPlan, sourceFingerprint: fingerprint,
+        initialDocument: seed)
+    }
+    newEditor.onDocumentStateChanged = { document in
+      $projectState.withLock {
+        $0.timelineRemovals = document.timelineRemovals
+        $0.cutSuggestions = document.cutSuggestions
+        $0.speakerCountOverride = document.speakerCountOverride
+        $0.speakerDisplayNames = document.speakerDisplayNames
+      }
+    }
+    return newEditor
+  }
+
   /// Applies one engine progress event to the on-screen state. Resets the monotonic
   /// clamp and the per-phase timer when the phase moves forward, ignores a late event
   /// from an earlier phase, and clamps the fraction so the bar never jumps backward

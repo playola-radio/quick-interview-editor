@@ -37,10 +37,6 @@ final class EditorModel: ViewModel {
   @ObservationIgnored @Dependency(\.continuousClock) var clock
 
   // MARK: - Shared State
-  /// The per-file project sidecar, keyed by `sourceFingerprint` — the same store
-  /// `cutSuggestions` shares, so both stay backed by one file. Only `timelineRemovals`
-  /// is written through here; the sidecar's other sections are `cutSuggestions`' concern.
-  @ObservationIgnored @Shared var projectState: ProjectState
   /// The user's global clip-boundary offset preference (Settings → Editing) — nudges every
   /// NEW clip's cut points by up to ±50 ms. Read only by `appendNewClip`; manual boundary
   /// re-edits never consult these.
@@ -71,8 +67,10 @@ final class EditorModel: ViewModel {
   /// from `fineTune`, which drives the docked pane — so the two can't fight over one session.
   var editSlice: EditSliceModel?
 
-  init(sourceURL: URL, canonicalAudioURL: URL, editPlan: EditPlan, sourceFingerprint: String? = nil)
-  {
+  init(
+    sourceURL: URL, canonicalAudioURL: URL, editPlan: EditPlan, sourceFingerprint: String? = nil,
+    initialDocument: EditorDocumentState = EditorDocumentState()
+  ) {
     self.sourceURL = sourceURL
     self.canonicalAudioURL = canonicalAudioURL
     self.editPlan = editPlan
@@ -92,25 +90,49 @@ final class EditorModel: ViewModel {
     // `EditorModel(...)` in `withDependencies(from:)`), so the child inherits the same deps.
     self.cutSuggestions = CutSuggestionsPageModel(
       editPlan: editPlan, sourceFingerprint: fingerprint)
-    _projectState = Shared(.projectState(fingerprint: fingerprint))
     super.init()
+    // Seeded from the caller's initial document (the tab reads the sidecar and hands it in);
+    // the editor no longer touches `@Shared` — persistence flows out through
+    // `onDocumentStateChanged`, which the tab wires to the sidecar.
+    self.slices = initialDocument.slices
     self.timelineRemovals = Self.validatedRemovals(
-      projectState.timelineRemovals, sourceDurationSamples: editPlan.source.durationSamples)
-    self.documentCutSuggestions = projectState.cutSuggestions
-    self.speakerCountOverride = projectState.speakerCountOverride
-    self.speakerDisplayNames = projectState.speakerDisplayNames
+      initialDocument.timelineRemovals, sourceDurationSamples: editPlan.source.durationSamples)
+    self.documentCutSuggestions = initialDocument.cutSuggestions
+    self.speakerCountOverride = initialDocument.speakerCountOverride
+    self.speakerDisplayNames = initialDocument.speakerDisplayNames
     syncEditedTimeline()
-    // The document owns the cut candidates; the panel reads them from here so it stays in
-    // step with undo/redo and background passes.
+    wireCutSuggestions()
+    // The speed control lives in the transcript panel, but the transport owns the shared player, so
+    // apply its changes here — live while playing and remembered for the next play. Each change
+    // applies the model's LATEST committed rate (not the value that triggered this callback), so
+    // two rapid changes whose Tasks reach the player out of order still converge on the newest.
+    transcript.onPlaybackRateChanged = { [weak self] _ in
+      Task { await self?.applyPlaybackRate() }
+    }
+    // Text-selection gestures are now intents: the transcript resolves which words the gesture hit
+    // and hands them here, and THIS model writes the authoritative freeform `audioSelection`. Wired
+    // on the model (not a view `.onChange`) so headless model tests apply intents without a view.
+    // One-directional — the model never writes the transcript's selection back through this.
+    transcript.onSelectionIntent = { [weak self] intent in
+      guard let self else { return }
+      switch intent {
+      case .words(let anchor, let focus): self.selectWords(anchorID: anchor, focusID: focus)
+      case .word(let id, let extending): self.selectWord(id, extending: extending)
+      case .clear: self.clearSelection()
+      }
+    }
+  }
+
+  /// Wires the cut-suggestions panel's intents to the document. The document owns the candidates
+  /// (`currentSuggestions` reads them here so the panel stays in step with undo/redo and background
+  /// passes); accept/reject flip status undoably through `mutateDocument`, while a completed
+  /// analysis run stores its candidates non-undoably (a background pass must not fill the undo
+  /// stack). Accepting also lands the derived slice, idempotently, through the same funnel.
+  private func wireCutSuggestions() {
     cutSuggestions.currentSuggestions = { [weak self] in self?.documentCutSuggestions ?? [] }
-    // Accepting a suggestion adds its slice here (idempotently), through the shared
-    // mutation funnel so it's exportable and undoable like any other slice.
     cutSuggestions.onAcceptSlice = { [weak self] slice in
       self?.acceptCutSuggestionSlice(slice)
     }
-    // Accept/reject flip the suggestion's status in the document (undoably); a completed run
-    // stores its candidates non-undoably (a background analysis pass must not fill the undo
-    // stack). Each routes through `mutateDocument`, so persistence and undo stay unified.
     cutSuggestions.onAccept = { [weak self] id in
       self?.mutateDocument { $0.cutSuggestions[id: id]?.accept() }
     }
@@ -131,25 +153,6 @@ final class EditorModel: ViewModel {
     // Clicking a suggestion reveals it across both panes so the user can review/audition it.
     cutSuggestions.onSelectSuggestion = { [weak self] suggestion in
       self?.cutSuggestionSelected(suggestion)
-    }
-    // The speed control lives in the transcript panel, but the transport owns the shared player, so
-    // apply its changes here — live while playing and remembered for the next play. Each change
-    // applies the model's LATEST committed rate (not the value that triggered this callback), so
-    // two rapid changes whose Tasks reach the player out of order still converge on the newest.
-    transcript.onPlaybackRateChanged = { [weak self] _ in
-      Task { await self?.applyPlaybackRate() }
-    }
-    // Text-selection gestures are now intents: the transcript resolves which words the gesture hit
-    // and hands them here, and THIS model writes the authoritative freeform `audioSelection`. Wired
-    // on the model (not a view `.onChange`) so headless model tests apply intents without a view.
-    // One-directional — the model never writes the transcript's selection back through this.
-    transcript.onSelectionIntent = { [weak self] intent in
-      guard let self else { return }
-      switch intent {
-      case .words(let anchor, let focus): self.selectWords(anchorID: anchor, focusID: focus)
-      case .word(let id, let extending): self.selectWord(id, extending: extending)
-      case .clear: self.clearSelection()
-      }
     }
   }
 
@@ -1459,12 +1462,12 @@ final class EditorModel: ViewModel {
     return true
   }
 
-  /// The single funnel for every document mutation (`slices` + `timelineRemovals`):
-  /// snapshots before/after and records the change on the undo stack (a no-op when
-  /// nothing changed), then persists the removals if they actually changed — a
-  /// slice-only mutation (rename, reorder, add/delete slice) never touches the sidecar.
-  /// Restoring history via `undoTapped`/`redoTapped` deliberately bypasses this — it
-  /// assigns the fields directly so replaying the stack never records a new entry.
+  /// The single funnel for every document mutation (slices, timeline removals, cut
+  /// suggestions, speaker overrides): snapshots before/after and records the change on
+  /// the undo stack (a no-op when nothing changed), then emits the new document through
+  /// `onDocumentStateChanged` — the one dirtiness signal, which the owning tab wires to
+  /// persistence. Restoring history via `undoTapped`/`redoTapped` deliberately bypasses
+  /// this — it assigns the fields directly so replaying the stack never records a new entry.
   func mutateDocument(recordUndo: Bool = true, _ body: (inout EditorDocumentState) -> Void) {
     let old = documentState
     var new = old
@@ -1477,9 +1480,6 @@ final class EditorModel: ViewModel {
     if recordUndo {
       documentUndo.record(before: old, after: new)
     }
-    if new.timelineRemovals != old.timelineRemovals {
-      persistTimelineRemovals()
-    }
     syncEditedTimeline()
     onDocumentStateChanged?(documentState)
   }
@@ -1490,16 +1490,10 @@ final class EditorModel: ViewModel {
     mutateDocument { doc in body(&doc.slices) }
   }
 
-  /// Writes `timelineRemovals` to the per-file project sidecar so it survives engine
-  /// re-runs and reloads.
-  private func persistTimelineRemovals() {
-    $projectState.withLock { $0.timelineRemovals = timelineRemovals }
-  }
-
   /// Adds an accepted suggestion's slice to the editor. Idempotent by `Slice.id` (a
   /// re-accept is a no-op), routed through `appendNewClip` so it's exportable and undoable.
-  /// Known limitation: undoing/deleting the slice later does not un-accept the suggestion
-  /// in the sidecar — full accept/reject reconciliation is deferred.
+  /// The suggestion's own status flip is a separate document mutation (`onAccept`); this
+  /// only lands the slice.
   func acceptCutSuggestionSlice(_ slice: Slice) {
     guard slices[id: slice.id] == nil else { return }
     appendNewClip(slice)
@@ -2004,19 +1998,14 @@ final class EditorModel: ViewModel {
   }
 
   /// Assigns a restored document snapshot back onto the model's fields (bypassing the undo
-  /// stack — replaying history must never record a new entry), persists the removals only
-  /// when they actually changed, rebuilds the edited timeline, and fires the change
-  /// callback so persistence stays in step with in-memory state.
+  /// stack — replaying history must never record a new entry), rebuilds the edited timeline,
+  /// and fires the change callback so persistence stays in step with in-memory state.
   private func restore(_ restored: EditorDocumentState) {
-    let removalsChanged = restored.timelineRemovals != timelineRemovals
     slices = restored.slices
     timelineRemovals = restored.timelineRemovals
     documentCutSuggestions = restored.cutSuggestions
     speakerCountOverride = restored.speakerCountOverride
     speakerDisplayNames = restored.speakerDisplayNames
-    if removalsChanged {
-      persistTimelineRemovals()
-    }
     syncEditedTimeline()
     onDocumentStateChanged?(documentState)
   }
