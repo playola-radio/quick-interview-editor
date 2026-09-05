@@ -104,7 +104,8 @@ struct ProjectPackageTests {
     let audioData = Data("canonical-audio-bytes".utf8)
     let source = Fixtures.projectSource(canonicalByteCount: audioData.count + 1)
     #expect(throws: ProjectPackageError.audioMismatch) {
-      try ProjectPackage.verifyAudio(FileWrapper(regularFileWithContents: audioData), against: source)
+      try ProjectPackage.verifyAudio(
+        FileWrapper(regularFileWithContents: audioData), against: source)
     }
   }
 
