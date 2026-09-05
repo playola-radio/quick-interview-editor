@@ -12,8 +12,8 @@
 > `ProjectHostView`), `pfw-issue-reporting` (`reportIssue` on error paths). List the
 > ones you used in each task's checklist.
 
-**Goal:** Make Quick Interview Editor a document-based macOS app where a project
-is a `.qieproj` package (canonical AIFF + transcript + all edits) that saves,
+**Goal:** Make Playola Interview Editor a document-based macOS app where a project
+is a `.pie` package (canonical AIFF + transcript + all edits) that saves,
 autosaves in place with Versions, and reopens exactly as left.
 
 **Architecture:** A thin `ProjectDocument: ReferenceFileDocument` owns a
@@ -36,10 +36,15 @@ Swift Testing, XcodeGen (`project.yml`), FileWrapper packages, APFS clone.
 - Deployment target **macOS 15.0**; Swift **6.0** strict concurrency; CI on
   **Xcode 16.4** (do not use macOS 27 `Document`/`ReadableDocument`/
   `WritableDocument`/`DocumentWriter` APIs — they will not compile).
-- Bundle id `fm.playola.QuickInterviewEditor`; Team `FSRSPV9N9Q`;
-  MARKETING_VERSION bumps to a new **major** for this release. Never change the
-  Team ID, bundle id, or Sparkle keychain service (preserves the stored API key
-  across updates).
+- Bundle id `fm.playola.PlayolaInterviewEditor`; Team `FSRSPV9N9Q`; keychain
+  service `fm.playola.PlayolaInterviewEditor.anthropicAPIKey`;
+  MARKETING_VERSION bumps to `2.0.0` (new **major**) for this release. The
+  rename/bundle-id cutover is **already done** (PR #71 merged: Quick Interview
+  Editor → Playola Interview Editor, new bundle id + keychain service, appcast
+  moved to `.../downloads/PlayolaInterviewEditor/appcast.xml`). From here on
+  never change the Team ID, bundle id, or Sparkle keychain service again — the
+  one-time change at n=1 was spent by #71; a second change would strand the
+  stored API key.
 - Architecture: **MV with `@Observable` models**, zero logic in views, every
   model unit-tested. Models inherit the `ViewModel` base
   (`Views/Reusable Components/ViewModel.swift`), are `@MainActor`, and use the
@@ -142,7 +147,7 @@ Versions copying the AIFF every checkpoint, STOP and escalate before PR 4.
 }
 ```
 
-- [ ] **Step 2: Run to verify it fails** — `make test-fast ONLY=QuickInterviewEditorTests/EditorDocumentStateTests` → FAIL (extra members / missing initializer).
+- [ ] **Step 2: Run to verify it fails** — `make test-fast ONLY=PlayolaInterviewEditorTests/EditorDocumentStateTests` → FAIL (extra members / missing initializer).
 - [ ] **Step 3: Add the three fields** with a custom `init(from:)` using
   `decodeIfPresent` and defaults (mirror `ProjectState`'s lenient decoder), and a
   memberwise `init` with defaults for the new fields so existing call sites keep
@@ -260,8 +265,8 @@ private func tree(projectJSON: Data, planJSON: Data, audio: Data?) -> FileWrappe
 - (Regenerate once: `cd QuickInterviewEditor && xcodegen generate`)
 
 **Interfaces:**
-- Produces: exported UTType `fm.playola.quickintervieweditor.project` conforming
-  to `com.apple.package` + `public.composite-content`, extension `qieproj`;
+- Produces: exported UTType `fm.playola.interview-editor.project` conforming
+  to `com.apple.package` + `public.composite-content`, extension `pie`;
   a `CFBundleDocumentTypes` entry (role `Editor`, `LSTypeIsPackage = true`)
   referencing it. No consumer until PR 4, but declaring early keeps Open Recent /
   Finder association correct and lets the spike exercise real save/open.
@@ -272,21 +277,21 @@ private func tree(projectJSON: Data, planJSON: Data, audio: Data?) -> FileWrappe
 <key>UTExportedTypeDeclarations</key>
 <array>
   <dict>
-    <key>UTTypeIdentifier</key><string>fm.playola.quickintervieweditor.project</string>
-    <key>UTTypeDescription</key><string>Quick Interview Editor Project</string>
+    <key>UTTypeIdentifier</key><string>fm.playola.interview-editor.project</string>
+    <key>UTTypeDescription</key><string>Playola Interview Editor Project</string>
     <key>UTTypeConformsTo</key>
     <array><string>com.apple.package</string><string>public.composite-content</string></array>
     <key>UTTypeTagSpecification</key>
-    <dict><key>public.filename-extension</key><array><string>qieproj</string></array></dict>
+    <dict><key>public.filename-extension</key><array><string>pie</string></array></dict>
   </dict>
 </array>
 <key>CFBundleDocumentTypes</key>
 <array>
   <dict>
-    <key>CFBundleTypeName</key><string>Quick Interview Editor Project</string>
+    <key>CFBundleTypeName</key><string>Playola Interview Editor Project</string>
     <key>CFBundleTypeRole</key><string>Editor</string>
     <key>LSTypeIsPackage</key><true/>
-    <key>LSItemContentTypes</key><array><string>fm.playola.quickintervieweditor.project</string></array>
+    <key>LSItemContentTypes</key><array><string>fm.playola.interview-editor.project</string></array>
   </dict>
 </array>
 ```
@@ -295,12 +300,12 @@ private func tree(projectJSON: Data, planJSON: Data, audio: Data?) -> FileWrappe
   `xcodegen generate` does not drop them; regenerate once and confirm the plist
   in the generated target keeps the keys.
 - [ ] **Step 3:** Build (`make test-fast` compiles the app target) → PASS.
-- [ ] **Step 4: Commit** — `git commit -m "feat: declare .qieproj package UTType + document type"`.
+- [ ] **Step 4: Commit** — `git commit -m "feat: declare .pie package UTType + document type"`.
 
 ### Task 1.6: Package fixture
 
 **Files:**
-- Create: `QuickInterviewEditorTests/Fixtures/project-v1.qieproj/{project.json,plan.json,audio/canonical.aiff}`
+- Create: `QuickInterviewEditorTests/Fixtures/project-v1.pie/{project.json,plan.json,audio/canonical.aiff}`
 - Modify: `QuickInterviewEditor/project.yml` (add the fixture folder to the test target resources if fixtures are declared there; follow how `edit-plan.json` is bundled)
 
 - [ ] **Step 1:** Build a minimal valid package by hand: `project.json` (schema 1,
@@ -312,7 +317,7 @@ private func tree(projectJSON: Data, planJSON: Data, audio: Data?) -> FileWrappe
   `FileWrapper(url:options:)` and `ProjectPackage.decode`s it successfully, then
   `verifyAudio` passes.
 - [ ] **Step 3:** `make test-fast` → PASS.
-- [ ] **Step 4: Commit** — `git commit -m "test: add project-v1.qieproj package fixture"`.
+- [ ] **Step 4: Commit** — `git commit -m "test: add project-v1.pie package fixture"`.
 
 **PR 1 self-check:** value types + codec + declarations exist and are tested;
 nothing user-visible changed; `make test` + `make format-check` + `make lint` green.
@@ -576,8 +581,8 @@ notes file. If S3 fails, escalate before proceeding.
 - Consumes: `ProjectPackage` (1.3), `ProjectFile`, `EditPlan`, `CanonicalAudioSource`.
 - Produces: `final class ProjectDocument: ReferenceFileDocument` (nonisolated
   read/write hooks):
-  - `static var readableContentTypes: [UTType] = [.qieProject]` (define
-    `UTType.qieProject` from the exported id)
+  - `static var readableContentTypes: [UTType] = [.pieProject]` (define
+    `UTType.pieProject` from the exported id)
   - stored: `var file: ProjectFile; var plan: EditPlan; var audio: CanonicalAudioSource`
   - `struct Snapshot: Sendable { var file: ProjectFile; var plan: EditPlan; var audio: CanonicalAudioSource }`
   - `init(configuration:)` → `ProjectPackage.decode`, sets `audio = .packageChild`
@@ -589,7 +594,7 @@ notes file. If S3 fails, escalate before proceeding.
     Duplicate (no `existingFile`) fall back to the session file.
 
 - [ ] **Step 1: Write failing tests** driving the codec through the document:
-  - `init(configuration:)` from the `project-v1.qieproj` fixture wrapper decodes
+  - `init(configuration:)` from the `project-v1.pie` fixture wrapper decodes
     `file`/`plan` and sets `audio == .packageChild`.
   - `fileWrapper` with `snapshot.audio == .packageChild` and a supplied
     `existingFile` reuses the same audio child wrapper instance (assert the wrapper
@@ -700,7 +705,7 @@ notes file. If S3 fails, escalate before proceeding.
   manual menu verify (Cmd-Z from the menu undoes; disabled with empty history).
 - [ ] **Step 5: Commit** — `git commit -m "feat: focused Undo/Redo + re-transcribe commands; remove RootModel/SongTabModel/tab bar"`.
 
-**PR 4 self-check:** app opens/saves/autosaves `.qieproj`; one project per window;
+**PR 4 self-check:** app opens/saves/autosaves `.pie`; one project per window;
 menus route to the focused project; no `RootModel`/`SongTabModel`; the spec's
 S1–S3/S5 spikes passed; green `make test` + format + lint; PR description carries
 the manual-verify checklist (import, edit, save, autosave, Revert To…, open,

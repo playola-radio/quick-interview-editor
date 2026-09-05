@@ -146,7 +146,7 @@ fixture `EditPlan`, a fake canonical URL, and an initial `EditorDocumentState`.
 
 ### A3. Window model: one project per window
 
-- Drop the custom in-app tab bar. Each `.qieproj` is one window; users who
+- Drop the custom in-app tab bar. Each `.pie` is one window; users who
   want tabs use macOS native window tabs (Window > Merge All Windows), matching
   Logic's one-project-per-window convention.
 - `RootModel` is deleted. Its import validation moves to `ProjectModel`; its
@@ -172,22 +172,22 @@ fixture `EditPlan`, a fake canonical URL, and an initial `EditorDocumentState`.
 ### A4. Package layout, type, and compatibility
 
 ```
-Interview.qieproj/
+Interview.pie/
   project.json          ← ProjectFile (small; rewritten on every save)
   plan.json             ← EditPlan verbatim (engine-owned; ~1 MB per hour)
   audio/
     canonical.aiff      ← canonical PCM; reused, never re-serialized (A5)
 ```
 
-- Extension **`.qieproj`**; UTType **`fm.playola.quickintervieweditor.project`**
+- Extension **`.pie`**; UTType **`fm.playola.interview-editor.project`**
   conforming to `com.apple.package` and `public.composite-content`. Declared as
   an exported type and the app's document type in `project.yml`/Info.plist
   (Open Recent and Finder association depend on this being right).
-  `.interview` was rejected as too generic and `.qie` as not signalling a
-  project bundle.
+  `.interview` was rejected as too generic; `.pie` puns on **P**layola
+  **I**nterview **E**ditor and reads as a project bundle.
 - `schemaVersion` starts at 1 in `project.json`. `EditPlan` keeps its own
   `schema_version`. Rules: refuse to open a **greater** major `schemaVersion`
-  with a clear alert ("This project was saved by a newer version of Quick
+  with a clear alert ("This project was saved by a newer version of Playola
   Interview Editor"); decode additive fields leniently with defaults (the
   `ProjectState` / `Crossfade` pattern); unknown enum values fall back only
   where a safe default exists (crossfade curve → equal power).
@@ -289,8 +289,9 @@ struct EditorDocumentState: Codable, Equatable, Sendable {
 
 ### A8. Migration and the cache layer
 
-- The fingerprint sidecar (`~/Library/Application Support/QuickInterviewEditor/
-  Projects/<sha256>.json`) becomes **read-only migration input**. On import,
+- The fingerprint sidecar (`~/Library/Application Support/Playola Interview
+  Editor/Projects/<sha256>.json`, post-rename unified folder — see
+  `AppDirectories`) becomes **read-only migration input**. On import,
   after the source fingerprint is known and before the editor is built, seed
   `EditorDocumentState` from a matching sidecar (removals, suggestions, speaker
   fields — slices were never persisted). The sidecar is not written again and
@@ -333,7 +334,7 @@ Every model is tested; no view carries logic.
   `FileWrapper(directoryWithFileWrappers:)`; lenient decode of a v1 file with
   fields missing; refusal of a greater `schemaVersion`; missing `plan.json`;
   audio wrapper reuse when the source is `.packageChild` and a fresh wrapper
-  when it is `.sessionFile`. Fixtures: a bundled `project-v1.qieproj` tree
+  when it is `.sessionFile`. Fixtures: a bundled `project-v1.pie` tree
   with a tiny AIFF.
 - `ProjectModel`: phase transitions with an immediate `TranscriptionQueueClient`
   stream; commit + `registerChange` recorded by a test `ProjectDocumentSink`;
@@ -390,7 +391,10 @@ ships behind no flag: PRs 1–3 are invisible; PR 4 is the user-visible switch.
 
 ## Open items for the user
 
-- Extension `.qieproj` vs `.qie` (recommendation: `.qieproj`).
+- ~~Extension `.pie` vs `.qie`~~ **Resolved: `.pie`.** The app was also renamed
+  Quick Interview Editor → Playola Interview Editor with a new bundle id
+  (`fm.playola.PlayolaInterviewEditor`), keychain service, and appcast path —
+  shipped ahead of this feature in PR #71.
 - Whether the autosave-window crash-loss trade (A7) is acceptable for v1.
 - Whether deleting the legacy sidecar after a successful first save is wanted
   (recommendation: leave it; remove the reader in a later major).
