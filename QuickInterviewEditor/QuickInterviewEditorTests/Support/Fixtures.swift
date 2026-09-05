@@ -81,6 +81,33 @@ enum Fixtures {
       id: id, removedRange: range, crossfade: Crossfade(lengthSamples: 480, curve: .equalPower))
   }
 
+  static func projectSource(
+    originalFileName: String = "interview.mp3",
+    originalPath: String? = "/Users/host/Desktop/interview.mp3",
+    originalFingerprint: String = "orig-fp",
+    canonicalFingerprint: String = "canonical-fp",
+    canonicalByteCount: Int = 4096,
+    importedAt: Date = Date(timeIntervalSince1970: 1_700_000_000),
+    sampleRate: Int = 44100,
+    channels: Int = 1,
+    durationSamples: Int = 441_000
+  ) -> ProjectSource {
+    ProjectSource(
+      originalFileName: originalFileName, originalPath: originalPath,
+      originalFingerprint: originalFingerprint, canonicalFingerprint: canonicalFingerprint,
+      canonicalByteCount: canonicalByteCount, importedAt: importedAt, sampleRate: sampleRate,
+      channels: channels, durationSamples: durationSamples)
+  }
+
+  static func projectFile(
+    schemaVersion: Int = ProjectFile.currentSchemaVersion,
+    source: ProjectSource = projectSource(),
+    engine: ProjectEngineInfo = ProjectEngineInfo(engineFingerprint: "engine-fp"),
+    content: EditorDocumentState = editorDocumentState()
+  ) -> ProjectFile {
+    ProjectFile(schemaVersion: schemaVersion, source: source, engine: engine, content: content)
+  }
+
   static func editorDocumentState(
     slices: IdentifiedArrayOf<Slice> = [slice()],
     timelineRemovals: IdentifiedArrayOf<TimelineRemoval> = [timelineRemoval()],
