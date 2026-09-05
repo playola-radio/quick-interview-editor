@@ -72,6 +72,23 @@ struct ProjectModelTests {
     expectNoDifference(commit.file.source.durationSamples, plan.source.durationSamples)
   }
 
+  @Test func importedAtIsFlooredToWholeSecondsForRoundTrip() async throws {
+    // The `.pie` package stores whole seconds; a fractional clock reading must be
+    // floored so the committed file equals what reopening the saved package yields.
+    let (sink, record) = ProjectDocumentSink.recorder()
+    let model = ProjectModel(file: nil, plan: nil, audio: nil, sink: sink)
+    await withDependencies {
+      $0.date = .constant(Date(timeIntervalSince1970: 1_700_000_000.75))
+      $0.transcription.transcribe = { _, _, _ in
+        stream([.completed(Fixtures.transcriptionResult(Fixtures.editPlan()))])
+      }
+    } operation: {
+      await model.importAudioTapped(URL(fileURLWithPath: "/clip.m4a"))
+    }
+    let commit = try #require(record.commits.first)
+    expectNoDifference(commit.file.source.importedAt, Date(timeIntervalSince1970: 1_700_000_000))
+  }
+
   @Test func progressUpdatesTranscribingFraction() async {
     let (sink, _) = ProjectDocumentSink.recorder()
     let model = ProjectModel(file: nil, plan: nil, audio: nil, sink: sink)

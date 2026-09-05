@@ -160,7 +160,10 @@ final class ProjectModel: ViewModel {
         // (Task 5.1), where they key the re-transcribe cache; empty until then.
         canonicalFingerprint: "",
         canonicalByteCount: 0,
-        importedAt: date.now,
+        // The `.pie` package stores whole seconds only; floor here so the committed
+        // in-memory `ProjectFile` matches what reopening the saved package yields
+        // (ProjectPackage precision contract).
+        importedAt: Date(timeIntervalSince1970: date.now.timeIntervalSince1970.rounded(.down)),
         sampleRate: editPlan.source.sampleRate,
         channels: editPlan.source.channels,
         durationSamples: editPlan.source.durationSamples),
