@@ -91,4 +91,20 @@ struct ProjectPackageTests {
       try ProjectPackage.decode(root)
     }
   }
+
+  // MARK: - Audio integrity
+
+  @Test func verifyAudioPassesWhenByteCountMatches() throws {
+    let audioData = Data("canonical-audio-bytes".utf8)
+    let source = Fixtures.projectSource(canonicalByteCount: audioData.count)
+    try ProjectPackage.verifyAudio(FileWrapper(regularFileWithContents: audioData), against: source)
+  }
+
+  @Test func verifyAudioThrowsWhenByteCountMismatches() {
+    let audioData = Data("canonical-audio-bytes".utf8)
+    let source = Fixtures.projectSource(canonicalByteCount: audioData.count + 1)
+    #expect(throws: ProjectPackageError.audioMismatch) {
+      try ProjectPackage.verifyAudio(FileWrapper(regularFileWithContents: audioData), against: source)
+    }
+  }
 }

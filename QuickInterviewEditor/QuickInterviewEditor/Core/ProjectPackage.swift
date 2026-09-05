@@ -60,4 +60,16 @@ enum ProjectPackage {
       "audio": audioDirWrapper,
     ])
   }
+
+  /// Confirms the bundled canonical AIFF hasn't been truncated or swapped since
+  /// `project.json` was written. Only checks byte count — header sample-rate/channel
+  /// checks are deferred to the hydration step in PR 5, where an `AVAudioFile` is
+  /// opened anyway (spec A5/A8).
+  static func verifyAudio(_ wrapper: FileWrapper, against source: ProjectSource) throws {
+    guard let contents = wrapper.regularFileContents,
+      contents.count == source.canonicalByteCount
+    else {
+      throw ProjectPackageError.audioMismatch
+    }
+  }
 }
