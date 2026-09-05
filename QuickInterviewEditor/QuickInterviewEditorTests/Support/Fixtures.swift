@@ -1,4 +1,5 @@
 import Foundation
+import IdentifiedCollections
 
 @testable import PlayolaInterviewEditor
 
@@ -66,6 +67,57 @@ enum Fixtures {
 
   static func uuid(_ index: Int) -> UUID {
     UUID(uuidString: String(format: "00000000-0000-0000-0000-%012d", index))!
+  }
+
+  static func slice(id: UUID = uuid(1), start: Int = 0, end: Int = 100) -> Slice {
+    Slice(
+      id: id, name: "Slice", startSample: start, endSample: end, wordIDs: [1, 2],
+      snippet: "hello world")
+  }
+
+  static func timelineRemoval(id: UUID = uuid(2), range: Range<Int> = 100..<200) -> TimelineRemoval
+  {
+    TimelineRemoval(
+      id: id, removedRange: range, crossfade: Crossfade(lengthSamples: 480, curve: .equalPower))
+  }
+
+  static func projectSource(
+    originalFileName: String = "interview.mp3",
+    originalPath: String? = "/Users/host/Desktop/interview.mp3",
+    originalFingerprint: String = "orig-fp",
+    canonicalFingerprint: String = "canonical-fp",
+    canonicalByteCount: Int = 4096,
+    importedAt: Date = Date(timeIntervalSince1970: 1_700_000_000),
+    sampleRate: Int = 44100,
+    channels: Int = 1,
+    durationSamples: Int = 441_000
+  ) -> ProjectSource {
+    ProjectSource(
+      originalFileName: originalFileName, originalPath: originalPath,
+      originalFingerprint: originalFingerprint, canonicalFingerprint: canonicalFingerprint,
+      canonicalByteCount: canonicalByteCount, importedAt: importedAt, sampleRate: sampleRate,
+      channels: channels, durationSamples: durationSamples)
+  }
+
+  static func projectFile(
+    schemaVersion: Int = ProjectFile.currentSchemaVersion,
+    source: ProjectSource = projectSource(),
+    engine: ProjectEngineInfo = ProjectEngineInfo(engineFingerprint: "engine-fp"),
+    content: EditorDocumentState = editorDocumentState()
+  ) -> ProjectFile {
+    ProjectFile(schemaVersion: schemaVersion, source: source, engine: engine, content: content)
+  }
+
+  static func editorDocumentState(
+    slices: IdentifiedArrayOf<Slice> = [slice()],
+    timelineRemovals: IdentifiedArrayOf<TimelineRemoval> = [timelineRemoval()],
+    cutSuggestions: IdentifiedArrayOf<CutSuggestion> = [cutSuggestion(id: uuid(3))],
+    speakerCountOverride: Int? = 2,
+    speakerDisplayNames: [String: String] = ["0": "Host"]
+  ) -> EditorDocumentState {
+    EditorDocumentState(
+      slices: slices, timelineRemovals: timelineRemovals, cutSuggestions: cutSuggestions,
+      speakerCountOverride: speakerCountOverride, speakerDisplayNames: speakerDisplayNames)
   }
 
   /// A stand-in canonical audio URL for tests. A tiny real file backs it so export's

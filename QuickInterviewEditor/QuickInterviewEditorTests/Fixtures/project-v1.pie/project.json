@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "originalFileName": "interview.mp3",
+    "originalPath": "/Users/host/Desktop/interview.mp3",
+    "originalFingerprint": "orig-fp",
+    "canonicalFingerprint": "canonical-fp",
+    "canonicalByteCount": 936,
+    "importedAt": "2023-11-14T22:13:20Z",
+    "sampleRate": 44100,
+    "channels": 1,
+    "durationSamples": 441
+  },
+  "engine": { "engineFingerprint": "engine-fp" },
+  "content": { "slices": [], "timelineRemovals": [] }
+}
