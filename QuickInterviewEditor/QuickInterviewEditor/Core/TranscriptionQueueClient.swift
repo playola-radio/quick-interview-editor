@@ -1,0 +1,106 @@
+import Dependencies
+import Foundation
+
+/// One transcription request: the source audio plus the fingerprint and cache policy the
+/// underlying `TranscriptionClient` needs. A value so the queue can hold and reorder it.
+struct TranscriptionJob: Sendable, Equatable {
+  var source: URL
+  var sourceFingerprint: String
+  var policy: CachePolicy
+}
+
+/// App-level transcription entry point that caps how many heavy WhisperX subprocesses run at
+/// once. `RootModel` used to own this cap via its own queue pump; moving it into a dependency
+/// lets every window share one limiter once each `.pie` is its own document (spec A3). Enqueuing
+/// suspends until a slot is free, then returns the underlying engine stream.
+struct TranscriptionQueueClient: Sendable {
+  var enqueue: @Sendable (TranscriptionJob) async -> AsyncThrowingStream<EngineEvent, Error>
+}
+
+/// Serializes access to a fixed number of transcription slots. A job holds its slot for as long
+/// as its engine stream runs; when the stream finishes, fails, or is cancelled the slot is handed
+/// to the next waiter (or released) so at most `maxConcurrent` engines ever run together.
+actor TranscriptionQueue {
+  private let maxConcurrent: Int
+  private let transcribe:
+    @Sendable (URL, String, CachePolicy) -> AsyncThrowingStream<EngineEvent, Error>
+  private var running = 0
+  private var waiters: [CheckedContinuation<Void, Never>] = []
+
+  init(
+    maxConcurrent: Int,
+    transcribe:
+      @escaping @Sendable (URL, String, CachePolicy) -> AsyncThrowingStream<
+        EngineEvent, Error
+      >
+  ) {
+    self.maxConcurrent = maxConcurrent
+    self.transcribe = transcribe
+  }
+
+  func enqueue(_ job: TranscriptionJob) async -> AsyncThrowingStream<EngineEvent, Error> {
+    await acquire()
+    let upstream = transcribe(job.source, job.sourceFingerprint, job.policy)
+    return AsyncThrowingStream { continuation in
+      let task = Task {
+        do {
+          for try await event in upstream { continuation.yield(event) }
+          continuation.finish()
+        } catch {
+          continuation.finish(throwing: error)
+        }
+        // The slot is held for the life of the engine stream, not the consumer's consumption —
+        // draining `upstream` eagerly here means a slow reader can't pin a slot open, and a
+        // cancelled reader (via `onTermination`) still frees it once the loop unwinds.
+        await release()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  private func acquire() async {
+    if running < maxConcurrent {
+      running += 1
+      return
+    }
+    // Full: park until `release` hands this waiter the freed slot. The slot count is preserved
+    // across the hand-off (no decrement in `release`, no increment here), so it never double-counts.
+    await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+      waiters.append(continuation)
+    }
+  }
+
+  private func release() {
+    if waiters.isEmpty {
+      running -= 1
+    } else {
+      waiters.removeFirst().resume()
+    }
+  }
+}
+
+extension TranscriptionQueueClient: DependencyKey {
+  static var liveValue: TranscriptionQueueClient {
+    @Dependency(\.transcription) var transcription
+    let queue = TranscriptionQueue(maxConcurrent: 2, transcribe: transcription.transcribe)
+    return TranscriptionQueueClient(enqueue: { await queue.enqueue($0) })
+  }
+}
+
+extension TranscriptionQueueClient: TestDependencyKey {
+  /// No queue: hand back the underlying stream immediately so model tests drive phase logic
+  /// with a controllable `transcription` override and never wait on real concurrency.
+  static var testValue: TranscriptionQueueClient {
+    TranscriptionQueueClient(enqueue: { job in
+      @Dependency(\.transcription) var transcription
+      return transcription.transcribe(job.source, job.sourceFingerprint, job.policy)
+    })
+  }
+}
+
+extension DependencyValues {
+  var transcriptionQueue: TranscriptionQueueClient {
+    get { self[TranscriptionQueueClient.self] }
+    set { self[TranscriptionQueueClient.self] = newValue }
+  }
+}
