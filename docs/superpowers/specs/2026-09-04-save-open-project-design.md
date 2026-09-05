@@ -1,6 +1,6 @@
 # Save / Open Project — Design
 
-**Status:** Draft — awaiting user approval (no code written)
+**Status:** Approved 2026-09-05 — implementation via the 5-PR plan
 **Date:** 2026-09-04
 **Author:** Brian (with Claude + Codex architecture consult, session
 `01a06d95-c0fc-73f2-b3ad-6082e05c96cc`)
