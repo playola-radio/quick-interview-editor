@@ -129,6 +129,25 @@ struct AppDirectoriesTests {
     expectNoDifference(fm.fileExists(atPath: legacyB.path), false)
   }
 
+  @Test func fallsBackToMergeWhenAtomicRenameFailsAndDestinationIsAbsent() throws {
+    let parent = try makeTempParent()
+    defer { try? fm.removeItem(at: parent) }
+    try writeFile("plan", at: parent.appending(path: "QuickInterviewEditor/TranscriptCache/a.json"))
+
+    // Force the fast-path root rename to fail while the destination does not exist.
+    let failing = FailFirstMoveFileManager()
+
+    AppDirectories.migrate(
+      parent: parent, legacyNames: ["QuickInterviewEditor"], newName: "Playola Interview Editor",
+      fileManager: failing)
+
+    // The fallback merge must still land the data under the new folder, not strand it.
+    expectNoDifference(
+      read(parent.appending(path: "Playola Interview Editor/TranscriptCache/a.json")), "plan")
+    expectNoDifference(
+      fm.fileExists(atPath: parent.appending(path: "QuickInterviewEditor").path), false)
+  }
+
   @Test func noLegacyFoldersIsANoOp() throws {
     let parent = try makeTempParent()
     defer { try? fm.removeItem(at: parent) }
@@ -139,5 +158,18 @@ struct AppDirectoriesTests {
 
     expectNoDifference(
       fm.fileExists(atPath: parent.appending(path: "Playola Interview Editor").path), false)
+  }
+}
+
+/// A `FileManager` whose first `moveItem` throws, then behaves normally — used to force
+/// the migration's fast-path atomic rename to fail so the merge fallback is exercised.
+private final class FailFirstMoveFileManager: FileManager, @unchecked Sendable {
+  private var didFailFirstMove = false
+  override func moveItem(at srcURL: URL, to dstURL: URL) throws {
+    if !didFailFirstMove {
+      didFailFirstMove = true
+      throw CocoaError(.fileWriteUnknown)
+    }
+    try super.moveItem(at: srcURL, to: dstURL)
   }
 }

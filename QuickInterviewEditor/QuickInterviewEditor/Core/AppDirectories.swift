@@ -67,7 +67,10 @@ enum AppDirectories {
       }
 
       // Destination exists (or the atomic rename failed) — deep-merge the legacy
-      // contents in, then drop the emptied legacy folder.
+      // contents in, then drop the emptied legacy folder. Ensure the destination
+      // exists first, so the rename-failed fallback doesn't move children into a
+      // missing directory (createDirectory is a no-op when it already exists).
+      try? fm.createDirectory(at: new, withIntermediateDirectories: true)
       mergeContents(of: old, into: new, fileManager: fm)
     }
   }
