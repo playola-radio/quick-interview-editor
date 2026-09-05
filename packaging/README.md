@@ -105,7 +105,7 @@ is the cheapest way to simulate a clean Mac without a second machine.
 
 ### 3–4. Assemble + sign — `build-app.sh`, `sign-app.sh`
 
-`build-app.sh` builds `QuickInterviewEditor.app` (Release, unsigned) and copies
+`build-app.sh` builds `PlayolaInterviewEditor.app` (Release, unsigned) and copies
 the frozen engine into `Contents/Resources/engine/`. `sign-app.sh` then signs
 **inside-out**: every nested Mach-O (`.so`/`.dylib`) first, then the helper
 (with `engine.entitlements`), then embedded frameworks, then the app (with
@@ -137,7 +137,7 @@ packaging/make-dmg.sh    # 6. hdiutil -> sign + notarize + staple the DMG
 sparkle sign_update <dmg>  # 7. EdDSA-sign the DMG (private key from login Keychain)
 packaging/appcast.rb …   # 8. append a signed <item> to appcast.xml (idempotent)
 aws s3 cp …              # 9. upload versioned DMG (kept for rollback), copy it to
-                         #    QuickInterviewEditor-latest.dmg, upload appcast.xml (no-cache)
+                         #    PlayolaInterviewEditor-latest.dmg, upload appcast.xml (no-cache)
 ```
 
 All nine steps run from **one lane**, locally (Decision 3 — the multi-GB
@@ -146,11 +146,11 @@ Apple-Silicon engine freeze is impractical on hosted CI).
 ### Website download link
 
 The lane also server-side-copies each release's DMG to a **stable** key,
-`QuickInterviewEditor-latest.dmg`, so the website link never needs updating.
+`PlayolaInterviewEditor-latest.dmg`, so the website link never needs updating.
 Point the site's download button at:
 
 ```
-https://playola-static.s3.amazonaws.com/downloads/QuickInterviewEditor/QuickInterviewEditor-latest.dmg
+https://playola-static.s3.amazonaws.com/downloads/PlayolaInterviewEditor/PlayolaInterviewEditor-latest.dmg
 ```
 
 It is uploaded `--cache-control no-cache`, so a click always fetches the newest
@@ -175,7 +175,7 @@ via Sparkle (the appcast points at the versioned DMG, not `latest`).
   ```
 
 - **AWS**: the `default` profile (override with `AWS_PROFILE`) must have write
-  access to `s3://playola-static/downloads/QuickInterviewEditor/`.
+  access to `s3://playola-static/downloads/PlayolaInterviewEditor/`.
 
 ### One-command release
 
@@ -190,12 +190,12 @@ bundle exec fastlane mac release              # build → sign → notarize → 
 regenerates the Xcode project, and commits — so `release` starts from a clean
 tree with a never-reused `CFBundleVersion`. Env overrides (defaults shown):
 `RELEASE_S3_BUCKET=playola-static`,
-`RELEASE_S3_PREFIX=downloads/QuickInterviewEditor`,
+`RELEASE_S3_PREFIX=downloads/PlayolaInterviewEditor`,
 `RELEASE_DOWNLOAD_HOST=https://playola-static.s3.amazonaws.com`,
 `AWS_PROFILE=default`.
 
 To rehearse without changing production objects, point the release at a
-**staging prefix** (`RELEASE_S3_PREFIX=downloads/QuickInterviewEditor-staging`,
+**staging prefix** (`RELEASE_S3_PREFIX=downloads/PlayolaInterviewEditor-staging`,
 matching `RELEASE_DOWNLOAD_HOST`) and run the checklist against that URL. This
 still uploads to S3 — `release` always does — it just isolates the artifacts
 under a separate prefix so the production feed and DMGs are untouched.
@@ -209,8 +209,8 @@ run this on a real build:
    from the S3 URL so you test the notarization ticket that actually shipped):
 
    ```bash
-   spctl --assess --type open --context context:primary-signature -v QuickInterviewEditor-<short>-<build>.dmg
-   xcrun stapler validate QuickInterviewEditor-<short>-<build>.dmg
+   spctl --assess --type open --context context:primary-signature -v PlayolaInterviewEditor-<short>-<build>.dmg
+   xcrun stapler validate PlayolaInterviewEditor-<short>-<build>.dmg
    ```
 
 2. **Clean install**: on a clean Mac / user account, mount the DMG, drag to
@@ -227,7 +227,7 @@ run this on a real build:
    fluke): the DRs of vN and vN+1 must agree on the invariants below.
 
    ```bash
-   codesign -d -r- /Applications/QuickInterviewEditor.app 2>&1 | grep '^designated'
+   codesign -d -r- /Applications/PlayolaInterviewEditor.app 2>&1 | grep '^designated'
    # compare vN vs vN+1: same identifier + "certificate leaf[subject.OU] = FSRSPV9N9Q"
    ```
 
@@ -238,8 +238,8 @@ requirement**, not the bundle path. Changing any of these makes an update unable
 to read the previously-saved key without a prompt:
 
 - **Team ID** `FSRSPV9N9Q`
-- **bundle id** `fm.playola.QuickInterviewEditor`
-- **Keychain service** `fm.playola.QuickInterviewEditor.anthropicAPIKey`,
+- **bundle id** `fm.playola.PlayolaInterviewEditor`
+- **Keychain service** `fm.playola.PlayolaInterviewEditor.anthropicAPIKey`,
   **account** `anthropic`, with **no** `kSecAttrAccessGroup` / sandbox /
   synchronizable change (mirrored in a comment on `KeychainStore.service`).
 
@@ -290,7 +290,7 @@ reaches the child env) is a separate follow-up, not part of this freeze.
 ## Models are data, not code
 
 The app downloads the model weights on first launch into
-`~/Library/Application Support/Quick Interview Editor/Models/` (see
+`~/Library/Application Support/Playola Interview Editor/Models/` (see
 `ModelManifest`), resumable + SHA-256 checksummed. Weights are **data** loaded
 by faster-whisper / torchaudio — never executable code shipped or fetched after
 notarization (roadmap decision 6):

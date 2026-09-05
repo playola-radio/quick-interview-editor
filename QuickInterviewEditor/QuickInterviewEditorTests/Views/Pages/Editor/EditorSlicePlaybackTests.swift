@@ -3,7 +3,7 @@ import Dependencies
 import Foundation
 import Testing
 
-@testable import QuickInterviewEditor
+@testable import PlayolaInterviewEditor
 
 /// Slice playback must match slice EXPORT: a clip whose range crosses a removed span plays the
 /// same slice-local render plan the exporter builds, never the raw source range that still

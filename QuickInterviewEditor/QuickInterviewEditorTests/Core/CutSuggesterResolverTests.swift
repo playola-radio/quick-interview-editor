@@ -2,7 +2,7 @@ import CustomDump
 import Foundation
 import Testing
 
-@testable import QuickInterviewEditor
+@testable import PlayolaInterviewEditor
 
 /// Unit coverage for cut-suggester launch resolution: bundled helper first, dev
 /// `.venv` fallback running `python -m cut_suggester.cli`. Pure — the filesystem

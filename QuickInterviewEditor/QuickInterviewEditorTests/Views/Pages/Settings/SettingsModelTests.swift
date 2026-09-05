@@ -4,7 +4,7 @@ import Dependencies
 import Foundation
 import Testing
 
-@testable import QuickInterviewEditor
+@testable import PlayolaInterviewEditor
 
 @MainActor
 struct SettingsModelTests {

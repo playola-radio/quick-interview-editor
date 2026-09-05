@@ -16,23 +16,23 @@
 set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST="$REPO_ROOT/packaging/dist"
-APP="$DIST/QuickInterviewEditor.app"
+APP="$DIST/PlayolaInterviewEditor.app"
 [ -d "$APP" ] || { echo "error: no app at $APP (run build/sign/notarize first)" >&2; exit 1; }
 IDENTITY="${SIGN_IDENTITY:-Developer ID Application: Playola Radio, Incorporated (FSRSPV9N9Q)}"
 NOTARY_PROFILE="${NOTARY_PROFILE:?set NOTARY_PROFILE (notarytool keychain profile)}"
 SHORT="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")"
 BUILD="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP/Contents/Info.plist")"
-DMG="$DIST/QuickInterviewEditor-$SHORT-$BUILD.dmg"
+DMG="$DIST/PlayolaInterviewEditor-$SHORT-$BUILD.dmg"
 rm -f "$DMG"
 # Stage the signed bundle + an /Applications shortcut into a clean temp dir, then
 # image the whole dir (read-only, compressed). ditto preserves the app's signature
 # and symlinks; the /Applications symlink gives the drag-to-install target.
 STAGE="$(mktemp -d "${TMPDIR:-/tmp}/qie-dmg.XXXXXX")"
 trap 'rm -rf "$STAGE"' EXIT
-/usr/bin/ditto "$APP" "$STAGE/QuickInterviewEditor.app"
+/usr/bin/ditto "$APP" "$STAGE/PlayolaInterviewEditor.app"
 ln -s /Applications "$STAGE/Applications"
 echo "==> Building DMG (hdiutil, no Finder): $(basename "$DMG")"
-hdiutil create -volname "QuickInterviewEditor $SHORT" \
+hdiutil create -volname "PlayolaInterviewEditor $SHORT" \
   -srcfolder "$STAGE" -fs HFS+ -format UDZO -ov "$DMG"
 echo "==> Signing the DMG (Developer ID)"
 codesign --force --sign "$IDENTITY" --timestamp "$DMG"

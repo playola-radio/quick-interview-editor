@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-@testable import QuickInterviewEditor
+@testable import PlayolaInterviewEditor
 
 /// Opt-in, real-subprocess integration coverage for the live engine.
 ///

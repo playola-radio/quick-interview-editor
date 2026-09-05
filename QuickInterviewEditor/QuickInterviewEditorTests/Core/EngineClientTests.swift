@@ -4,7 +4,7 @@ import Foundation
 import IssueReporting
 import Testing
 
-@testable import QuickInterviewEditor
+@testable import PlayolaInterviewEditor
 
 struct EngineClientTests {
   @Test func liveValueDecodesFromURL() async throws {

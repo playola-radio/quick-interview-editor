@@ -3,7 +3,7 @@ import Dependencies
 import Foundation
 import Testing
 
-@testable import QuickInterviewEditor
+@testable import PlayolaInterviewEditor
 
 private func stream(_ events: [ModelDownloadEvent], throwing error: Error? = nil)
   -> AsyncThrowingStream<ModelDownloadEvent, Error>

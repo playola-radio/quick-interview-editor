@@ -21,7 +21,7 @@ For _fastlane_ installation instructions, see [Installing _fastlane_](https://do
 [bundle exec] fastlane mac test
 ```
 
-Runs the Swift Testing suite (QuickInterviewEditorTests)
+Runs the Swift Testing suite (PlayolaInterviewEditorTests)
 
 ### mac lint_code
 

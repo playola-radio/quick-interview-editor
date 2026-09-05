@@ -4,7 +4,7 @@ import Foundation
 import Sharing
 import Testing
 
-@testable import QuickInterviewEditor
+@testable import PlayolaInterviewEditor
 
 // swiftlint:disable large_tuple
 // The (URL, Range<Int>, Int) recorded-call tuple mirrors `audioPlayer.play`'s three

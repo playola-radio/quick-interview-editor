@@ -3,7 +3,7 @@ import Foundation
 import IssueReporting
 import Testing
 
-@testable import QuickInterviewEditor
+@testable import PlayolaInterviewEditor
 
 struct CutSuggestClientTests {
   private static let request = CutSuggestRequest(

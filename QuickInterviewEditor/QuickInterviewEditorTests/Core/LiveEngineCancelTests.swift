@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-@testable import QuickInterviewEditor
+@testable import PlayolaInterviewEditor
 
 /// Opt-in integration test for the live-engine cancellation path.
 ///

@@ -5,7 +5,7 @@ import Dependencies
 import Foundation
 import Testing
 
-@testable import QuickInterviewEditor
+@testable import PlayolaInterviewEditor
 
 /// Logic-style marquee: a horizontal drag in the waveform body writes `audioSelection` with the
 /// EXACT dragged `[start, end)` in source samples — freeform, never snapped to word edges — and,

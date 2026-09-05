@@ -2,7 +2,7 @@ import CustomDump
 import Foundation
 import Testing
 
-@testable import QuickInterviewEditor
+@testable import PlayolaInterviewEditor
 
 /// Pure coverage for the Swift→Python request wire: the JSON `LiveCutSuggester`
 /// writes must carry the snake-cased keys `cut_suggester.cli` expects, and must plumb

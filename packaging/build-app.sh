@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Assemble a distributable .app: build the SwiftUI app (Release) and embed the
 # frozen engine folder at Contents/Resources/engine/. Output goes to
-# packaging/dist/QuickInterviewEditor.app, ready for sign-app.sh.
+# packaging/dist/PlayolaInterviewEditor.app, ready for sign-app.sh.
 #
 #   packaging/package-engine.sh   # first, produces the frozen engine
 #   packaging/build-app.sh        # then, this
-#   packaging/sign-app.sh   packaging/dist/QuickInterviewEditor.app
-#   packaging/notarize-app.sh packaging/dist/QuickInterviewEditor.app
+#   packaging/sign-app.sh   packaging/dist/PlayolaInterviewEditor.app
+#   packaging/notarize-app.sh packaging/dist/PlayolaInterviewEditor.app
 #
 # Builds unsigned (CODE_SIGNING_ALLOWED=NO); sign-app.sh applies the Developer ID
 # signature + hardened runtime afterward, so the slow xcodebuild stays uncoupled
@@ -27,21 +27,21 @@ DIST="$REPO_ROOT/packaging/dist"
   exit 1
 }
 
-echo "==> Building QuickInterviewEditor.app (Release, unsigned)"
+echo "==> Building PlayolaInterviewEditor.app (Release, unsigned)"
 cd "$REPO_ROOT/QuickInterviewEditor"
 xcodebuild \
-  -scheme QuickInterviewEditor \
+  -scheme PlayolaInterviewEditor \
   -configuration Release \
   -derivedDataPath "$REPO_ROOT/packaging/build/app" \
   -destination 'generic/platform=macOS' \
   CODE_SIGNING_ALLOWED=NO \
   build
 
-BUILT="$REPO_ROOT/packaging/build/app/Build/Products/Release/QuickInterviewEditor.app"
+BUILT="$REPO_ROOT/packaging/build/app/Build/Products/Release/PlayolaInterviewEditor.app"
 [ -d "$BUILT" ] || { echo "error: build produced no .app at $BUILT" >&2; exit 1; }
 
 echo "==> Embedding frozen engine + cut-suggester at Contents/Resources/engine/"
-DEST_APP="$DIST/QuickInterviewEditor.app"
+DEST_APP="$DIST/PlayolaInterviewEditor.app"
 rm -rf "$DEST_APP"
 /usr/bin/ditto "$BUILT" "$DEST_APP"
 ENGINE_DEST="$DEST_APP/Contents/Resources/engine"

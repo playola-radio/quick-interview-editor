@@ -2,7 +2,7 @@ import CustomDump
 import Dependencies
 import Testing
 
-@testable import QuickInterviewEditor
+@testable import PlayolaInterviewEditor
 
 /// The live `UpdaterClient` drives Sparkle and can't run in tests; these lock in
 /// that the `testValue` is a safe no-op models can exercise without Sparkle.

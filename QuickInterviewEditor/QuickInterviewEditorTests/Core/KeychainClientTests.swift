@@ -1,7 +1,7 @@
 import CustomDump
 import Testing
 
-@testable import QuickInterviewEditor
+@testable import PlayolaInterviewEditor
 
 struct KeychainClientTests {
 
@@ -35,5 +35,13 @@ struct KeychainClientTests {
     // The default testValue is an empty in-memory store, so a forgotten override can't
     // read a real key off the developer's machine.
     expectNoDifference(try KeychainClient.testValue.load(), nil)
+  }
+
+  /// Pins the Keychain service id. Changing it silently drops the user's saved API key
+  /// across an update (a returning user would have to re-enter it), so it must never
+  /// drift by accident — see packaging/README.md (Release invariants).
+  @Test func serviceIdIsStable() {
+    expectNoDifference(
+      KeychainStore.service, "fm.playola.PlayolaInterviewEditor.anthropicAPIKey")
   }
 }

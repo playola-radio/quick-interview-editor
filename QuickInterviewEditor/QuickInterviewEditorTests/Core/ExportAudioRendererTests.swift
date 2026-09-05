@@ -3,7 +3,7 @@ import CustomDump
 import Foundation
 import Testing
 
-@testable import QuickInterviewEditor
+@testable import PlayolaInterviewEditor
 
 /// Integration tests for the export renderer against real AIFF files on disk — no
 /// subprocess, no playback, no engine. They assert at the byte level because the

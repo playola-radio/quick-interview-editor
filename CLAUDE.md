@@ -1,4 +1,4 @@
-# Quick Interview Editor — macOS app
+# Playola Interview Editor — macOS app
 
 A native macOS (SwiftUI) app that cuts a long spoken-word interview into Logic
 Pro-ready AIFF chunks. It drives the existing, tested Python engine
@@ -222,7 +222,7 @@ holds no logic, testing the model tests the behavior.
   DerivedData — **no code signing, no fastlane wrapper**. Measured on this repo:
   ~50s cold / ~15s warm for the full 826-test suite (~9s of which is just
   executing the tests). Focus one suite with
-  `make test-fast ONLY=QuickInterviewEditorTests/TranscriptSelectionTests`.
+  `make test-fast ONLY=PlayolaInterviewEditorTests/TranscriptSelectionTests`.
 - **Compilation is not the bottleneck** — the unsigned loop above was measured
   directly at ~15s. The remaining ~10-min `make test` cost was *not* isolated;
   the likely contributors (fastlane/xcbeautify wrapper, code signing, and/or

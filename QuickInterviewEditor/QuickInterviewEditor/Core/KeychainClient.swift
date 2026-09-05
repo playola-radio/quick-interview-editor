@@ -67,7 +67,7 @@ enum KeychainStore {
   /// the bundle path or build dir) so a key set once is reused everywhere.
   /// INVARIANT: changing this string, the bundle id, or the Team ID breaks silent key
   /// reads across Sparkle self-updates — see packaging/README.md (Release invariants).
-  static let service = "fm.playola.QuickInterviewEditor.anthropicAPIKey"
+  static let service = "fm.playola.PlayolaInterviewEditor.anthropicAPIKey"
   static let account = "anthropic"
 
   private static func baseQuery() -> [String: Any] {

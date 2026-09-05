@@ -4,6 +4,8 @@
 <dict>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>CFBundleDisplayName</key>
+	<string>Playola Interview Editor</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -21,7 +23,7 @@
 	<key>SUEnableAutomaticChecks</key>
 	<true/>
 	<key>SUFeedURL</key>
-	<string>https://playola-static.s3.amazonaws.com/downloads/QuickInterviewEditor/appcast.xml</string>
+	<string>https://playola-static.s3.amazonaws.com/downloads/PlayolaInterviewEditor/appcast.xml</string>
 	<key>SUPublicEDKey</key>
 	<string>WyAypjfp2RUEqO+iIb/iYTTYwVq5AaXJWUxT9pwzrog=</string>
 	<key>SUScheduledCheckInterval</key>

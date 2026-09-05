@@ -8,7 +8,7 @@ import Foundation
 @_spi(Internals) import Sharing
 import Testing
 
-@testable import QuickInterviewEditor
+@testable import PlayolaInterviewEditor
 
 /// The sidecar is `@Shared(.fileStorage(...))`, which is backed by an in-memory file
 /// system in tests. Each test injects its OWN fresh in-memory file system and uses a

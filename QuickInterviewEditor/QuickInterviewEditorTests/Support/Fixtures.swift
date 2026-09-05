@@ -1,6 +1,6 @@
 import Foundation
 
-@testable import QuickInterviewEditor
+@testable import PlayolaInterviewEditor
 
 private final class BundleToken {}
 

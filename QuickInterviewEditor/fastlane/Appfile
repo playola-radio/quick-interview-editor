@@ -1,4 +1,4 @@
-app_identifier("fm.playola.QuickInterviewEditor") # The bundle identifier of the app
+app_identifier("fm.playola.PlayolaInterviewEditor") # The bundle identifier of the app
 team_id("FSRSPV9N9Q") # Playola Radio, Inc. — Developer Portal Team ID
 
 # For more information about the Appfile, see:
