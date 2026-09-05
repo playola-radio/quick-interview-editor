@@ -53,6 +53,24 @@ targets:
         SUPublicEDKey: WyAypjfp2RUEqO+iIb/iYTTYwVq5AaXJWUxT9pwzrog=
         SUEnableAutomaticChecks: true
         SUScheduledCheckInterval: 86400
+        # The `.pie` document package (spec A2). No consumer until PR 4
+        # (DocumentGroup); declared now so Open Recent / Finder association and
+        # the save/open spike can exercise the real UTType end to end.
+        UTExportedTypeDeclarations:
+          - UTTypeIdentifier: fm.playola.interview-editor.project
+            UTTypeDescription: Playola Interview Editor Project
+            UTTypeConformsTo:
+              - com.apple.package
+              - public.composite-content
+            UTTypeTagSpecification:
+              public.filename-extension:
+                - pie
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: Playola Interview Editor Project
+            CFBundleTypeRole: Editor
+            LSTypeIsPackage: true
+            LSItemContentTypes:
+              - fm.playola.interview-editor.project
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: fm.playola.PlayolaInterviewEditor
