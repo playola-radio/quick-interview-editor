@@ -69,6 +69,14 @@ actor TranscriptionQueue {
         // The slot is held for the life of the engine stream, not the consumer's consumption —
         // draining `upstream` eagerly here means a slow reader can't pin a slot open, and a
         // cancelled reader (via `onTermination`) still frees it once the loop unwinds.
+        //
+        // Known teardown-window limitation: on natural completion `upstream` (LiveEngine) only
+        // finishes after `waitForExit` reaps the child, so the slot is held until the process is
+        // truly dead. On *cancellation*, `AsyncThrowingStream` short-circuits this loop's `next()`
+        // to nil before the downstream SIGTERM→SIGKILL→reap completes, so `release()` can hand a
+        // slot to the next waiter while the cancelled WhisperX is still exiting — a brief >maxConcurrent
+        // overlap. Binding release to actual process reap needs the engine-stream layer to expose a
+        // reap barrier (or the queue to own the process); tracked as an engine-layer follow-up.
         await release()
       }
       continuation.onTermination = { _ in task.cancel() }
