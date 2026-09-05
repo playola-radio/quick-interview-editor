@@ -96,6 +96,9 @@ final class EditorModel: ViewModel {
     super.init()
     self.timelineRemovals = Self.validatedRemovals(
       projectState.timelineRemovals, sourceDurationSamples: editPlan.source.durationSamples)
+    self.documentCutSuggestions = projectState.cutSuggestions
+    self.speakerCountOverride = projectState.speakerCountOverride
+    self.speakerDisplayNames = projectState.speakerDisplayNames
     syncEditedTimeline()
     // Accepting a suggestion adds its slice here (idempotently), through the shared
     // mutation funnel so it's exportable and undoable like any other slice.
@@ -146,10 +149,25 @@ final class EditorModel: ViewModel {
   /// Removed source ranges (with their crossfades) that collapse the timeline. Mutated
   /// only through `mutateDocument`, alongside `slices`, so the two move together on undo.
   var timelineRemovals: IdentifiedArrayOf<TimelineRemoval> = []
+  /// The ranked cut candidates the document persists — the source of truth the child
+  /// `cutSuggestions` page model reads (via its injected accessor) and displays. Mutated
+  /// only through `mutateDocument` (accept/reject undoably; the background pass with
+  /// `recordUndo: false`), so it moves with the rest of the document on undo.
+  var documentCutSuggestions: IdentifiedArrayOf<CutSuggestion> = []
+  /// Paragraph/speaker spec: per-file `override ?? auto_speaker_count`. Part of the
+  /// document so it saves/undoes with everything else; unused by the editor UI yet.
+  var speakerCountOverride: Int?
+  /// Paragraph/speaker spec: `SPEAKER_00` → "Host" display-name overrides. Part of the
+  /// document; unused by the editor UI yet.
+  var speakerDisplayNames: [String: String] = [:]
   /// Undo/redo history over the document (`slices` + `timelineRemovals`) — never
   /// selection, zoom, playback, or export phase. Every document mutation routes
   /// through `mutateDocument`, which records here.
   var documentUndo = UndoStack<EditorDocumentState>()
+  /// Fired after every committed document change (mutation, undo, redo) with the new
+  /// document — the single dirtiness signal. The tab model wires this to persistence, so
+  /// the editor itself never touches the sidecar.
+  @ObservationIgnored var onDocumentStateChanged: (@MainActor (EditorDocumentState) -> Void)?
   /// The slice currently open in the fine-tune pane. Edit-target state, NOT playback state — a
   /// slice can be active (being edited) without playing, and vice versa.
   var activeSliceID: Slice.ID?
@@ -280,9 +298,14 @@ final class EditorModel: ViewModel {
       removals: Array(timelineRemovals))
   }
 
-  /// The undoable document snapshot: `slices` and `timelineRemovals` together.
-  private var documentState: EditorDocumentState {
-    EditorDocumentState(slices: slices, timelineRemovals: timelineRemovals)
+  /// The undoable document snapshot: everything a saved project persists, assembled from
+  /// the model's stored fields. The single value the undo stack and the change callback
+  /// carry.
+  var documentState: EditorDocumentState {
+    EditorDocumentState(
+      slices: slices, timelineRemovals: timelineRemovals,
+      cutSuggestions: documentCutSuggestions, speakerCountOverride: speakerCountOverride,
+      speakerDisplayNames: speakerDisplayNames)
   }
 
   /// Rebuilds the edited timeline the collapsed waveform renders on from the current removals,
@@ -1419,17 +1442,23 @@ final class EditorModel: ViewModel {
   /// slice-only mutation (rename, reorder, add/delete slice) never touches the sidecar.
   /// Restoring history via `undoTapped`/`redoTapped` deliberately bypasses this — it
   /// assigns the fields directly so replaying the stack never records a new entry.
-  func mutateDocument(_ body: (inout EditorDocumentState) -> Void) {
+  func mutateDocument(recordUndo: Bool = true, _ body: (inout EditorDocumentState) -> Void) {
     let old = documentState
     var new = old
     body(&new)
     slices = new.slices
     timelineRemovals = new.timelineRemovals
-    documentUndo.record(before: old, after: new)
+    documentCutSuggestions = new.cutSuggestions
+    speakerCountOverride = new.speakerCountOverride
+    speakerDisplayNames = new.speakerDisplayNames
+    if recordUndo {
+      documentUndo.record(before: old, after: new)
+    }
     if new.timelineRemovals != old.timelineRemovals {
       persistTimelineRemovals()
     }
     syncEditedTimeline()
+    onDocumentStateChanged?(documentState)
   }
 
   /// `slices`-only convenience over `mutateDocument`, kept so every existing slice
@@ -1937,13 +1966,7 @@ final class EditorModel: ViewModel {
     guard !hasUncommittedSliceEdit, !isExporting,
       let restored = documentUndo.undo(current: documentState)
     else { return }
-    let removalsChanged = restored.timelineRemovals != timelineRemovals
-    slices = restored.slices
-    timelineRemovals = restored.timelineRemovals
-    if removalsChanged {
-      persistTimelineRemovals()
-    }
-    syncEditedTimeline()
+    restore(restored)
     await reconcilePlayback()
   }
 
@@ -1953,14 +1976,26 @@ final class EditorModel: ViewModel {
     guard !hasUncommittedSliceEdit, !isExporting,
       let restored = documentUndo.redo(current: documentState)
     else { return }
+    restore(restored)
+    await reconcilePlayback()
+  }
+
+  /// Assigns a restored document snapshot back onto the model's fields (bypassing the undo
+  /// stack — replaying history must never record a new entry), persists the removals only
+  /// when they actually changed, rebuilds the edited timeline, and fires the change
+  /// callback so persistence stays in step with in-memory state.
+  private func restore(_ restored: EditorDocumentState) {
     let removalsChanged = restored.timelineRemovals != timelineRemovals
     slices = restored.slices
     timelineRemovals = restored.timelineRemovals
+    documentCutSuggestions = restored.cutSuggestions
+    speakerCountOverride = restored.speakerCountOverride
+    speakerDisplayNames = restored.speakerDisplayNames
     if removalsChanged {
       persistTimelineRemovals()
     }
     syncEditedTimeline()
-    await reconcilePlayback()
+    onDocumentStateChanged?(documentState)
   }
 
   /// Reconciles derived state after any slice list change (explicit delete, undo, redo):
