@@ -2,12 +2,16 @@ import Dependencies
 import Foundation
 import IdentifiedCollections
 import Observation
-import Sharing
 
 /// Drives the cut-suggester surface: resolves the Anthropic key (onboarding when none),
 /// runs the "Suggest cuts" action, and lets the editor accept/reject the ranked candidates.
 /// All display text and derived state live here; the view only renders (CLAUDE.md's "no
-/// logic in views"). Accepted candidates flow to the editor through `onAcceptSlice`.
+/// logic in views").
+///
+/// Owns no persisted state: the candidates it displays are read through
+/// `currentSuggestions` (the editor's document is the source of truth), and every edit is
+/// emitted as an intent (`onAccept`/`onReject`/`onSuggestionsProduced`/
+/// `onSpeakerOverridesChanged`) that the editor funnels through `mutateDocument`.
 @MainActor
 @Observable
 final class CutSuggestionsPageModel: ViewModel {
@@ -17,17 +21,28 @@ final class CutSuggestionsPageModel: ViewModel {
   @ObservationIgnored @Dependency(\.keychain) var keychain
   @ObservationIgnored @Dependency(\.environment) var environment
 
-  // MARK: - Shared State
-  @ObservationIgnored @Shared var projectState: ProjectState
-
   // MARK: - Initialization
   let editPlan: EditPlan
   let sourceFingerprint: String
   let options: CutSuggestOptions
   let productSpecs: [ProductSpec]
-  /// Hands an accepted suggestion's `Slice` to the editor (wired by `EditorModel`), which
-  /// appends it to its slices/render list. Kept a closure so this model stays editor-agnostic.
-  @ObservationIgnored var onAcceptSlice: ((Slice) -> Void)?
+  /// Reads the document's current cut candidates (the editor's `documentCutSuggestions`).
+  /// A closure so this model stays editor-agnostic; reading the editor's `@Observable`
+  /// property here keeps the panel in sync with document changes.
+  @ObservationIgnored var currentSuggestions: @MainActor () -> IdentifiedArrayOf<CutSuggestion> =
+    { [] }
+  /// Asks the editor to accept a suggestion (wired by `EditorModel`): land its derived `Slice`
+  /// and flip the suggestion to `.accepted` in ONE undoable document transaction, so a single
+  /// undo reverts both. Kept a closure so this model stays editor-agnostic.
+  @ObservationIgnored var onAccept: (@MainActor (Slice, CutSuggestion.ID) -> Void)?
+  /// Asks the editor to flip a suggestion to `.rejected` in the document (undoably).
+  @ObservationIgnored var onReject: (@MainActor (CutSuggestion.ID) -> Void)?
+  /// Hands a completed run's stamped candidates to the editor to store in the document
+  /// (non-undoably — a background analysis pass must not pollute the undo stack).
+  @ObservationIgnored var onSuggestionsProduced: (@MainActor ([CutSuggestion]) -> Void)?
+  /// Emits per-file speaker overrides for the editor to fold into the document. Wired now;
+  /// the paragraph/speaker UI that drives it lands in a later PR.
+  @ObservationIgnored var onSpeakerOverridesChanged: (@MainActor (Int?, [String: String]) -> Void)?
   /// Asks the editor to reveal a suggestion across both panes (select its words, scroll the
   /// transcript, zoom the waveform) when the user clicks a row. Wired by `EditorModel`.
   @ObservationIgnored var onSelectSuggestion: ((CutSuggestion) -> Void)?
@@ -37,16 +52,13 @@ final class CutSuggestionsPageModel: ViewModel {
     sourceFingerprint: String,
     options: CutSuggestOptions = CutSuggestOptions(),
     productSpecs: [ProductSpec] = ProductSpec.defaults,
-    onAcceptSlice: ((Slice) -> Void)? = nil,
     onSelectSuggestion: ((CutSuggestion) -> Void)? = nil
   ) {
     self.editPlan = editPlan
     self.sourceFingerprint = sourceFingerprint
     self.options = options
     self.productSpecs = productSpecs
-    self.onAcceptSlice = onAcceptSlice
     self.onSelectSuggestion = onSelectSuggestion
-    _projectState = Shared(.projectState(fingerprint: sourceFingerprint))
     super.init()
   }
 
@@ -91,13 +103,13 @@ final class CutSuggestionsPageModel: ViewModel {
   }
 
   // MARK: - View Helpers
-  /// The candidates to show, in ranked order, read straight from the sidecar.
-  var suggestions: [CutSuggestion] { projectState.rankedSuggestions }
+  /// The candidates to show, in ranked order, read from the editor's document.
+  var suggestions: [CutSuggestion] { currentSuggestions().ranked }
 
   /// The still-undecided candidates, in ranked order — the source of the amber clip
   /// containers the transcript draws. Accepted candidates are already slices (drawn green,
   /// so they aren't double-drawn here); rejected ones aren't drawn at all.
-  var pendingSuggestions: [CutSuggestion] { projectState.pendingSuggestions }
+  var pendingSuggestions: [CutSuggestion] { currentSuggestions().pending }
 
   /// The show/hide toggle only makes sense when there are pending suggestions whose transcript
   /// outlines it can mute — hidden otherwise so it never dangles over an empty list.
@@ -190,16 +202,16 @@ final class CutSuggestionsPageModel: ViewModel {
           }
           let stamped = candidates.map { stampProvenance(on: $0, from: request) }
           // A background pass guards emptiness at start, but suggestions can land while it's in
-          // flight (a manual run, or the same file open elsewhere sharing this fingerprint's
-          // sidecar). Do the empty-check and the write in ONE locked operation so nothing can
-          // slip in between them: a background pass commits only if the sidecar is still empty
+          // flight (a manual run, or a decision the user just made). Re-check right before
+          // emitting — the check and the emit are synchronous on the main actor, so nothing can
+          // slip between them: a background pass commits only if the document is still empty
           // (else it would silently wipe the user's accept/reject decisions); a manual run always
-          // replaces — an explicit re-run is meant to overwrite. De-dupe defensively:
-          // `uniquingIDsWith` keeps the first of any repeated ID a malformed response might emit.
-          $projectState.withLock { state in
-            guard !isBackgroundPass || state.cutSuggestions.isEmpty else { return }
-            state.cutSuggestions = IdentifiedArray(stamped, uniquingIDsWith: { first, _ in first })
+          // replaces — an explicit re-run is meant to overwrite. The editor de-dupes on store.
+          guard !isBackgroundPass || currentSuggestions().isEmpty else {
+            phase = .idle
+            return
           }
+          onSuggestionsProduced?(stamped)
           phase = .idle
           return
         }
@@ -216,17 +228,19 @@ final class CutSuggestionsPageModel: ViewModel {
     }
   }
 
-  /// Accepts a suggestion: converts it to a `Slice` against the current plan (PR 3's
-  /// `acceptCutSuggestion`), flips it accepted in the sidecar, and hands the slice to the
-  /// editor. Stale/invalid inputs surface a message instead of a slice — never a crash.
+  /// Accepts a suggestion: validates it against the current plan, then — on success —
+  /// asks the editor to land the derived `Slice` and flip the suggestion accepted in one
+  /// undoable document transaction (`onAccept`). Stale/invalid inputs surface a message
+  /// instead of a slice — never a crash. Validating here (the model owns the plan,
+  /// fingerprint, and `actionMessage`) keeps the outcome message local; the editor owns
+  /// the undoable document write.
   func acceptTapped(_ id: CutSuggestion.ID) {
     switch acceptCutSuggestion(
-      id, in: projectState, plan: editPlan, sourceFingerprint: sourceFingerprint,
-      transcriptHash: editPlan.transcriptHash)
+      id, in: ProjectState(cutSuggestions: currentSuggestions()), plan: editPlan,
+      sourceFingerprint: sourceFingerprint, transcriptHash: editPlan.transcriptHash)
     {
     case .accepted(let slice, _):
-      $projectState.withLock { $0.acceptSuggestion(id) }
-      onAcceptSlice?(slice)
+      onAccept?(slice, id)
       actionMessage = nil
     case .stale(let reason):
       actionMessage = cutSuggestionStaleMessage(reason)
@@ -236,7 +250,7 @@ final class CutSuggestionsPageModel: ViewModel {
   }
 
   func rejectTapped(_ id: CutSuggestion.ID) {
-    $projectState.withLock { $0.rejectSuggestion(id) }
+    onReject?(id)
     actionMessage = nil
   }
 

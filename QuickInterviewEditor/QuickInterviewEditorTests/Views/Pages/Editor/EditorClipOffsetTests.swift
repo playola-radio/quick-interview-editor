@@ -148,7 +148,7 @@ struct EditorClipOffsetTests {
       let range = 44_100..<88_200
       let original = suggestionSlice(Fixtures.uuid(1), range: range, plan: plan)
 
-      model.acceptCutSuggestionSlice(original)
+      model.acceptCutSuggestion(original, id: original.id)
 
       let slice = model.slices[id: original.id]!
       let expectedStart = range.lowerBound + sampleShift(forMs: -30, plan: plan)
@@ -168,7 +168,7 @@ struct EditorClipOffsetTests {
       let range = 44_100..<88_200
       let original = suggestionSlice(Fixtures.uuid(1), range: range, plan: plan)
 
-      model.acceptCutSuggestionSlice(original)
+      model.acceptCutSuggestion(original, id: original.id)
 
       let slice = model.slices[id: original.id]!
       expectNoDifference(slice.startSample, range.lowerBound)

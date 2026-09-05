@@ -1,6 +1,7 @@
 import Dependencies
 import Foundation
 import Observation
+import Sharing
 
 @MainActor
 @Observable
@@ -159,11 +160,7 @@ final class SongTabModel: ViewModel, Identifiable {
         case .progress(let progress):
           applyProgress(progress)
         case .completed(let result):
-          editor = withDependencies(from: self) {
-            EditorModel(
-              sourceURL: sourceURL, canonicalAudioURL: result.canonicalAudioURL,
-              editPlan: result.editPlan, sourceFingerprint: fingerprint)
-          }
+          editor = makeEditor(for: result, fingerprint: fingerprint)
           phase = .loaded
           stopTicking()
         }
@@ -202,6 +199,58 @@ final class SongTabModel: ViewModel, Identifiable {
   }
 
   // MARK: - Private Helpers
+  /// Builds the editor for a completed transcription and owns the sidecar bridge: it seeds
+  /// the editor's document from the legacy per-file `.projectState` sidecar (which carries
+  /// no slices) and installs `onDocumentStateChanged` so every document mutation the editor
+  /// funnels through `mutateDocument` is written straight back to that same sidecar. This
+  /// keeps persistence entirely on the tab; the editor no longer touches `@Shared`.
+  private func makeEditor(
+    for result: TranscriptionResult, fingerprint: String
+  ) -> EditorModel {
+    @Shared(.projectState(fingerprint: fingerprint)) var projectState = ProjectState()
+    let seed = EditorDocumentState(
+      slices: [],
+      timelineRemovals: projectState.timelineRemovals,
+      cutSuggestions: projectState.cutSuggestions,
+      speakerCountOverride: projectState.speakerCountOverride,
+      speakerDisplayNames: projectState.speakerDisplayNames)
+    let newEditor = withDependencies(from: self) {
+      EditorModel(
+        sourceURL: sourceURL, canonicalAudioURL: result.canonicalAudioURL,
+        editPlan: result.editPlan, sourceFingerprint: fingerprint,
+        initialDocument: seed)
+    }
+    // The dirtiness signal fires on EVERY document change, including slice-only edits — but the
+    // legacy sidecar has never stored slices, so a slice-only change must leave it untouched.
+    // Persist only the sidecar-backed fields THIS editor actually changed, diffing against the
+    // editor's OWN last-persisted document (its post-init state), not the shared sidecar, and
+    // merging each changed field under the lock:
+    //   - Two tabs on the same source hold independent snapshots but share one sidecar. Writing
+    //     every field wholesale let a change in one tab clobber a field the other tab persisted;
+    //     scoping each write to what changed here leaves the other tab's fields intact.
+    //   - The editor normalizes removals at init (validatedRemovals). Diffing against the raw
+    //     sidecar treated that cleanup as a change and persisted it on the first unrelated edit;
+    //     diffing against the post-init baseline means an unrelated edit never touches removals.
+    var lastPersisted = newEditor.documentState
+    newEditor.onDocumentStateChanged = { document in
+      let previous = lastPersisted
+      lastPersisted = document
+      let removalsChanged = document.timelineRemovals != previous.timelineRemovals
+      let suggestionsChanged = document.cutSuggestions != previous.cutSuggestions
+      let speakerCountChanged = document.speakerCountOverride != previous.speakerCountOverride
+      let speakerNamesChanged = document.speakerDisplayNames != previous.speakerDisplayNames
+      guard removalsChanged || suggestionsChanged || speakerCountChanged || speakerNamesChanged
+      else { return }
+      $projectState.withLock {
+        if removalsChanged { $0.timelineRemovals = document.timelineRemovals }
+        if suggestionsChanged { $0.cutSuggestions = document.cutSuggestions }
+        if speakerCountChanged { $0.speakerCountOverride = document.speakerCountOverride }
+        if speakerNamesChanged { $0.speakerDisplayNames = document.speakerDisplayNames }
+      }
+    }
+    return newEditor
+  }
+
   /// Applies one engine progress event to the on-screen state. Resets the monotonic
   /// clamp and the per-phase timer when the phase moves forward, ignores a late event
   /// from an earlier phase, and clamps the fraction so the bar never jumps backward
