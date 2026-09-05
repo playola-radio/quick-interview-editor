@@ -100,10 +100,33 @@ final class EditorModel: ViewModel {
     self.speakerCountOverride = projectState.speakerCountOverride
     self.speakerDisplayNames = projectState.speakerDisplayNames
     syncEditedTimeline()
+    // The document owns the cut candidates; the panel reads them from here so it stays in
+    // step with undo/redo and background passes.
+    cutSuggestions.currentSuggestions = { [weak self] in self?.documentCutSuggestions ?? [] }
     // Accepting a suggestion adds its slice here (idempotently), through the shared
     // mutation funnel so it's exportable and undoable like any other slice.
     cutSuggestions.onAcceptSlice = { [weak self] slice in
       self?.acceptCutSuggestionSlice(slice)
+    }
+    // Accept/reject flip the suggestion's status in the document (undoably); a completed run
+    // stores its candidates non-undoably (a background analysis pass must not fill the undo
+    // stack). Each routes through `mutateDocument`, so persistence and undo stay unified.
+    cutSuggestions.onAccept = { [weak self] id in
+      self?.mutateDocument { $0.cutSuggestions[id: id]?.accept() }
+    }
+    cutSuggestions.onReject = { [weak self] id in
+      self?.mutateDocument { $0.cutSuggestions[id: id]?.reject() }
+    }
+    cutSuggestions.onSuggestionsProduced = { [weak self] produced in
+      self?.mutateDocument(recordUndo: false) {
+        $0.cutSuggestions = IdentifiedArray(produced, uniquingIDsWith: { first, _ in first })
+      }
+    }
+    cutSuggestions.onSpeakerOverridesChanged = { [weak self] count, names in
+      self?.mutateDocument {
+        $0.speakerCountOverride = count
+        $0.speakerDisplayNames = names
+      }
     }
     // Clicking a suggestion reveals it across both panes so the user can review/audition it.
     cutSuggestions.onSelectSuggestion = { [weak self] suggestion in
@@ -665,7 +688,7 @@ final class EditorModel: ViewModel {
     // ranked list: when it's off, no suggested bands are drawn (accepted slices stay put).
     guard cutSuggestions.showsSuggestionBands else { return approved }
     let claimed = Set(approved.flatMap(\.wordIDs))
-    let suggested = cutSuggestions.pendingSuggestions.compactMap {
+    let suggested = documentCutSuggestions.pending.compactMap {
       suggestion -> TranscriptClipBand? in
       let unclaimed = suggestion.wordIDs.filter { !claimed.contains($0) }
       guard !unclaimed.isEmpty else { return nil }

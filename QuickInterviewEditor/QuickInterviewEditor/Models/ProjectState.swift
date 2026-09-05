@@ -71,8 +71,19 @@ extension ProjectState {
 
   /// Suggestions ordered for display: pending first, then by ascending `rank`, with
   /// higher `score` breaking ties. `id` is the final tie-break for a stable order.
-  var rankedSuggestions: [CutSuggestion] {
-    cutSuggestions.sorted { lhs, rhs in
+  var rankedSuggestions: [CutSuggestion] { cutSuggestions.ranked }
+
+  /// Just the still-undecided candidates, in ranked order.
+  var pendingSuggestions: [CutSuggestion] { cutSuggestions.pending }
+}
+
+// MARK: - Ranking (pure, order the display shares)
+
+extension IdentifiedArray where Element == CutSuggestion, ID == CutSuggestion.ID {
+  /// Suggestions ordered for display: pending first, then by ascending `rank`, with
+  /// higher `score` breaking ties. `id` is the final tie-break for a stable order.
+  var ranked: [CutSuggestion] {
+    sorted { lhs, rhs in
       if lhs.statusSortOrder != rhs.statusSortOrder {
         return lhs.statusSortOrder < rhs.statusSortOrder
       }
@@ -88,9 +99,7 @@ extension ProjectState {
   }
 
   /// Just the still-undecided candidates, in ranked order.
-  var pendingSuggestions: [CutSuggestion] {
-    rankedSuggestions.filter(\.isPending)
-  }
+  var pending: [CutSuggestion] { ranked.filter(\.isPending) }
 }
 
 extension CutSuggestion {
