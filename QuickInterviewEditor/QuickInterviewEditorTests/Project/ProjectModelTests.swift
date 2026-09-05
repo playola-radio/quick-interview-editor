@@ -56,6 +56,7 @@ struct ProjectModelTests {
     expectNoDifference(model.phase, .loaded)
     let editor = try #require(model.editor)
     expectNoDifference(editor.canonicalAudioURL, canonical)
+    expectNoDifference(editor.transcript.document.wordRanges.count, 122)
     // Exactly one commit — the transcription completion. No document change registered yet.
     expectNoDifference(record.registerChangeCount, 0)
     expectNoDifference(record.commits.count, 1)
@@ -200,6 +201,37 @@ struct ProjectModelTests {
     expectNoDifference(editor.speakerDisplayNames, ["0": "Host", "1": "Guest"])
     // Building from a decoded package neither transcribes nor commits on its own.
     expectNoDifference(record.commits, [])
+    expectNoDifference(record.registerChangeCount, 0)
+  }
+
+  @Test func reimportTearsDownPriorEditorAndBuildsFresh() async throws {
+    let plan = Fixtures.editPlan()
+    let first = URL(fileURLWithPath: "/tmp/qie-project-first.aiff")
+    let second = URL(fileURLWithPath: "/tmp/qie-project-second.aiff")
+    let canonicals = LockIsolated<[URL]>([first, second])
+    let (sink, record) = ProjectDocumentSink.recorder()
+    let model = ProjectModel(file: nil, plan: nil, audio: nil, sink: sink)
+
+    try await withDependencies {
+      $0.date = .constant(importedAt)
+      $0.transcription.transcribe = { _, _, _ in
+        let url = canonicals.withValue { $0.removeFirst() }
+        return stream([.completed(Fixtures.transcriptionResult(plan, canonicalAudioURL: url))])
+      }
+    } operation: {
+      await model.importAudioTapped(URL(fileURLWithPath: "/clip.m4a"))
+      let firstEditor = try #require(model.editor)
+      expectNoDifference(firstEditor.canonicalAudioURL, first)
+
+      // A second import tears the first editor down and builds a fresh one.
+      await model.importAudioTapped(URL(fileURLWithPath: "/clip.m4a"))
+      let secondEditor = try #require(model.editor)
+      #expect(firstEditor !== secondEditor)
+      expectNoDifference(secondEditor.canonicalAudioURL, second)
+    }
+
+    expectNoDifference(model.phase, .loaded)
+    expectNoDifference(record.commits.count, 2)
     expectNoDifference(record.registerChangeCount, 0)
   }
 
