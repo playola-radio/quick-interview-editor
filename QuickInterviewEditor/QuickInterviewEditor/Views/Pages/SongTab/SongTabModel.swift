@@ -220,24 +220,32 @@ final class SongTabModel: ViewModel, Identifiable {
         editPlan: result.editPlan, sourceFingerprint: fingerprint,
         initialDocument: seed)
     }
-    // The dirtiness signal fires on EVERY document change, including slice-only edits — but
-    // the legacy sidecar has never stored slices, so writing it on a slice-only change would
-    // be a new side effect (an extra write, and a re-normalization of legacy fields) that PR1
-    // never had. Write only when a sidecar-backed field actually changed, so slice-only and
-    // no-op mutations leave the sidecar untouched, exactly as before.
+    // The dirtiness signal fires on EVERY document change, including slice-only edits — but the
+    // legacy sidecar has never stored slices, so a slice-only change must leave it untouched.
+    // Persist only the sidecar-backed fields THIS editor actually changed, diffing against the
+    // editor's OWN last-persisted document (its post-init state), not the shared sidecar, and
+    // merging each changed field under the lock:
+    //   - Two tabs on the same source hold independent snapshots but share one sidecar. Writing
+    //     every field wholesale let a change in one tab clobber a field the other tab persisted;
+    //     scoping each write to what changed here leaves the other tab's fields intact.
+    //   - The editor normalizes removals at init (validatedRemovals). Diffing against the raw
+    //     sidecar treated that cleanup as a change and persisted it on the first unrelated edit;
+    //     diffing against the post-init baseline means an unrelated edit never touches removals.
+    var lastPersisted = newEditor.documentState
     newEditor.onDocumentStateChanged = { document in
-      let current = $projectState.wrappedValue
-      guard
-        current.timelineRemovals != document.timelineRemovals
-          || current.cutSuggestions != document.cutSuggestions
-          || current.speakerCountOverride != document.speakerCountOverride
-          || current.speakerDisplayNames != document.speakerDisplayNames
+      let previous = lastPersisted
+      lastPersisted = document
+      let removalsChanged = document.timelineRemovals != previous.timelineRemovals
+      let suggestionsChanged = document.cutSuggestions != previous.cutSuggestions
+      let speakerCountChanged = document.speakerCountOverride != previous.speakerCountOverride
+      let speakerNamesChanged = document.speakerDisplayNames != previous.speakerDisplayNames
+      guard removalsChanged || suggestionsChanged || speakerCountChanged || speakerNamesChanged
       else { return }
       $projectState.withLock {
-        $0.timelineRemovals = document.timelineRemovals
-        $0.cutSuggestions = document.cutSuggestions
-        $0.speakerCountOverride = document.speakerCountOverride
-        $0.speakerDisplayNames = document.speakerDisplayNames
+        if removalsChanged { $0.timelineRemovals = document.timelineRemovals }
+        if suggestionsChanged { $0.cutSuggestions = document.cutSuggestions }
+        if speakerCountChanged { $0.speakerCountOverride = document.speakerCountOverride }
+        if speakerNamesChanged { $0.speakerDisplayNames = document.speakerDisplayNames }
       }
     }
     return newEditor
