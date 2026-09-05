@@ -28,14 +28,14 @@ struct EditorDocumentMutationTests {
     #expect(model.canUndo)
   }
 
-  @Test func noOpMutateDocumentFiresTheCallbackButRecordsNoUndo() {
+  @Test func noOpMutateDocumentNeitherFiresTheCallbackNorRecordsUndo() {
     let model = editor()
     var seen: [EditorDocumentState] = []
     model.onDocumentStateChanged = { seen.append($0) }
 
     model.mutateDocument { _ in }
 
-    expectNoDifference(seen.count, 1)
+    expectNoDifference(seen.count, 0)
     #expect(!model.canUndo)
   }
 

@@ -22,7 +22,7 @@ struct EditorCutSuggestionTests {
   @Test func acceptingASuggestionSliceAddsItToTheEditor() {
     let model = editor()
     let id = Fixtures.uuid(1)
-    model.acceptCutSuggestionSlice(slice(id))
+    model.acceptCutSuggestion(slice(id), id: id)
     expectNoDifference(model.slices.count, 1)
     expectNoDifference(model.slices[id: id]?.name, "A story")
   }
@@ -30,31 +30,32 @@ struct EditorCutSuggestionTests {
   @Test func acceptingASuggestionTargetsItForScrolling() {
     let model = editor()
     let id = Fixtures.uuid(1)
-    model.acceptCutSuggestionSlice(slice(id))
+    model.acceptCutSuggestion(slice(id), id: id)
     expectNoDifference(model.sliceScrollTarget, id)
   }
 
   @Test func acceptingIsIdempotentByID() {
     let model = editor()
     let id = Fixtures.uuid(1)
-    model.acceptCutSuggestionSlice(slice(id))
-    model.acceptCutSuggestionSlice(slice(id))
+    model.acceptCutSuggestion(slice(id), id: id)
+    model.acceptCutSuggestion(slice(id), id: id)
     expectNoDifference(model.slices.count, 1)
   }
 
   @Test func acceptedSuggestionSliceIsUndoable() async {
     let model = editor()
     let id = Fixtures.uuid(1)
-    model.acceptCutSuggestionSlice(slice(id))
+    model.acceptCutSuggestion(slice(id), id: id)
     #expect(model.canUndo)
     await model.undoTapped()
     expectNoDifference(model.slices.count, 0)
   }
 
   @Test func acceptWiringFromChildModelLandsASlice() {
-    // The editor wires its child cut-suggestions model's onAcceptSlice to itself.
+    // The editor wires its child cut-suggestions model's onAccept to itself.
     let model = editor()
-    model.cutSuggestions.onAcceptSlice?(slice(Fixtures.uuid(7)))
-    expectNoDifference(model.slices[id: Fixtures.uuid(7)]?.name, "A story")
+    let id = Fixtures.uuid(7)
+    model.cutSuggestions.onAccept?(slice(id), id)
+    expectNoDifference(model.slices[id: id]?.name, "A story")
   }
 }

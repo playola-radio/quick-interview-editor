@@ -130,11 +130,8 @@ final class EditorModel: ViewModel {
   /// stack). Accepting also lands the derived slice, idempotently, through the same funnel.
   private func wireCutSuggestions() {
     cutSuggestions.currentSuggestions = { [weak self] in self?.documentCutSuggestions ?? [] }
-    cutSuggestions.onAcceptSlice = { [weak self] slice in
-      self?.acceptCutSuggestionSlice(slice)
-    }
-    cutSuggestions.onAccept = { [weak self] id in
-      self?.mutateDocument { $0.cutSuggestions[id: id]?.accept() }
+    cutSuggestions.onAccept = { [weak self] slice, id in
+      self?.acceptCutSuggestion(slice, id: id)
     }
     cutSuggestions.onReject = { [weak self] id in
       self?.mutateDocument { $0.cutSuggestions[id: id]?.reject() }
@@ -1463,15 +1460,19 @@ final class EditorModel: ViewModel {
   }
 
   /// The single funnel for every document mutation (slices, timeline removals, cut
-  /// suggestions, speaker overrides): snapshots before/after and records the change on
-  /// the undo stack (a no-op when nothing changed), then emits the new document through
-  /// `onDocumentStateChanged` — the one dirtiness signal, which the owning tab wires to
-  /// persistence. Restoring history via `undoTapped`/`redoTapped` deliberately bypasses
-  /// this — it assigns the fields directly so replaying the stack never records a new entry.
+  /// suggestions, speaker overrides): snapshots before/after and, when the body actually
+  /// changed the document, records the change on the undo stack and emits the new document
+  /// through `onDocumentStateChanged` — the one dirtiness signal, which the owning tab wires
+  /// to persistence. A no-op body (or one that leaves the document unchanged, e.g. rejecting
+  /// an already-rejected suggestion) returns early: no undo entry, and the dirtiness signal
+  /// stays honest so a clean document is never marked dirty. Restoring history via
+  /// `undoTapped`/`redoTapped` deliberately bypasses this — it assigns the fields directly so
+  /// replaying the stack never records a new entry.
   func mutateDocument(recordUndo: Bool = true, _ body: (inout EditorDocumentState) -> Void) {
     let old = documentState
     var new = old
     body(&new)
+    guard new != old else { return }
     slices = new.slices
     timelineRemovals = new.timelineRemovals
     documentCutSuggestions = new.cutSuggestions
@@ -1490,22 +1491,36 @@ final class EditorModel: ViewModel {
     mutateDocument { doc in body(&doc.slices) }
   }
 
-  /// Adds an accepted suggestion's slice to the editor. Idempotent by `Slice.id` (a
-  /// re-accept is a no-op), routed through `appendNewClip` so it's exportable and undoable.
-  /// The suggestion's own status flip is a separate document mutation (`onAccept`); this
-  /// only lands the slice.
-  func acceptCutSuggestionSlice(_ slice: Slice) {
-    guard slices[id: slice.id] == nil else { return }
-    appendNewClip(slice)
+  /// Accepts a cut suggestion in ONE document transaction: appends the accepted slice
+  /// (idempotently, by `Slice.id`) AND flips the suggestion to `.accepted` together, so the
+  /// pair moves as a unit — a single undo reverts both, and the transcript never shows the
+  /// half-accepted state (a green slice beside its own amber pending band) that two separate
+  /// mutations would leave between undos. The derived slice shares the suggestion's id, so
+  /// re-accepting is a no-op on the slice while still (re)confirming the status.
+  func acceptCutSuggestion(_ slice: Slice, id: CutSuggestion.ID) {
+    let firstAccept = slices[id: slice.id] == nil
+    let nudged = offsetNudgedClip(slice)
+    mutateDocument {
+      if $0.slices[id: nudged.id] == nil { $0.slices.append(nudged) }
+      $0.cutSuggestions[id: id]?.accept()
+    }
+    if firstAccept { sliceScrollTarget = nudged.id }
   }
 
-  /// The single funnel for every NEW clip (Mark as Clip, fine-tune commit, accepted
-  /// suggestion): nudges its cut points by the user's clip-boundary offset setting, then
-  /// appends. Word membership and snippet are intentionally left AS BUILT — the offset is a
-  /// small audio padding, not a content change — so the clip stays "the same words" with a
-  /// slightly earlier/later cut. Manual boundary re-edits (`updatedSlice`) deliberately do NOT
-  /// pass through here (new cuts only).
+  /// The single funnel for every NEW clip (Mark as Clip, fine-tune commit): nudges its cut
+  /// points by the user's clip-boundary offset setting, then appends. Manual boundary
+  /// re-edits (`updatedSlice`) deliberately do NOT pass through here (new cuts only).
   private func appendNewClip(_ slice: Slice) {
+    let nudged = offsetNudgedClip(slice)
+    mutateSlices { $0.append(nudged) }
+    sliceScrollTarget = nudged.id
+  }
+
+  /// Nudges a new clip's cut points by the user's clip-boundary offset setting, leaving word
+  /// membership and snippet AS BUILT — the offset is a small audio padding, not a content
+  /// change — so the clip stays "the same words" with a slightly earlier/later cut. Pure: the
+  /// caller decides how (and in which transaction) the nudged clip lands.
+  private func offsetNudgedClip(_ slice: Slice) -> Slice {
     let range = offsetClipRange(
       slice.startSample..<slice.endSample,
       startOffsetMs: clipStartOffsetMs, endOffsetMs: clipEndOffsetMs,
@@ -1513,8 +1528,7 @@ final class EditorModel: ViewModel {
     var nudged = slice
     nudged.startSample = range.lowerBound
     nudged.endSample = range.upperBound
-    mutateSlices { $0.append(nudged) }
-    sliceScrollTarget = nudged.id
+    return nudged
   }
 
   // MARK: - Listen pass

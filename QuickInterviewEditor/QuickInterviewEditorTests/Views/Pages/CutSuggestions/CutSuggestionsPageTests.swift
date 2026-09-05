@@ -40,7 +40,7 @@ struct CutSuggestionsPageTests {
     to store: LockIsolated<IdentifiedArrayOf<CutSuggestion>>
   ) {
     model.currentSuggestions = { store.value }
-    model.onAccept = { id in store.withValue { $0[id: id]?.accept() } }
+    model.onAccept = { _, id in store.withValue { $0[id: id]?.accept() } }
     model.onReject = { id in store.withValue { $0[id: id]?.reject() } }
     model.onSuggestionsProduced = { produced in
       store.withValue { $0 = IdentifiedArray(produced, uniquingIDsWith: { first, _ in first }) }
@@ -297,7 +297,10 @@ struct CutSuggestionsPageTests {
     } operation: {
       let model = CutSuggestionsPageModel(editPlan: plan, sourceFingerprint: fingerprint)
       wire(model, to: store)
-      model.onAcceptSlice = { acceptedSlice.setValue($0) }
+      model.onAccept = { slice, id in
+        acceptedSlice.setValue(slice)
+        store.withValue { $0[id: id]?.accept() }
+      }
 
       model.acceptTapped(suggestion.id)
 
@@ -322,7 +325,10 @@ struct CutSuggestionsPageTests {
     } operation: {
       let model = CutSuggestionsPageModel(editPlan: plan, sourceFingerprint: fingerprint)
       wire(model, to: store)
-      model.onAcceptSlice = { acceptedSlice.setValue($0) }
+      model.onAccept = { slice, id in
+        acceptedSlice.setValue(slice)
+        store.withValue { $0[id: id]?.accept() }
+      }
 
       model.acceptTapped(suggestion.id)
 

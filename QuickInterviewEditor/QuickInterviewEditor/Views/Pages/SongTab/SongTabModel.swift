@@ -220,7 +220,19 @@ final class SongTabModel: ViewModel, Identifiable {
         editPlan: result.editPlan, sourceFingerprint: fingerprint,
         initialDocument: seed)
     }
+    // The dirtiness signal fires on EVERY document change, including slice-only edits — but
+    // the legacy sidecar has never stored slices, so writing it on a slice-only change would
+    // be a new side effect (an extra write, and a re-normalization of legacy fields) that PR1
+    // never had. Write only when a sidecar-backed field actually changed, so slice-only and
+    // no-op mutations leave the sidecar untouched, exactly as before.
     newEditor.onDocumentStateChanged = { document in
+      let current = $projectState.wrappedValue
+      guard
+        current.timelineRemovals != document.timelineRemovals
+          || current.cutSuggestions != document.cutSuggestions
+          || current.speakerCountOverride != document.speakerCountOverride
+          || current.speakerDisplayNames != document.speakerDisplayNames
+      else { return }
       $projectState.withLock {
         $0.timelineRemovals = document.timelineRemovals
         $0.cutSuggestions = document.cutSuggestions

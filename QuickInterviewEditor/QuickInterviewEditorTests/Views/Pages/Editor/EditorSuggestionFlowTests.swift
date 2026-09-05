@@ -58,11 +58,14 @@ struct EditorSuggestionFlowTests {
     expectNoDifference(model.slices[id: suggestion.id]?.wordIDs, [10, 11, 12, 13, 14, 15, 16])
     expectNoDifference(model.documentCutSuggestions[id: suggestion.id]?.status, .accepted)
     #expect(model.canUndo)
-    #expect(seen.count >= 1)
+    // Accept lands the slice AND the status flip in ONE transaction — one callback, one entry.
+    expectNoDifference(seen.count, 1)
 
-    // The status flip is the last-recorded change, so a single undo reverts the acceptance.
+    // A single undo reverts the WHOLE acceptance: the slice goes and the status returns to
+    // pending together, so the transcript is never left with a half-accepted suggestion.
     await model.undoTapped()
     expectNoDifference(model.documentCutSuggestions[id: suggestion.id]?.status, .pending)
+    #expect(model.slices[id: suggestion.id] == nil)
   }
 
   @Test func rejectingASuggestionFlipsStatusAndIsUndoable() async {

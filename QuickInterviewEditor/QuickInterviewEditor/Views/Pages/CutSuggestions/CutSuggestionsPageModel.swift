@@ -31,12 +31,10 @@ final class CutSuggestionsPageModel: ViewModel {
   /// property here keeps the panel in sync with document changes.
   @ObservationIgnored var currentSuggestions: @MainActor () -> IdentifiedArrayOf<CutSuggestion> =
     { [] }
-  /// Hands an accepted suggestion's `Slice` to the editor (wired by `EditorModel`), which
-  /// appends it to its slices/render list. Kept a closure so this model stays editor-agnostic.
-  @ObservationIgnored var onAcceptSlice: ((Slice) -> Void)?
-  /// Asks the editor to flip a suggestion to `.accepted` in the document (undoably). Paired
-  /// with `onAcceptSlice` so one accept lands both the slice and the status change.
-  @ObservationIgnored var onAccept: (@MainActor (CutSuggestion.ID) -> Void)?
+  /// Asks the editor to accept a suggestion (wired by `EditorModel`): land its derived `Slice`
+  /// and flip the suggestion to `.accepted` in ONE undoable document transaction, so a single
+  /// undo reverts both. Kept a closure so this model stays editor-agnostic.
+  @ObservationIgnored var onAccept: (@MainActor (Slice, CutSuggestion.ID) -> Void)?
   /// Asks the editor to flip a suggestion to `.rejected` in the document (undoably).
   @ObservationIgnored var onReject: (@MainActor (CutSuggestion.ID) -> Void)?
   /// Hands a completed run's stamped candidates to the editor to store in the document
@@ -54,14 +52,12 @@ final class CutSuggestionsPageModel: ViewModel {
     sourceFingerprint: String,
     options: CutSuggestOptions = CutSuggestOptions(),
     productSpecs: [ProductSpec] = ProductSpec.defaults,
-    onAcceptSlice: ((Slice) -> Void)? = nil,
     onSelectSuggestion: ((CutSuggestion) -> Void)? = nil
   ) {
     self.editPlan = editPlan
     self.sourceFingerprint = sourceFingerprint
     self.options = options
     self.productSpecs = productSpecs
-    self.onAcceptSlice = onAcceptSlice
     self.onSelectSuggestion = onSelectSuggestion
     super.init()
   }
@@ -233,9 +229,9 @@ final class CutSuggestionsPageModel: ViewModel {
   }
 
   /// Accepts a suggestion: validates it against the current plan, then — on success —
-  /// hands the derived `Slice` to the editor (`onAcceptSlice`) and asks it to flip the
-  /// suggestion accepted in the document (`onAccept`). Stale/invalid inputs surface a
-  /// message instead of a slice — never a crash. Validating here (the model owns the plan,
+  /// asks the editor to land the derived `Slice` and flip the suggestion accepted in one
+  /// undoable document transaction (`onAccept`). Stale/invalid inputs surface a message
+  /// instead of a slice — never a crash. Validating here (the model owns the plan,
   /// fingerprint, and `actionMessage`) keeps the outcome message local; the editor owns
   /// the undoable document write.
   func acceptTapped(_ id: CutSuggestion.ID) {
@@ -244,8 +240,7 @@ final class CutSuggestionsPageModel: ViewModel {
       sourceFingerprint: sourceFingerprint, transcriptHash: editPlan.transcriptHash)
     {
     case .accepted(let slice, _):
-      onAcceptSlice?(slice)
-      onAccept?(id)
+      onAccept?(slice, id)
       actionMessage = nil
     case .stale(let reason):
       actionMessage = cutSuggestionStaleMessage(reason)
