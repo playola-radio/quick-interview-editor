@@ -389,12 +389,15 @@ mitigation is NSDocument with `preservesVersions` tuned, not a format change.
 Each PR builds, passes `make test-fast`, `make format-check`, `make lint`, and
 ships behind no flag: PRs 1–3 are invisible; PR 4 is the user-visible switch.
 
-## Open items for the user
+## Resolved decisions
 
 - ~~Extension `.pie` vs `.qie`~~ **Resolved: `.pie`.** The app was also renamed
   Quick Interview Editor → Playola Interview Editor with a new bundle id
   (`fm.playola.PlayolaInterviewEditor`), keychain service, and appcast path —
   shipped ahead of this feature in PR #71.
-- Whether the autosave-window crash-loss trade (A7) is acceptable for v1.
-- Whether deleting the legacy sidecar after a successful first save is wanted
-  (recommendation: leave it; remove the reader in a later major).
+- ~~Autosave-window crash-loss trade (A7)~~ **Resolved: acceptable for v1.**
+- ~~Deleting the legacy sidecar after first save~~ **Resolved: leave it in
+  place.** Migration stays a pure read (no destructive save-path side effect);
+  the sidecar is keyed by source fingerprint so one source can seed multiple
+  projects; it is a tiny read-only transition-period safety net. Remove the
+  reader (and sweep leftover sidecars) in a later major.
