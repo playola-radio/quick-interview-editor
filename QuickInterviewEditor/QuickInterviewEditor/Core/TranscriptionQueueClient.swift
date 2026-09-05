@@ -21,11 +21,17 @@ struct TranscriptionQueueClient: Sendable {
 /// as its engine stream runs; when the stream finishes, fails, or is cancelled the slot is handed
 /// to the next waiter (or released) so at most `maxConcurrent` engines ever run together.
 actor TranscriptionQueue {
+  private struct Waiter {
+    let id: UInt64
+    let continuation: CheckedContinuation<Void, Error>
+  }
+
   private let maxConcurrent: Int
   private let transcribe:
     @Sendable (URL, String, CachePolicy) -> AsyncThrowingStream<EngineEvent, Error>
   private var running = 0
-  private var waiters: [CheckedContinuation<Void, Never>] = []
+  private var waiters: [Waiter] = []
+  private var nextWaiterID: UInt64 = 0
 
   init(
     maxConcurrent: Int,
@@ -39,7 +45,18 @@ actor TranscriptionQueue {
   }
 
   func enqueue(_ job: TranscriptionJob) async -> AsyncThrowingStream<EngineEvent, Error> {
-    await acquire()
+    do {
+      try await acquire()
+    } catch {
+      // Cancelled while parked: never got a slot, so start no engine job.
+      return AsyncThrowingStream { $0.finish(throwing: error) }
+    }
+    // Cancelled after being handed a slot but before starting: hand the slot back rather than
+    // burn a heavy engine run for a consumer that has already gone away.
+    if Task.isCancelled {
+      release()
+      return AsyncThrowingStream { $0.finish(throwing: CancellationError()) }
+    }
     let upstream = transcribe(job.source, job.sourceFingerprint, job.policy)
     return AsyncThrowingStream { continuation in
       let task = Task {
@@ -58,23 +75,40 @@ actor TranscriptionQueue {
     }
   }
 
-  private func acquire() async {
+  private func acquire() async throws {
     if running < maxConcurrent {
       running += 1
       return
     }
     // Full: park until `release` hands this waiter the freed slot. The slot count is preserved
     // across the hand-off (no decrement in `release`, no increment here), so it never double-counts.
-    await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-      waiters.append(continuation)
+    // Cancelling a parked waiter removes it and throws, so a closed window never later starts a job.
+    let id = nextWaiterID
+    nextWaiterID += 1
+    try await withTaskCancellationHandler {
+      try await withCheckedThrowingContinuation {
+        (continuation: CheckedContinuation<Void, Error>) in
+        if Task.isCancelled {
+          continuation.resume(throwing: CancellationError())
+        } else {
+          waiters.append(Waiter(id: id, continuation: continuation))
+        }
+      }
+    } onCancel: {
+      Task { await cancelWaiter(id) }
     }
+  }
+
+  private func cancelWaiter(_ id: UInt64) {
+    guard let index = waiters.firstIndex(where: { $0.id == id }) else { return }
+    waiters.remove(at: index).continuation.resume(throwing: CancellationError())
   }
 
   private func release() {
     if waiters.isEmpty {
       running -= 1
     } else {
-      waiters.removeFirst().resume()
+      waiters.removeFirst().continuation.resume()
     }
   }
 }
