@@ -27,6 +27,14 @@ enum ProjectPackage {
   /// `Date` coding is seconds-since-2001, which silently misreads a Unix-looking
   /// timestamp by decades. `plan.json` keeps its own engine-defined coding and is
   /// never routed through here (spec A2/A4).
+  ///
+  /// Precision contract: this format carries **whole seconds only** (no fractional
+  /// seconds). `importedAt` is import-provenance metadata where sub-second precision
+  /// is meaningless, so an in-memory `Date()`'s fractional part is dropped on encode
+  /// and does not survive a round trip. `verifyAudio`'s test suite pins this
+  /// normalization. Whoever constructs `ProjectSource` at import time should floor
+  /// `importedAt` to whole seconds so the in-memory value matches what reopening the
+  /// package yields.
   static func projectEncoder() -> JSONEncoder {
     let encoder = JSONEncoder()
     encoder.dateEncodingStrategy = .iso8601

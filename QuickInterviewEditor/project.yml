@@ -103,6 +103,12 @@ targets:
     platform: macOS
     sources:
       - path: QuickInterviewEditorTests
+        excludes:
+          # Copied whole as an opaque package by the explicit folder resource
+          # below; excluding it here stops the broad source scan from also
+          # exploding its children (project.json/plan.json/canonical.aiff) as
+          # loose top-level bundle resources.
+          - Fixtures/project-v1.pie
       - path: Resources/Fixtures/edit-plan.json
         buildPhase: resources
       - path: Resources/Fixtures/edit-plan-v2.json

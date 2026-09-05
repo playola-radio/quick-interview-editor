@@ -47,7 +47,7 @@ struct ProjectPackageTests {
     expectNoDifference(decoded.audioWrapper.regularFileContents, audioData)
   }
 
-  @Test func importedAtRoundTripsExactly() throws {
+  @Test func wholeSecondImportedAtRoundTripsExactly() throws {
     let importedAt = Date(timeIntervalSince1970: 1_700_000_000)
     let file = Fixtures.projectFile(source: Fixtures.projectSource(importedAt: importedAt))
     let audioWrapper = FileWrapper(regularFileWithContents: Data("audio".utf8))
@@ -56,6 +56,20 @@ struct ProjectPackageTests {
     let decoded = try ProjectPackage.decode(root)
 
     expectNoDifference(decoded.file.source.importedAt, importedAt)
+  }
+
+  @Test func fractionalImportedAtNormalizesToWholeSeconds() throws {
+    // The format carries whole seconds only: a sub-second component is dropped on
+    // encode and must not survive the round trip (ProjectPackage precision contract).
+    let file = Fixtures.projectFile(
+      source: Fixtures.projectSource(importedAt: Date(timeIntervalSince1970: 1_700_000_000.75)))
+    let audioWrapper = FileWrapper(regularFileWithContents: Data("audio".utf8))
+
+    let root = try ProjectPackage.encode(file: file, plan: Fixtures.editPlan(), audio: audioWrapper)
+    let decoded = try ProjectPackage.decode(root)
+
+    expectNoDifference(
+      decoded.file.source.importedAt, Date(timeIntervalSince1970: 1_700_000_000))
   }
 
   // MARK: - Missing pieces

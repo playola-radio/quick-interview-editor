@@ -131,3 +131,29 @@ carried the rest forward with explicit reasons.
 - Fixture `project.json`↔`plan.json` metadata disagreement (challenge #7) and
   duplicate-JSON-key rejection (challenge #9) — noted; cross-field validation and
   strict-JSON parsing are not PR 1 requirements for a self-written local format.
+
+## Greptile review (PR 1, Confidence 4/5) — dispositions
+
+**Fixed in PR 1:**
+- **Timestamp precision contract** (P2): `.iso8601` carries whole seconds only, so
+  a real `Date()`'s sub-second part would not round-trip — and the exact-round-trip
+  test only used a whole-second value, hiding it. Made whole-second normalization
+  the explicit, documented contract on `projectEncoder`/`projectDecoder` and added
+  `fractionalImportedAtNormalizesToWholeSeconds` proving a fractional `Date`
+  truncates. Carry-forward: whoever constructs `ProjectSource` at import (PR 2/3+)
+  should floor `importedAt` to whole seconds so the in-memory value matches disk.
+- **Fixture resource duplication** (P2): the broad `QuickInterviewEditorTests`
+  source glob was exploding `project-v1.pie`'s children (`project.json`,
+  `plan.json`, `canonical.aiff`) as loose top-level bundle resources *in addition*
+  to the explicit whole-package folder resource. Added an `excludes:
+  [Fixtures/project-v1.pie]` to the source path so only the opaque package is
+  copied; verified in the regenerated `.pbxproj` that the loose child build files
+  are gone.
+
+**Deferred by design (left unresolved for the user):**
+- **S2 feasibility gate incomplete** (P1): the real end-to-end check (50 autosaves
+  at 500 MB/1 GB while measuring Versions/`.DocumentRevisions` growth) **cannot** run
+  in PR 1 — there is no `NSDocument` to autosave until `DocumentGroup` lands in PR 4.
+  PR 1 is codec-only and PR 2/3 don't ship the document shell either, so no
+  incremental disk-growth risk accrues before PR 4, where the check is already a hard
+  gate (see the S2 ESCALATE note above and `graph.md`). Left the thread unresolved.
