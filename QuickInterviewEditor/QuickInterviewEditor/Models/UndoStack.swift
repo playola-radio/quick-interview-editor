@@ -33,6 +33,16 @@ struct UndoStack<State: Equatable> {
     redo.removeAll()
   }
 
+  /// Replays a non-undoable change into every stored snapshot (both stacks), so a mutation
+  /// applied to the live state outside the undo timeline (recorded with `record` skipped)
+  /// stays consistent no matter where the user is in history. Without this, stepping back to
+  /// an older snapshot would revert the out-of-band change. The transform must be
+  /// timeline-independent — it is applied identically at every point in history.
+  mutating func rebase(_ transform: (inout State) -> Void) {
+    for index in undo.indices { transform(&undo[index]) }
+    for index in redo.indices { transform(&redo[index]) }
+  }
+
   /// Steps back one entry, returning the state to restore (or `nil` at the bottom).
   /// The caller's `current` state is pushed onto the redo stack so the step is reversible.
   mutating func undo(current: State) -> State? {

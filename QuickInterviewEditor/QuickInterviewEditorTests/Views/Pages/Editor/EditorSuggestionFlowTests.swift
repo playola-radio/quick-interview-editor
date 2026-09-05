@@ -68,6 +68,30 @@ struct EditorSuggestionFlowTests {
     #expect(model.slices[id: suggestion.id] == nil)
   }
 
+  @Test func suggestionsProducedAfterAnEditSurviveUndoAndRedoOfThatEdit() async {
+    let plan = Fixtures.editPlan()
+    let model = editor(plan)
+    // An undoable edit lands FIRST, while no suggestions exist — so its undo snapshot predates
+    // them. This is the ordering the old sidecar could never break, since suggestions lived
+    // outside undo entirely.
+    model.mutateDocument { $0.slices.append(Fixtures.slice(id: Fixtures.uuid(9))) }
+
+    // Then a background pass stores suggestions non-undoably.
+    let suggestion = freshSuggestion(Fixtures.uuid(1), plan: plan)
+    model.cutSuggestions.onSuggestionsProduced?([suggestion])
+    expectNoDifference(model.documentCutSuggestions.count, 1)
+
+    // Undoing the slice must NOT rewind to the pre-suggestion snapshot and erase them.
+    await model.undoTapped()
+    expectNoDifference(model.slices.count, 0)
+    expectNoDifference(model.documentCutSuggestions[id: suggestion.id]?.id, suggestion.id)
+
+    // Redo restores the slice and still keeps the suggestions.
+    await model.redoTapped()
+    expectNoDifference(model.slices.count, 1)
+    expectNoDifference(model.documentCutSuggestions[id: suggestion.id]?.id, suggestion.id)
+  }
+
   @Test func rejectingASuggestionFlipsStatusAndIsUndoable() async {
     let plan = Fixtures.editPlan()
     let model = editor(plan)

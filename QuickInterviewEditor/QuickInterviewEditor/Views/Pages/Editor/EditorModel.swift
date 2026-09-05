@@ -1465,9 +1465,11 @@ final class EditorModel: ViewModel {
   /// through `onDocumentStateChanged` — the one dirtiness signal, which the owning tab wires
   /// to persistence. A no-op body (or one that leaves the document unchanged, e.g. rejecting
   /// an already-rejected suggestion) returns early: no undo entry, and the dirtiness signal
-  /// stays honest so a clean document is never marked dirty. Restoring history via
-  /// `undoTapped`/`redoTapped` deliberately bypasses this — it assigns the fields directly so
-  /// replaying the stack never records a new entry.
+  /// stays honest so a clean document is never marked dirty. A `recordUndo: false` change is
+  /// rebased into the existing history (see `UndoStack.rebase`) so undoing an older edit can't
+  /// rewind past it and drop it. Restoring history via `undoTapped`/`redoTapped` deliberately
+  /// bypasses this — it assigns the fields directly so replaying the stack never records a new
+  /// entry.
   func mutateDocument(recordUndo: Bool = true, _ body: (inout EditorDocumentState) -> Void) {
     let old = documentState
     var new = old
@@ -1480,6 +1482,11 @@ final class EditorModel: ViewModel {
     speakerDisplayNames = new.speakerDisplayNames
     if recordUndo {
       documentUndo.record(before: old, after: new)
+    } else {
+      // A non-undoable change (e.g. the background suggestion pass) must land at EVERY point in
+      // history, not just the live state: replay it into the stored snapshots so undoing an
+      // earlier edit can't rewind to a snapshot that predates it and silently drop it.
+      documentUndo.rebase(body)
     }
     syncEditedTimeline()
     onDocumentStateChanged?(documentState)

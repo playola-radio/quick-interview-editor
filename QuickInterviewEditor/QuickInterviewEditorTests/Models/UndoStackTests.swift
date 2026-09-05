@@ -63,6 +63,19 @@ struct UndoStackTests {
     expectNoDifference(stack.undo(current: 42), 0)
   }
 
+  @Test func rebaseMapsEverySnapshotOnBothStacks() {
+    var stack = UndoStack<Int>()
+    stack.record(before: 0, after: 1)
+    stack.record(before: 1, after: 2)
+    _ = stack.undo(current: 2)  // undo has [0], redo has [2]
+
+    stack.rebase { $0 += 100 }
+
+    // Both the remaining undo snapshot and the redo snapshot moved uniformly.
+    expectNoDifference(stack.undo, [100])
+    expectNoDifference(stack.redo, [102])
+  }
+
   @Test func limitEvictsOldestUndoEntries() {
     var stack = UndoStack<Int>(limit: 2)
     stack.record(before: 0, after: 1)
