@@ -22,21 +22,51 @@ struct DecodedPackage {
 /// disk, so both the document type and its tests can operate on the same codec
 /// (spec A2).
 enum ProjectPackage {
+  /// The coder for `project.json`. An explicit ISO-8601 `Date` strategy keeps
+  /// `importedAt` unambiguous and human-legible on disk — Foundation's default
+  /// `Date` coding is seconds-since-2001, which silently misreads a Unix-looking
+  /// timestamp by decades. `plan.json` keeps its own engine-defined coding and is
+  /// never routed through here (spec A2/A4).
+  static func projectEncoder() -> JSONEncoder {
+    let encoder = JSONEncoder()
+    encoder.dateEncodingStrategy = .iso8601
+    return encoder
+  }
+
+  static func projectDecoder() -> JSONDecoder {
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
+    return decoder
+  }
+
+  /// Just enough of `project.json` to gate on the schema version before decoding the
+  /// full, version-specific payload.
+  private struct SchemaProbe: Decodable {
+    let schemaVersion: Int
+  }
+
   static func decode(_ root: FileWrapper) throws -> DecodedPackage {
     guard let projectData = root.fileWrappers?["project.json"]?.regularFileContents else {
       throw ProjectPackageError.missingProjectJSON
     }
-    let file = try JSONDecoder().decode(ProjectFile.self, from: projectData)
-    guard file.schemaVersion <= ProjectFile.currentSchemaVersion else {
-      throw ProjectPackageError.unsupportedSchema(file.schemaVersion)
+    // Gate on the schema version first, so a newer or malformed file whose fields no
+    // longer match the v1 shape fails with a clear `unsupportedSchema` instead of an
+    // opaque `DecodingError`. Only versions in `1...current` are accepted; 0, negative,
+    // and future versions are all refused (spec A8).
+    let probe = try JSONDecoder().decode(SchemaProbe.self, from: projectData)
+    guard (1...ProjectFile.currentSchemaVersion).contains(probe.schemaVersion) else {
+      throw ProjectPackageError.unsupportedSchema(probe.schemaVersion)
     }
+    let file = try projectDecoder().decode(ProjectFile.self, from: projectData)
 
     guard let planData = root.fileWrappers?["plan.json"]?.regularFileContents else {
       throw ProjectPackageError.missingPlanJSON
     }
     let plan = try JSONDecoder().decode(EditPlan.self, from: planData)
 
-    guard let audioWrapper = root.fileWrappers?["audio"]?.fileWrappers?["canonical.aiff"] else {
+    guard let audioWrapper = root.fileWrappers?["audio"]?.fileWrappers?["canonical.aiff"],
+      audioWrapper.isRegularFile
+    else {
       throw ProjectPackageError.missingAudio
     }
 
@@ -44,7 +74,7 @@ enum ProjectPackage {
   }
 
   static func encode(file: ProjectFile, plan: EditPlan, audio: FileWrapper) throws -> FileWrapper {
-    let projectWrapper = FileWrapper(regularFileWithContents: try JSONEncoder().encode(file))
+    let projectWrapper = FileWrapper(regularFileWithContents: try projectEncoder().encode(file))
     projectWrapper.preferredFilename = "project.json"
 
     let planWrapper = FileWrapper(regularFileWithContents: try JSONEncoder().encode(plan))

@@ -93,3 +93,41 @@ checkpoint. If it is, the fix is likely disabling `NSDocument.autosavesInPlace`
 or hooking `fileWrapper(snapshot:configuration:)` to explicitly hand back the
 identical wrapper reference (which this spike shows is safe to do) rather than
 rebuilding the audio child from scratch on every save call.
+
+## Codex adversarial review (PR 1) — dispositions
+
+Ran `/codex review` (PASS: 2 P2 advisory, no P0/P1) + `/codex challenge`
+(9 findings) on the PR 1 diff. Fixed the three that are genuine
+contract-correctness issues in the codec that *defines* the on-disk format;
+carried the rest forward with explicit reasons.
+
+**Fixed in PR 1:**
+- **Schema-version gating** (`ProjectPackage.decode`): decode a minimal
+  `SchemaProbe` first and accept only `1...currentSchemaVersion`. A newer or
+  malformed file now fails with a clear `unsupportedSchema` instead of an opaque
+  `DecodingError`, and `0`/negative versions are refused (was: only `> current`
+  rejected, after a full v1-shaped decode).
+- **Explicit ISO-8601 `Date` strategy** for `project.json` (`projectEncoder`/
+  `projectDecoder`): Foundation's default `Date` coding is seconds-since-2001, so
+  the fixture's `importedAt: 1700000000` silently decoded to ~year 2054. Pinned
+  to ISO-8601 (self-documenting on disk); fixture updated to the string form.
+  `plan.json`/`EditPlan` keeps its own engine-defined coding, untouched.
+- **Regular-file guard** on `audio/canonical.aiff` in `decode`: a directory or
+  symlink at that path no longer survives as "present audio."
+
+**Deferred by design (carried forward):**
+- Real audio integrity — fingerprint/header validation beyond byte count
+  (challenge #1/#2, review #2) → **PR 5**, where the canonical AIFF is opened as
+  an `AVAudioFile` during hydration anyway (spec A5/A8). Byte-count-only
+  `verifyAudio` is the deliberate PR 1 placeholder.
+- Editor snapshot drops the widened `EditorDocumentState` fields
+  (`cutSuggestions`/speaker) (challenge #3) → **PR 2/PR 3**. `EditorModel` is
+  untouched by PR 1; the memberwise-init defaults are intentional forward-compat
+  so existing call sites compile. The `mutateDocument` funnel that populates these
+  fields is explicitly PR 2/PR 3 scope.
+- `FileWrapper` aliasing / caller mutation on `encode` (challenge #5) —
+  theoretical; no callers exist yet, and A5 *wants* the same audio wrapper reused.
+  Revisit when the save path is wired (PR 4).
+- Fixture `project.json`↔`plan.json` metadata disagreement (challenge #7) and
+  duplicate-JSON-key rejection (challenge #9) — noted; cross-field validation and
+  strict-JSON parsing are not PR 1 requirements for a self-written local format.

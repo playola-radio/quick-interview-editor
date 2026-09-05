@@ -23,7 +23,7 @@ struct ProjectPackageTests {
 
   private func encodedProjectFile(_ file: ProjectFile) -> Data {
     // swiftlint:disable:next force_try
-    try! JSONEncoder().encode(file)
+    try! ProjectPackage.projectEncoder().encode(file)
   }
 
   private func encodedPlan(_ plan: EditPlan) -> Data {
@@ -45,6 +45,17 @@ struct ProjectPackageTests {
     expectNoDifference(decoded.file, file)
     expectNoDifference(decoded.plan, plan)
     expectNoDifference(decoded.audioWrapper.regularFileContents, audioData)
+  }
+
+  @Test func importedAtRoundTripsExactly() throws {
+    let importedAt = Date(timeIntervalSince1970: 1_700_000_000)
+    let file = Fixtures.projectFile(source: Fixtures.projectSource(importedAt: importedAt))
+    let audioWrapper = FileWrapper(regularFileWithContents: Data("audio".utf8))
+
+    let root = try ProjectPackage.encode(file: file, plan: Fixtures.editPlan(), audio: audioWrapper)
+    let decoded = try ProjectPackage.decode(root)
+
+    expectNoDifference(decoded.file.source.importedAt, importedAt)
   }
 
   // MARK: - Missing pieces
@@ -92,6 +103,32 @@ struct ProjectPackageTests {
     }
   }
 
+  @Test(arguments: [0, -1]) func decodeSchemaVersionBelowOneThrows(_ version: Int) {
+    var file = Fixtures.projectFile()
+    file.schemaVersion = version
+    let root = tree(
+      projectJSON: encodedProjectFile(file), planJSON: encodedPlan(Fixtures.editPlan()),
+      audio: Data("audio".utf8))
+    #expect(throws: ProjectPackageError.unsupportedSchema(version)) {
+      try ProjectPackage.decode(root)
+    }
+  }
+
+  @Test func decodeAudioAsDirectoryThrowsMissingAudio() {
+    let children: [String: FileWrapper] = [
+      "project.json": FileWrapper(
+        regularFileWithContents: encodedProjectFile(Fixtures.projectFile())),
+      "plan.json": FileWrapper(regularFileWithContents: encodedPlan(Fixtures.editPlan())),
+      "audio": FileWrapper(directoryWithFileWrappers: [
+        // A directory where the canonical AIFF file should be must not read as present audio.
+        "canonical.aiff": FileWrapper(directoryWithFileWrappers: [:])
+      ]),
+    ]
+    #expect(throws: ProjectPackageError.missingAudio) {
+      try ProjectPackage.decode(FileWrapper(directoryWithFileWrappers: children))
+    }
+  }
+
   // MARK: - Audio integrity
 
   @Test func verifyAudioPassesWhenByteCountMatches() throws {
@@ -120,6 +157,8 @@ struct ProjectPackageTests {
     try ProjectPackage.verifyAudio(decoded.audioWrapper, against: decoded.file.source)
 
     expectNoDifference(decoded.file.schemaVersion, 1)
+    expectNoDifference(
+      decoded.file.source.importedAt, Date(timeIntervalSince1970: 1_700_000_000))
   }
 }
 
