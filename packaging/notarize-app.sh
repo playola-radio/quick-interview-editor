@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Notarize + staple a signed .app for Gatekeeper acceptance on clean Macs.
 #
-#   packaging/notarize-app.sh /path/to/QuickInterviewEditor.app
+#   packaging/notarize-app.sh /path/to/PlayolaInterviewEditor.app
 #
 # Requires notarytool credentials. Provide EITHER a stored keychain profile:
 #   xcrun notarytool store-credentials qie-notary \
@@ -15,7 +15,7 @@
 # documents this as a gap when they are absent.
 set -euo pipefail
 
-APP="${1:?usage: notarize-app.sh /path/to/QuickInterviewEditor.app}"
+APP="${1:?usage: notarize-app.sh /path/to/PlayolaInterviewEditor.app}"
 ZIP="${APP%.app}-notarize.zip"
 
 notary_auth=()

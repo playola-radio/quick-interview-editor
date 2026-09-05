@@ -2,7 +2,7 @@ import CustomDump
 import Dependencies
 import Testing
 
-@testable import QuickInterviewEditor
+@testable import PlayolaInterviewEditor
 
 @MainActor
 struct UpdaterCommandsModelTests {

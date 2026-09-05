@@ -5,7 +5,7 @@ import Foundation
 @_spi(Internals) import Sharing
 import Testing
 
-@testable import QuickInterviewEditor
+@testable import PlayolaInterviewEditor
 
 /// Suspends every `play` until released, so a test can hold a slice-edit playback "in flight"
 /// (mirroring the transport's real suspended-`play` semantics) while it drives pause/resume.

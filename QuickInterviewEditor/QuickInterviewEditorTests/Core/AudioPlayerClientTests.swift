@@ -3,7 +3,7 @@ import Foundation
 import IssueReporting
 import Testing
 
-@testable import QuickInterviewEditor
+@testable import PlayolaInterviewEditor
 
 struct AudioPlayerClientTests {
   @Test func testValuePlayFailsCleanlyWithoutOverride() async {

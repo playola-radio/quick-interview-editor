@@ -2,7 +2,7 @@ import CustomDump
 import Foundation
 import Testing
 
-@testable import QuickInterviewEditor
+@testable import PlayolaInterviewEditor
 
 /// Pure decision coverage for the first-launch relocation nudge. The actual move
 /// is a thin side effect (guarded out of DEBUG/tests) and is not unit-tested.
@@ -11,7 +11,7 @@ struct InstallLocationTests {
   @Test func fromApplicationsFolderNoOffer() {
     expectNoDifference(
       InstallLocation.shouldOfferMoveToApplications(
-        bundlePath: "/Applications/QuickInterviewEditor.app",
+        bundlePath: "/Applications/PlayolaInterviewEditor.app",
         isTranslocated: false),
       false)
   }
@@ -19,7 +19,7 @@ struct InstallLocationTests {
   @Test func fromDiskImageOffers() {
     expectNoDifference(
       InstallLocation.shouldOfferMoveToApplications(
-        bundlePath: "/Volumes/QuickInterviewEditor/QuickInterviewEditor.app",
+        bundlePath: "/Volumes/PlayolaInterviewEditor/PlayolaInterviewEditor.app",
         isTranslocated: false),
       true)
   }
@@ -28,7 +28,7 @@ struct InstallLocationTests {
     expectNoDifference(
       InstallLocation.shouldOfferMoveToApplications(
         bundlePath:
-          "/private/var/folders/xy/AppTranslocation/ABC/d/QuickInterviewEditor.app",
+          "/private/var/folders/xy/AppTranslocation/ABC/d/PlayolaInterviewEditor.app",
         isTranslocated: true),
       true)
   }
@@ -37,7 +37,7 @@ struct InstallLocationTests {
     let home = NSHomeDirectory()
     expectNoDifference(
       InstallLocation.shouldOfferMoveToApplications(
-        bundlePath: "\(home)/Applications/QuickInterviewEditor.app",
+        bundlePath: "\(home)/Applications/PlayolaInterviewEditor.app",
         isTranslocated: false),
       false)
   }

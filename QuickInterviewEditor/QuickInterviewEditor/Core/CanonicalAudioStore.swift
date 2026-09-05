@@ -6,7 +6,7 @@ import Foundation
 /// dir (which is deleted right after). Before that deletion we copy it here so a
 /// single file can back the waveform, playback, and render for the whole editing
 /// session. This data is **derived, large, and rebuildable**, so it lives under
-/// `Caches` (not Application Support): `Caches/Quick Interview Editor/Canonical/
+/// `Caches` (not Application Support): `Caches/Playola Interview Editor/Canonical/
 /// <jobID>/canonical.aiff`.
 ///
 /// Lifecycle: created during transcription (``store(planAIFF:in:)``), owned by the
@@ -30,12 +30,12 @@ enum CanonicalAudioStore {
   /// The fixed file name inside each per-job dir.
   static let fileName = "canonical.aiff"
 
-  /// `Caches/Quick Interview Editor/Canonical`. Created on demand.
+  /// `Caches/Playola Interview Editor/Canonical`. Created on demand.
   static func baseDirectory() throws -> URL {
     try FileManager.default.url(
       for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: true
     )
-    .appendingPathComponent("Quick Interview Editor/Canonical")
+    .appendingPathComponent("\(AppDirectories.folderName)/Canonical")
   }
 
   /// Copies `planAIFF` into a fresh per-job dir and returns the cached AIFF's URL.

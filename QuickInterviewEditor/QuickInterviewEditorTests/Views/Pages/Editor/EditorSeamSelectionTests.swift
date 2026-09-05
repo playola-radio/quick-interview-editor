@@ -6,7 +6,7 @@ import IdentifiedCollections
 @_spi(Internals) import Sharing
 import Testing
 
-@testable import QuickInterviewEditor
+@testable import PlayolaInterviewEditor
 
 /// Minimal `playEdited` gate: suspends free-play until `stop` releases it, and reports when a play
 /// started. Mirrors `EditorTransportTests`' `TransportGate` (kept private there).

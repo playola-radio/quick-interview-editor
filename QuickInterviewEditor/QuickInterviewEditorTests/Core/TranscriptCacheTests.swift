@@ -2,7 +2,7 @@ import CustomDump
 import Foundation
 import Testing
 
-@testable import QuickInterviewEditor
+@testable import PlayolaInterviewEditor
 
 @Suite struct TranscriptCacheTests {
   /// A unique temp base dir per test; caller removes it.

@@ -2,7 +2,7 @@ import CustomDump
 import Foundation
 import Testing
 
-@testable import QuickInterviewEditor
+@testable import PlayolaInterviewEditor
 
 /// Suspends a single caller until `release()`, for putting a transport action's `onStop`/`onPause`
 /// mid-flight so a second action can race it. Mirrors `EditorSlicePlaybackTests`'s `PlayGate`,

@@ -82,7 +82,7 @@ usage is billed to your own Anthropic account.
 2. In the app, open **Settings** (⌘,) — or tap **Suggest Cuts** with no key set,
    which opens the same key entry — and paste the key into **Anthropic API Key**.
 3. The key is stored in your **macOS Keychain** under a stable, machine-wide
-   service id (`fm.playola.QuickInterviewEditor.anthropicAPIKey`), so you set it
+   service id (`fm.playola.PlayolaInterviewEditor.anthropicAPIKey`), so you set it
    **once per machine** and it's shared across every build/workspace. It is never
    written to `UserDefaults`, a plist, the on-disk request, or the process
    arguments, and is never logged.

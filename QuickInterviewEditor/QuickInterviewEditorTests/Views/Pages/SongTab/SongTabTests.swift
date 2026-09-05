@@ -4,7 +4,7 @@ import Dependencies
 import Foundation
 import Testing
 
-@testable import QuickInterviewEditor
+@testable import PlayolaInterviewEditor
 
 private func stream(_ events: [EngineEvent], throwing error: Error? = nil)
   -> AsyncThrowingStream<EngineEvent, Error>

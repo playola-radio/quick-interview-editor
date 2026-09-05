@@ -2,7 +2,7 @@ import CustomDump
 import Foundation
 import Testing
 
-@testable import QuickInterviewEditor
+@testable import PlayolaInterviewEditor
 
 /// Pure coverage for the Python↔Swift suggestion mapping — no subprocess. Proves the
 /// snake-cased `CutCandidate.to_dict()` payload maps to a stamped, pending

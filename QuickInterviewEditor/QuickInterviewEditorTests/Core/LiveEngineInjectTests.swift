@@ -2,7 +2,7 @@ import CustomDump
 import Foundation
 import Testing
 
-@testable import QuickInterviewEditor
+@testable import PlayolaInterviewEditor
 
 /// Pure coverage for the Swift↔Python `inject-markers` wire: the request JSON
 /// `LiveEngine` writes must carry the snake-cased keys `logic_markers.cli

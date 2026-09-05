@@ -2,7 +2,7 @@ import AppKit
 import CustomDump
 import Testing
 
-@testable import QuickInterviewEditor
+@testable import PlayolaInterviewEditor
 
 @MainActor
 struct EditorKeyMonitorTests {

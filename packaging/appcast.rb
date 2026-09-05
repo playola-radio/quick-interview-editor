@@ -13,7 +13,7 @@ abort "usage: appcast.rb <dmg> <download-url> <sign_update> [notes_file]" unless
 abort "sign_update not executable: #{sign_update}" unless File.executable?(sign_update)
 abort "dmg not found: #{dmg}" unless File.file?(dmg)
 
-app = File.join(File.dirname(dmg), "QuickInterviewEditor.app")
+app = File.join(File.dirname(dmg), "PlayolaInterviewEditor.app")
 # Read plist keys via argv (no shell) so an app path with spaces/quotes/metacharacters
 # can't break or inject — matches the Open3 handling used for sign_update below.
 def plist(app, key)
@@ -50,7 +50,7 @@ if doc.nil?
   doc = REXML::Document.new(<<~XML)
     <?xml version="1.0" encoding="utf-8"?>
     <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
-      <channel><title>QuickInterviewEditor</title></channel>
+      <channel><title>PlayolaInterviewEditor</title></channel>
     </rss>
   XML
 end

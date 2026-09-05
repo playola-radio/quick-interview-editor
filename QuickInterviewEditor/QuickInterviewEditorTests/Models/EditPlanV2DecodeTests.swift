@@ -1,7 +1,7 @@
 import CustomDump
 import Testing
 
-@testable import QuickInterviewEditor
+@testable import PlayolaInterviewEditor
 
 struct EditPlanV2DecodeTests {
   @Test func decodesSchemaV2WithConfidenceAndTranscriptSegments() {

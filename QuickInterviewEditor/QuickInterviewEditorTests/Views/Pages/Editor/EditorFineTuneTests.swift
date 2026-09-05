@@ -3,7 +3,7 @@ import Dependencies
 import Foundation
 import Testing
 
-@testable import QuickInterviewEditor
+@testable import PlayolaInterviewEditor
 
 /// A play stand-in that suspends each call until released, in call order, and reports starts —
 /// enough to interleave two preview tasks deterministically.

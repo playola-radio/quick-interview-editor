@@ -4,7 +4,7 @@ import Foundation
 import IdentifiedCollections
 import Testing
 
-@testable import QuickInterviewEditor
+@testable import PlayolaInterviewEditor
 
 private func neverCompleting() -> AsyncThrowingStream<EngineEvent, Error> {
   AsyncThrowingStream { _ in }  // holds the tab in .transcribing; no completion

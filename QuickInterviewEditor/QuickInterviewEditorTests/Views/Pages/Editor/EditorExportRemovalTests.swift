@@ -4,7 +4,7 @@ import Foundation
 import IdentifiedCollections
 import Testing
 
-@testable import QuickInterviewEditor
+@testable import PlayolaInterviewEditor
 
 /// Export behavior once `timelineRemovals` are in play: the render plan a removal produces,
 /// the markers that survive it, and how the gating/warning surfaces react. `EditorRemovalTests`

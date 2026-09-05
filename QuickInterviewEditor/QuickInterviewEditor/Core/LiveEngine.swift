@@ -85,7 +85,7 @@ enum LiveEngine {
       appropriateFor: nil,
       create: true
     )
-    .appendingPathComponent("Quick Interview Editor/Jobs/\(UUID().uuidString)")
+    .appendingPathComponent("\(AppDirectories.folderName)/Jobs/\(UUID().uuidString)")
     try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
     return base
   }
@@ -110,7 +110,7 @@ enum LiveEngine {
       let base = try? FileManager.default.url(
         for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
     else { return nil }
-    let dir = base.appendingPathComponent("Quick Interview Editor/Logs")
+    let dir = base.appendingPathComponent("\(AppDirectories.folderName)/Logs")
     try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
     return dir
   }

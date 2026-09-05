@@ -1,4 +1,4 @@
-name: QuickInterviewEditor
+name: PlayolaInterviewEditor
 options:
   deploymentTarget:
     macOS: "15.0"
@@ -23,7 +23,7 @@ packages:
     url: https://github.com/sparkle-project/Sparkle
     exactVersion: "2.9.6"
 targets:
-  QuickInterviewEditor:
+  PlayolaInterviewEditor:
     type: application
     platform: macOS
     sources:
@@ -40,19 +40,25 @@ targets:
         # otherwise bake in literal "1.0"/"1" defaults here).
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        # Pretty, user-facing name (with spaces) shown in Finder, the menu bar, and
+        # dialogs. The executable/product name stays space-free (PRODUCT_NAME).
+        CFBundleDisplayName: Playola Interview Editor
         # Sparkle self-update. appcast.xml + DMG both live on the public
-        # `playola-static` S3 bucket under `downloads/QuickInterviewEditor/`,
+        # `playola-static` S3 bucket under `downloads/PlayolaInterviewEditor/`,
         # served by the raw S3 URL — exactly how the sibling PlayolaAudioProcessor
         # distributes (no Netlify/CloudFront in the path). Feed goes live in PR 2.
         # SUPublicEDKey is the EdDSA public key from the login-Keychain private key
         # (Setup Task 0 — safe to ship publicly).
-        SUFeedURL: https://playola-static.s3.amazonaws.com/downloads/QuickInterviewEditor/appcast.xml
+        SUFeedURL: https://playola-static.s3.amazonaws.com/downloads/PlayolaInterviewEditor/appcast.xml
         SUPublicEDKey: WyAypjfp2RUEqO+iIb/iYTTYwVq5AaXJWUxT9pwzrog=
         SUEnableAutomaticChecks: true
         SUScheduledCheckInterval: 86400
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: fm.playola.QuickInterviewEditor
+        PRODUCT_BUNDLE_IDENTIFIER: fm.playola.PlayolaInterviewEditor
+        # Space-free executable/artifact name (and Swift module name). The pretty
+        # display name lives in CFBundleDisplayName above.
+        PRODUCT_NAME: PlayolaInterviewEditor
         SWIFT_VERSION: "6.0"
         # Single source of truth for the app version. sparkle:version ==
         # CFBundleVersion (CURRENT_PROJECT_VERSION) — a monotonically increasing
@@ -74,7 +80,7 @@ targets:
         product: IssueReporting
       - package: Sparkle
         product: Sparkle
-  QuickInterviewEditorTests:
+  PlayolaInterviewEditorTests:
     type: bundle.unit-test
     platform: macOS
     sources:
@@ -92,13 +98,13 @@ targets:
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: FSRSPV9N9Q
     dependencies:
-      - target: QuickInterviewEditor
+      - target: PlayolaInterviewEditor
 schemes:
-  QuickInterviewEditor:
+  PlayolaInterviewEditor:
     build:
       targets:
-        QuickInterviewEditor: all
-        QuickInterviewEditorTests: [test]
+        PlayolaInterviewEditor: all
+        PlayolaInterviewEditorTests: [test]
     test:
       targets:
-        - QuickInterviewEditorTests
+        - PlayolaInterviewEditorTests

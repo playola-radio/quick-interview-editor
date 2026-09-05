@@ -4,7 +4,7 @@
 Produces ``packaging/dist/logic-markers-engine/`` — a ``logic-markers-engine``
 executable plus an ``_internal/`` tree of torch/ctranslate2/torchaudio native
 libs and package data. The app bundles this whole folder under
-``QuickInterviewEditor.app/Contents/Resources/engine/`` and spawns the
+``PlayolaInterviewEditor.app/Contents/Resources/engine/`` and spawns the
 executable directly (no system Python required).
 
 Run via ``packaging/package-engine.sh`` (which stages the bundled NLTK data

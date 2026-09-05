@@ -1,7 +1,7 @@
 import CustomDump
 import Testing
 
-@testable import QuickInterviewEditor
+@testable import PlayolaInterviewEditor
 
 /// Covers the sample-label formatting helpers that remain in `SliceWarnings.swift` after the
 /// tight-join concept was retired (every exported/auditioned clip now gets a boundary declick

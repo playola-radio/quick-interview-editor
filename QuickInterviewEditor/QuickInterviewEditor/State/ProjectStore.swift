@@ -21,7 +21,7 @@ extension SharedKey where Self == FileStorageKey<ProjectState>.Default {
 
 extension ProjectState {
   /// The on-disk sidecar location for a given source fingerprint:
-  /// `…/Application Support/QuickInterviewEditor/Projects/<sha256>.json`.
+  /// `…/Application Support/Playola Interview Editor/Projects/<sha256>.json`.
   ///
   /// The fingerprint is hashed into a fixed 64-char lowercase-hex filename rather than
   /// used verbatim. That makes the name filename-safe (no path separators can escape
@@ -32,7 +32,7 @@ extension ProjectState {
     let name = digest.map { String(format: "%02x", $0) }.joined()
     return
       URL.applicationSupportDirectory
-      .appending(component: "QuickInterviewEditor", directoryHint: .isDirectory)
+      .appending(component: AppDirectories.folderName, directoryHint: .isDirectory)
       .appending(component: "Projects", directoryHint: .isDirectory)
       .appending(component: "\(name).json", directoryHint: .notDirectory)
   }
