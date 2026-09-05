@@ -88,7 +88,7 @@ struct ModelManifest: Equatable, Sendable {
 /// downloader (writes here) and the engine launch (points `QIE_*` env here), so
 /// they can never disagree.
 enum ModelLocations {
-  private static let appFolder = "Quick Interview Editor"
+  private static let appFolder = AppDirectories.folderName
 
   /// The per-model subdirectory names under the models root. The single source of
   /// truth — both ``ModelManifest`` (relative paths) and ``installation()``
@@ -96,7 +96,7 @@ enum ModelLocations {
   static let whisperDirName = "faster-whisper-large-v2"
   static let alignDirName = "align"
 
-  /// `~/Library/Application Support/Quick Interview Editor/Models`.
+  /// `~/Library/Application Support/Playola Interview Editor/Models`.
   static func modelsRoot(
     fileManager: FileManager = .default
   ) throws -> URL {

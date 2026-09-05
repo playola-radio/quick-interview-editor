@@ -1,7 +1,7 @@
 import CustomDump
 import Testing
 
-@testable import QuickInterviewEditor
+@testable import PlayolaInterviewEditor
 
 struct FineTuneGeometryTests {
   private func silence(_ start: Int, _ end: Int) -> EditPlan.Silence {

@@ -35,7 +35,7 @@ enum TranscriptCache {
 
   static func baseDirectory() throws -> URL {
     URL.applicationSupportDirectory
-      .appending(component: "QuickInterviewEditor", directoryHint: .isDirectory)
+      .appending(component: AppDirectories.folderName, directoryHint: .isDirectory)
       .appending(component: "TranscriptCache", directoryHint: .isDirectory)
   }
 

@@ -6,7 +6,7 @@ import IdentifiedCollections
 @_spi(Internals) import Sharing
 import Testing
 
-@testable import QuickInterviewEditor
+@testable import PlayolaInterviewEditor
 
 /// Suspends a play call until released, reporting when it started. A minimal local mirror of
 /// `EditorTransportTests`' `TransportGate`, scoped to the one playback-interruption test below.

@@ -1,7 +1,7 @@
 import CustomDump
 import Testing
 
-@testable import QuickInterviewEditor
+@testable import PlayolaInterviewEditor
 
 struct PauseParagraphBuilderTests {
   private func word(_ id: Int, _ text: String, _ start: Double, _ end: Double) -> Word {

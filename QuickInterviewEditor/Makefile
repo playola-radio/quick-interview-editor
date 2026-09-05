@@ -22,11 +22,11 @@ test:
 
 # Fast local dev loop: skip code signing, reuse the default (warm) DerivedData,
 # no fastlane/xcbeautify wrapper. Iterate a single suite with:
-#   make test-fast ONLY=QuickInterviewEditorTests/TranscriptSelectionTests
+#   make test-fast ONLY=PlayolaInterviewEditorTests/TranscriptSelectionTests
 ONLY ?=
 test-fast:
 	xcodebuild test \
-		-scheme QuickInterviewEditor \
+		-scheme PlayolaInterviewEditor \
 		-destination 'platform=macOS' \
 		CODE_SIGNING_ALLOWED=NO \
 		$(if $(ONLY),-only-testing:$(ONLY),)

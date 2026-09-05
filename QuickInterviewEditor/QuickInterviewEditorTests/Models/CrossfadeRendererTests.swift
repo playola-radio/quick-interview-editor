@@ -2,7 +2,7 @@ import CustomDump
 import Foundation
 import Testing
 
-@testable import QuickInterviewEditor
+@testable import PlayolaInterviewEditor
 
 struct CrossfadeRendererTests {
   private func expectClose(_ lhs: [Float], _ rhs: [Float], tolerance: Float = 1e-4) {

@@ -2,7 +2,7 @@ import CustomDump
 import Foundation
 import Testing
 
-@testable import QuickInterviewEditor
+@testable import PlayolaInterviewEditor
 
 struct WordRangePredicatesTests {
   private func word(_ id: Int, _ start: Int, _ end: Int) -> Word {

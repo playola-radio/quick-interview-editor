@@ -2,7 +2,7 @@ import CustomDump
 import Foundation
 import Testing
 
-@testable import QuickInterviewEditor
+@testable import PlayolaInterviewEditor
 
 /// A per-file sidecar persisted before the tight-join concept was retired still has a
 /// top-level "warnings" array on each slice. `Slice` no longer declares that property, but

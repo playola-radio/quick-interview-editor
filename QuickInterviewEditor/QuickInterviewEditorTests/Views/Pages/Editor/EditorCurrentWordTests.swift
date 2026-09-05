@@ -5,7 +5,7 @@ import Foundation
 @_spi(Internals) import Sharing
 import Testing
 
-@testable import QuickInterviewEditor
+@testable import PlayolaInterviewEditor
 
 @MainActor
 struct EditorCurrentWordTests {

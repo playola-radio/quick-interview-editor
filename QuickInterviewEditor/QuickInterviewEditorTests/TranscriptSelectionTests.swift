@@ -1,7 +1,7 @@
 import CustomDump
 import Testing
 
-@testable import QuickInterviewEditor
+@testable import PlayolaInterviewEditor
 
 /// The transcript no longer owns the selection — its gesture handlers emit a `SelectionIntent`
 /// that `EditorModel` turns into the authoritative `audioSelection`. These tests assert the

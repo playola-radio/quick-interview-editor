@@ -29,6 +29,10 @@ final class AppLaunchModel: ViewModel {
   ///   engine), which gates on model setup; `false` for dev, which goes straight
   ///   to the editor. Defaults to `LiveEngine.isPackaged`.
   init(requiresManagedModels: Bool = LiveEngine.isPackaged) {
+    // Consolidate any pre-rename on-disk folders under the unified name before any
+    // store reads them (moves are atomic + instant, so this is safe on the main actor
+    // even for a multi-GB cache). No-op once done. See AppDirectories.
+    AppDirectories.migrateLegacyFolders()
     // Reap only *stale* canonical audio dirs (leftovers from a crashed run), never a
     // blanket wipe: this launch can overlap a still-running instance (auto-update
     // relaunch, relocation's second instance, a manual double-launch), and wiping the

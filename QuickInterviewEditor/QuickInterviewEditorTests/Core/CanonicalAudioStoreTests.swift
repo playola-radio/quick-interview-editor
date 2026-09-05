@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-@testable import QuickInterviewEditor
+@testable import PlayolaInterviewEditor
 
 struct CanonicalAudioStoreTests {
 

@@ -62,7 +62,7 @@ enum LiveCutSuggester {
     let base = try FileManager.default.url(
       for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true
     )
-    .appendingPathComponent("Quick Interview Editor/CutSuggestJobs/\(UUID().uuidString)")
+    .appendingPathComponent("\(AppDirectories.folderName)/CutSuggestJobs/\(UUID().uuidString)")
     try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
     return base
   }
@@ -80,7 +80,7 @@ enum LiveCutSuggester {
       let base = try? FileManager.default.url(
         for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
     else { return nil }
-    let dir = base.appendingPathComponent("Quick Interview Editor/CutSuggestCache")
+    let dir = base.appendingPathComponent("\(AppDirectories.folderName)/CutSuggestCache")
     try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
     pruneCache(in: dir, keepingNewest: 1000)
     return dir

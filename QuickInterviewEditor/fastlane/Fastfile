@@ -31,7 +31,7 @@ def print_failed_tests_summary(output_dir)
 end
 
 platform :mac do
-  desc "Runs the Swift Testing suite (QuickInterviewEditorTests)"
+  desc "Runs the Swift Testing suite (PlayolaInterviewEditorTests)"
   lane :test do
     # Local dev signs with the Playola team (Automatic) so the app stays a
     # stable, TCC-friendly binary. CI runners have no signing certs, so disable
@@ -42,8 +42,8 @@ platform :mac do
     test_error = nil
     begin
       scan(
-        project: "QuickInterviewEditor.xcodeproj",
-        scheme: "QuickInterviewEditor",
+        project: "PlayolaInterviewEditor.xcodeproj",
+        scheme: "PlayolaInterviewEditor",
         destination: "platform=macOS",
         include_simulator_logs: false,
         parallel_testing: false,
@@ -96,7 +96,7 @@ platform :mac do
     marketing = text[/MARKETING_VERSION:\s*"([^"]*)"/, 1]
 
     sh("cd .. && xcodegen generate")
-    sh("cd .. && git add project.yml QuickInterviewEditor.xcodeproj")
+    sh("cd .. && git add project.yml PlayolaInterviewEditor.xcodeproj")
     sh(%(cd .. && git commit -m "build: bump to #{marketing} (#{new_build})"))
     UI.success("Bumped to #{marketing} (#{new_build}). Next: bundle exec fastlane mac release")
   end
@@ -110,7 +110,7 @@ platform :mac do
     ensure_git_status_clean
     UI.user_error!("set NOTARY_PROFILE (notarytool keychain profile)") if ENV["NOTARY_PROFILE"].to_s.empty?
     bucket  = ENV.fetch("RELEASE_S3_BUCKET", "playola-static")
-    prefix  = ENV.fetch("RELEASE_S3_PREFIX", "downloads/QuickInterviewEditor")
+    prefix  = ENV.fetch("RELEASE_S3_PREFIX", "downloads/PlayolaInterviewEditor")
     host    = ENV.fetch("RELEASE_DOWNLOAD_HOST", "https://playola-static.s3.amazonaws.com")
     profile = ENV.fetch("AWS_PROFILE", "default")
 
@@ -132,14 +132,14 @@ platform :mac do
     sh("cd ../.. && packaging/package-engine.sh")
     sh("cd ../.. && packaging/package-cut-suggester.sh")
     sh("cd ../.. && packaging/build-app.sh")
-    sh("cd ../.. && packaging/sign-app.sh packaging/dist/QuickInterviewEditor.app")
-    sh("cd ../.. && packaging/notarize-app.sh packaging/dist/QuickInterviewEditor.app")
+    sh("cd ../.. && packaging/sign-app.sh packaging/dist/PlayolaInterviewEditor.app")
+    sh("cd ../.. && packaging/notarize-app.sh packaging/dist/PlayolaInterviewEditor.app")
     sh("cd ../.. && packaging/make-dmg.sh")
 
-    plist = "packaging/dist/QuickInterviewEditor.app/Contents/Info.plist"
+    plist = "packaging/dist/PlayolaInterviewEditor.app/Contents/Info.plist"
     short = sh("cd ../.. && /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' #{plist}").strip
     build = sh("cd ../.. && /usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' #{plist}").strip
-    name = "QuickInterviewEditor-#{short}-#{build}.dmg"     # matches make-dmg.sh
+    name = "PlayolaInterviewEditor-#{short}-#{build}.dmg"     # matches make-dmg.sh
     dmg  = "packaging/dist/#{name}"
     url  = "#{host}/#{prefix}/#{name}"
 
@@ -187,7 +187,7 @@ platform :mac do
     # --metadata-directive REPLACE is REQUIRED: an S3->S3 copy defaults to preserving
     # the source's metadata, which would silently drop our cache-control/content-type
     # and let the stable URL serve a stale installer from a cache.
-    sh("cd ../.. && aws --profile #{profile} s3 cp 's3://#{bucket}/#{prefix}/#{name}' 's3://#{bucket}/#{prefix}/QuickInterviewEditor-latest.dmg' --metadata-directive REPLACE --content-type application/x-apple-diskimage --cache-control no-cache")
+    sh("cd ../.. && aws --profile #{profile} s3 cp 's3://#{bucket}/#{prefix}/#{name}' 's3://#{bucket}/#{prefix}/PlayolaInterviewEditor-latest.dmg' --metadata-directive REPLACE --content-type application/x-apple-diskimage --cache-control no-cache")
 
     sh("cd ../.. && aws --profile #{profile} s3 cp packaging/dist/appcast.xml 's3://#{bucket}/#{prefix}/appcast.xml' --content-type application/xml --cache-control no-cache")
 

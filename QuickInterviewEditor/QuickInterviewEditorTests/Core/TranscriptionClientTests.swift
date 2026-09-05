@@ -3,7 +3,7 @@ import Dependencies
 import Foundation
 import Testing
 
-@testable import QuickInterviewEditor
+@testable import PlayolaInterviewEditor
 
 @MainActor @Suite struct TranscriptionClientTests {
   private nonisolated func engineStream(_ events: [EngineEvent]) -> AsyncThrowingStream<

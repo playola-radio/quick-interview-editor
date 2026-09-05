@@ -2,7 +2,7 @@
 # Deep, inside-out code-signing of the app + bundled engine helper for
 # Developer ID distribution with the hardened runtime.
 #
-#   packaging/sign-app.sh /path/to/QuickInterviewEditor.app
+#   packaging/sign-app.sh /path/to/PlayolaInterviewEditor.app
 #
 # Signs every nested Mach-O (torch/ctranslate2/torchaudio .so/.dylib) FIRST,
 # then the engine executable, then embedded frameworks, then the app itself.
@@ -13,7 +13,7 @@
 # Override the identity with SIGN_IDENTITY=... (defaults to Playola Developer ID).
 set -euo pipefail
 
-APP="${1:?usage: sign-app.sh /path/to/QuickInterviewEditor.app}"
+APP="${1:?usage: sign-app.sh /path/to/PlayolaInterviewEditor.app}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 IDENTITY="${SIGN_IDENTITY:-Developer ID Application: Playola Radio, Incorporated (FSRSPV9N9Q)}"
 ENGINE_ENTITLEMENTS="$HERE/engine.entitlements"

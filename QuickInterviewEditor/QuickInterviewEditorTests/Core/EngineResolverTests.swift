@@ -2,7 +2,7 @@ import CustomDump
 import Foundation
 import Testing
 
-@testable import QuickInterviewEditor
+@testable import PlayolaInterviewEditor
 
 /// Unit coverage for engine launch resolution: bundled helper first, dev `.venv`
 /// fallback. Pure — the filesystem probe is injected, so nothing here touches
@@ -113,7 +113,7 @@ struct EngineResolverTests {
   @Test func bundledHelperUnderTranslocatedPathStillResolves() {
     let translocatedHelper = URL(
       fileURLWithPath:
-        "/private/var/folders/xy/AppTranslocation/ABC/d/QuickInterviewEditor.app"
+        "/private/var/folders/xy/AppTranslocation/ABC/d/PlayolaInterviewEditor.app"
         + "/Contents/Resources/engine/logic-markers-engine"
     )
     let launch = EngineResolver.resolve(

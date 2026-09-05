@@ -2,7 +2,7 @@ import CustomDump
 import Foundation
 import Testing
 
-@testable import QuickInterviewEditor
+@testable import PlayolaInterviewEditor
 
 struct TimelineRemovalTests {
   private func removal(_ lower: Int, _ upper: Int, length: Int = 480, id: UInt = 1)

@@ -62,7 +62,7 @@ enum InstallLocation {
     let alert = NSAlert()
     alert.messageText = "Move to the Applications folder?"
     alert.informativeText =
-      "Quick Interview Editor works best — and can keep itself up to date — when it "
+      "Playola Interview Editor works best — and can keep itself up to date — when it "
       + "lives in your Applications folder. Would you like to move it there now?"
     alert.addButton(withTitle: "Move to Applications Folder")
     alert.addButton(withTitle: "Not Now")
@@ -122,7 +122,7 @@ enum InstallLocation {
     let alert = NSAlert()
     alert.messageText = "Couldn't move to the Applications folder"
     alert.informativeText =
-      "You can move Quick Interview Editor yourself by dragging it into "
+      "You can move Playola Interview Editor yourself by dragging it into "
       + "Applications in Finder. Auto-update works best once it lives there."
     alert.addButton(withTitle: "OK")
     alert.runModal()

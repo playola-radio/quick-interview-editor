@@ -2,7 +2,7 @@ import CustomDump
 import Foundation
 import Testing
 
-@testable import QuickInterviewEditor
+@testable import PlayolaInterviewEditor
 
 /// Suspends a single caller until `release()`, for putting a transport action's `onStop`/`onPause`
 /// mid-flight so a second action can race it. Mirrors `EditorSlicePlaybackTests`'s `PlayGate`,
@@ -691,22 +691,169 @@ struct EditSliceTests {
   }
 
   /// A seam whose removal crosses or touches a slice edge collapses to a hard cut on the slice's
-  /// own timeline (no kept audio on that side), so a handle here would author a fade the slice
-  /// plays/exports as a hard cut. The bowtie still draws; only the drag affordance is withheld.
+  /// own timeline (no kept audio on that side). The sheet draws what the slice plays — a hard cut
+  /// (zero-width marker), not the parent's global bowtie — and offers no stretch handle, so it can
+  /// never author (or display) a fade the slice renders as a hard cut.
   @Test(arguments: [8_000..<12_000, 10_000..<12_000, 18_000..<22_000, 18_000..<20_000])
-  func boundarySeamStaysBowtieOnly(removedRange: Range<Int>) throws {
+  func boundarySeamDrawsAsAHardCutWithNoHandles(removedRange: Range<Int>) throws {
     let model = laneModel()  // slice 10_000..<20_000
     let removal = TimelineRemoval(
       id: UUID(), removedRange: removedRange, crossfade: Crossfade(lengthSamples: 600))
     model.syncTimeline(EditedTimeline(sourceDurationSamples: 100_000, removals: [removal]))
 
     let overlay = try #require(model.seamOverlays.first)
+    expectNoDifference(overlay.span.width, 0)  // hard cut, not the global bowtie
     expectNoDifference(overlay.leadingHandleX, nil)
     expectNoDifference(overlay.trailingHandleX, nil)
   }
 
-  /// Interior-ness is judged against the LIVE cut (the draft while editing): nudging the cut-in past
-  /// a removal turns it into a boundary seam, and its handles go away with it.
+  @Test(arguments: [8_000..<10_000, 20_000..<22_000])
+  func removalOutsideTheSliceDrawsNoSeam(removedRange: Range<Int>) throws {
+    let model = laneModel()
+    let removal = TimelineRemoval(
+      id: UUID(), removedRange: removedRange, crossfade: Crossfade(lengthSamples: 600))
+    model.syncTimeline(EditedTimeline(sourceDurationSamples: 100_000, removals: [removal]))
+    let globalSeam = try #require(model.editedWaveform.timeline.seams.first)
+
+    _ = try #require(model.editedWaveform.spanForSeam(globalSeam))
+    expectNoDifference(model.seamOverlays, [])
+  }
+
+  /// The sheet clamps a stretch to the SLICE-LOCAL handle, not the parent's global one. A removal
+  /// OUTSIDE the slice leaves a global kept island wider than what the slice can play, so the global
+  /// handle exceeds the slice-local handle. Global left handle for the interior seam is 3_000
+  /// (9_000..<12_000); the slice-local left handle is 2_000 (10_000..<12_000). Dragging to 5_000
+  /// drafts and commits the local ceiling, 2_000.
+  @Test func stretchClampsToTheSliceLocalHandleNotTheGlobalOne() {
+    let model = laneModel()  // slice 10_000..<20_000
+    let id = UUID()
+    let outside = TimelineRemoval(
+      id: UUID(), removedRange: 2_000..<9_000, crossfade: Crossfade(lengthSamples: 0))
+    let interior = TimelineRemoval(
+      id: id, removedRange: 12_000..<15_000, crossfade: Crossfade(lengthSamples: 600))
+    model.currentCrossfadeLength = { $0 == id ? 600 : nil }
+    let timeline = EditedTimeline(sourceDurationSamples: 100_000, removals: [outside, interior])
+    let localMax = SliceRenderPlanBuilder.localTimeline(
+      sliceRange: 10_000..<20_000, removals: timeline.removals
+    ).maxCrossfadeLength(forSeamID: id)!
+    expectNoDifference(localMax, 2_000)
+    #expect(timeline.maxCrossfadeLength(forSeamID: id)! > localMax)  // global exceeds local
+    var committed: [Int] = []
+    model.onStretchCrossfade = { committed.append($1) }
+    model.syncTimeline(timeline)
+
+    model.crossfadeStretchBegan(id: id)
+    model.crossfadeStretched(toLength: 5_000)
+    expectNoDifference(model.crossfadeStretchDraft?.length, localMax)
+    model.crossfadeStretchEnded()
+
+    expectNoDifference(committed, [localMax])
+  }
+
+  /// With no drag live, the bowtie draws at the SLICE-LOCAL clamped length — what the slice plays —
+  /// not the parent's global clamped length. A latent fade stored longer than the slice-local handle
+  /// renders shorter on this sheet. Here the global clamped length is 2_500, the slice-local 2_000.
+  @Test func bowtieDrawsAtTheSliceLocalLengthNotTheGlobalOne() throws {
+    let model = laneModel()  // slice 10_000..<20_000
+    let id = UUID()
+    let outside = TimelineRemoval(
+      id: UUID(), removedRange: 2_000..<9_000, crossfade: Crossfade(lengthSamples: 0))
+    let interior = TimelineRemoval(
+      id: id, removedRange: 12_000..<15_000, crossfade: Crossfade(lengthSamples: 2_500))
+    let timeline = EditedTimeline(sourceDurationSamples: 100_000, removals: [outside, interior])
+    model.syncTimeline(timeline)
+    let seam = try #require(timeline.seams.first { $0.id == id })
+    let localTimeline = SliceRenderPlanBuilder.localTimeline(
+      sliceRange: 10_000..<20_000, removals: timeline.removals)
+    let localSeam = try #require(localTimeline.seams.first { $0.id == id })
+    let localLength = localSeam.crossfadeLength
+    expectNoDifference(localLength, 2_000)
+    expectNoDifference(seam.crossfadeLength, 2_500)  // the global timeline renders it longer
+
+    let overlay = try #require(model.seamOverlays.first { $0.id == id })
+    let origin = try #require(timeline.sourceToEdited(10_000, bias: .rightEdge))
+    let localSpan = try #require(
+      model.editedWaveform.span(
+        forEdited: (origin + localSeam.editedCrossfadeStart)..<(origin
+          + localSeam.editedCrossfadeStart + localLength)))
+    let globalSpan = try #require(model.editedWaveform.spanForSeam(seam))
+    expectNoDifference(overlay.span, localSpan)
+    #expect(overlay.span != globalSpan)
+  }
+
+  @Test func laterSeamPositionUsesTheSliceLocalTimeline() throws {
+    let model = laneModel()
+    let first = TimelineRemoval(
+      id: UUID(), removedRange: 12_000..<13_000, crossfade: Crossfade(lengthSamples: 2_500))
+    let later = TimelineRemoval(
+      id: UUID(), removedRange: 16_000..<17_000, crossfade: Crossfade(lengthSamples: 1_000))
+    let timeline = EditedTimeline(
+      sourceDurationSamples: 100_000, removals: [first, later])
+    model.syncTimeline(timeline)
+    let localTimeline = SliceRenderPlanBuilder.localTimeline(
+      sliceRange: 10_000..<20_000, removals: timeline.removals)
+    let localSeam = try #require(localTimeline.seams.first { $0.id == later.id })
+    let globalSeam = try #require(timeline.seams.first { $0.id == later.id })
+    let origin = try #require(timeline.sourceToEdited(10_000, bias: .rightEdge))
+    let expectedCenterX = model.editedWaveform.editedSampleToX(
+      origin + localSeam.editedCrossfadeCenter)
+    let globalCenterX = model.editedWaveform.editedSampleToX(globalSeam.editedCrossfadeCenter)
+    let overlay = try #require(model.seamOverlays.first { $0.id == later.id })
+
+    #expect(abs(overlay.span.positionX + overlay.span.width / 2 - expectedCenterX) < 0.000_001)
+    #expect(expectedCenterX != globalCenterX)
+  }
+
+  @Test func seamHitTestingUsesTheSliceLocalBowtie() throws {
+    let model = laneModel()
+    let id = UUID()
+    let outside = TimelineRemoval(
+      id: UUID(), removedRange: 2_000..<9_000, crossfade: Crossfade(lengthSamples: 0))
+    let interior = TimelineRemoval(
+      id: id, removedRange: 12_000..<15_000, crossfade: Crossfade(lengthSamples: 2_500))
+    model.syncTimeline(
+      EditedTimeline(sourceDurationSamples: 100_000, removals: [outside, interior]))
+    let seam = try #require(model.editedWaveform.timeline.seams.first { $0.id == id })
+    let globalSpan = try #require(model.editedWaveform.spanForSeam(seam))
+    let localSpan = try #require(model.seamOverlays.first { $0.id == id }?.span)
+    let globalOnlyX = globalSpan.positionX + 1
+
+    #expect(globalOnlyX < localSpan.positionX - 4)
+    expectNoDifference(model.seamID(atX: globalOnlyX), nil)
+    expectNoDifference(model.seamID(atX: localSpan.positionX + localSpan.width / 2), id)
+  }
+
+  /// The stretch ceiling tracks the LIVE cut (the draft while editing), like the handles do: nudging
+  /// the cut-in forward shrinks the slice-local left handle, so mid-drag the draft re-clamps down to
+  /// the smaller live ceiling. Mirrors `stretchHandlesFollowTheLiveDraftCut`.
+  @Test func theStretchCeilingFollowsTheLiveDraftCut() throws {
+    let model = laneModel()  // slice 10_000..<20_000
+    let id = UUID()
+    let removal = TimelineRemoval(
+      id: id, removedRange: 11_000..<12_000, crossfade: Crossfade(lengthSamples: 0))
+    model.currentCrossfadeLength = { $0 == id ? 0 : nil }
+    model.syncTimeline(EditedTimeline(sourceDurationSamples: 100_000, removals: [removal]))
+
+    model.crossfadeStretchBegan(id: id)
+    model.crossfadeStretched(toLength: 5_000)
+    let committedMax = SliceRenderPlanBuilder.localTimeline(
+      sliceRange: model.fineTune.committedRange!, removals: model.editedWaveform.timeline.removals
+    ).maxCrossfadeLength(forSeamID: id)!
+    expectNoDifference(model.crossfadeStretchDraft?.length, committedMax)
+
+    model.cutInNudgedForward()  // narrows the slice from the left; the left handle shrinks
+    model.crossfadeStretched(toLength: 5_000)
+
+    let draft = try #require(model.fineTune.draftRange)
+    let liveMax = SliceRenderPlanBuilder.localTimeline(
+      sliceRange: draft, removals: model.editedWaveform.timeline.removals
+    ).maxCrossfadeLength(forSeamID: id)!
+    #expect(liveMax < committedMax)
+    expectNoDifference(model.crossfadeStretchDraft?.length, liveMax)
+  }
+
+  /// Seam visibility is judged against the LIVE cut (the draft while editing): nudging the cut-in
+  /// past a removal takes it out of the slice-local timeline, so its overlay and handles disappear.
   @Test func stretchHandlesFollowTheLiveDraftCut() throws {
     let model = laneModel()  // slice 10_000..<20_000
     let removal = TimelineRemoval(
@@ -718,9 +865,7 @@ struct EditSliceTests {
     let draft = try #require(model.fineTune.draftRange)
     #expect(draft.lowerBound > removal.removedRange.lowerBound)
 
-    let overlay = try #require(model.seamOverlays.first)
-    expectNoDifference(overlay.leadingHandleX, nil)
-    expectNoDifference(overlay.trailingHandleX, nil)
+    expectNoDifference(model.seamOverlays, [])
   }
 
   /// The model, not just the view, refuses to stretch a boundary seam: a begin for one seeds no draft.
@@ -894,7 +1039,9 @@ struct EditSliceTests {
     model.syncTimeline(EditedTimeline(sourceDurationSamples: 100_000, removals: [removal]))
     model.crossfadeStretchBegan(id: id)
     model.crossfadeStretched(toLength: 400)
-    #expect(model.crossfadeStretchDraft?.length == 400)
+    // Clamped to the slice-local left handle: only 1 sample of kept audio (10_000..<10_001) lies
+    // before the removal inside the slice, so the sheet can draft at most a 1-sample fade here.
+    #expect(model.crossfadeStretchDraft?.length == 1)
 
     model.cutInNudgedForward()
     model.crossfadeStretchEnded()
@@ -906,7 +1053,7 @@ struct EditSliceTests {
   /// dragged removal's stored length (undo restores a neighbouring removal), so the surviving draft
   /// may hold a length the lane can no longer render. Release clamps to the CURRENT handle, the same
   /// bound every drag event clamps to, so the commit never exceeds what the lane showed.
-  @Test func releaseReClampsTheDraftToTheSeamsCurrentHandle() {
+  @Test func releaseReClampsTheDraftToTheSeamsCurrentHandle() throws {
     let model = laneModel()  // slice 10_000..<20_000
     let id = UUID()
     let removal = TimelineRemoval(
@@ -926,6 +1073,11 @@ struct EditSliceTests {
     #expect(currentMax < 1_200)
     model.syncTimeline(narrowed)
     #expect(model.crossfadeStretchDraft != nil)  // stored length unchanged: the drag survives
+    let overlay = try #require(model.seamOverlays.first { $0.id == id })
+    #expect(
+      abs(
+        overlay.span.width - CGFloat(currentMax) / model.editedWaveform.samplesPerPixel)
+        < 0.000_001)
     model.crossfadeStretchEnded()
 
     expectNoDifference(committed, [currentMax])
@@ -945,8 +1097,10 @@ struct EditSliceTests {
     let timeline = EditedTimeline(sourceDurationSamples: 100_000, removals: [removal])
     #expect(timeline.maxCrossfadeLength(forSeamID: id)! < 20_000)
     model.syncTimeline(timeline)
+    let committedSpan = model.seamOverlays[0].span
 
     model.crossfadeStretchBegan(id: id)
+    expectNoDifference(model.seamOverlays[0].span, committedSpan)
     model.crossfadeStretchEnded()
 
     expectNoDifference(committed, [])

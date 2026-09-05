@@ -1,6 +1,6 @@
 import Testing
 
-@testable import QuickInterviewEditor
+@testable import PlayolaInterviewEditor
 
 @Suite struct TranscriptionCacheKeyTests {
   @Test func sha256FingerprintProducesStableKey() {
