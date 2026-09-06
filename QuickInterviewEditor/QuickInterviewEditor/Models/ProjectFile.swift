@@ -42,4 +42,12 @@ enum CanonicalAudioSource: Equatable, Sendable {
   /// Duplicate of an unsaved copy — writes the audio from it instead.
   case packageChild(sessionCopy: URL?)
   case sessionFile(URL)
+
+  /// The session-owned copy the editor reads from, if one exists yet.
+  var sessionURL: URL? {
+    switch self {
+    case .packageChild(let sessionCopy): return sessionCopy
+    case .sessionFile(let url): return url
+    }
+  }
 }

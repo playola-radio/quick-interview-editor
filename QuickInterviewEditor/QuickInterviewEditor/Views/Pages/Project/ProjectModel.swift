@@ -224,6 +224,7 @@ final class ProjectModel: ViewModel {
     stopTicking()
     await transcriptionTask?.value
     await tearDownEditor()
+    releaseSessionAudio(loadedAudio)
   }
 
   // MARK: - Private Helpers
@@ -256,7 +257,7 @@ final class ProjectModel: ViewModel {
     // the bytes we're actually transcribing. Falls back to the path if unreadable.
     let fingerprint = await SourceFingerprint.make(for: url)
     guard !Task.isCancelled else { return }
-    let seed = migrationSeed(fingerprint: fingerprint)
+    let seed = documentSeed(fingerprint: fingerprint)
     let job = TranscriptionJob(source: url, sourceFingerprint: fingerprint, policy: policy)
     let events = await transcriptionQueue.enqueue(job)
     guard !Task.isCancelled else { return }
@@ -298,6 +299,7 @@ final class ProjectModel: ViewModel {
     let newFile = makeProjectFile(
       url: url, fingerprint: fingerprint, editPlan: result.editPlan,
       canonicalByteCount: byteCount, content: editor.documentState)
+    let replacedAudio = loadedAudio
     self.editor = editor
     file = newFile
     loadedPlan = result.editPlan
@@ -308,6 +310,12 @@ final class ProjectModel: ViewModel {
     // A completed transcription is the first thing worth keeping (spec A7): an untitled window
     // must go dirty here so closing it asks to save and autosave arms.
     sink.registerChange()
+    // Only now is the previous session audio unreferenced by the document (spec A5: re-transcribe
+    // replaces plan + audio in one commit). Releasing it any earlier would leave a failed or
+    // cancelled run pointing a save at a deleted file.
+    if replacedAudio?.sessionURL != result.canonicalAudioURL {
+      releaseSessionAudio(replacedAudio)
+    }
   }
 
   /// Builds the editor for an opened package. Audio still inside the package is first cloned
@@ -358,6 +366,16 @@ final class ProjectModel: ViewModel {
     self.editor = editor
     wireEditor(editor)
     phase = .loaded
+  }
+
+  /// The document a new editor starts from. Re-running the same source (retry, re-import) keeps
+  /// the project's current content — the sidecar is stale the moment the document diverges from
+  /// it. Only a source this window has never held is seeded from the sidecar.
+  private func documentSeed(fingerprint: String) -> EditorDocumentState {
+    if let file, file.source.originalFingerprint == fingerprint {
+      return file.content
+    }
+    return migrationSeed(fingerprint: fingerprint)
   }
 
   /// Seeds the editor's document from the legacy per-file `.projectState` sidecar, once, on
@@ -469,16 +487,24 @@ final class ProjectModel: ViewModel {
     tickTask = nil
   }
 
-  /// Cancel export, stop playback, let the cancelled render unwind, then release the canonical
-  /// AIFF — so a re-import or window close never leaves stale playback or export work running,
-  /// or an orphaned session copy.
+  /// Cancel export, stop playback, and let the cancelled render unwind — so a re-import or window
+  /// close never leaves stale playback or export work running. The session audio is deliberately
+  /// not released here: the document keeps referencing it until a replacement is committed
+  /// (`loadCompletedTranscription`) or the window closes (`viewDisappeared`).
   private func tearDownEditor() async {
     if let previous = editor {
       previous.cancelExportTapped()
       await previous.stopPlaybackTapped()
       await previous.awaitExportTeardown()
-      previous.discardCanonicalAudio()
     }
     editor = nil
+  }
+
+  /// Deletes a session copy of the canonical AIFF (derived data, rebuildable by re-transcribing).
+  /// Only safe once no editor is playing or rendering from it (`tearDownEditor`) and the document
+  /// no longer points a save at it.
+  private func releaseSessionAudio(_ source: CanonicalAudioSource?) {
+    guard let url = source?.sessionURL else { return }
+    canonicalAudioStore.remove(url)
   }
 }

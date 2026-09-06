@@ -15,7 +15,10 @@ enum ProjectPackageError: Error, Equatable, LocalizedError {
     case .missingPlanJSON: return "The project is missing its plan.json."
     case .missingAudio: return "The project is missing its bundled audio (audio/canonical.aiff)."
     case .unsupportedSchema(let version):
-      return "This project (format \(version)) was saved by a newer version of the app."
+      if version > ProjectFile.currentSchemaVersion {
+        return "This project (format \(version)) was saved by a newer version of the app."
+      }
+      return "This project uses an unsupported format version (\(version))."
     case .audioMismatch: return "The project's bundled audio does not match the project."
     }
   }

@@ -363,12 +363,14 @@ struct ProjectModelTests {
       try? FileManager.default.removeItem(at: second)
     }
     let canonicals = LockIsolated<[URL]>([first, second])
+    let removed = LockIsolated<[URL]>([])
     let (sink, record) = ProjectDocumentSink.recorder()
     let model = ProjectModel(file: nil, plan: nil, audio: nil, sink: sink)
 
     try await withDependencies {
       $0.continuousClock = TestClock()
       $0.date = .constant(importedAt)
+      $0.canonicalAudioStore.remove = { url in removed.withValue { $0.append(url) } }
       $0.transcription.transcribe = { _, _, _ in
         let url = canonicals.withValue { $0.removeFirst() }
         return engineEvents([.completed(Fixtures.transcriptionResult(plan, canonicalAudioURL: url))]
@@ -390,6 +392,7 @@ struct ProjectModelTests {
     expectNoDifference(record.commits.count, 2)
     expectNoDifference(record.commits.last?.file.source.canonicalByteCount, 20)
     expectNoDifference(record.registerChangeCount, 2)
+    expectNoDifference(removed.value, [first])
   }
 
   @Test func viewAppearedIsANoOpForAnEmptyModel() async {
@@ -480,9 +483,11 @@ struct ProjectModelTests {
     let (sink, record) = ProjectDocumentSink.recorder()
     let model = ProjectModel(file: nil, plan: nil, audio: nil, sink: sink)
     let runs = LockIsolated(0)
+    let removed = LockIsolated<[URL]>([])
     let reimport = try await withDependencies {
       $0.continuousClock = TestClock()
       $0.date = .constant(Date(timeIntervalSince1970: 1_700_000_000))
+      $0.canonicalAudioStore.remove = { url in removed.withValue { $0.append(url) } }
       $0.transcription.transcribe = { _, _, _ in
         let run = runs.withValue {
           $0 += 1
@@ -508,6 +513,8 @@ struct ProjectModelTests {
     expectNoDifference(model.phase, .failed("Transcription cancelled."))
     #expect(model.editor == nil)
     expectNoDifference(record.commits.count, 1)
+    // The document still references the first run's audio; cancelling must not delete it.
+    expectNoDifference(removed.value, [])
   }
 
   @Test func closingTheWindowCancelsAnInFlightExport() async throws {
@@ -537,6 +544,7 @@ struct ProjectModelTests {
       }
       $0.workspace.reveal = { _ in }
       $0.audioPlayer.stop = { _ in }  // closing also stops playback
+      $0.canonicalAudioStore.remove = { _ in }
     } operation: {
       await model.importAudioTapped(URL(fileURLWithPath: "/clip.m4a"))
       let editor = try #require(model.editor)
@@ -575,15 +583,180 @@ struct ProjectModelTests {
         engineEvents([.completed(Fixtures.transcriptionResult(canonicalAudioURL: canonical))])
       }
       $0.audioPlayer.stop = { _ in }
+      $0.canonicalAudioStore.remove = { CanonicalAudioStore.remove($0) }
     } operation: {
       await model.importAudioTapped(URL(fileURLWithPath: "/clip.m4a"))
       #expect(FileManager.default.fileExists(atPath: canonical.path))
       await model.viewDisappeared()
-      // Removal happens after playback teardown, on a detached task — let it run.
-      for _ in 0..<1000 where FileManager.default.fileExists(atPath: canonical.path) {
-        await Task.yield()
-      }
       #expect(!FileManager.default.fileExists(atPath: canonical.path))
     }
+  }
+
+  // MARK: - Re-import keeps the project (content + audio) until the replacement lands
+
+  @Test func reimportSeedsTheNewEditorFromTheCurrentDocumentNotTheSidecar() async throws {
+    let (sink, record) = ProjectDocumentSink.recorder()
+    let model = ProjectModel(file: nil, plan: nil, audio: nil, sink: sink)
+
+    try await withDependencies {
+      $0.continuousClock = TestClock()
+      $0.date = .constant(importedAt)
+      $0.canonicalAudioStore.remove = { _ in }
+      $0.transcription.transcribe = { _, _, _ in
+        engineEvents([.completed(Fixtures.transcriptionResult(Fixtures.editPlan()))])
+      }
+    } operation: {
+      await model.importAudioTapped(URL(fileURLWithPath: "/clip.m4a"))
+      let first = try #require(model.editor)
+      first.mutateDocument { $0.speakerCountOverride = 3 }
+
+      await model.reimportIgnoringCacheTapped()
+      let second = try #require(model.editor)
+      #expect(first !== second)
+      // The sidecar seed (never written this session) would say nil; the document says 3.
+      expectNoDifference(second.speakerCountOverride, 3)
+    }
+    expectNoDifference(record.commits.last?.file.content.speakerCountOverride, 3)
+  }
+
+  @Test func aDifferentSourceImportedIntoAFailedWindowDoesNotInheritTheOldContent() async throws {
+    let (sink, record) = ProjectDocumentSink.recorder()
+    let model = ProjectModel(file: nil, plan: nil, audio: nil, sink: sink)
+    let runs = LockIsolated(0)
+
+    try await withDependencies {
+      $0.continuousClock = TestClock()
+      $0.date = .constant(importedAt)
+      $0.canonicalAudioStore.remove = { _ in }
+      $0.transcription.transcribe = { _, _, _ in
+        let run = runs.withValue {
+          $0 += 1
+          return $0
+        }
+        return run == 2
+          ? engineEvents([], throwing: EngineClientError.engineFailed("no models"))
+          : engineEvents([.completed(Fixtures.transcriptionResult(Fixtures.editPlan()))])
+      }
+    } operation: {
+      await model.importAudioTapped(URL(fileURLWithPath: "/clip.m4a"))
+      try #require(model.editor).mutateDocument { $0.speakerCountOverride = 3 }
+      await model.reimportIgnoringCacheTapped()
+      expectNoDifference(model.phase, .failed("Transcription failed: no models"))
+
+      // A failed window takes new audio; another file's edits must not carry over.
+      #expect(model.fileDropped([URL(fileURLWithPath: "/other.m4a")]))
+      await model.transcriptionTask?.value
+      expectNoDifference(try #require(model.editor).speakerCountOverride, nil)
+    }
+    expectNoDifference(record.commits.last?.file.source.originalFileName, "other.m4a")
+    expectNoDifference(record.commits.last?.file.content.speakerCountOverride, nil)
+  }
+
+  @Test func aFailedReimportKeepsTheSessionAudioTheDocumentStillReferences() async throws {
+    let canonical = try temporaryCanonicalAudio(bytes: 10)
+    defer { try? FileManager.default.removeItem(at: canonical) }
+    let removed = LockIsolated<[URL]>([])
+    let runs = LockIsolated(0)
+    let (sink, record) = ProjectDocumentSink.recorder()
+    let model = ProjectModel(file: nil, plan: nil, audio: nil, sink: sink)
+
+    await withDependencies {
+      $0.continuousClock = TestClock()
+      $0.date = .constant(importedAt)
+      $0.canonicalAudioStore.remove = { url in removed.withValue { $0.append(url) } }
+      $0.transcription.transcribe = { _, _, _ in
+        let run = runs.withValue {
+          $0 += 1
+          return $0
+        }
+        return run == 1
+          ? engineEvents([
+            .completed(
+              Fixtures.transcriptionResult(Fixtures.editPlan(), canonicalAudioURL: canonical))
+          ])
+          : engineEvents([], throwing: EngineClientError.engineFailed("no models"))
+      }
+    } operation: {
+      await model.importAudioTapped(URL(fileURLWithPath: "/clip.m4a"))
+      await model.reimportIgnoringCacheTapped()
+    }
+
+    expectNoDifference(model.phase, .failed("Transcription failed: no models"))
+    #expect(model.editor == nil)
+    // The document still points at the first run's audio, so a save must still find it.
+    expectNoDifference(record.commits.count, 1)
+    expectNoDifference(record.commits.last?.audio, .sessionFile(canonical))
+    expectNoDifference(removed.value, [])
+  }
+
+  @Test func aSuccessfulReimportReleasesThePriorSessionAudioOnlyAfterTheCommit() async throws {
+    let first = try temporaryCanonicalAudio(bytes: 10, name: "qie-project-first")
+    let second = try temporaryCanonicalAudio(bytes: 20, name: "qie-project-second")
+    defer {
+      try? FileManager.default.removeItem(at: first)
+      try? FileManager.default.removeItem(at: second)
+    }
+    let canonicals = LockIsolated<[URL]>([first, second])
+    let removed = LockIsolated<[(url: URL, commitsSoFar: Int)]>([])
+    let (sink, record) = ProjectDocumentSink.recorder()
+    let model = ProjectModel(file: nil, plan: nil, audio: nil, sink: sink)
+
+    await withDependencies {
+      $0.continuousClock = TestClock()
+      $0.date = .constant(importedAt)
+      $0.canonicalAudioStore.remove = { url in
+        // The model releases audio on the main actor; read the recorder there too.
+        let commitsSoFar = MainActor.assumeIsolated { record.commits.count }
+        removed.withValue { $0.append((url, commitsSoFar)) }
+      }
+      $0.transcription.transcribe = { _, _, _ in
+        let url = canonicals.withValue { $0.removeFirst() }
+        return engineEvents([
+          .completed(Fixtures.transcriptionResult(Fixtures.editPlan(), canonicalAudioURL: url))
+        ])
+      }
+    } operation: {
+      await model.importAudioTapped(URL(fileURLWithPath: "/clip.m4a"))
+      await model.reimportIgnoringCacheTapped()
+    }
+
+    expectNoDifference(record.commits.last?.audio, .sessionFile(second))
+    expectNoDifference(removed.value.map(\.url), [first])
+    // Released after the replacement commit, never before it.
+    expectNoDifference(removed.value.map(\.commitsSoFar), [2])
+  }
+
+  @Test func closingTheWindowAfterAFailedReimportReleasesTheRetainedAudio() async throws {
+    let canonical = try temporaryCanonicalAudio(bytes: 10)
+    defer { try? FileManager.default.removeItem(at: canonical) }
+    let removed = LockIsolated<[URL]>([])
+    let runs = LockIsolated(0)
+    let (sink, _) = ProjectDocumentSink.recorder()
+    let model = ProjectModel(file: nil, plan: nil, audio: nil, sink: sink)
+
+    await withDependencies {
+      $0.continuousClock = TestClock()
+      $0.date = .constant(importedAt)
+      $0.canonicalAudioStore.remove = { url in removed.withValue { $0.append(url) } }
+      $0.transcription.transcribe = { _, _, _ in
+        let run = runs.withValue {
+          $0 += 1
+          return $0
+        }
+        return run == 1
+          ? engineEvents([
+            .completed(
+              Fixtures.transcriptionResult(Fixtures.editPlan(), canonicalAudioURL: canonical))
+          ])
+          : engineEvents([], throwing: EngineClientError.engineFailed("no models"))
+      }
+    } operation: {
+      await model.importAudioTapped(URL(fileURLWithPath: "/clip.m4a"))
+      await model.reimportIgnoringCacheTapped()
+      expectNoDifference(removed.value, [])
+      await model.viewDisappeared()
+    }
+
+    expectNoDifference(removed.value, [canonical])
   }
 }

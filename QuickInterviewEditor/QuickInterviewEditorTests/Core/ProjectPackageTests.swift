@@ -170,6 +170,10 @@ struct ProjectPackageTests {
     expectNoDifference(
       ProjectPackageError.unsupportedSchema(7).errorDescription,
       "This project (format 7) was saved by a newer version of the app.")
+    // Schema 0 (or below) is malformed, not from the future; don't blame a newer app.
+    expectNoDifference(
+      ProjectPackageError.unsupportedSchema(0).errorDescription,
+      "This project uses an unsupported format version (0).")
     expectNoDifference(
       ProjectPackageError.audioMismatch.errorDescription,
       "The project's bundled audio does not match the project.")
