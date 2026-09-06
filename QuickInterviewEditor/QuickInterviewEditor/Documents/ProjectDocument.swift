@@ -38,7 +38,15 @@ final class ProjectDocument: ReferenceFileDocument {
     var plan: EditPlan
     var audio: CanonicalAudioSource
   }
-  typealias Snapshot = Content
+
+  /// The value `snapshot` hands to `fileWrapper`: the content to write plus the edit
+  /// generation it reflects. Carrying the generation on the snapshot (rather than through
+  /// shared document state) keeps overlapping save pipelines honest — a completing save can
+  /// only ever clear the indicator up to the generation it actually wrote.
+  struct Snapshot: Sendable {
+    var content: Content
+    var editGeneration: Int
+  }
 
   nonisolated static var readableContentTypes: [UTType] { [.pieProject] }
 
@@ -53,6 +61,14 @@ final class ProjectDocument: ReferenceFileDocument {
   /// the document system's own manager, so one registered action marks the document edited and
   /// schedules autosave (spec A7).
   weak var undoManager: UndoManager?
+
+  /// The window's autosave indicator, supplied by `ProjectHostView`. `registerChange` marks it
+  /// edited and the completed save pipeline clears it; `nil` outside a live window (e.g. codec
+  /// tests) leaves the seams as no-ops.
+  weak var saveStatus: SaveStatus?
+  /// Bumped on the main actor for every dirtying change and read off the main actor by the save
+  /// pipeline, so the generation a save captures is comparable to the latest edit.
+  private nonisolated let editGeneration = Mutex(0)
 
   nonisolated init() {}
 
@@ -69,15 +85,26 @@ final class ProjectDocument: ReferenceFileDocument {
       file: decoded.file, plan: decoded.plan, audio: .packageChild(sessionCopy: nil))
   }
 
-  nonisolated func snapshot(contentType: UTType) throws -> Content {
+  nonisolated func snapshot(contentType: UTType) throws -> Snapshot {
+    // Read the generation BEFORE the content (they live behind separate locks). This keeps the
+    // captured generation older-or-equal to the content actually written, so a completing save
+    // can never report a generation newer than what it wrote — the indicator errs toward
+    // "Saving…" and never falsely clears to "Saved" if an edit lands mid-snapshot.
+    let generation = editGeneration.withLock { $0 }
     guard let content else { throw ProjectDocumentError.nothingToSave }
-    return content
+    return Snapshot(content: content, editGeneration: generation)
   }
 
-  nonisolated func fileWrapper(snapshot: Content, configuration: WriteConfiguration) throws
+  nonisolated func fileWrapper(snapshot: Snapshot, configuration: WriteConfiguration) throws
     -> FileWrapper
   {
-    try Self.makeFileWrapper(snapshot: snapshot, existingFile: configuration.existingFile)
+    let wrapper = try Self.makeFileWrapper(
+      snapshot: snapshot.content, existingFile: configuration.existingFile)
+    // Only a successfully built package clears the indicator, and only up to the generation
+    // this save actually wrote; a throw leaves it "Saving…".
+    let saved = snapshot.editGeneration
+    Task { @MainActor [weak self] in self?.saveStatus?.markSaved(upToGeneration: saved) }
+    return wrapper
   }
 
   /// Builds the package to write. Audio unchanged since the read reuses the on-disk package's
@@ -132,6 +159,11 @@ final class ProjectDocument: ReferenceFileDocument {
   }
 
   func registerChange() {
+    let generation = editGeneration.withLock {
+      $0 += 1
+      return $0
+    }
+    saveStatus?.markEdited(generation: generation)
     guard let undoManager else { return }
     undoManager.levelsOfUndo = 1
     undoManager.registerUndo(withTarget: self) { _ in }

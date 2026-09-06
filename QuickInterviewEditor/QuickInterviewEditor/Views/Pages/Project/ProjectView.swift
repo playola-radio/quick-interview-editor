@@ -10,6 +10,7 @@ struct ProjectView: View {
     content
       .frame(minWidth: 1040, minHeight: 680)
       .background(Color.black)
+      .toolbar { saveStatusToolbar }
       .dropDestination(for: URL.self) { urls, _ in model.fileDropped(urls) }
       .fileImporter(
         isPresented: $model.isImporterPresented,
@@ -20,6 +21,21 @@ struct ProjectView: View {
         case .failure(let error): model.filePickFailed(error)
         }
       }
+  }
+
+  @ToolbarContentBuilder private var saveStatusToolbar: some ToolbarContent {
+    if model.showsSaveStatus {
+      ToolbarItem(placement: .automatic) {
+        HStack(spacing: 6) {
+          if model.isSaving {
+            ProgressView().controlSize(.small)
+          }
+          Text(model.saveStatusLabel)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+      }
+    }
   }
 
   @ViewBuilder private var content: some View {

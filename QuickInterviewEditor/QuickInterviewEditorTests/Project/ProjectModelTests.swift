@@ -29,6 +29,18 @@ struct ProjectModelTests {
     expectNoDifference(record.registerChangeCount, 0)
   }
 
+  @Test func saveStatusIsHiddenUntilLoadedAndForwardsTheIndicator() {
+    let (sink, _) = ProjectDocumentSink.recorder()
+    let status = SaveStatus()
+    let model = ProjectModel(file: nil, plan: nil, audio: nil, sink: sink, saveStatus: status)
+    #expect(!model.showsSaveStatus)
+    expectNoDifference(model.saveStatusLabel, "Saved")
+
+    status.markEdited(generation: 1)
+    #expect(model.isSaving)
+    expectNoDifference(model.saveStatusLabel, "Saving…")
+  }
+
   @Test func importReachesLoadedAndCommitsSessionFileOnce() async throws {
     let plan = Fixtures.editPlan()
     let canonical = try temporaryCanonicalAudio(bytes: 1234)
