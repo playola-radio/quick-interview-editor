@@ -151,6 +151,69 @@ struct EditorTests {
     expectNoDifference(model.slices.map(\.name), ["Slice 1", "Slice 2"])
   }
 
+  @Test func addSliceNumbersPastExistingSlicesOnRebuild() {
+    // A rebuilt editor (the tab reloads the sidecar's slices into a fresh model) must keep
+    // numbering past the clips already there — not relabel every new clip "Slice 1".
+    let existing: IdentifiedArrayOf<Slice> = [
+      Slice(
+        id: Fixtures.uuid(1), name: "Slice 1", startSample: 0, endSample: 10, wordIDs: [],
+        snippet: ""),
+      Slice(
+        id: Fixtures.uuid(2), name: "Slice 2", startSample: 20, endSample: 30, wordIDs: [],
+        snippet: ""),
+    ]
+    let model = EditorModel(
+      sourceURL: URL(fileURLWithPath: "/clip.m4a"),
+      canonicalAudioURL: Fixtures.canonicalAudioURL, editPlan: Fixtures.editPlan(),
+      initialDocument: EditorDocumentState(slices: existing))
+    selectWords(model.transcript, 0, 1)
+    model.addSliceTapped()
+    expectNoDifference(model.slices.last?.name, "Slice 3")
+  }
+
+  @Test func addSliceIgnoresCustomNamedSlicesWhenNumbering() {
+    // Custom-renamed clips don't match "Slice N" and must not hold back or inflate the counter.
+    let existing: IdentifiedArrayOf<Slice> = [
+      Slice(
+        id: Fixtures.uuid(1), name: "Intro", startSample: 0, endSample: 10, wordIDs: [], snippet: ""
+      )
+    ]
+    let model = EditorModel(
+      sourceURL: URL(fileURLWithPath: "/clip.m4a"),
+      canonicalAudioURL: Fixtures.canonicalAudioURL, editPlan: Fixtures.editPlan(),
+      initialDocument: EditorDocumentState(slices: existing))
+    selectWords(model.transcript, 0, 1)
+    model.addSliceTapped()
+    expectNoDifference(model.slices.last?.name, "Slice 1")
+  }
+
+  @Test func addSliceIgnoresMalformedSliceNumbersWhenSeeding() {
+    // `name` is user-editable, so a persisted "Slice N" whose N is negative, non-numeric, or at
+    // Int.max must not seed the counter (Int.max would trap on `+ 1`). Only plain positives count:
+    // here the sole valid auto-name is "Slice 4", so the next clip is "Slice 5".
+    let existing: IdentifiedArrayOf<Slice> = [
+      Slice(
+        id: Fixtures.uuid(1), name: "Slice -1", startSample: 0, endSample: 10, wordIDs: [],
+        snippet: ""),
+      Slice(
+        id: Fixtures.uuid(2), name: "Slice \(Int.max)", startSample: 20, endSample: 30, wordIDs: [],
+        snippet: ""),
+      Slice(
+        id: Fixtures.uuid(3), name: "Slice 12x", startSample: 40, endSample: 50, wordIDs: [],
+        snippet: ""),
+      Slice(
+        id: Fixtures.uuid(4), name: "Slice 4", startSample: 60, endSample: 70, wordIDs: [],
+        snippet: ""),
+    ]
+    let model = EditorModel(
+      sourceURL: URL(fileURLWithPath: "/clip.m4a"),
+      canonicalAudioURL: Fixtures.canonicalAudioURL, editPlan: Fixtures.editPlan(),
+      initialDocument: EditorDocumentState(slices: existing))
+    selectWords(model.transcript, 0, 1)
+    model.addSliceTapped()
+    expectNoDifference(model.slices.last?.name, "Slice 5")
+  }
+
   @Test func renameReorderDeleteMutateSlices() async {
     let model = editor()
     for pair in [(0, 1), (2, 3), (4, 5)] {

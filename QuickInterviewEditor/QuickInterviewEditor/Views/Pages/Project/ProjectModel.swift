@@ -120,6 +120,16 @@ final class ProjectModel: ViewModel {
     return !transcriptionTask.isCancelled
   }
   var isLoaded: Bool { phase == .loaded }
+  /// The name a still-unsaved window should offer the first time it's saved: the imported audio's
+  /// name minus its extension (the `.pie` package extension is appended by the document type), so
+  /// importing "interview.mp3" defaults the Save dialog to "interview" instead of "Untitled".
+  /// `nil` until the import lands (`.loaded` is the first savable moment and where `file` is set),
+  /// which — because it reads the observed `phase` — is also when the setter that applies it re-fires.
+  var suggestedDocumentName: String? {
+    guard isLoaded, let name = file?.source.originalFileName else { return nil }
+    let stem = (name as NSString).deletingPathExtension
+    return stem.isEmpty ? nil : stem
+  }
   /// A loaded project can be re-transcribed: a source imported this session re-runs that source;
   /// a project opened from disk re-transcribes its bundled canonical AIFF (spec A8).
   var canReimport: Bool {
