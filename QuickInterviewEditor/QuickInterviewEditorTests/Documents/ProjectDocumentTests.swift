@@ -134,6 +134,24 @@ struct ProjectDocumentTests {
     expectNoDifference(reread.file.content.speakerCountOverride, 3)
   }
 
+  @Test func saveRefusesToReuseExistingPackageAudioWhoseSizeDriftedFromTheProject() throws {
+    // The on-disk AIFF was truncated or swapped behind our back: the reuse path must apply
+    // the same integrity gate as open and session-file saves rather than rewriting metadata
+    // over mismatched audio.
+    let bytes = Data("package-audio".utf8)
+    let existing = try packageTree(
+      file: Fixtures.projectFile(source: Fixtures.projectSource(canonicalByteCount: bytes.count)),
+      audio: bytes)
+    let snapshot = ProjectDocument.Content(
+      file: Fixtures.projectFile(
+        source: Fixtures.projectSource(canonicalByteCount: bytes.count + 1)),
+      plan: Fixtures.editPlan(), audio: .packageChild(sessionCopy: nil))
+
+    #expect(throws: ProjectPackageError.audioMismatch) {
+      try ProjectDocument.makeFileWrapper(snapshot: snapshot, existingFile: existing)
+    }
+  }
+
   @Test func saveWithoutAnExistingFileFallsBackToTheSessionCopy() throws {
     // Save As / Duplicate: the write configuration carries no existing file, so the audio comes
     // from the clone hydration made for the editor.

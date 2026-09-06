@@ -83,9 +83,9 @@ final class ProjectDocument: ReferenceFileDocument {
   /// Builds the package to write. Audio unchanged since the read reuses the on-disk package's
   /// own child wrapper so the AIFF is never re-serialized (spec A5); a save with nothing to reuse
   /// (Save As / Duplicate) falls back to the hydrated session copy, and freshly transcribed audio
-  /// is wrapped lazily from the session store. Either file-backed path is refused when the
-  /// file's size no longer matches the recorded byte count, so a package can never be written
-  /// whose `project.json` disagrees with its audio.
+  /// is wrapped lazily from the session store. Every path is refused when the audio's size no
+  /// longer matches the recorded byte count, so a package can never be written whose
+  /// `project.json` disagrees with its audio.
   nonisolated static func makeFileWrapper(snapshot: Content, existingFile: FileWrapper?) throws
     -> FileWrapper
   {
@@ -96,6 +96,7 @@ final class ProjectDocument: ReferenceFileDocument {
         let existing = existingFile.fileWrappers?["audio"]?.fileWrappers?["canonical.aiff"],
         existing.isRegularFile
       {
+        try ProjectPackage.verifyAudio(existing, against: snapshot.file.source)
         return try ProjectPackage.rewriteMetadata(
           in: existingFile, file: snapshot.file, plan: snapshot.plan)
       }

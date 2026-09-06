@@ -305,6 +305,9 @@ final class ProjectModel: ViewModel {
     wireEditor(editor)
     phase = .loaded
     sink.commit(newFile, result.editPlan, .sessionFile(result.canonicalAudioURL))
+    // A completed transcription is the first thing worth keeping (spec A7): an untitled window
+    // must go dirty here so closing it asks to save and autosave arms.
+    sink.registerChange()
   }
 
   /// Builds the editor for an opened package. Audio still inside the package is first cloned

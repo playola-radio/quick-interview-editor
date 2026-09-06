@@ -55,8 +55,8 @@ struct ProjectModelTests {
     let editor = try #require(model.editor)
     expectNoDifference(editor.canonicalAudioURL, canonical)
     expectNoDifference(editor.transcript.document.wordRanges.count, 122)
-    // Exactly one commit — the transcription completion. No document change registered yet.
-    expectNoDifference(record.registerChangeCount, 0)
+    // Exactly one commit — the transcription completion — and it dirties the document (spec A7).
+    expectNoDifference(record.registerChangeCount, 1)
     expectNoDifference(record.commits.count, 1)
     let commit = try #require(record.commits.first)
     expectNoDifference(commit.plan, plan)
@@ -255,7 +255,8 @@ struct ProjectModelTests {
 
       editor.mutateDocument { $0.speakerCountOverride = 3 }
 
-      expectNoDifference(record.registerChangeCount, 1)
+      // One from the transcription commit, one from the edit.
+      expectNoDifference(record.registerChangeCount, 2)
       expectNoDifference(record.commits.count, 2)
       let latest = try #require(record.commits.last)
       // A content edit rewrites only the file — plan/audio stay unchanged.
@@ -388,7 +389,7 @@ struct ProjectModelTests {
     expectNoDifference(model.phase, .loaded)
     expectNoDifference(record.commits.count, 2)
     expectNoDifference(record.commits.last?.file.source.canonicalByteCount, 20)
-    expectNoDifference(record.registerChangeCount, 0)
+    expectNoDifference(record.registerChangeCount, 2)
   }
 
   @Test func viewAppearedIsANoOpForAnEmptyModel() async {
