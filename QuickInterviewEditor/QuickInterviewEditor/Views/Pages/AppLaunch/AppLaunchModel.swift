@@ -2,10 +2,10 @@ import Dependencies
 import Foundation
 import Observation
 
-/// Top-level launch flow: in the **packaged** app, first-launch model setup must
-/// complete before the editor is usable; in **dev**, the engine downloads models
-/// on demand, so setup is skipped entirely. Owning both child models here keeps
-/// the decision (and all of it) out of the view.
+/// App-level launch flow, shared by every document window: in the **packaged** app,
+/// first-launch model setup must complete before any editor is usable; in **dev**, the
+/// engine downloads models on demand, so setup is skipped entirely. Owning the setup
+/// model here keeps the decision (and all of it) out of the views.
 @MainActor
 @Observable
 final class AppLaunchModel: ViewModel {
@@ -21,7 +21,6 @@ final class AppLaunchModel: ViewModel {
 
   // MARK: - Properties
   var phase: Phase
-  let root: RootModel
   private(set) var modelSetup: ModelSetupModel?
 
   // MARK: - Initialization
@@ -44,7 +43,6 @@ final class AppLaunchModel: ViewModel {
     if let base = try? TranscriptCache.baseDirectory() {
       TranscriptCache.sweepStaleTempDirs(base: base)
     }
-    self.root = RootModel()
     self.phase = requiresManagedModels ? .modelSetup : .ready
     if requiresManagedModels {
       let setup = ModelSetupModel()
@@ -66,8 +64,8 @@ final class AppLaunchModel: ViewModel {
   var showsModelSetup: Bool { phase == .modelSetup }
 
   // MARK: - User Actions
-  /// Run once on first appearance. `onAppear` can fire repeatedly (window reopen,
-  /// tab switches), so the one-shot guard keeps the relocation prompt from nagging
+  /// Run once on first appearance. `onAppear` fires per document window (and again on
+  /// reopen), so the one-shot guard keeps the relocation prompt from nagging
   /// the user again and again within a single process. Relocation runs first; if it
   /// kicks off a move + relaunch this process is terminating, so we skip starting
   /// the updater here — the relocated copy starts its own on launch.

@@ -1,15 +1,26 @@
 import SwiftUI
 
-/// File-menu commands for the transcription cache. Reads/acts through `RootModel`;
-/// no logic lives here beyond binding the menu item to the model.
+/// File-menu command to re-transcribe the focused project's source ignoring the cache. Reads
+/// and acts through `TranscriptionCommandsModel`; no logic lives here.
 struct TranscriptionCommands: Commands {
-  let root: RootModel
+  @FocusedValue(\.projectModel) private var project
 
   var body: some Commands {
+    let model = TranscriptionCommandsModel(project: project)
     CommandGroup(after: .newItem) {
-      Button(root.reimportMenuLabel) { root.reimportSelectedTabIgnoringCache() }
+      Button(model.reimportMenuLabel) { Task { await model.reimportTapped() } }
         .keyboardShortcut("r", modifiers: [.command, .shift])
-        .disabled(!root.canReimportSelectedTab)
+        .disabled(!model.canReimport)
     }
   }
+}
+
+@MainActor
+struct TranscriptionCommandsModel {
+  let project: ProjectModel?
+
+  var reimportMenuLabel: String { project?.reimportMenuLabel ?? "Re-import (Ignore Cache)" }
+  var canReimport: Bool { project?.canReimport ?? false }
+
+  func reimportTapped() async { await project?.reimportIgnoringCacheTapped() }
 }
