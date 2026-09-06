@@ -328,7 +328,21 @@ final class ProjectModel: ViewModel {
       do {
         let clone = try await canonicalAudioStore.clone(
           packageURL.appendingPathComponent("audio/\(CanonicalAudioStore.fileName)"))
-        guard !Task.isCancelled else { return }
+        // The window may have closed while the copy ran; the clone is derived data, so drop it
+        // rather than leave a multi-GB orphan in the session store.
+        guard !Task.isCancelled else {
+          canonicalAudioStore.remove(clone)
+          return
+        }
+        // The package was verified at open, but it is read again by path here; refuse a copy
+        // whose size no longer matches `project.json` (the package changed in between).
+        guard
+          try clone.resourceValues(forKeys: [.fileSizeKey]).fileSize
+            == file.source.canonicalByteCount
+        else {
+          canonicalAudioStore.remove(clone)
+          throw ProjectPackageError.audioMismatch
+        }
         canonicalAudioURL = clone
         self.loadedAudio = .packageChild(sessionCopy: clone)
         sink.commit(file, nil, .packageChild(sessionCopy: clone))
