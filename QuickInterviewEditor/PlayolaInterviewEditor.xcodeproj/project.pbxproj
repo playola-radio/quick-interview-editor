@@ -1047,7 +1047,7 @@
 			path = EditSlice;
 			sourceTree = "<group>";
 		};
-		"TEMP_084AB237-843C-461D-B84A-3257791D54A5" /* Fixtures */ = {
+		"TEMP_A5091F48-720D-493C-987A-E44A4C9D008B" /* Fixtures */ = {
 			isa = PBXGroup;
 			children = (
 			);
@@ -1494,7 +1494,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.2.0;
+				MARKETING_VERSION = 2.0.0;
 				PRODUCT_BUNDLE_IDENTIFIER = fm.playola.PlayolaInterviewEditor;
 				PRODUCT_NAME = PlayolaInterviewEditor;
 				SDKROOT = macosx;
@@ -1517,7 +1517,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.2.0;
+				MARKETING_VERSION = 2.0.0;
 				PRODUCT_BUNDLE_IDENTIFIER = fm.playola.PlayolaInterviewEditor;
 				PRODUCT_NAME = PlayolaInterviewEditor;
 				SDKROOT = macosx;
