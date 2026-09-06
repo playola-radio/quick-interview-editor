@@ -284,9 +284,38 @@ adversarial challenge). Six findings.
 - **`canonicalFingerprint` is still `""`** (P1 by Codex's severity): a
   same-size AIFF swap passes the byte-count gate. This is PR 5's scope by the
   plan; the byte-count gate is the agreed PR 4 integrity check.
-- **Session audio lifetime vs. an in-flight save** (P2): re-import tears the
-  old editor down and deletes its session AIFF while an autosave of the old
-  snapshot could still be reading it. The save then fails the byte-count
-  guard rather than writing bad audio, and NSDocument retries autosave, so the
-  failure mode is a skipped autosave, not corruption. Tying audio lifetime to
-  pending document writes is a follow-up.
+- **Session audio lifetime vs. an in-flight save** (P2): originally deferred;
+  fixed in the PR-review pass below (session audio now outlives every
+  re-import and is only deleted on window close).
+
+## PR review dispositions (Greptile 3/5, CodeRabbit, Codex follow-up)
+
+Greptile and CodeRabbit reviewed PR #76; Codex re-reviewed the fix commit.
+
+**Fixed:**
+- **Re-import discarded the project's edits** (Greptile P1): a same-source
+  re-import or retry seeded the new editor from `migrationSeed` (the legacy
+  sidecar, always empty slices) instead of the current document. The seed now
+  comes from `file.content` when the source fingerprint matches, and from the
+  sidecar only for a first import or a different source.
+- **Failed re-import broke saving** (Greptile P1, CodeRabbit Major): starting a
+  re-import deleted the session AIFF the document still referenced, so a
+  failed or cancelled run left Save pointing at a missing file. Audio lifetime
+  moved out of `EditorModel` into `ProjectModel`: teardown only cancels
+  playback and export, and the audio survives until the window closes.
+- **Replaced audio deleted while a save could still read it** (Codex P2 on the
+  fix commit): deleting the previous session copy right after the replacement
+  commit still raced a save snapshotted before it. Replaced copies are now
+  retired and deleted with the current one in `viewDisappeared`, after the
+  close-save. Crash leftovers fall to the 7-day `reapStale` at launch.
+- **Schema 0 described as "newer app"** (CodeRabbit Minor): versions at or
+  below zero now get a neutral "unsupported format version" message.
+
+**Deferred to PR 5:**
+- **Word-keyed content vs. a changed plan** (Codex P3): a force-fresh
+  re-transcribe of the same source keeps the document's slices (`wordIDs`,
+  `snippet`) and cut suggestions as-is. `Word.id` is an index into the plan,
+  so a differently aligned plan cannot be detected per word; sample-based
+  `timelineRemovals` are still validated. Revalidating word-keyed metadata
+  against the new plan belongs with PR 5's re-transcribe alignment work
+  (spike S4).
