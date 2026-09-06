@@ -620,6 +620,89 @@ struct ProjectModelTests {
     expectNoDifference(record.commits.last?.file.content.speakerCountOverride, 3)
   }
 
+  @Test func aReimportWhosePlanChangedRekeysClipsToTheNewWords() async throws {
+    let (sink, record) = ProjectDocumentSink.recorder()
+    let model = ProjectModel(file: nil, plan: nil, audio: nil, sink: sink)
+    let plan = Fixtures.editPlan()
+    let replacement: EditPlan = {
+      var replacement = plan
+      replacement.words = plan.words.map { word in
+        var word = word
+        word.text = word.text.uppercased()
+        return word
+      }
+      return replacement
+    }()
+    let range = try #require(plan.words[0].startSample)..<(try #require(plan.words[1].endSample))
+    let stale = Slice(
+      id: UUID(), name: "Slice 1", startSample: range.lowerBound, endSample: range.upperBound,
+      wordIDs: [99], snippet: "stale")
+    let expectedIDs = wordIDs(anyOverlap: range, words: replacement.words)
+    let runs = LockIsolated(0)
+
+    try await withDependencies {
+      $0.continuousClock = TestClock()
+      $0.date = .constant(importedAt)
+      $0.canonicalAudioStore.remove = { _ in }
+      $0.transcription.transcribe = { _, _, _ in
+        let run = runs.withValue {
+          $0 += 1
+          return $0
+        }
+        return engineEvents([
+          .completed(Fixtures.transcriptionResult(run == 1 ? plan : replacement))
+        ])
+      }
+    } operation: {
+      await model.importAudioTapped(URL(fileURLWithPath: "/clip.m4a"))
+      let first = try #require(model.editor)
+      first.mutateDocument {
+        $0.slices = [stale]
+        $0.cutSuggestions = [Fixtures.cutSuggestion(id: UUID())]
+      }
+
+      await model.reimportIgnoringCacheTapped()
+      let second = try #require(model.editor)
+      expectNoDifference(second.documentState.slices[0].wordIDs, expectedIDs)
+      expectNoDifference(
+        second.documentState.slices[0].snippet,
+        displaySliceSnippet(sliceSnippet(for: expectedIDs, words: replacement.words)))
+      expectNoDifference(second.documentState.cutSuggestions, [])
+    }
+    expectNoDifference(record.commits.last?.file.content.slices.map(\.wordIDs), [expectedIDs])
+  }
+
+  @Test func aReimportThatReproducesTheSamePlanKeepsClipsAndSuggestionsAsIs() async throws {
+    let (sink, _) = ProjectDocumentSink.recorder()
+    let model = ProjectModel(file: nil, plan: nil, audio: nil, sink: sink)
+    let plan = Fixtures.editPlan()
+    let slice = Slice(
+      id: UUID(), name: "Slice 1", startSample: 0, endSample: 44100, wordIDs: [0],
+      snippet: "“first”")
+    let suggestion = Fixtures.cutSuggestion(id: UUID())
+
+    try await withDependencies {
+      $0.continuousClock = TestClock()
+      $0.date = .constant(importedAt)
+      $0.canonicalAudioStore.remove = { _ in }
+      $0.transcription.transcribe = { _, _, _ in
+        engineEvents([.completed(Fixtures.transcriptionResult(plan))])
+      }
+    } operation: {
+      await model.importAudioTapped(URL(fileURLWithPath: "/clip.m4a"))
+      let first = try #require(model.editor)
+      first.mutateDocument {
+        $0.slices = [slice]
+        $0.cutSuggestions = [suggestion]
+      }
+
+      await model.reimportIgnoringCacheTapped()
+      let second = try #require(model.editor)
+      expectNoDifference(second.documentState.slices, [slice])
+      expectNoDifference(second.documentState.cutSuggestions, [suggestion])
+    }
+  }
+
   @Test func aDifferentSourceImportedIntoAFailedWindowDoesNotInheritTheOldContent() async throws {
     let (sink, record) = ProjectDocumentSink.recorder()
     let model = ProjectModel(file: nil, plan: nil, audio: nil, sink: sink)

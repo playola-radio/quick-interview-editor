@@ -284,7 +284,7 @@ final class ProjectModel: ViewModel {
   }
 
   private func loadCompletedTranscription(
-    _ result: TranscriptionResult, url: URL, fingerprint: String, seed: EditorDocumentState
+    _ result: TranscriptionResult, url: URL, fingerprint: String, seed: DocumentSeed
   ) {
     // The package records the canonical AIFF's size so a later open can refuse audio that was
     // truncated or swapped (ProjectPackage.verifyAudio). Read it from the file system, never by
@@ -298,7 +298,7 @@ final class ProjectModel: ViewModel {
     }
     let editor = buildEditor(
       sourceURL: url, canonicalAudioURL: result.canonicalAudioURL, editPlan: result.editPlan,
-      fingerprint: fingerprint, seed: seed)
+      fingerprint: fingerprint, seed: seed.content(for: result.editPlan))
     let newFile = makeProjectFile(
       url: url, fingerprint: fingerprint, editPlan: result.editPlan,
       canonicalByteCount: byteCount, content: editor.documentState)
@@ -375,11 +375,24 @@ final class ProjectModel: ViewModel {
   /// The document a new editor starts from. Re-running the same source (retry, re-import) keeps
   /// the project's current content — the sidecar is stale the moment the document diverges from
   /// it. Only a source this window has never held is seeded from the sidecar.
-  private func documentSeed(fingerprint: String) -> EditorDocumentState {
-    if let file, file.source.originalFingerprint == fingerprint {
-      return file.content
+  /// What a transcription run seeds its editor with, captured before the run starts.
+  private struct DocumentSeed {
+    var content: EditorDocumentState
+    /// The plan `content`'s word-keyed state refers to, when it came from the current document.
+    /// nil for a first import, whose sidecar seed carries no clips.
+    var plan: EditPlan?
+
+    func content(for newPlan: EditPlan) -> EditorDocumentState {
+      guard let plan, plan != newPlan else { return content }
+      return content.rekeyed(to: newPlan)
     }
-    return migrationSeed(fingerprint: fingerprint)
+  }
+
+  private func documentSeed(fingerprint: String) -> DocumentSeed {
+    if let file, file.source.originalFingerprint == fingerprint {
+      return DocumentSeed(content: file.content, plan: loadedPlan)
+    }
+    return DocumentSeed(content: migrationSeed(fingerprint: fingerprint), plan: nil)
   }
 
   /// Seeds the editor's document from the legacy per-file `.projectState` sidecar, once, on
