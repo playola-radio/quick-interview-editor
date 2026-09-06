@@ -88,8 +88,9 @@ struct ProjectModelTests {
 
     let commit = try #require(record.commits.first)
     expectNoDifference(commit.file.source.canonicalByteCount, 1234)
-    // canonicalFingerprint is PR 5's; the import leaves it empty.
-    expectNoDifference(commit.file.source.canonicalFingerprint, "")
+    // Import records a content fingerprint of the canonical AIFF bytes (spec A8, PR 5).
+    expectNoDifference(
+      commit.file.source.canonicalFingerprint, SourceFingerprint.compute(for: canonical))
     // The recorded count is what a later open checks the bundled AIFF against.
     try ProjectPackage.verifyAudio(
       FileWrapper(url: canonical, options: []), against: commit.file.source)
@@ -212,7 +213,7 @@ struct ProjectModelTests {
     expectNoDifference(record.commits.count, 2)
   }
 
-  @Test func canReimportOnlyWhenLoadedFromThisSession() async {
+  @Test func canReimportOnceLoadedForBothImportedAndOpenedProjects() async {
     let (sink, _) = ProjectDocumentSink.recorder()
     let model = ProjectModel(file: nil, plan: nil, audio: nil, sink: sink)
     #expect(!model.canReimport)
@@ -227,15 +228,15 @@ struct ProjectModelTests {
     }
     #expect(model.canReimport)
 
-    // A project opened from disk has no session source to re-run until PR 5.
+    // A project opened from disk can re-transcribe its bundled canonical AIFF once hydrated
+    // (spec A8, PR 5) — but not before it has a session copy to read.
     let opened = ProjectModel(
       file: Fixtures.projectFile(), plan: Fixtures.editPlan(),
       audio: .sessionFile(Fixtures.canonicalAudioURL), sink: sink)
+    #expect(!opened.canReimport)
     await opened.viewAppeared()
     #expect(opened.isLoaded)
-    #expect(!opened.canReimport)
-    await opened.reimportIgnoringCacheTapped()  // no-op
-    #expect(opened.isLoaded)
+    #expect(opened.canReimport)
   }
 
   @Test func oneDocumentMutationCommitsOnceAndRegistersOneChange() async throws {

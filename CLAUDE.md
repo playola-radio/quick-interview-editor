@@ -238,21 +238,32 @@ holds no logic, testing the model tests the behavior.
 
 ---
 
-## Project structure (target)
+## Project structure
+
+The app is **document-based** (v2.0.0): a project IS a `.pie` file package, and the
+app is a `DocumentGroup` over `ProjectDocument`. There is no root tab bar — one
+window per open project. (The pre-2.0 `RootModel` / `SongTabModel` / tab-bar shell
+has been removed.)
 
 ```
-pangyo/
+logic-utils/
 ├── logic_markers/        # Python engine (stays; driven as a subprocess)
+├── cut_suggester/        # 2nd Python helper (LLM cut suggestions)
 ├── tests/                # Python engine tests (pytest)
 ├── ux-prototype/         # HTML design reference (do NOT ship)
-├── plans/                # roadmap-macos-app.md
-└── QuickInterviewEditor/ # the SwiftUI app (to be scaffolded)
-    ├── Core/             # dependency clients (EngineClient, audio, waveform)
-    ├── Models/           # Codable data models (EditPlan, Word, Slice)
-    ├── State/            # @Shared key definitions
-    └── Views/
-        ├── Pages/        # each page = Model + View + Tests
-        └── Reusable Components/   # incl. ViewModel base class
+├── plans/ docs/          # roadmap + specs/plans (docs/superpowers/**)
+└── QuickInterviewEditor/ # the SwiftUI app (XcodeGen: project.yml → *.xcodeproj)
+    ├── QuickInterviewEditor/          # app sources
+    │   ├── QuickInterviewEditorApp.swift  # @main; the DocumentGroup scene
+    │   ├── Documents/                  # ProjectDocument.swift — the .pie ReferenceFileDocument
+    │   ├── Core/                       # dependency clients (Engine, TranscriptionQueue, audio, waveform, cut-suggester)
+    │   ├── Models/                     # Codable data models (EditPlan, Word, Slice, ProjectFile, ProjectState)
+    │   ├── State/                      # @Shared key definitions (incl. legacy read-only .projectState migration key)
+    │   └── Views/
+    │       ├── Pages/                  # each page = Model + View + Tests (Project, Editor, TranscriptPage, CutSuggestions, ModelSetup, Settings, AppLaunch)
+    │       ├── Commands/               # menu commands
+    │       └── Reusable Components/    # incl. ViewModel base class
+    └── QuickInterviewEditorTests/      # Swift Testing suites, mirroring the source tree
 ```
 
 ## Interface parity with Logic Pro
