@@ -311,11 +311,14 @@ Greptile and CodeRabbit reviewed PR #76; Codex re-reviewed the fix commit.
 - **Schema 0 described as "newer app"** (CodeRabbit Minor): versions at or
   below zero now get a neutral "unsupported format version" message.
 
-**Deferred to PR 5:**
-- **Word-keyed content vs. a changed plan** (Codex P3): a force-fresh
-  re-transcribe of the same source keeps the document's slices (`wordIDs`,
-  `snippet`) and cut suggestions as-is. `Word.id` is an index into the plan,
-  so a differently aligned plan cannot be detected per word; sample-based
-  `timelineRemovals` are still validated. Revalidating word-keyed metadata
-  against the new plan belongs with PR 5's re-transcribe alignment work
-  (spike S4).
+- **Word-keyed content vs. a changed plan** (Codex P3, then Greptile P1 on
+  re-review): a force-fresh re-transcribe of the same source kept the
+  document's slices (`wordIDs`, `snippet`) and cut suggestions as-is against
+  a plan that may have changed. `Word.id` is an index into the plan, so a
+  changed plan cannot be detected per word; the seed now remembers the plan
+  it came from, and when the replacement differs
+  (`EditorDocumentState.rekeyed(to:)`) slices keep their sample ranges and
+  re-derive membership and snippet by the overlap rule, while cut
+  suggestions are dropped for auto-suggest to regenerate. An identical plan
+  leaves the document untouched. Sample-exact alignment of re-transcribed
+  audio itself remains PR 5's spike S4.
