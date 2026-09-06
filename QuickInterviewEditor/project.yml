@@ -64,6 +64,7 @@ targets:
             UTTypeIconFile: PieDocument
             UTTypeConformsTo:
               - com.apple.package
+              - public.content
               - public.composite-content
             UTTypeTagSpecification:
               public.filename-extension:

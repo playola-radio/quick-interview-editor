@@ -95,6 +95,10 @@ final class EditorModel: ViewModel {
     // the editor no longer touches `@Shared` — persistence flows out through
     // `onDocumentStateChanged`, which the tab wires to the sidecar.
     self.slices = initialDocument.slices
+    // Seed the auto-name counter past whatever's already in the document. The editor is rebuilt
+    // from the sidecar's slices every time the tab reloads, so a counter that always started at 1
+    // relabeled every freshly added clip "Slice 1" once a project had existing slices.
+    self.nextSliceNumber = Self.firstUnusedSliceNumber(in: initialDocument.slices)
     self.timelineRemovals = Self.validatedRemovals(
       initialDocument.timelineRemovals, sourceDurationSamples: editPlan.source.durationSamples)
     self.documentCutSuggestions = initialDocument.cutSuggestions
@@ -307,6 +311,8 @@ final class EditorModel: ViewModel {
   /// Which pane the right column shows. The clips list and the cut-suggester share the
   /// column so accepting a suggestion visibly lands a clip in the Slices tab.
   var rightPanelTab: RightPanelTab = .slices
+  /// The number the next auto-named "Slice N" gets. Seeded in `init` from the loaded slices (so a
+  /// rebuilt editor keeps counting past existing clips) and bumped as clips are added in-session.
   private var nextSliceNumber = 1
   /// Names of slices skipped by the most recent "Export all" because their entire audio
   /// fell inside a removed section — surfaced by `exportSkippedRemovedWarning`.
@@ -1716,6 +1722,30 @@ final class EditorModel: ViewModel {
     stopActiveTransportSnapshotting()
   }
 
+  /// One past the highest number already used by an auto-named "Slice N" clip (1 when none are).
+  /// Custom-renamed clips don't match the pattern and don't hold back the counter. Only a plain
+  /// positive decimal suffix counts: a persisted `name` is user-editable, so "Slice -1", "Slice 0x",
+  /// or a value at `Int.max` (which would trap on `+ 1`) must not seed the counter.
+  private static func firstUnusedSliceNumber(in slices: some Sequence<Slice>) -> Int {
+    let highest = slices.compactMap { slice -> Int? in
+      let prefix = "Slice "
+      guard slice.name.hasPrefix(prefix) else { return nil }
+      let suffix = slice.name.dropFirst(prefix.count)
+      guard !suffix.isEmpty, suffix.allSatisfy(\.isNumber),
+        let value = Int(suffix), value > 0, value < Int.max
+      else { return nil }
+      return value
+    }.max()
+    return (highest ?? 0) + 1
+  }
+
+  /// Bumps the auto-name counter after a clip is added, saturating at `Int.max` so a poisoned
+  /// persisted name (`Slice \(Int.max - 1)`) that seeded the counter to the ceiling can't trap on
+  /// overflow. A real session never reaches this; at the ceiling the next clip just reuses the name.
+  private func advanceSliceNumber() {
+    if nextSliceNumber < Int.max { nextSliceNumber += 1 }
+  }
+
   func addSliceTapped() {
     guard canAddSlice, let range = selectedSourceRange else { return }
     // Clip membership is derived from the selection RANGE (overlap), not the transcript's own
@@ -1727,7 +1757,7 @@ final class EditorModel: ViewModel {
       id: UUID(), name: "Slice \(nextSliceNumber)", range: range, wordIDs: wordIDs,
       plan: editPlan)
     appendNewClip(slice)
-    nextSliceNumber += 1
+    advanceSliceNumber()
     transcript.clearSelectionTapped()
   }
 
@@ -2651,7 +2681,7 @@ final class EditorModel: ViewModel {
     case .pendingSelection:
       let slice = makeSlice(range: draft)
       appendNewClip(slice)
-      nextSliceNumber += 1
+      advanceSliceNumber()
       // Closing the pane removes the region, so stop any preview or audition of the draft first.
       cancelPreviewOrAuditionIfNeeded()
       fineTune.clear()

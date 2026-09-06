@@ -21,6 +21,7 @@ struct ProjectHostView: View {
 
   var body: some View {
     content
+      .background(DocumentDefaultName(suggestedName: model.suggestedDocumentName))
       .focusedSceneValue(\.projectModel, model)
       .onChange(of: undoManager, initial: true) { _, manager in document.undoManager = manager }
       // Wire the document's weak indicator to the RETAINED model's own SaveStatus (never a

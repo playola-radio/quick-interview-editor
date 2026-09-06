@@ -82,6 +82,33 @@ struct ProjectModelTests {
     expectNoDifference(commit.file.source.durationSamples, plan.source.durationSamples)
   }
 
+  @Test func suggestedDocumentNameIsNilBeforeImport() {
+    let (sink, _) = ProjectDocumentSink.recorder()
+    let model = ProjectModel(file: nil, plan: nil, audio: nil, sink: sink)
+    expectNoDifference(model.suggestedDocumentName, nil)
+  }
+
+  @Test func suggestedDocumentNameStripsAudioExtensionAfterImport() async throws {
+    let plan = Fixtures.editPlan()
+    let canonical = try temporaryCanonicalAudio(bytes: 1234)
+    defer { try? FileManager.default.removeItem(at: canonical) }
+    let (sink, _) = ProjectDocumentSink.recorder()
+    let model = ProjectModel(file: nil, plan: nil, audio: nil, sink: sink)
+
+    await withDependencies {
+      $0.continuousClock = TestClock()
+      $0.date = .constant(importedAt)
+      $0.transcription.transcribe = { _, _, _ in
+        engineEvents([.completed(Fixtures.transcriptionResult(plan, canonicalAudioURL: canonical))])
+      }
+    } operation: {
+      await model.importAudioTapped(URL(fileURLWithPath: "/my interview.m4a"))
+    }
+
+    expectNoDifference(model.phase, .loaded)
+    expectNoDifference(model.suggestedDocumentName, "my interview")
+  }
+
   @Test func importRecordsTheCanonicalAudioByteCountSoASavedPackageVerifies() async throws {
     let canonical = try temporaryCanonicalAudio(bytes: 1234)
     defer { try? FileManager.default.removeItem(at: canonical) }
