@@ -214,6 +214,27 @@ struct EditorTests {
     expectNoDifference(model.slices.last?.name, "Slice 5")
   }
 
+  @Test func addSliceDoesNotTrapWhenSeededAtIntMax() {
+    // A persisted "Slice \(Int.max - 1)" is valid to parse, so the counter seeds to Int.max. The
+    // in-session bump must saturate rather than overflow-trap; adding a clip stays on "Slice \(Int.max)".
+    let existing: IdentifiedArrayOf<Slice> = [
+      Slice(
+        id: Fixtures.uuid(1), name: "Slice \(Int.max - 1)", startSample: 0, endSample: 10,
+        wordIDs: [], snippet: "")
+    ]
+    let model = EditorModel(
+      sourceURL: URL(fileURLWithPath: "/clip.m4a"),
+      canonicalAudioURL: Fixtures.canonicalAudioURL, editPlan: Fixtures.editPlan(),
+      initialDocument: EditorDocumentState(slices: existing))
+    selectWords(model.transcript, 0, 1)
+    model.addSliceTapped()
+    expectNoDifference(model.slices.last?.name, "Slice \(Int.max)")
+    // A second add must not trap either; the saturated counter simply reuses the ceiling name.
+    selectWords(model.transcript, 2, 3)
+    model.addSliceTapped()
+    expectNoDifference(model.slices.last?.name, "Slice \(Int.max)")
+  }
+
   @Test func renameReorderDeleteMutateSlices() async {
     let model = editor()
     for pair in [(0, 1), (2, 3), (4, 5)] {

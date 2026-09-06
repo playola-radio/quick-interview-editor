@@ -1739,6 +1739,13 @@ final class EditorModel: ViewModel {
     return (highest ?? 0) + 1
   }
 
+  /// Bumps the auto-name counter after a clip is added, saturating at `Int.max` so a poisoned
+  /// persisted name (`Slice \(Int.max - 1)`) that seeded the counter to the ceiling can't trap on
+  /// overflow. A real session never reaches this; at the ceiling the next clip just reuses the name.
+  private func advanceSliceNumber() {
+    if nextSliceNumber < Int.max { nextSliceNumber += 1 }
+  }
+
   func addSliceTapped() {
     guard canAddSlice, let range = selectedSourceRange else { return }
     // Clip membership is derived from the selection RANGE (overlap), not the transcript's own
@@ -1750,7 +1757,7 @@ final class EditorModel: ViewModel {
       id: UUID(), name: "Slice \(nextSliceNumber)", range: range, wordIDs: wordIDs,
       plan: editPlan)
     appendNewClip(slice)
-    nextSliceNumber += 1
+    advanceSliceNumber()
     transcript.clearSelectionTapped()
   }
 
@@ -2674,7 +2681,7 @@ final class EditorModel: ViewModel {
     case .pendingSelection:
       let slice = makeSlice(range: draft)
       appendNewClip(slice)
-      nextSliceNumber += 1
+      advanceSliceNumber()
       // Closing the pane removes the region, so stop any preview or audition of the draft first.
       cancelPreviewOrAuditionIfNeeded()
       fineTune.clear()
