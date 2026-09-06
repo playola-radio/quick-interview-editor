@@ -157,3 +157,93 @@ carried the rest forward with explicit reasons.
   PR 1 is codec-only and PR 2/3 don't ship the document shell either, so no
   incremental disk-growth risk accrues before PR 4, where the check is already a hard
   gate (see the S2 ESCALATE note above and `graph.md`). Left the thread unresolved.
+
+## PR 4 spike results — S1 / S2 / S3 / S5 against the real `DocumentGroup`
+
+Run 2026-09-05 on the PR 4 branch once `ProjectDocument` + `DocumentGroup` +
+`ProjectHostView` were in place. S2/S3 were driven by a throwaway, env-gated
+hook (`QIE_SPIKE=1`, set via `launchctl setenv` so `open -a` inherited it) that
+lived in `ProjectHostView`/`ProjectModel`, logged to `/tmp/qie-spike/log.txt`,
+and was deleted before commit. UI automation was unavailable (no assistive
+access for `osascript`; `screencapture` returned black), so everything below
+was measured from inside the process, not visually.
+
+### S5 — `nonisolated init(configuration:)` feeding a `@MainActor` model
+
+**PASS.** `ProjectDocument` is a `@MainActor final class` with a
+`nonisolated init()` and `nonisolated convenience init(configuration:)`;
+`Content`/`Snapshot` is `Sendable`. Signed and unsigned builds report zero
+Swift 6 diagnostics in `ProjectDocument`, `ProjectModel`, `ProjectHostView`,
+`ProjectView`, and the `Views/Commands` files.
+
+**Bug found on the way (fixed in `bf716ee`):** NSDocument saves
+asynchronously. The first Cmd-S crashed with `EXC_BREAKPOINT` inside
+`ProjectDocument.snapshot(contentType:)` because it used
+`MainActor.assumeIsolated` and the document system calls
+`fileWrapper(ofType:)` → `ReferenceFileDocumentBox.snapshotForSerialization`
+→ our `snapshot` on a dispatch worker thread. The saved values now sit behind
+a `Mutex<Content?>` and `snapshot` is `nonisolated`; the test
+`snapshotIsTakenOffTheMainActorAfterAMainActorCommit` pins it.
+
+### S3 — `UndoManager` dirtiness bridge over the value-snapshot `UndoStack`
+
+**PASS, with one amendment to the plan's mechanism.**
+
+The plan's bridge (`registerChange()` registers a single no-op
+`registerUndo(withTarget:)` action, `levelsOfUndo = 1`) does *not* by itself
+mark the document edited when called from a Swift-concurrency continuation.
+`NSUndoManager` opens an implicit per-event group on the first registration
+and only closes it when AppKit finishes dispatching an `NSEvent`; from a task
+continuation there is no event in flight, so `groupingLevel` stayed at 1 for
+100+ s and `NSDocument.isDocumentEdited` stayed `false` until the next mouse
+or key event. Explicit `beginUndoGrouping`/`endUndoGrouping` did not help:
+at level 0 with `groupsByEvent` it nests inside the still-open implicit group.
+
+Fix kept in product code: after `registerUndo`, post a no-op
+`.applicationDefined` `NSEvent` so the run loop closes the group. With that,
+`NSDocument.isDocumentEdited` flipped to `true` within 0.5 s of the edit,
+autosave-in-place landed in `project.json` after ~11 s, and an explicit
+`save(nil)` cleared the edited flag. The editor's `UndoStack` and the PR 2
+post-init diff base were untouched; the full suite (including
+`suggestionsProducedAfterAnEditSurviveUndoAndRedoOfThatEdit`) stays green.
+
+Observed but not a failure: `NSWindow.isDocumentEdited` stays `false` for
+autosaving documents even while `NSDocument.isDocumentEdited` is `true`,
+which is AppKit's documented behavior for `autosavesInPlace` apps. The
+title-bar "Edited" text could not be checked visually here; it is on the PR
+manual-QA checklist.
+
+### S2 — autosave/Versions disk usage, end to end
+
+**PASS — Versions does not duplicate the audio per checkpoint.**
+
+Package: `/tmp/qie-spike/big.pie`, 637 MB (90 copies of the 42 s
+hayes-carll-intro clip as 44.1 kHz stereo AIFF = 667,975,734 bytes,
+`project.json` byteCount updated, `plan.json` from the fixture). Opened in the
+app, made one edit (autosave), then ten explicit saves.
+
+| checkpoint | `.pie` size (`du -sk`) | Versions count (`NSFileVersion.otherVersionsOfItem`) | free-disk delta |
+| --- | --- | --- | --- |
+| open | 652,344 KB | 0 | — |
+| after autosave | 652,344 KB | 1 | ≈ −106 MB |
+| after save 1 | 652,344 KB | 2 | ≈ −423 MB |
+| after save 2 | 652,344 KB | 3 | ≈ −141 MB |
+| after saves 3–10 | 652,344 KB | 11 | flat |
+
+Total free-disk drop ≈ 670 MB ≈ one copy of the audio, spread over the first
+three checkpoints (Versions preserves the original asynchronously), then flat
+for eight more saves. The package itself never grew: the audio child is
+reused in place and only `project.json`/`plan.json` are rewritten.
+`~/Library/Containers/<bundle>/Data/Library/Autosave Information/` is empty
+(the app is not sandboxed, so there is no container); autosave writes into
+the package in place. `.DocumentRevisions-V100` is root-only, so the
+per-version cost was measured via free-disk deltas rather than `du`.
+
+Conclusion: the spec A5 "reuse the audio `FileWrapper` child" assumption
+holds under the real NSDocument autosave path. One extra copy of the audio
+on disk after the first save is the expected Versions baseline, not a
+per-checkpoint leak.
+
+### S1 — real CI run (Xcode 16.4 / macOS 15.0 / Swift 6.0)
+
+Pending the PR's first CI run; result recorded on the PR.
