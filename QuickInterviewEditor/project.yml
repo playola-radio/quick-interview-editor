@@ -28,6 +28,8 @@ targets:
     platform: macOS
     sources:
       - path: QuickInterviewEditor
+      - path: Resources/PieDocument.icns
+        buildPhase: resources
       - path: Resources/Fixtures/edit-plan.json
         buildPhase: resources
       - path: Resources/Fixtures/project-state.json
@@ -59,6 +61,7 @@ targets:
         UTExportedTypeDeclarations:
           - UTTypeIdentifier: fm.playola.interview-editor.project
             UTTypeDescription: Playola Interview Editor Project
+            UTTypeIconFile: PieDocument
             UTTypeConformsTo:
               - com.apple.package
               - public.composite-content
@@ -68,6 +71,7 @@ targets:
         CFBundleDocumentTypes:
           - CFBundleTypeName: Playola Interview Editor Project
             CFBundleTypeRole: Editor
+            CFBundleTypeIconFile: PieDocument
             LSTypeIsPackage: true
             LSItemContentTypes:
               - fm.playola.interview-editor.project
