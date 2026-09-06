@@ -23,7 +23,13 @@ struct ProjectHostView: View {
     content
       .focusedSceneValue(\.projectModel, model)
       .onChange(of: undoManager, initial: true) { _, manager in document.undoManager = manager }
-      .onAppear { launch.viewAppeared() }
+      // Wire the document's weak indicator to the RETAINED model's own SaveStatus (never a
+      // fresh one made in init — SwiftUI reuses the @State model across view re-inits, so a
+      // per-init SaveStatus would orphan the visible indicator). Idempotent across re-appears.
+      .onAppear {
+        document.saveStatus = model.saveStatus
+        launch.viewAppeared()
+      }
       .task { await model.viewAppeared() }
       .onDisappear { Task { await model.viewDisappeared() } }
   }

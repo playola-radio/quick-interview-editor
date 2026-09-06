@@ -36,16 +36,20 @@ final class ProjectModel: ViewModel {
   /// Where the opened package lives on disk; hydration reads `audio/canonical.aiff` from it.
   /// `nil` for an untitled window.
   @ObservationIgnored private let packageURL: URL?
+  /// The window's autosave indicator, written by the document and read by the toolbar. Owned here
+  /// so the view reads its display values off the model like everything else.
+  let saveStatus: SaveStatus
 
   init(
     file: ProjectFile?, plan: EditPlan?, audio: CanonicalAudioSource?, packageURL: URL? = nil,
-    sink: ProjectDocumentSink
+    sink: ProjectDocumentSink, saveStatus: SaveStatus = SaveStatus()
   ) {
     self.sink = sink
     self.file = file
     self.loadedPlan = plan
     self.loadedAudio = audio
     self.packageURL = packageURL
+    self.saveStatus = saveStatus
     self.phase = file == nil ? .empty : .queued
     super.init()
   }
@@ -105,6 +109,10 @@ final class ProjectModel: ViewModel {
     }
   }
   var showsEditor: Bool { phase == .loaded }
+  /// The autosave indicator only reads once there is a loaded project to save.
+  var showsSaveStatus: Bool { phase == .loaded }
+  var saveStatusLabel: String { saveStatus.label }
+  var isSaving: Bool { saveStatus.isSaving }
   var showsError: Bool { errorMessage != nil }
   /// Only a run started in this window can be cancelled; hydrating an opened package can't.
   var showsCancel: Bool {

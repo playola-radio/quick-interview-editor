@@ -87,7 +87,17 @@ struct ProjectDocumentTests {
   @Test func snapshotReturnsTheCurrentContent() throws {
     let document = try ProjectDocument(reading: try fixturePackage())
     let snapshot = try document.snapshot(contentType: .pieProject)
-    expectNoDifference(snapshot, document.content)
+    expectNoDifference(snapshot.content, document.content)
+  }
+
+  @Test func snapshotCarriesTheCurrentEditGeneration() throws {
+    let document = try ProjectDocument(reading: try fixturePackage())
+    expectNoDifference(try document.snapshot(contentType: .pieProject).editGeneration, 0)
+
+    document.sink.registerChange()
+    document.sink.registerChange()
+
+    expectNoDifference(try document.snapshot(contentType: .pieProject).editGeneration, 2)
   }
 
   @Test func snapshotIsTakenOffTheMainActorAfterAMainActorCommit() async throws {
@@ -101,7 +111,7 @@ struct ProjectDocumentTests {
       .value
 
     expectNoDifference(
-      snapshot,
+      snapshot.content,
       ProjectDocument.Content(
         file: file, plan: plan, audio: .sessionFile(URL(fileURLWithPath: "/tmp/session.aiff"))))
   }
@@ -264,6 +274,18 @@ struct ProjectDocumentTests {
     let document = ProjectDocument()
     document.sink.registerChange()
     #expect(document.undoManager == nil)
+  }
+
+  @Test func registerChangeMarksTheSaveStatusSaving() {
+    let document = ProjectDocument()
+    let status = SaveStatus()
+    document.saveStatus = status
+    #expect(!status.isSaving)
+
+    document.sink.registerChange()
+
+    #expect(status.isSaving)
+    expectNoDifference(status.label, "Saving…")
   }
 }
 
