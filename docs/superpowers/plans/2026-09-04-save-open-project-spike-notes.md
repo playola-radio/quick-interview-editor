@@ -246,7 +246,11 @@ per-checkpoint leak.
 
 ### S1 — real CI run (Xcode 16.4 / macOS 15.0 / Swift 6.0)
 
-Pending the PR's first CI run; result recorded on the PR.
+**PASS.** PR #76's first CI run (workflow run 34004272572, commit 7d2adb9)
+built and ran the full suite on the `Xcode app (macOS)` job under Xcode 16.4 /
+macOS 15 / Swift 6.0 with no diagnostics. The `nonisolated init` +
+`Mutex`-backed `ReferenceFileDocument` compiled cleanly on the older toolchain,
+so the Xcode 26/27-vs-16.4 skew that bit earlier PRs did not apply here.
 
 ## Codex review + challenge (PR 4) — dispositions
 
