@@ -345,7 +345,13 @@ final class ProjectModel: ViewModel {
     // Content-hash the bundled canonical AIFF (off-main), so a re-transcribe from a saved copy
     // keys on the audio's own identity rather than the original MP3's (spec A8, Task 5.1).
     let canonicalFingerprint = await SourceFingerprint.make(for: result.canonicalAudioURL)
-    guard !Task.isCancelled else { return }
+    guard !Task.isCancelled else {
+      // Cancelled after the engine produced this AIFF but before it was committed: nothing
+      // references it (no commit, no save), so remove the orphaned session copy rather than
+      // leak it until the weekly reap — mirrors hydrate()'s clone-on-cancel cleanup.
+      canonicalAudioStore.remove(result.canonicalAudioURL)
+      return
+    }
     let newSource = makeProjectSource(
       input: input, sourceFingerprint: sourceFingerprint, editPlan: result.editPlan,
       canonicalFingerprint: canonicalFingerprint, canonicalByteCount: byteCount)
@@ -489,8 +495,12 @@ final class ProjectModel: ViewModel {
   /// autosaves on. The commit carries `nil` plan/audio because a content edit never touches
   /// those. Diffing discipline is the editor's: it only fires for a real post-init change.
   private func wireEditor(_ editor: EditorModel) {
-    editor.onDocumentStateChanged = { [weak self] state in
-      guard let self, var file = self.file else { return }
+    editor.onDocumentStateChanged = { [weak self, weak editor] state in
+      // A retired editor (its window re-transcribed or closed) can still finish in-flight async
+      // work — e.g. a buffered cut-suggestion completion — and fire this callback. Only the
+      // model's current editor may drive the document; a stale one would clobber the
+      // freshly-transcribed content committed after teardown.
+      guard let self, let editor, self.editor === editor, var file = self.file else { return }
       file.content = state
       self.file = file
       self.sink.commit(file, nil, nil)

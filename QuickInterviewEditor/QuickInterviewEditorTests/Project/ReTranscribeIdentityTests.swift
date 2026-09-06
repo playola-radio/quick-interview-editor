@@ -111,4 +111,35 @@ struct ReTranscribeIdentityTests {
     expectNoDifference(commit.file.source.canonicalByteCount, 4096)
     expectNoDifference(commit.file.content.speakerCountOverride, 5)
   }
+
+  @Test func aRetiredEditorCannotClobberDocumentContentAfterReTranscribe() async throws {
+    let (sink, record) = ProjectDocumentSink.recorder()
+    let model = ProjectModel(
+      file: Fixtures.projectFile(
+        source: Fixtures.projectSource(
+          originalFingerprint: "sha256:original-mp3", canonicalFingerprint: "sha256:canonical")),
+      plan: Fixtures.editPlan(), audio: .sessionFile(Fixtures.canonicalAudioURL), sink: sink)
+
+    try await withDependencies {
+      $0.continuousClock = TestClock()
+      $0.date = .constant(importedAt)
+      $0.canonicalAudioStore.remove = { _ in }
+      $0.transcription.transcribe = { _, _, _ in
+        engineEvents([.completed(Fixtures.transcriptionResult(Fixtures.editPlan()))])
+      }
+    } operation: {
+      await model.viewAppeared()
+      let retired = try #require(model.editor)
+      await model.reimportIgnoringCacheTapped()
+      let current = try #require(model.editor)
+      #expect(retired !== current)
+
+      // A buffered async completion on the retired editor (e.g. a late cut-suggestion) fires its
+      // document callback after the re-transcribe committed. It must be ignored.
+      let commitsBefore = record.commits.count
+      retired.mutateDocument { $0.speakerCountOverride = 99 }
+      expectNoDifference(record.commits.count, commitsBefore)
+      #expect(record.commits.last?.file.content.speakerCountOverride != 99)
+    }
+  }
 }
