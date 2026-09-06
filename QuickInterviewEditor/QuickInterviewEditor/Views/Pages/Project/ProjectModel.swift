@@ -107,9 +107,12 @@ final class ProjectModel: ViewModel {
     return !transcriptionTask.isCancelled
   }
   var isLoaded: Bool { phase == .loaded }
-  /// Only a source imported in this session can be re-transcribed; a project opened from disk
-  /// re-transcribes from its bundled AIFF in PR 5.
-  var canReimport: Bool { isLoaded && sourceURL != nil }
+  /// A loaded project can be re-transcribed: a source imported this session re-runs that source;
+  /// a project opened from disk re-transcribes its bundled canonical AIFF (spec A8).
+  var canReimport: Bool {
+    guard isLoaded else { return false }
+    return sourceURL != nil || (file != nil && loadedAudio?.sessionURL != nil)
+  }
   /// A drop or open replaces nothing: only an empty or failed window takes new audio.
   var acceptsImport: Bool {
     switch phase {
@@ -165,7 +168,7 @@ final class ProjectModel: ViewModel {
 
   func filePicked(_ url: URL) {
     guard acceptsImport else { return }
-    beginTranscription(of: url, policy: .useCache)
+    beginTranscription(of: .importedSource(url), policy: .useCache)
   }
 
   /// Surface (don't swallow) an open-panel failure.
@@ -177,14 +180,14 @@ final class ProjectModel: ViewModel {
   /// whether the drop was taken so the view can report it to the drag session.
   func fileDropped(_ urls: [URL]) -> Bool {
     guard acceptsImport, let url = urls.first(where: Self.isAudioFile) else { return false }
-    beginTranscription(of: url, policy: .useCache)
+    beginTranscription(of: .importedSource(url), policy: .useCache)
     return true
   }
 
   /// Imports a source audio file and waits for the run to finish (the view-facing entry points
   /// above start the same run without waiting).
   func importAudioTapped(_ url: URL) async {
-    await beginTranscription(of: url, policy: .useCache).value
+    await beginTranscription(of: .importedSource(url), policy: .useCache).value
   }
 
   /// Abandons the running transcription. An untitled window returns to its empty state; a
@@ -201,17 +204,28 @@ final class ProjectModel: ViewModel {
   /// package.
   func retryTapped() async {
     if let sourceURL {
-      await beginTranscription(of: sourceURL, policy: .useCache).value
+      await beginTranscription(of: .importedSource(sourceURL), policy: .useCache).value
     } else if file != nil {
       phase = .queued
       await hydrate()
     }
   }
 
-  /// Re-transcribes this session's source ignoring any cached result, overwriting the entry.
+  /// Re-transcribes ignoring any cached result, overwriting the entry: this session's source if
+  /// one was imported, otherwise a saved project's bundled canonical AIFF (keyed on its stored
+  /// `canonicalFingerprint`, spec A8).
   func reimportIgnoringCacheTapped() async {
-    guard canReimport, let sourceURL else { return }
-    await beginTranscription(of: sourceURL, policy: .forceFresh).value
+    guard canReimport, let input = reimportInput else { return }
+    await beginTranscription(of: input, policy: .forceFresh).value
+  }
+
+  /// What a re-import re-transcribes. `canReimport` guarantees exactly one is available.
+  private var reimportInput: TranscriptionInput? {
+    if let sourceURL { return .importedSource(sourceURL) }
+    if let file, let canonicalURL = loadedAudio?.sessionURL {
+      return .bundledCanonical(canonicalURL, source: file.source)
+    }
+    return nil
   }
 
   /// For a window opened from a decoded package: hydrates the audio and builds the editor.
@@ -236,32 +250,42 @@ final class ProjectModel: ViewModel {
     return UTType(filenameExtension: url.pathExtension)?.conforms(to: .audio) ?? false
   }
 
+  /// What a transcription run reads and how its output is identified.
+  private enum TranscriptionInput {
+    /// A source audio file imported this session. Its cache keys to the content hash of the file,
+    /// and it becomes the window's re-runnable `sourceURL`.
+    case importedSource(URL)
+    /// A saved project's bundled canonical AIFF, re-transcribed in place. Keyed on the stored
+    /// `canonicalFingerprint` (not the original MP3's) so a Versions-restored or copied `.pie`
+    /// never collides with the original import's cache entry; the original source identity in
+    /// `source` is preserved across the run (spec A8).
+    case bundledCanonical(URL, source: ProjectSource)
+  }
+
   /// Starts one transcription run as a stored task so Cancel and window close can stop it. A
   /// run already in flight is cancelled and allowed to unwind first, so teardown never races.
   @discardableResult
-  private func beginTranscription(of url: URL, policy: CachePolicy) -> Task<Void, Never> {
+  private func beginTranscription(of input: TranscriptionInput, policy: CachePolicy) -> Task<
+    Void, Never
+  > {
     let previous = transcriptionTask
     previous?.cancel()
     let task = Task { [weak self] in
       await previous?.value
-      await self?.transcribe(url, policy: policy)
+      await self?.transcribe(input, policy: policy)
     }
     transcriptionTask = task
     return task
   }
 
-  private func transcribe(_ url: URL, policy: CachePolicy) async {
+  private func transcribe(_ input: TranscriptionInput, policy: CachePolicy) async {
     await tearDownEditor()
     guard !Task.isCancelled else { return }
-    sourceURL = url
     resetProgress()
     phase = .queued
-    // Content-hash the source once (off-main) BEFORE the engine reads it, so the cache keys to
-    // the bytes we're actually transcribing. Falls back to the path if unreadable.
-    let fingerprint = await SourceFingerprint.make(for: url)
-    guard !Task.isCancelled else { return }
-    let seed = documentSeed(fingerprint: fingerprint)
-    let job = TranscriptionJob(source: url, sourceFingerprint: fingerprint, policy: policy)
+    guard let (jobSource, jobFingerprint) = await resolveJob(for: input) else { return }
+    let seed = documentSeed(input: input, fingerprint: jobFingerprint)
+    let job = TranscriptionJob(source: jobSource, sourceFingerprint: jobFingerprint, policy: policy)
     let events = await transcriptionQueue.enqueue(job)
     guard !Task.isCancelled else { return }
     phase = .transcribing(nil)
@@ -275,7 +299,8 @@ final class ProjectModel: ViewModel {
         case .progress(let progress):
           applyProgress(progress)
         case .completed(let result):
-          loadCompletedTranscription(result, url: url, fingerprint: fingerprint, seed: seed)
+          await loadCompletedTranscription(
+            result, input: input, sourceFingerprint: jobFingerprint, seed: seed)
         }
       }
     } catch is CancellationError {
@@ -285,9 +310,28 @@ final class ProjectModel: ViewModel {
     }
   }
 
+  /// Resolves what the engine reads and the fingerprint its cache keys on. An imported source is
+  /// content-hashed once (off-main) BEFORE the engine reads it, falling back to the path when
+  /// unreadable; a bundled re-transcribe reuses the stored canonical fingerprint verbatim. Returns
+  /// nil if the task was cancelled while hashing.
+  private func resolveJob(for input: TranscriptionInput) async -> (
+    source: URL, fingerprint: String
+  )? {
+    switch input {
+    case .importedSource(let url):
+      sourceURL = url
+      let fingerprint = await SourceFingerprint.make(for: url)
+      guard !Task.isCancelled else { return nil }
+      return (url, fingerprint)
+    case .bundledCanonical(let canonicalURL, let source):
+      return (canonicalURL, source.canonicalFingerprint)
+    }
+  }
+
   private func loadCompletedTranscription(
-    _ result: TranscriptionResult, url: URL, fingerprint: String, seed: DocumentSeed
-  ) {
+    _ result: TranscriptionResult, input: TranscriptionInput, sourceFingerprint: String,
+    seed: DocumentSeed
+  ) async {
     // The package records the canonical AIFF's size so a later open can refuse audio that was
     // truncated or swapped (ProjectPackage.verifyAudio). Read it from the file system, never by
     // loading the (potentially multi-GB) file.
@@ -298,12 +342,23 @@ final class ProjectModel: ViewModel {
       phase = .failed(missingCanonicalAudioMessage)
       return
     }
+    // Content-hash the bundled canonical AIFF (off-main), so a re-transcribe from a saved copy
+    // keys on the audio's own identity rather than the original MP3's (spec A8, Task 5.1).
+    let canonicalFingerprint = await SourceFingerprint.make(for: result.canonicalAudioURL)
+    guard !Task.isCancelled else { return }
+    let newSource = makeProjectSource(
+      input: input, sourceFingerprint: sourceFingerprint, editPlan: result.editPlan,
+      canonicalFingerprint: canonicalFingerprint, canonicalByteCount: byteCount)
+    // The editor's identity is the source it belongs to: the original file's name (export stems)
+    // and fingerprint (the cut-suggester sidecar key), stable across a bundled re-transcribe.
     let editor = buildEditor(
-      sourceURL: url, canonicalAudioURL: result.canonicalAudioURL, editPlan: result.editPlan,
-      fingerprint: fingerprint, seed: seed.content(for: result.editPlan))
-    let newFile = makeProjectFile(
-      url: url, fingerprint: fingerprint, editPlan: result.editPlan,
-      canonicalByteCount: byteCount, content: editor.documentState)
+      sourceURL: URL(fileURLWithPath: newSource.originalFileName),
+      canonicalAudioURL: result.canonicalAudioURL, editPlan: result.editPlan,
+      fingerprint: newSource.originalFingerprint, seed: seed.content(for: result.editPlan))
+    let newFile = ProjectFile(
+      schemaVersion: ProjectFile.currentSchemaVersion, source: newSource,
+      engine: ProjectEngineInfo(engineFingerprint: engineFingerprint.current()),
+      content: editor.documentState)
     let replacedAudio = loadedAudio
     self.editor = editor
     file = newFile
@@ -392,11 +447,18 @@ final class ProjectModel: ViewModel {
     }
   }
 
-  private func documentSeed(fingerprint: String) -> DocumentSeed {
-    if let file, file.source.originalFingerprint == fingerprint {
-      return DocumentSeed(content: file.content, plan: loadedPlan)
+  private func documentSeed(input: TranscriptionInput, fingerprint: String) -> DocumentSeed {
+    switch input {
+    case .bundledCanonical:
+      // Re-transcribing the project's own audio always keeps the current document (re-keyed if the
+      // new words differ); the legacy sidecar migration never applies to an already-loaded project.
+      return DocumentSeed(content: file?.content ?? EditorDocumentState(), plan: loadedPlan)
+    case .importedSource:
+      if let file, file.source.originalFingerprint == fingerprint {
+        return DocumentSeed(content: file.content, plan: loadedPlan)
+      }
+      return DocumentSeed(content: migrationSeed(fingerprint: fingerprint), plan: nil)
     }
-    return DocumentSeed(content: migrationSeed(fingerprint: fingerprint), plan: nil)
   }
 
   /// Seeds the editor's document from the legacy per-file `.projectState` sidecar, once, on
@@ -436,19 +498,20 @@ final class ProjectModel: ViewModel {
     }
   }
 
-  private func makeProjectFile(
-    url: URL, fingerprint: String, editPlan: EditPlan, canonicalByteCount: Int,
-    content: EditorDocumentState
-  ) -> ProjectFile {
-    ProjectFile(
-      schemaVersion: ProjectFile.currentSchemaVersion,
-      source: ProjectSource(
+  /// The `ProjectSource` for a completed run. A fresh import builds it from the imported file; a
+  /// bundled re-transcribe preserves the existing original-source identity and refreshes only the
+  /// canonical audio fields and the plan-derived format fields.
+  private func makeProjectSource(
+    input: TranscriptionInput, sourceFingerprint: String, editPlan: EditPlan,
+    canonicalFingerprint: String, canonicalByteCount: Int
+  ) -> ProjectSource {
+    switch input {
+    case .importedSource(let url):
+      return ProjectSource(
         originalFileName: url.lastPathComponent,
         originalPath: url.path,
-        originalFingerprint: fingerprint,
-        // canonicalFingerprint is computed on the bundled AIFF in PR 5 (Task 5.1), where it
-        // keys the re-transcribe cache; empty until then.
-        canonicalFingerprint: "",
+        originalFingerprint: sourceFingerprint,
+        canonicalFingerprint: canonicalFingerprint,
         canonicalByteCount: canonicalByteCount,
         // The `.pie` package stores whole seconds only; floor here so the committed
         // in-memory `ProjectFile` matches what reopening the saved package yields
@@ -456,9 +519,15 @@ final class ProjectModel: ViewModel {
         importedAt: Date(timeIntervalSince1970: date.now.timeIntervalSince1970.rounded(.down)),
         sampleRate: editPlan.source.sampleRate,
         channels: editPlan.source.channels,
-        durationSamples: editPlan.source.durationSamples),
-      engine: ProjectEngineInfo(engineFingerprint: engineFingerprint.current()),
-      content: content)
+        durationSamples: editPlan.source.durationSamples)
+    case .bundledCanonical(_, var source):
+      source.canonicalFingerprint = canonicalFingerprint
+      source.canonicalByteCount = canonicalByteCount
+      source.sampleRate = editPlan.source.sampleRate
+      source.channels = editPlan.source.channels
+      source.durationSamples = editPlan.source.durationSamples
+      return source
+    }
   }
 
   /// Applies one engine progress event to the on-screen state. Resets the monotonic clamp and
