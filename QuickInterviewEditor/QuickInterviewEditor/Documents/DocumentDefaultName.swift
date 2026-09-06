@@ -33,12 +33,24 @@ struct DocumentDefaultName: NSViewRepresentable {
     /// (unsaved) document, and only when it differs — so a re-run during transcription progress
     /// or after saving is a no-op.
     func applyIfNeeded() {
-      guard let suggestedName, !suggestedName.isEmpty,
-        let document = window?.windowController?.document as? NSDocument,
-        document.fileURL == nil,
-        document.displayName != suggestedName
+      guard let document = window?.windowController?.document as? NSDocument,
+        let name = Self.nameToApply(
+          suggested: suggestedName, currentDisplayName: document.displayName,
+          isSaved: document.fileURL != nil)
       else { return }
-      document.displayName = suggestedName
+      document.displayName = name
+    }
+
+    /// The display name to write, or `nil` to leave the document alone. Pure so the branching —
+    /// empty/absent suggestion, already-applied, and "never touch a saved document" — is testable
+    /// without a live `NSWindow`/`NSDocument` hierarchy.
+    static func nameToApply(suggested: String?, currentDisplayName: String, isSaved: Bool)
+      -> String?
+    {
+      guard let suggested, !suggested.isEmpty, !isSaved, currentDisplayName != suggested else {
+        return nil
+      }
+      return suggested
     }
   }
 }
