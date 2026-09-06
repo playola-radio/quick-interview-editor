@@ -27,6 +27,9 @@ final class ProjectModel: ViewModel {
   @ObservationIgnored private var file: ProjectFile?
   @ObservationIgnored private var loadedPlan: EditPlan?
   @ObservationIgnored private var loadedAudio: CanonicalAudioSource?
+  /// Session copies a re-transcribe has replaced. A save snapshot taken before the replacement
+  /// commit may still point at one, so they are only deleted once the window closes.
+  @ObservationIgnored private var retiredSessionAudio: [URL] = []
   /// Where the opened package lives on disk; hydration reads `audio/canonical.aiff` from it.
   /// `nil` for an untitled window.
   @ObservationIgnored private let packageURL: URL?
@@ -224,7 +227,7 @@ final class ProjectModel: ViewModel {
     stopTicking()
     await transcriptionTask?.value
     await tearDownEditor()
-    releaseSessionAudio(loadedAudio)
+    releaseSessionAudio()
   }
 
   // MARK: - Private Helpers
@@ -310,11 +313,12 @@ final class ProjectModel: ViewModel {
     // A completed transcription is the first thing worth keeping (spec A7): an untitled window
     // must go dirty here so closing it asks to save and autosave arms.
     sink.registerChange()
-    // Only now is the previous session audio unreferenced by the document (spec A5: re-transcribe
-    // replaces plan + audio in one commit). Releasing it any earlier would leave a failed or
-    // cancelled run pointing a save at a deleted file.
-    if replacedAudio?.sessionURL != result.canonicalAudioURL {
-      releaseSessionAudio(replacedAudio)
+    // The document no longer references the previous session audio (spec A5: re-transcribe
+    // replaces plan + audio in one commit), but a save already snapshotted may. Retire it —
+    // deleting it here or earlier would point that save, or a failed or cancelled run's save, at
+    // a missing file.
+    if let replaced = replacedAudio?.sessionURL, replaced != result.canonicalAudioURL {
+      retiredSessionAudio.append(replaced)
     }
   }
 
@@ -489,8 +493,7 @@ final class ProjectModel: ViewModel {
 
   /// Cancel export, stop playback, and let the cancelled render unwind — so a re-import or window
   /// close never leaves stale playback or export work running. The session audio is deliberately
-  /// not released here: the document keeps referencing it until a replacement is committed
-  /// (`loadCompletedTranscription`) or the window closes (`viewDisappeared`).
+  /// not released here: the document keeps referencing it until the window closes.
   private func tearDownEditor() async {
     if let previous = editor {
       previous.cancelExportTapped()
@@ -500,11 +503,13 @@ final class ProjectModel: ViewModel {
     editor = nil
   }
 
-  /// Deletes a session copy of the canonical AIFF (derived data, rebuildable by re-transcribing).
-  /// Only safe once no editor is playing or rendering from it (`tearDownEditor`) and the document
-  /// no longer points a save at it.
-  private func releaseSessionAudio(_ source: CanonicalAudioSource?) {
-    guard let url = source?.sessionURL else { return }
-    canonicalAudioStore.remove(url)
+  /// Deletes this window's session copies of the canonical AIFF (derived data, rebuildable by
+  /// re-transcribing): the one in use plus any a re-transcribe retired. Only safe once no editor
+  /// is playing or rendering from them (`tearDownEditor`) and no save can still need them —
+  /// i.e. on window close, after the close-save.
+  private func releaseSessionAudio() {
+    for url in retiredSessionAudio { canonicalAudioStore.remove(url) }
+    retiredSessionAudio = []
+    if let url = loadedAudio?.sessionURL { canonicalAudioStore.remove(url) }
   }
 }

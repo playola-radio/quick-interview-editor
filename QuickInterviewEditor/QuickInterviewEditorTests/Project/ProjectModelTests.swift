@@ -392,7 +392,8 @@ struct ProjectModelTests {
     expectNoDifference(record.commits.count, 2)
     expectNoDifference(record.commits.last?.file.source.canonicalByteCount, 20)
     expectNoDifference(record.registerChangeCount, 2)
-    expectNoDifference(removed.value, [first])
+    // The first run's audio is retired, not deleted, while the window is open.
+    expectNoDifference(removed.value, [])
   }
 
   @Test func viewAppearedIsANoOpForAnEmptyModel() async {
@@ -689,7 +690,7 @@ struct ProjectModelTests {
     expectNoDifference(removed.value, [])
   }
 
-  @Test func aSuccessfulReimportReleasesThePriorSessionAudioOnlyAfterTheCommit() async throws {
+  @Test func aSuccessfulReimportRetiresThePriorSessionAudioUntilTheWindowCloses() async throws {
     let first = try temporaryCanonicalAudio(bytes: 10, name: "qie-project-first")
     let second = try temporaryCanonicalAudio(bytes: 20, name: "qie-project-second")
     defer {
@@ -697,18 +698,14 @@ struct ProjectModelTests {
       try? FileManager.default.removeItem(at: second)
     }
     let canonicals = LockIsolated<[URL]>([first, second])
-    let removed = LockIsolated<[(url: URL, commitsSoFar: Int)]>([])
+    let removed = LockIsolated<[URL]>([])
     let (sink, record) = ProjectDocumentSink.recorder()
     let model = ProjectModel(file: nil, plan: nil, audio: nil, sink: sink)
 
     await withDependencies {
       $0.continuousClock = TestClock()
       $0.date = .constant(importedAt)
-      $0.canonicalAudioStore.remove = { url in
-        // The model releases audio on the main actor; read the recorder there too.
-        let commitsSoFar = MainActor.assumeIsolated { record.commits.count }
-        removed.withValue { $0.append((url, commitsSoFar)) }
-      }
+      $0.canonicalAudioStore.remove = { url in removed.withValue { $0.append(url) } }
       $0.transcription.transcribe = { _, _, _ in
         let url = canonicals.withValue { $0.removeFirst() }
         return engineEvents([
@@ -718,12 +715,14 @@ struct ProjectModelTests {
     } operation: {
       await model.importAudioTapped(URL(fileURLWithPath: "/clip.m4a"))
       await model.reimportIgnoringCacheTapped()
+      expectNoDifference(record.commits.last?.audio, .sessionFile(second))
+      // A save snapshotted before the replacement commit may still read the first copy, so it
+      // outlives the commit and goes with the window.
+      expectNoDifference(removed.value, [])
+      await model.viewDisappeared()
     }
 
-    expectNoDifference(record.commits.last?.audio, .sessionFile(second))
-    expectNoDifference(removed.value.map(\.url), [first])
-    // Released after the replacement commit, never before it.
-    expectNoDifference(removed.value.map(\.commitsSoFar), [2])
+    expectNoDifference(removed.value, [first, second])
   }
 
   @Test func closingTheWindowAfterAFailedReimportReleasesTheRetainedAudio() async throws {
