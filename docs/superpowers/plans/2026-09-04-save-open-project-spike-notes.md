@@ -247,3 +247,42 @@ per-checkpoint leak.
 ### S1 — real CI run (Xcode 16.4 / macOS 15.0 / Swift 6.0)
 
 Pending the PR's first CI run; result recorded on the PR.
+
+## Codex review + challenge (PR 4) — dispositions
+
+Run on the finished branch (review via `codex exec` over the diff, then an
+adversarial challenge). Six findings.
+
+**Fixed:**
+- **Transcription commit never dirtied the document** (P1, both passes): the
+  first import into an untitled window committed the new package values but
+  never called `registerChange()`, so the window stayed clean, autosave never
+  armed, and closing it discarded the transcription without asking. Spec A7
+  names the transcription commit as the first dirtying change. Fixed in
+  `loadCompletedTranscription`; tests now expect one registered change per
+  import (the earlier expectation of zero was wrong).
+- **Reused package audio skipped the byte-count gate** (P1, both passes): the
+  save path that keeps the on-disk `audio/canonical.aiff` child only checked
+  that it was a regular file, so metadata could be rewritten over a truncated
+  or swapped AIFF. `verifyAudio` now runs before `rewriteMetadata`.
+- **Hydration trusted the by-path copy** (P1): open verified the package, but
+  hydration re-read the audio by URL later; a package rewritten in between
+  would hand the editor mismatched audio. The clone's size is now checked
+  against the recorded byte count before the editor is built, and the clone
+  is removed on mismatch.
+- **Clone orphaned when the window closed mid-copy** (P2): the detached copy
+  ignores cancellation, and `hydrate()` returned without deleting the result.
+  It now removes the clone. Removal goes through a new
+  `CanonicalAudioStoreClient.remove` endpoint so tests can point it at their
+  own store base (the static `remove` refuses paths outside the real cache).
+
+**Deferred by design:**
+- **`canonicalFingerprint` is still `""`** (P1 by Codex's severity): a
+  same-size AIFF swap passes the byte-count gate. This is PR 5's scope by the
+  plan; the byte-count gate is the agreed PR 4 integrity check.
+- **Session audio lifetime vs. an in-flight save** (P2): re-import tears the
+  old editor down and deletes its session AIFF while an autosave of the old
+  snapshot could still be reading it. The save then fails the byte-count
+  guard rather than writing bad audio, and NSDocument retries autosave, so the
+  failure mode is a skipped autosave, not corruption. Tying audio lifetime to
+  pending document writes is a follow-up.
