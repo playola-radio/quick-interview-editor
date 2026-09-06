@@ -33,7 +33,7 @@ struct LiveEngineCancelTests {
     // Keep consuming; the shim emits one progress event then blocks, so this task
     // stays suspended in `for await` until we cancel it below. Cancelling the task
     // (not breaking out of the loop) is the real user-cancel path —
-    // SongTabModel.cancel() -> task.cancel() -> stream throws CancellationError ->
+    // ProjectModel.cancelTranscriptionTapped() -> task.cancel() -> stream throws CancellationError ->
     // onTermination -> terminate().
     let consume = Task {
       for try await _ in LiveEngine.transcribe(audio: URL(fileURLWithPath: "/tmp/unused.m4a")) {}
