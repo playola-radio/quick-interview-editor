@@ -90,6 +90,22 @@ struct ProjectDocumentTests {
     expectNoDifference(snapshot, document.content)
   }
 
+  @Test func snapshotIsTakenOffTheMainActorAfterAMainActorCommit() async throws {
+    // NSDocument saves asynchronously and asks for the snapshot on a background thread.
+    let document = ProjectDocument()
+    let file = Fixtures.projectFile()
+    let plan = Fixtures.editPlan()
+    document.sink.commit(file, plan, .sessionFile(URL(fileURLWithPath: "/tmp/session.aiff")))
+
+    let snapshot = try await Task.detached { try document.snapshot(contentType: .pieProject) }
+      .value
+
+    expectNoDifference(
+      snapshot,
+      ProjectDocument.Content(
+        file: file, plan: plan, audio: .sessionFile(URL(fileURLWithPath: "/tmp/session.aiff"))))
+  }
+
   // MARK: - Writing
 
   @Test func saveReusesTheExistingPackageAudioWrapperWhenAudioIsUnchanged() throws {

@@ -1,6 +1,8 @@
+import AppKit
 import Foundation
 import IssueReporting
 import SwiftUI
+import Synchronization
 import UniformTypeIdentifiers
 
 extension UTType {
@@ -24,8 +26,9 @@ enum ProjectDocumentError: Error, Equatable, LocalizedError {
 /// The `ReferenceFileDocument` behind every `.pie` window (spec A2/A3). Deliberately thin: it
 /// holds the decoded values, hands them to a `ProjectModel` through a `ProjectDocumentSink`, and
 /// turns the model's commits back into a package on save. The document system calls
-/// `init(configuration:)` and `fileWrapper(snapshot:configuration:)` off the main thread and
-/// `snapshot(contentType:)` on it, hence the `nonisolated` hooks around main-actor state.
+/// `init(configuration:)`, `snapshot(contentType:)` and `fileWrapper(snapshot:configuration:)`
+/// off the main thread (NSDocument saves asynchronously), so the saved values live behind a
+/// lock rather than on the main actor.
 @MainActor
 final class ProjectDocument: ReferenceFileDocument {
 
@@ -39,8 +42,13 @@ final class ProjectDocument: ReferenceFileDocument {
 
   nonisolated static var readableContentTypes: [UTType] { [.pieProject] }
 
-  /// `nil` for an untitled window until its first transcription commits.
-  var content: Content?
+  /// `nil` for an untitled window until its first transcription commits. Written by main-actor
+  /// commits, read by the document system's background save; the lock keeps both honest.
+  nonisolated var content: Content? {
+    get { latest.withLock { $0 } }
+    set { latest.withLock { $0 = newValue } }
+  }
+  private nonisolated let latest = Mutex<Content?>(nil)
   /// The window's undo manager, supplied by `ProjectHostView` from the SwiftUI environment. It is
   /// the document system's own manager, so one registered action marks the document edited and
   /// schedules autosave (spec A7).
@@ -62,10 +70,8 @@ final class ProjectDocument: ReferenceFileDocument {
   }
 
   nonisolated func snapshot(contentType: UTType) throws -> Content {
-    try MainActor.assumeIsolated {
-      guard let content else { throw ProjectDocumentError.nothingToSave }
-      return content
-    }
+    guard let content else { throw ProjectDocumentError.nothingToSave }
+    return content
   }
 
   nonisolated func fileWrapper(snapshot: Content, configuration: WriteConfiguration) throws
@@ -128,6 +134,16 @@ final class ProjectDocument: ReferenceFileDocument {
     guard let undoManager else { return }
     undoManager.levelsOfUndo = 1
     undoManager.registerUndo(withTarget: self) { _ in }
+    // NSUndoManager closes the implicit per-event group (which is what marks the document
+    // edited) only when AppKit finishes dispatching an event. A change committed from a task
+    // continuation would otherwise stay in an open group, and the window clean, until the next
+    // mouse or key event; a no-op event closes it now.
+    if let nudge = NSEvent.otherEvent(
+      with: .applicationDefined, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0,
+      context: nil, subtype: 0, data1: 0, data2: 0)
+    {
+      NSApp?.postEvent(nudge, atStart: false)
+    }
   }
 
   private func commit(_ file: ProjectFile, plan: EditPlan?, audio: CanonicalAudioSource?) {
