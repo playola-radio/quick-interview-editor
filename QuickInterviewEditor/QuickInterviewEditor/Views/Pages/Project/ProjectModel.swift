@@ -30,6 +30,9 @@ final class ProjectModel: ViewModel {
   /// Session copies a re-transcribe has replaced. A save snapshot taken before the replacement
   /// commit may still point at one, so they are only deleted once the window closes.
   @ObservationIgnored private var retiredSessionAudio: [URL] = []
+  /// The last transcription this window ran, so Retry re-runs exactly that — including a bundled
+  /// re-transcribe of an opened project, which has no `sourceURL` to fall back on.
+  @ObservationIgnored private var lastRun: (input: TranscriptionInput, policy: CachePolicy)?
   /// Where the opened package lives on disk; hydration reads `audio/canonical.aiff` from it.
   /// `nil` for an untitled window.
   @ObservationIgnored private let packageURL: URL?
@@ -88,6 +91,8 @@ final class ProjectModel: ViewModel {
   let progressNote = "This can take several minutes — longer files take longer."
   let missingCanonicalAudioMessage =
     "Transcription finished but its audio file is missing. Try importing again."
+  let uncomputableFingerprintMessage =
+    "Couldn't read the transcribed audio to fingerprint it. Try importing again."
   let missingPackageMessage =
     "This project has no saved location to load its audio from. Reopen it from its .pie file."
 
@@ -200,11 +205,11 @@ final class ProjectModel: ViewModel {
     phase = file == nil ? .empty : .failed("Transcription cancelled.")
   }
 
-  /// Re-runs whatever failed: the last import in this session, or the hydration of an opened
-  /// package.
+  /// Re-runs whatever failed: the last transcription this session (a fresh import or a bundled
+  /// re-transcribe of an opened project), or the hydration of an opened package.
   func retryTapped() async {
-    if let sourceURL {
-      await beginTranscription(of: .importedSource(sourceURL), policy: .useCache).value
+    if let lastRun {
+      await beginTranscription(of: lastRun.input, policy: lastRun.policy).value
     } else if file != nil {
       phase = .queued
       await hydrate()
@@ -279,6 +284,7 @@ final class ProjectModel: ViewModel {
   }
 
   private func transcribe(_ input: TranscriptionInput, policy: CachePolicy) async {
+    lastRun = (input, policy)
     await tearDownEditor()
     guard !Task.isCancelled else { return }
     resetProgress()
@@ -350,6 +356,15 @@ final class ProjectModel: ViewModel {
       // references it (no commit, no save), so remove the orphaned session copy rather than
       // leak it until the weekly reap — mirrors hydrate()'s clone-on-cancel cleanup.
       canonicalAudioStore.remove(result.canonicalAudioURL)
+      return
+    }
+    // The canonical fingerprint is the re-transcribe cache key and must be a real content hash
+    // (spec A8, Task 5.1). SourceFingerprint falls back to a `path:` of the session-local file
+    // when it can't read it; persisting that would key the cache on a per-session path (or
+    // collide across projects), so fail the run and drop the uncommitted session audio instead.
+    guard canonicalFingerprint.hasPrefix("sha256:") else {
+      canonicalAudioStore.remove(result.canonicalAudioURL)
+      phase = .failed(uncomputableFingerprintMessage)
       return
     }
     let newSource = makeProjectSource(

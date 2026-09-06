@@ -142,4 +142,69 @@ struct ReTranscribeIdentityTests {
       #expect(record.commits.last?.file.content.speakerCountOverride != 99)
     }
   }
+
+  @Test func aCanonicalFingerprintThatIsntAContentHashFailsTheRunAndCleansUp() async throws {
+    // A file the fingerprinter can stat (byteCount) but cannot read (mode 000) forces the
+    // `path:` fallback — the one way `canonicalFingerprint` could be a non-sha256 value.
+    let unreadable = try temporaryCanonicalAudio(bytes: 1024)
+    let fm = FileManager.default
+    try fm.setAttributes([.posixPermissions: 0], ofItemAtPath: unreadable.path)
+    defer {
+      try? fm.setAttributes([.posixPermissions: 0o644], ofItemAtPath: unreadable.path)
+      try? fm.removeItem(at: unreadable)
+    }
+    let removed = LockIsolated<[URL]>([])
+    let (sink, record) = ProjectDocumentSink.recorder()
+    let model = ProjectModel(file: nil, plan: nil, audio: nil, sink: sink)
+
+    await withDependencies {
+      $0.continuousClock = TestClock()
+      $0.date = .constant(importedAt)
+      $0.canonicalAudioStore.remove = { url in removed.withValue { $0.append(url) } }
+      $0.transcription.transcribe = { _, _, _ in
+        engineEvents([.completed(Fixtures.transcriptionResult(canonicalAudioURL: unreadable))])
+      }
+    } operation: {
+      await model.importAudioTapped(URL(fileURLWithPath: "/clip.m4a"))
+    }
+
+    expectNoDifference(model.phase, .failed(model.uncomputableFingerprintMessage))
+    expectNoDifference(record.commits, [])
+    expectNoDifference(removed.value, [unreadable])
+  }
+
+  @Test func retryAfterAFailedBundledReTranscribeReRunsTheReTranscribe() async throws {
+    let calls = LockIsolated(0)
+    let (sink, _) = ProjectDocumentSink.recorder()
+    let model = ProjectModel(
+      file: Fixtures.projectFile(
+        source: Fixtures.projectSource(
+          originalFingerprint: "sha256:original", canonicalFingerprint: "sha256:canonical")),
+      plan: Fixtures.editPlan(), audio: .sessionFile(Fixtures.canonicalAudioURL), sink: sink)
+
+    await withDependencies {
+      $0.continuousClock = TestClock()
+      $0.date = .constant(importedAt)
+      $0.canonicalAudioStore.remove = { _ in }
+      $0.transcription.transcribe = { _, _, _ in
+        let attempt = calls.withValue {
+          $0 += 1
+          return $0
+        }
+        return attempt == 1
+          ? engineEvents([], throwing: EngineClientError.engineFailed("flaky"))
+          : engineEvents([.completed(Fixtures.transcriptionResult(Fixtures.editPlan()))])
+      }
+    } operation: {
+      await model.viewAppeared()
+      await model.reimportIgnoringCacheTapped()
+      #expect(model.showsError)
+      await model.retryTapped()
+    }
+
+    // Retry re-ran the bundled re-transcribe (a second transcribe call) rather than silently
+    // reverting to the loaded state via hydrate().
+    expectNoDifference(calls.value, 2)
+    expectNoDifference(model.phase, .loaded)
+  }
 }
