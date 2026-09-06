@@ -591,12 +591,14 @@ final class ProjectModel: ViewModel {
   /// close never leaves stale playback or export work running. The session audio is deliberately
   /// not released here: the document keeps referencing it until the window closes.
   private func tearDownEditor() async {
-    if let previous = editor {
-      previous.cancelExportTapped()
-      await previous.stopPlaybackTapped()
-      await previous.awaitExportTeardown()
-    }
+    guard let previous = editor else { return }
+    // Drop the reference before the awaits: a buffered completion on `previous` (e.g. a late
+    // cut-suggestion) that fires while playback/export teardown is suspended would otherwise
+    // still satisfy the `self.editor === editor` guard in `wireEditor` and commit stale content.
     editor = nil
+    previous.cancelExportTapped()
+    await previous.stopPlaybackTapped()
+    await previous.awaitExportTeardown()
   }
 
   /// Deletes this window's session copies of the canonical AIFF (derived data, rebuildable by
