@@ -10,7 +10,7 @@ struct TranscriptionJob: Sendable, Equatable {
 }
 
 /// App-level transcription entry point that caps how many heavy WhisperX subprocesses run at
-/// once. `RootModel` used to own this cap via its own queue pump; moving it into a dependency
+/// once. The old tab-bar root model owned this cap via its own queue pump; a dependency
 /// lets every window share one limiter once each `.pie` is its own document (spec A3). Enqueuing
 /// suspends until a slot is free, then returns the underlying engine stream.
 struct TranscriptionQueueClient: Sendable {

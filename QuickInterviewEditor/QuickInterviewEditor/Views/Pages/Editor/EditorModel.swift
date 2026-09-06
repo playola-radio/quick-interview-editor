@@ -2794,20 +2794,11 @@ final class EditorModel: ViewModel {
   }
 
   /// Waits for any in-flight export to finish unwinding. The engine subprocess reads the
-  /// canonical AIFF, so a caller tearing this editor down (tab close, re-import) must await
-  /// this — after ``cancelExportTapped()`` — before ``discardCanonicalAudio()``, or it could
+  /// canonical AIFF, so a caller tearing this editor down (window close, re-import) must await
+  /// this — after ``cancelExportTapped()`` — before releasing the session audio, or it could
   /// delete the file out from under a render still in flight.
   func awaitExportTeardown() async {
     await exportTask?.value
-  }
-
-  // MARK: - Lifecycle
-  /// Removes this session's canonical audio cache dir. Called when the tab closes:
-  /// the AIFF is derived data, rebuildable by re-transcribing, so it shouldn't linger.
-  /// Only safe once any in-flight export has been cancelled AND awaited
-  /// (``awaitExportTeardown()``) — the engine reads this file during render.
-  func discardCanonicalAudio() {
-    CanonicalAudioStore.remove(canonicalAudioURL)
   }
 
   // MARK: - Private Helpers

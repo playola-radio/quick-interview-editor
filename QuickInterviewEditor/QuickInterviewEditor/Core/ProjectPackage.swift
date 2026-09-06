@@ -1,12 +1,27 @@
 import Foundation
 
-/// Errors decoding or validating a `.pie` package's `FileWrapper` tree (spec A2).
-enum ProjectPackageError: Error, Equatable {
+/// Errors decoding or validating a `.pie` package's `FileWrapper` tree (spec A2). The
+/// descriptions are what the document system's open/save alert shows (spec A9).
+enum ProjectPackageError: Error, Equatable, LocalizedError {
   case missingProjectJSON
   case missingPlanJSON
   case missingAudio
   case unsupportedSchema(Int)
   case audioMismatch
+
+  var errorDescription: String? {
+    switch self {
+    case .missingProjectJSON: return "The project is missing its project.json."
+    case .missingPlanJSON: return "The project is missing its plan.json."
+    case .missingAudio: return "The project is missing its bundled audio (audio/canonical.aiff)."
+    case .unsupportedSchema(let version):
+      if version > ProjectFile.currentSchemaVersion {
+        return "This project (format \(version)) was saved by a newer version of the app."
+      }
+      return "This project uses an unsupported format version (\(version))."
+    case .audioMismatch: return "The project's bundled audio does not match the project."
+    }
+  }
 }
 
 /// The three pieces decoded from a `.pie` package: the small project file, the
@@ -82,31 +97,58 @@ enum ProjectPackage {
   }
 
   static func encode(file: ProjectFile, plan: EditPlan, audio: FileWrapper) throws -> FileWrapper {
-    let projectWrapper = FileWrapper(regularFileWithContents: try projectEncoder().encode(file))
-    projectWrapper.preferredFilename = "project.json"
-
-    let planWrapper = FileWrapper(regularFileWithContents: try JSONEncoder().encode(plan))
-    planWrapper.preferredFilename = "plan.json"
-
     audio.preferredFilename = "canonical.aiff"
     let audioDirWrapper = FileWrapper(directoryWithFileWrappers: ["canonical.aiff": audio])
     audioDirWrapper.preferredFilename = "audio"
 
     return FileWrapper(directoryWithFileWrappers: [
-      "project.json": projectWrapper,
-      "plan.json": planWrapper,
+      "project.json": try metadataWrapper(file),
+      "plan.json": try metadataWrapper(plan),
       "audio": audioDirWrapper,
     ])
+  }
+
+  /// Rewrites `project.json` and `plan.json` inside an on-disk package's root wrapper and
+  /// returns that same root. The `audio` child is left untouched — it stays parented to the
+  /// existing tree (moving a read-from-disk child into a new tree trips `FileWrapper`'s
+  /// parent bookkeeping), and NSDocument sees it as unchanged so a save never re-copies the
+  /// AIFF.
+  static func rewriteMetadata(in root: FileWrapper, file: ProjectFile, plan: EditPlan) throws
+    -> FileWrapper
+  {
+    let project = try metadataWrapper(file)
+    let planWrapper = try metadataWrapper(plan)
+    for name in ["project.json", "plan.json"] {
+      if let stale = root.fileWrappers?[name] { root.removeFileWrapper(stale) }
+    }
+    project.preferredFilename = "project.json"
+    planWrapper.preferredFilename = "plan.json"
+    root.addFileWrapper(project)
+    root.addFileWrapper(planWrapper)
+    return root
+  }
+
+  private static func metadataWrapper(_ file: ProjectFile) throws -> FileWrapper {
+    FileWrapper(regularFileWithContents: try projectEncoder().encode(file))
+  }
+
+  private static func metadataWrapper(_ plan: EditPlan) throws -> FileWrapper {
+    FileWrapper(regularFileWithContents: try JSONEncoder().encode(plan))
   }
 
   /// Confirms the bundled canonical AIFF hasn't been truncated or swapped since
   /// `project.json` was written. Only checks byte count — header sample-rate/channel
   /// checks are deferred to the hydration step in PR 5, where an `AVAudioFile` is
   /// opened anyway (spec A5/A8).
+  ///
+  /// Prefers the wrapper's file-system size attribute (present on a wrapper read from disk)
+  /// so a multi-GB AIFF is never pulled into memory just to count it; an in-memory wrapper
+  /// has no such attribute and falls back to its contents.
   static func verifyAudio(_ wrapper: FileWrapper, against source: ProjectSource) throws {
-    guard let contents = wrapper.regularFileContents,
-      contents.count == source.canonicalByteCount
-    else {
+    let byteCount =
+      (wrapper.fileAttributes[FileAttributeKey.size.rawValue] as? NSNumber)?.intValue
+      ?? wrapper.regularFileContents?.count
+    guard byteCount == source.canonicalByteCount else {
       throw ProjectPackageError.audioMismatch
     }
   }

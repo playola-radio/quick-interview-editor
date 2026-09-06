@@ -37,6 +37,17 @@ struct ProjectEngineInfo: Codable, Equatable, Sendable {
 /// this session (read from the session store on save). Never persisted itself —
 /// it is process state, not project content (spec A5).
 enum CanonicalAudioSource: Equatable, Sendable {
-  case packageChild
+  /// Unchanged since the package was read. `sessionCopy` is the clone hydration made for the
+  /// editor (nil until then); a save that has no on-disk package child to reuse — Save As or
+  /// Duplicate of an unsaved copy — writes the audio from it instead.
+  case packageChild(sessionCopy: URL?)
   case sessionFile(URL)
+
+  /// The session-owned copy the editor reads from, if one exists yet.
+  var sessionURL: URL? {
+    switch self {
+    case .packageChild(let sessionCopy): return sessionCopy
+    case .sessionFile(let url): return url
+    }
+  }
 }

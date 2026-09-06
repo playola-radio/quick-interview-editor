@@ -16,7 +16,6 @@ struct SlicesPanelView: View {
         } label: {
           Image(systemName: "arrow.uturn.backward")
         }
-        .keyboardShortcut("z", modifiers: .command)
         .disabled(!model.canUndo)
         .help(model.undoLabel).accessibilityLabel(model.undoLabel)
         Button {
@@ -24,7 +23,6 @@ struct SlicesPanelView: View {
         } label: {
           Image(systemName: "arrow.uturn.forward")
         }
-        .keyboardShortcut("z", modifiers: [.command, .shift])
         .disabled(!model.canRedo)
         .help(model.redoLabel).accessibilityLabel(model.redoLabel)
       }

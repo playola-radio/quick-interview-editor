@@ -151,6 +151,34 @@ struct ProjectPackageTests {
     try ProjectPackage.verifyAudio(FileWrapper(regularFileWithContents: audioData), against: source)
   }
 
+  @Test func verifyAudioUsesTheWrapperSizeAttributeWhenPresent() throws {
+    // A wrapper read from disk carries the file-system size; the check must not need to load
+    // (and must trust) the contents.
+    let url = FileManager.default.temporaryDirectory
+      .appendingPathComponent("qie-verify-\(UUID().uuidString).aiff")
+    try Data("on-disk-audio".utf8).write(to: url)
+    let wrapper = try FileWrapper(url: url, options: [])
+    #expect((wrapper.fileAttributes[FileAttributeKey.size.rawValue] as? NSNumber)?.intValue == 13)
+    try ProjectPackage.verifyAudio(wrapper, against: Fixtures.projectSource(canonicalByteCount: 13))
+    #expect(throws: ProjectPackageError.audioMismatch) {
+      try ProjectPackage.verifyAudio(
+        wrapper, against: Fixtures.projectSource(canonicalByteCount: 12))
+    }
+  }
+
+  @Test func errorsCarryUserFacingDescriptions() {
+    expectNoDifference(
+      ProjectPackageError.unsupportedSchema(7).errorDescription,
+      "This project (format 7) was saved by a newer version of the app.")
+    // Schema 0 (or below) is malformed, not from the future; don't blame a newer app.
+    expectNoDifference(
+      ProjectPackageError.unsupportedSchema(0).errorDescription,
+      "This project uses an unsupported format version (0).")
+    expectNoDifference(
+      ProjectPackageError.audioMismatch.errorDescription,
+      "The project's bundled audio does not match the project.")
+  }
+
   @Test func verifyAudioThrowsWhenByteCountMismatches() {
     let audioData = Data("canonical-audio-bytes".utf8)
     let source = Fixtures.projectSource(canonicalByteCount: audioData.count + 1)

@@ -157,3 +157,172 @@ carried the rest forward with explicit reasons.
   PR 1 is codec-only and PR 2/3 don't ship the document shell either, so no
   incremental disk-growth risk accrues before PR 4, where the check is already a hard
   gate (see the S2 ESCALATE note above and `graph.md`). Left the thread unresolved.
+
+## PR 4 spike results — S1 / S2 / S3 / S5 against the real `DocumentGroup`
+
+Run 2026-09-05 on the PR 4 branch once `ProjectDocument` + `DocumentGroup` +
+`ProjectHostView` were in place. S2/S3 were driven by a throwaway, env-gated
+hook (`QIE_SPIKE=1`, set via `launchctl setenv` so `open -a` inherited it) that
+lived in `ProjectHostView`/`ProjectModel`, logged to `/tmp/qie-spike/log.txt`,
+and was deleted before commit. UI automation was unavailable (no assistive
+access for `osascript`; `screencapture` returned black), so everything below
+was measured from inside the process, not visually.
+
+### S5 — `nonisolated init(configuration:)` feeding a `@MainActor` model
+
+**PASS.** `ProjectDocument` is a `@MainActor final class` with a
+`nonisolated init()` and `nonisolated convenience init(configuration:)`;
+`Content`/`Snapshot` is `Sendable`. Signed and unsigned builds report zero
+Swift 6 diagnostics in `ProjectDocument`, `ProjectModel`, `ProjectHostView`,
+`ProjectView`, and the `Views/Commands` files.
+
+**Bug found on the way (fixed in `bf716ee`):** NSDocument saves
+asynchronously. The first Cmd-S crashed with `EXC_BREAKPOINT` inside
+`ProjectDocument.snapshot(contentType:)` because it used
+`MainActor.assumeIsolated` and the document system calls
+`fileWrapper(ofType:)` → `ReferenceFileDocumentBox.snapshotForSerialization`
+→ our `snapshot` on a dispatch worker thread. The saved values now sit behind
+a `Mutex<Content?>` and `snapshot` is `nonisolated`; the test
+`snapshotIsTakenOffTheMainActorAfterAMainActorCommit` pins it.
+
+### S3 — `UndoManager` dirtiness bridge over the value-snapshot `UndoStack`
+
+**PASS, with one amendment to the plan's mechanism.**
+
+The plan's bridge (`registerChange()` registers a single no-op
+`registerUndo(withTarget:)` action, `levelsOfUndo = 1`) does *not* by itself
+mark the document edited when called from a Swift-concurrency continuation.
+`NSUndoManager` opens an implicit per-event group on the first registration
+and only closes it when AppKit finishes dispatching an `NSEvent`; from a task
+continuation there is no event in flight, so `groupingLevel` stayed at 1 for
+100+ s and `NSDocument.isDocumentEdited` stayed `false` until the next mouse
+or key event. Explicit `beginUndoGrouping`/`endUndoGrouping` did not help:
+at level 0 with `groupsByEvent` it nests inside the still-open implicit group.
+
+Fix kept in product code: after `registerUndo`, post a no-op
+`.applicationDefined` `NSEvent` so the run loop closes the group. With that,
+`NSDocument.isDocumentEdited` flipped to `true` within 0.5 s of the edit,
+autosave-in-place landed in `project.json` after ~11 s, and an explicit
+`save(nil)` cleared the edited flag. The editor's `UndoStack` and the PR 2
+post-init diff base were untouched; the full suite (including
+`suggestionsProducedAfterAnEditSurviveUndoAndRedoOfThatEdit`) stays green.
+
+Observed but not a failure: `NSWindow.isDocumentEdited` stays `false` for
+autosaving documents even while `NSDocument.isDocumentEdited` is `true`,
+which is AppKit's documented behavior for `autosavesInPlace` apps. The
+title-bar "Edited" text could not be checked visually here; it is on the PR
+manual-QA checklist.
+
+### S2 — autosave/Versions disk usage, end to end
+
+**PASS — Versions does not duplicate the audio per checkpoint.**
+
+Package: `/tmp/qie-spike/big.pie`, 637 MB (90 copies of the 42 s
+hayes-carll-intro clip as 44.1 kHz stereo AIFF = 667,975,734 bytes,
+`project.json` byteCount updated, `plan.json` from the fixture). Opened in the
+app, made one edit (autosave), then ten explicit saves.
+
+| checkpoint | `.pie` size (`du -sk`) | Versions count (`NSFileVersion.otherVersionsOfItem`) | free-disk delta |
+| --- | --- | --- | --- |
+| open | 652,344 KB | 0 | — |
+| after autosave | 652,344 KB | 1 | ≈ −106 MB |
+| after save 1 | 652,344 KB | 2 | ≈ −423 MB |
+| after save 2 | 652,344 KB | 3 | ≈ −141 MB |
+| after saves 3–10 | 652,344 KB | 11 | flat |
+
+Total free-disk drop ≈ 670 MB ≈ one copy of the audio, spread over the first
+three checkpoints (Versions preserves the original asynchronously), then flat
+for eight more saves. The package itself never grew: the audio child is
+reused in place and only `project.json`/`plan.json` are rewritten.
+`~/Library/Containers/<bundle>/Data/Library/Autosave Information/` is empty
+(the app is not sandboxed, so there is no container); autosave writes into
+the package in place. `.DocumentRevisions-V100` is root-only, so the
+per-version cost was measured via free-disk deltas rather than `du`.
+
+Conclusion: the spec A5 "reuse the audio `FileWrapper` child" assumption
+holds under the real NSDocument autosave path. One extra copy of the audio
+on disk after the first save is the expected Versions baseline, not a
+per-checkpoint leak.
+
+### S1 — real CI run (Xcode 16.4 / macOS 15.0 / Swift 6.0)
+
+**PASS.** PR #76's first CI run (workflow run 34004272572, commit 7d2adb9)
+built and ran the full suite on the `Xcode app (macOS)` job under Xcode 16.4 /
+macOS 15 / Swift 6.0 with no diagnostics. The `nonisolated init` +
+`Mutex`-backed `ReferenceFileDocument` compiled cleanly on the older toolchain,
+so the Xcode 26/27-vs-16.4 skew that bit earlier PRs did not apply here.
+
+## Codex review + challenge (PR 4) — dispositions
+
+Run on the finished branch (review via `codex exec` over the diff, then an
+adversarial challenge). Six findings.
+
+**Fixed:**
+- **Transcription commit never dirtied the document** (P1, both passes): the
+  first import into an untitled window committed the new package values but
+  never called `registerChange()`, so the window stayed clean, autosave never
+  armed, and closing it discarded the transcription without asking. Spec A7
+  names the transcription commit as the first dirtying change. Fixed in
+  `loadCompletedTranscription`; tests now expect one registered change per
+  import (the earlier expectation of zero was wrong).
+- **Reused package audio skipped the byte-count gate** (P1, both passes): the
+  save path that keeps the on-disk `audio/canonical.aiff` child only checked
+  that it was a regular file, so metadata could be rewritten over a truncated
+  or swapped AIFF. `verifyAudio` now runs before `rewriteMetadata`.
+- **Hydration trusted the by-path copy** (P1): open verified the package, but
+  hydration re-read the audio by URL later; a package rewritten in between
+  would hand the editor mismatched audio. The clone's size is now checked
+  against the recorded byte count before the editor is built, and the clone
+  is removed on mismatch.
+- **Clone orphaned when the window closed mid-copy** (P2): the detached copy
+  ignores cancellation, and `hydrate()` returned without deleting the result.
+  It now removes the clone. Removal goes through a new
+  `CanonicalAudioStoreClient.remove` endpoint so tests can point it at their
+  own store base (the static `remove` refuses paths outside the real cache).
+
+**Deferred by design:**
+- **`canonicalFingerprint` is still `""`** (P1 by Codex's severity): a
+  same-size AIFF swap passes the byte-count gate. This is PR 5's scope by the
+  plan; the byte-count gate is the agreed PR 4 integrity check.
+- **Session audio lifetime vs. an in-flight save** (P2): originally deferred;
+  fixed in the PR-review pass below (session audio now outlives every
+  re-import and is only deleted on window close).
+
+## PR review dispositions (Greptile 3/5, CodeRabbit, Codex follow-up)
+
+Greptile and CodeRabbit reviewed PR #76; Codex re-reviewed the fix commit.
+
+**Fixed:**
+- **Re-import discarded the project's edits** (Greptile P1): a same-source
+  re-import or retry seeded the new editor from `migrationSeed` (the legacy
+  sidecar, always empty slices) instead of the current document. The seed now
+  comes from `file.content` when the source fingerprint matches, and from the
+  sidecar only for a first import or a different source.
+- **Failed re-import broke saving** (Greptile P1, CodeRabbit Major): starting a
+  re-import deleted the session AIFF the document still referenced, so a
+  failed or cancelled run left Save pointing at a missing file. Audio lifetime
+  moved out of `EditorModel` into `ProjectModel`: teardown only cancels
+  playback and export, and the audio survives until the window closes.
+- **Replaced audio deleted while a save could still read it** (Codex P2 on the
+  fix commit): deleting the previous session copy right after the replacement
+  commit still raced a save snapshotted before it. Replaced copies are now
+  retired and deleted with the current one in `viewDisappeared`, after the
+  close-save. Crash leftovers fall to the 7-day `reapStale` at launch.
+- **Schema 0 described as "newer app"** (CodeRabbit Minor): versions at or
+  below zero now get a neutral "unsupported format version" message.
+
+- **Word-keyed content vs. a changed plan** (Codex P3, then Greptile P1 on
+  re-review): a force-fresh re-transcribe of the same source kept the
+  document's slices (`wordIDs`, `snippet`) and cut suggestions as-is against
+  a plan that may have changed. `Word.id` is an index into the plan, so a
+  changed plan cannot be detected per word; the seed now remembers the plan
+  it came from, and when the replacement differs
+  (`EditorDocumentState.rekeyed(to:)`) slices keep their sample ranges and
+  re-derive membership and snippet by the overlap rule, while cut
+  suggestions are dropped for auto-suggest to regenerate. Only the words are
+  the signal (Codex P3 on the fix): a plan that differs elsewhere (silences,
+  segments, source path) leaves the document untouched. Sample-exact
+  alignment of re-transcribed audio itself remains PR 5's spike S4.
+- **Buffered completion after cancel** (Codex P3 on the fix): the transcription
+  event loop now checks cancellation before handling each event, so a close
+  that lands with a `.completed` already buffered can never commit it.
