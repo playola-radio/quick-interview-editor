@@ -672,10 +672,18 @@ struct ProjectModelTests {
     expectNoDifference(record.commits.last?.file.content.slices.map(\.wordIDs), [expectedIDs])
   }
 
-  @Test func aReimportThatReproducesTheSamePlanKeepsClipsAndSuggestionsAsIs() async throws {
+  @Test func aReimportThatReproducesTheSameWordsKeepsClipsAndSuggestionsAsIs() async throws {
     let (sink, _) = ProjectDocumentSink.recorder()
     let model = ProjectModel(file: nil, plan: nil, audio: nil, sink: sink)
     let plan = Fixtures.editPlan()
+    // Same words, different silence detection: nothing word-keyed changed, so nothing is
+    // re-keyed or dropped.
+    let replacement: EditPlan = {
+      var replacement = plan
+      replacement.silences = []
+      return replacement
+    }()
+    let runs = LockIsolated(0)
     let slice = Slice(
       id: UUID(), name: "Slice 1", startSample: 0, endSample: 44100, wordIDs: [0],
       snippet: "“first”")
@@ -686,7 +694,13 @@ struct ProjectModelTests {
       $0.date = .constant(importedAt)
       $0.canonicalAudioStore.remove = { _ in }
       $0.transcription.transcribe = { _, _, _ in
-        engineEvents([.completed(Fixtures.transcriptionResult(plan))])
+        let run = runs.withValue {
+          $0 += 1
+          return $0
+        }
+        return engineEvents([
+          .completed(Fixtures.transcriptionResult(run == 1 ? plan : replacement))
+        ])
       }
     } operation: {
       await model.importAudioTapped(URL(fileURLWithPath: "/clip.m4a"))

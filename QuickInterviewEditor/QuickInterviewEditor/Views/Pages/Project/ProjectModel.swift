@@ -269,6 +269,8 @@ final class ProjectModel: ViewModel {
     defer { stopTicking() }
     do {
       for try await event in events {
+        // A close or cancel may land with a completion already buffered; never commit it.
+        guard !Task.isCancelled else { return }
         switch event {
         case .progress(let progress):
           applyProgress(progress)
@@ -382,8 +384,10 @@ final class ProjectModel: ViewModel {
     /// nil for a first import, whose sidecar seed carries no clips.
     var plan: EditPlan?
 
+    /// Only the words key the document's content, so a plan that differs elsewhere (silences,
+    /// segments, source path) keeps it as-is — re-keying drops cut suggestions.
     func content(for newPlan: EditPlan) -> EditorDocumentState {
-      guard let plan, plan != newPlan else { return content }
+      guard let plan, plan.words != newPlan.words else { return content }
       return content.rekeyed(to: newPlan)
     }
   }

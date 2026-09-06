@@ -319,6 +319,10 @@ Greptile and CodeRabbit reviewed PR #76; Codex re-reviewed the fix commit.
   it came from, and when the replacement differs
   (`EditorDocumentState.rekeyed(to:)`) slices keep their sample ranges and
   re-derive membership and snippet by the overlap rule, while cut
-  suggestions are dropped for auto-suggest to regenerate. An identical plan
-  leaves the document untouched. Sample-exact alignment of re-transcribed
-  audio itself remains PR 5's spike S4.
+  suggestions are dropped for auto-suggest to regenerate. Only the words are
+  the signal (Codex P3 on the fix): a plan that differs elsewhere (silences,
+  segments, source path) leaves the document untouched. Sample-exact
+  alignment of re-transcribed audio itself remains PR 5's spike S4.
+- **Buffered completion after cancel** (Codex P3 on the fix): the transcription
+  event loop now checks cancellation before handling each event, so a close
+  that lands with a `.completed` already buffered can never commit it.
