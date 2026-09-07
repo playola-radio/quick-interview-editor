@@ -23,6 +23,14 @@ struct SuggestionRow: Identifiable, Equatable, Sendable {
   var showsRejectButton: Bool
   /// Show the freshness warning only where it's actionable (a still-pending, stale row).
   var showsFreshnessWarning: Bool
+  /// Render the title as an editable field only while the suggestion is still pending — once
+  /// accepted its clip already exists (rename it in the sidebar), and rejected rows are inert.
+  var showsEditableTitle: Bool
+  /// Keep the static title inside the row's reveal control after a suggestion is completed.
+  var showsRevealableTitle: Bool
+  /// The product-type fallback shown as the title field's placeholder, so a pending suggestion
+  /// whose generated title is blank still shows the name its clip would take.
+  var titlePlaceholder: String
 }
 
 /// A product-type group of rows (e.g. all "Artist Spotlight" candidates), in ranked order.
@@ -79,7 +87,10 @@ func suggestionRow(
     canReject: pending,
     showsAcceptButton: pending,
     showsRejectButton: pending,
-    showsFreshnessWarning: stale && pending
+    showsFreshnessWarning: stale && pending,
+    showsEditableTitle: pending,
+    showsRevealableTitle: !pending,
+    titlePlaceholder: suggestion.productType.displayLabel
   )
 }
 

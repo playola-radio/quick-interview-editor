@@ -42,6 +42,7 @@ struct CutSuggestionsPageTests {
     model.currentSuggestions = { store.value }
     model.onAccept = { _, id in store.withValue { $0[id: id]?.accept() } }
     model.onReject = { id in store.withValue { $0[id: id]?.reject() } }
+    model.onTitleChanged = { id, title in store.withValue { $0[id: id]?.title = title } }
     model.onSuggestionsProduced = { produced in
       store.withValue { $0 = IdentifiedArray(produced, uniquingIDsWith: { first, _ in first }) }
     }
@@ -375,6 +376,41 @@ struct CutSuggestionsPageTests {
     }
 
     expectNoDifference(store.value[id: suggestion.id]?.status, .rejected)
+  }
+
+  // MARK: - Title editing
+
+  @Test func editableTitleReadsTheCurrentSuggestionTitle() {
+    let suggestion = Fixtures.cutSuggestion(id: Fixtures.uuid(1), title: "Original")
+    let store = LockIsolated<IdentifiedArrayOf<CutSuggestion>>([suggestion])
+
+    withDependencies { _ in
+    } operation: {
+      let model = CutSuggestionsPageModel(
+        editPlan: Fixtures.editPlan(), sourceFingerprint: "fp-title-read")
+      wire(model, to: store)
+
+      expectNoDifference(model.editableTitle(for: suggestion.id), "Original")
+      // An unknown ID reads as empty rather than trapping.
+      expectNoDifference(model.editableTitle(for: Fixtures.uuid(99)), "")
+    }
+  }
+
+  @Test func titleChangedUpdatesTheSuggestionTitle() {
+    let suggestion = Fixtures.cutSuggestion(id: Fixtures.uuid(1), title: "Original")
+    let store = LockIsolated<IdentifiedArrayOf<CutSuggestion>>([suggestion])
+
+    withDependencies { _ in
+    } operation: {
+      let model = CutSuggestionsPageModel(
+        editPlan: Fixtures.editPlan(), sourceFingerprint: "fp-title-edit")
+      wire(model, to: store)
+
+      model.titleChanged(suggestion.id, to: "Renamed")
+      expectNoDifference(model.editableTitle(for: suggestion.id), "Renamed")
+    }
+
+    expectNoDifference(store.value[id: suggestion.id]?.title, "Renamed")
   }
 
   // MARK: - Ranked, grouped presentation + freshness
