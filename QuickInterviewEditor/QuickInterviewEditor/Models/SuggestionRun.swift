@@ -103,7 +103,7 @@ func validateSuggestionRunApplication(
   }
 }
 
-// swiftlint:disable:next function_body_length
+// swiftlint:disable:next function_body_length cyclomatic_complexity
 func numberSuggestions(
   _ candidates: [CutSuggestion],
   snapshot: SuggestionRunSnapshot,
@@ -113,9 +113,17 @@ func numberSuggestions(
   mode: SuggestionNumberingMode = .fresh,
   existingBatch: SuggestionBatch? = nil
 ) throws -> (candidates: [CutSuggestion], batch: SuggestionBatch) {
-  try validateNumberingInput(candidates: candidates, snapshot: snapshot, starts: starts)
+  let rulesSnapshot: SuggestionRunSnapshot
+  switch mode {
+  case .fresh:
+    rulesSnapshot = snapshot
+  case .pendingRenumber, .correction:
+    rulesSnapshot = existingBatch?.snapshot ?? snapshot
+  }
+  try validateNumberingInput(candidates: candidates, snapshot: rulesSnapshot, starts: starts)
   let selectedIDs = selectedCandidateIDs(in: candidates, mode: mode)
-  let types = Dictionary(uniqueKeysWithValues: snapshot.configuration.types.map { ($0.id, $0) })
+  let types = Dictionary(
+    uniqueKeysWithValues: rulesSnapshot.configuration.types.map { ($0.id, $0) })
   let ordered = try candidates.sorted { lhs, rhs in
     let left = try typeID(for: lhs)
     let right = try typeID(for: rhs)
@@ -143,12 +151,12 @@ func numberSuggestions(
       reservation.canonicalValues.isEmpty ? nil : (reservation.key, reservation.canonicalValues)
     }, uniquingKeysWith: { first, _ in first })
   var result = Dictionary(uniqueKeysWithValues: candidates.map { ($0.id, $0) })
-  var actualStarts = starts
+  var actualStarts = existingBatch?.actualStarts ?? starts
 
   for original in ordered where selectedIDs.contains(original.id) {
     let typeID = try typeID(for: original)
     guard let type = types[typeID] else { throw SuggestionBatchNumberingError.unknownType(typeID) }
-    let source = try sourceNaming(for: original, type: type, snapshot: snapshot)
+    let source = try sourceNaming(for: original, type: type, snapshot: rulesSnapshot)
     let values = source.extractedValues.merging(source.correctedValues) { _, corrected in corrected
     }
     let key = suggestionSequenceKey(type: type, values: values, candidateID: original.id)
@@ -187,9 +195,11 @@ func numberSuggestions(
         let start = try allocationStart(
           configured, issuedMaximum: issuedMaximum[key], occupiedMaximum: occupied[key]?.max(),
           mode: mode)
-        actualStarts.groups.removeAll { $0.key == key }
-        actualStarts.groups.append(
-          .init(key: key, start: .init(number: start, isExplicit: configured.isExplicit)))
+        if modeRecordsActualStart(mode) {
+          actualStarts.groups.removeAll { $0.key == key }
+          actualStarts.groups.append(
+            .init(key: key, start: .init(number: start, isExplicit: configured.isExplicit)))
+        }
         let number = try nextSuggestionNumber(start: start, occupied: occupied[key] ?? [])
         reservation = SequenceReservation(
           candidateID: original.id, key: key, number: number, canonicalValues: canonicalValues)
@@ -204,7 +214,7 @@ func numberSuggestions(
       template: type.template, values: renderingValues, sequence: reservation?.number,
       fallback: source.discoveryLabel)
     candidate.naming = SuggestionNamingRecord(
-      runID: snapshot.runID, typeID: type.id, typeName: type.name, typeGroup: type.group,
+      runID: rulesSnapshot.runID, typeID: type.id, typeName: type.name, typeGroup: type.group,
       discoveryLabel: source.discoveryLabel, extractedValues: source.extractedValues,
       missingFieldIDs: source.missingFieldIDs, correctedValues: source.correctedValues,
       reservation: reservation)
@@ -214,7 +224,7 @@ func numberSuggestions(
   return (
     candidates: candidates.compactMap { result[$0.id] },
     batch: SuggestionBatch(
-      snapshot: snapshot, actualStarts: actualStarts,
+      snapshot: rulesSnapshot, actualStarts: actualStarts,
       canonicalGroups:
         canonicalGroups
         .map { .init(key: $0.key, values: $0.value) }
@@ -224,6 +234,13 @@ func numberSuggestions(
               && $0.key.fields.description < $1.key.fields.description)
         })
   )
+}
+
+private func modeRecordsActualStart(_ mode: SuggestionNumberingMode) -> Bool {
+  switch mode {
+  case .fresh, .pendingRenumber: true
+  case .correction: false
+  }
 }
 
 private func selectedCandidateIDs(
@@ -307,7 +324,8 @@ private func allocationStart(
   _ configured: SuggestionStart, issuedMaximum: Int?, occupiedMaximum: Int?,
   mode: SuggestionNumberingMode
 ) throws -> Int {
-  if case .correction = mode, let occupiedMaximum {
+  if case .correction = mode {
+    guard let occupiedMaximum else { return 1 }
     let next = occupiedMaximum.addingReportingOverflow(1)
     guard !next.overflow else { throw SuggestionNumberingError.exhausted }
     return next.partialValue
