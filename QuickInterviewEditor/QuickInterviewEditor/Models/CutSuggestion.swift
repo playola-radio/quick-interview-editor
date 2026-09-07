@@ -22,6 +22,8 @@ struct CutSuggestion: Identifiable, Codable, Equatable, Sendable {
   var score: Double
   var status: Status
   var provenance: Provenance
+  // swiftlint:disable:next implicit_optional_initialization
+  var naming: SuggestionNamingRecord? = nil
 
   /// Where a suggestion is in its accept/reject lifecycle.
   enum Status: String, Codable, Equatable, Sendable, CaseIterable {
@@ -41,6 +43,7 @@ struct CutSuggestion: Identifiable, Codable, Equatable, Sendable {
     var sourceFingerprint: String
     var diarizationHash: String?
   }
+
 }
 
 // MARK: - Lifecycle transitions

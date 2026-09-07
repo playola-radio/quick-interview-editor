@@ -49,6 +49,7 @@
 		2A244FB0213309DFD6FC2C7F /* project-v1.pie in Resources */ = {isa = PBXBuildFile; fileRef = 04549EC07B49C6824718F960 /* project-v1.pie */; };
 		2A30D5A70FAA1CCAA0DCEC56 /* BoundaryInset.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35158E7CE1A9A9D52CC12728 /* BoundaryInset.swift */; };
 		2A3411BECC192F8C8D4C813C /* TranscriptFollowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A8A7D8125AB200BC54332B3 /* TranscriptFollowTests.swift */; };
+		2A7032ECD17956195270C628 /* SuggestionRun.swift in Sources */ = {isa = PBXBuildFile; fileRef = C201194EBAEB235AB244E0C1 /* SuggestionRun.swift */; };
 		2AB5719F9A60E584F4DE1185 /* CutSuggestClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E86A062FD2FFCFC570035919 /* CutSuggestClientTests.swift */; };
 		2C92CE748FC5D6B7EB68C5E4 /* EditorEditSlicePresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E6CDAFD169715E44AE5E9EA /* EditorEditSlicePresentationTests.swift */; };
 		2CE1C1C93B59EE6860FE2333 /* BoundaryRangeEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 731A67BC11627978D74D22CC /* BoundaryRangeEditor.swift */; };
@@ -123,6 +124,7 @@
 		732459803D06A8013CFDBBEA /* CutSuggestionsPageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C183B04066C319ED446E9A7 /* CutSuggestionsPageView.swift */; };
 		73AF3E4C215AD54FC8C68039 /* ExportRenderClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68ED6B0140D2504D2069CA00 /* ExportRenderClient.swift */; };
 		748D9F74957CDE0574DD71EB /* TranscriptSelectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC832191C0DBABC92FC0B90C /* TranscriptSelectionTests.swift */; };
+		7598F5D68DA4403ECAADBE89 /* SuggestionRunTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BFA9A73A9E3E2BD0D935E585 /* SuggestionRunTests.swift */; };
 		76FC39C6FEB853521291E4F4 /* AudioEditRenderPlanTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA661B79746FC4BCA4ACD90D /* AudioEditRenderPlanTests.swift */; };
 		77DC9E317748E56D6E4BF762 /* EditorAuditionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0C51C2D00EA2A7E26041BD7 /* EditorAuditionTests.swift */; };
 		78781000C962DBA2C6758A61 /* EditedWaveformAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEB88CCE607D4755B2D1CF5A /* EditedWaveformAdapter.swift */; };
@@ -476,8 +478,10 @@
 		BEB5A263095D05939503280A /* EditorEditedCursorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorEditedCursorTests.swift; sourceTree = "<group>"; };
 		BF5337215804929FAB516664 /* EditSliceModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditSliceModel.swift; sourceTree = "<group>"; };
 		BF901632B77811C861AD9067 /* TranscriptSpeedTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptSpeedTests.swift; sourceTree = "<group>"; };
+		BFA9A73A9E3E2BD0D935E585 /* SuggestionRunTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SuggestionRunTests.swift; sourceTree = "<group>"; };
 		C002864903B4CD94592A20BA /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		C098497C57EEC28B2BD125AC /* PlaylistFrameTimeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistFrameTimeline.swift; sourceTree = "<group>"; };
+		C201194EBAEB235AB244E0C1 /* SuggestionRun.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SuggestionRun.swift; sourceTree = "<group>"; };
 		C494C2E61773F830EC6F3D47 /* TranscriptDocument.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptDocument.swift; sourceTree = "<group>"; };
 		C64A9EA59AAAC40D0CDCC3BA /* CrossfadeStretchDraft.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrossfadeStretchDraft.swift; sourceTree = "<group>"; };
 		C6AC140FED898B406666B294 /* UpdaterCommandsModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdaterCommandsModel.swift; sourceTree = "<group>"; };
@@ -643,6 +647,7 @@
 				2938B973CE3110DF0AFC188A /* SuggestionConfigurationTests.swift */,
 				28F8150DA7168EB24026F158 /* SuggestionNamingTests.swift */,
 				444CEA4B8EEF93682AA4CFBC /* SuggestionNumberingTests.swift */,
+				BFA9A73A9E3E2BD0D935E585 /* SuggestionRunTests.swift */,
 				A1DD6C3672428F34995C85CF /* TimelineRemovalTests.swift */,
 				B596A2B67C444B3A63EE98A7 /* TranscriptClipStyleTests.swift */,
 				141B4A0C58536011A553004D /* TranscriptHashTests.swift */,
@@ -873,6 +878,7 @@
 				D00E53D1068F939880827ED1 /* SuggestionDefaults.swift */,
 				112E01B5A6A1BF5DC6759841 /* SuggestionNaming.swift */,
 				0E26EDE355427CF55ECE1C16 /* SuggestionNumbering.swift */,
+				C201194EBAEB235AB244E0C1 /* SuggestionRun.swift */,
 				9220B5BD3835A038A74C6DA0 /* TimelineRemoval.swift */,
 				26119561988C8741B3FAEE42 /* TranscriptClipBand.swift */,
 				C494C2E61773F830EC6F3D47 /* TranscriptDocument.swift */,
@@ -1379,6 +1385,7 @@
 				B3FBBABBEE6D6A5A2051472F /* SuggestionDefaults.swift in Sources */,
 				FD54F31D91D655D951DE6242 /* SuggestionNaming.swift in Sources */,
 				D802EB036728A38A83C28740 /* SuggestionNumbering.swift in Sources */,
+				2A7032ECD17956195270C628 /* SuggestionRun.swift in Sources */,
 				A37451C895DB7C3A6FF95E35 /* TimelineRemoval.swift in Sources */,
 				7B6C410FD660EB359EFE351D /* TranscriptCache.swift in Sources */,
 				1588D5A47AB7263F1982C57A /* TranscriptClipBand.swift in Sources */,
@@ -1510,6 +1517,7 @@
 				3C44D2FB143843877E896046 /* SuggestionConfigurationTests.swift in Sources */,
 				5B3669DAF9F696333825DAD4 /* SuggestionNamingTests.swift in Sources */,
 				CA3F1297F04E1215099D12C2 /* SuggestionNumberingTests.swift in Sources */,
+				7598F5D68DA4403ECAADBE89 /* SuggestionRunTests.swift in Sources */,
 				8A210E5A135CA338C3B25150 /* TimelineRemovalTests.swift in Sources */,
 				93F160F39FBC5B6FB7417C0E /* TranscriptCacheTests.swift in Sources */,
 				BDCDF44FC95B6E8F9D72581D /* TranscriptClipContainersTests.swift in Sources */,
