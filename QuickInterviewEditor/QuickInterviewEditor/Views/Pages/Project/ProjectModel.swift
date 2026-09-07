@@ -528,6 +528,17 @@ final class ProjectModel: ViewModel {
   /// autosaves on. The commit carries `nil` plan/audio because a content edit never touches
   /// those. Diffing discipline is the editor's: it only fires for a real post-init change.
   private func wireEditor(_ editor: EditorModel) {
+    editor.cutSuggestions.automaticSuggestionsEnabled = file?.schemaVersion != 1
+    editor.cutSuggestions.onExplicitSuggest = { [weak self, weak editor] in
+      guard let self, let editor, self.editor === editor, var file = self.file,
+        file.schemaVersion < ProjectFile.currentSchemaVersion
+      else { return }
+      file.schemaVersion = ProjectFile.currentSchemaVersion
+      self.file = file
+      editor.cutSuggestions.automaticSuggestionsEnabled = true
+      self.sink.commit(file, nil, nil)
+      self.sink.registerChange()
+    }
     editor.onDocumentStateChanged = { [weak self, weak editor] state in
       // A retired editor (its window re-transcribed or closed) can still finish in-flight async
       // work — e.g. a buffered cut-suggestion completion — and fire this callback. Only the
@@ -535,6 +546,8 @@ final class ProjectModel: ViewModel {
       // freshly-transcribed content committed after teardown.
       guard let self, let editor, self.editor === editor, var file = self.file else { return }
       file.content = state
+      file.schemaVersion = ProjectFile.currentSchemaVersion
+      editor.cutSuggestions.automaticSuggestionsEnabled = true
       self.file = file
       self.sink.commit(file, nil, nil)
       self.sink.registerChange()

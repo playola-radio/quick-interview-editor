@@ -17,6 +17,65 @@ struct ProjectModelTests {
   private let fingerprint = "path:/clip.m4a"
   private let importedAt = Date(timeIntervalSince1970: 1_700_000_000)
 
+  @Test func untouchedV1DoesNotAutoSuggestOrDirtyAndNextEditUpgrades() async throws {
+    var file = Fixtures.projectFile(content: EditorDocumentState())
+    file.schemaVersion = 1
+    let (sink, record) = ProjectDocumentSink.recorder()
+    let requests = LockIsolated(0)
+    try await withDependencies {
+      $0.keychain = .inMemory("fixture-key")
+      $0.cutSuggest = CutSuggestClient { _, _ in
+        requests.withValue { $0 += 1 }
+        return AsyncThrowingStream {
+          $0.yield(.completed([]))
+          $0.finish()
+        }
+      }
+    } operation: {
+      let model = ProjectModel(
+        file: file, plan: Fixtures.editPlan(),
+        audio: .packageChild(sessionCopy: Fixtures.canonicalAudioURL),
+        sink: sink)
+      await model.viewAppeared()
+      let editor = try #require(model.editor)
+      await editor.cutSuggestions.autoSuggestCutsIfNeeded()
+      expectNoDifference(requests.value, 0)
+      expectNoDifference(editor.documentState, file.content)
+      expectNoDifference(record.registerChangeCount, 0)
+      expectNoDifference(record.commits.count, 0)
+
+      editor.mutateDocument { $0.speakerCountOverride = 3 }
+      expectNoDifference(record.commits.last?.file.schemaVersion, 2)
+      expectNoDifference(record.registerChangeCount, 1)
+      expectNoDifference(editor.documentState.suggestionRecoveryOwnerID, nil)
+    }
+  }
+
+  @Test func explicitSuggestUpgradesAnOpenedV1() async throws {
+    var file = Fixtures.projectFile(content: EditorDocumentState())
+    file.schemaVersion = 1
+    let (sink, record) = ProjectDocumentSink.recorder()
+    try await withDependencies {
+      $0.keychain = .inMemory("fixture-key")
+      $0.cutSuggest = CutSuggestClient { _, _ in
+        AsyncThrowingStream {
+          $0.yield(.completed([]))
+          $0.finish()
+        }
+      }
+    } operation: {
+      let model = ProjectModel(
+        file: file, plan: Fixtures.editPlan(),
+        audio: .packageChild(sessionCopy: Fixtures.canonicalAudioURL),
+        sink: sink)
+      await model.viewAppeared()
+      let editor = try #require(model.editor)
+      await editor.cutSuggestions.suggestCutsTapped()
+      expectNoDifference(record.commits.last?.file.schemaVersion, 2)
+      expectNoDifference(record.registerChangeCount, 1)
+    }
+  }
+
   @Test func freshModelIsEmpty() {
     let (sink, record) = ProjectDocumentSink.recorder()
     let model = ProjectModel(file: nil, plan: nil, audio: nil, sink: sink)

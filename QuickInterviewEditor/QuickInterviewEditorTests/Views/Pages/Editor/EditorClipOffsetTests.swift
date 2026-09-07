@@ -131,9 +131,17 @@ struct EditorClipOffsetTests {
 
   // MARK: - Accepting a cut suggestion
 
-  private func suggestionSlice(_ id: UUID, range: Range<Int>, plan: EditPlan) -> Slice {
-    let ids = wordIDs(anyOverlap: range, words: plan.words)
-    return buildSlice(id: id, name: "A story", range: range, wordIDs: ids, plan: plan)
+  private func seedSuggestion(_ model: EditorModel) -> Slice {
+    let plan = model.editPlan
+    var candidate = Fixtures.cutSuggestion(
+      id: Fixtures.uuid(1), wordIDs: [10, 11, 12, 13, 14, 15, 16])
+    candidate.provenance.transcriptHash = plan.transcriptHash
+    candidate.provenance.sourceFingerprint = model.sourceFingerprint
+    model.mutateDocument(recordUndo: false) { $0.cutSuggestions = [candidate] }
+    let words = plan.words.filter { candidate.wordIDs.contains($0.id) }
+    let range = words.compactMap(\.startSample).min()!..<words.compactMap(\.endSample).max()!
+    return buildSlice(
+      id: candidate.id, name: candidate.title, range: range, wordIDs: candidate.wordIDs, plan: plan)
   }
 
   @Test func acceptCutSuggestionSliceShiftsBoundariesButKeepsWordMembership() {
@@ -145,9 +153,10 @@ struct EditorClipOffsetTests {
 
       let model = editor()
       let plan = model.editPlan
-      let range = 44_100..<88_200
-      let original = suggestionSlice(Fixtures.uuid(1), range: range, plan: plan)
+      let original = seedSuggestion(model)
+      let range = original.startSample..<original.endSample
 
+      model.acceptCutSuggestion(original, id: original.id)
       model.acceptCutSuggestion(original, id: original.id)
 
       let slice = model.slices[id: original.id]!
@@ -165,9 +174,10 @@ struct EditorClipOffsetTests {
     } operation: {
       let model = editor()
       let plan = model.editPlan
-      let range = 44_100..<88_200
-      let original = suggestionSlice(Fixtures.uuid(1), range: range, plan: plan)
+      let original = seedSuggestion(model)
+      let range = original.startSample..<original.endSample
 
+      model.acceptCutSuggestion(original, id: original.id)
       model.acceptCutSuggestion(original, id: original.id)
 
       let slice = model.slices[id: original.id]!

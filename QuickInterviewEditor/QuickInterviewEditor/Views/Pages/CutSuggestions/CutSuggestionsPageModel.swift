@@ -79,6 +79,8 @@ final class CutSuggestionsPageModel: ViewModel {
   /// Whether a usable Anthropic key resolved (Keychain or env). Refreshed on appear and
   /// after key entry; drives onboarding vs the live suggest flow.
   private(set) var hasAPIKey = false
+  var automaticSuggestionsEnabled = true
+  var onExplicitSuggest: (() -> Void)?
   /// The message shown when accepting a suggestion failed (stale / invalid). Cleared on a
   /// successful accept or a new run.
   var actionMessage: String?
@@ -187,6 +189,7 @@ final class CutSuggestionsPageModel: ViewModel {
       addAPIKeyTapped()
       return
     }
+    onExplicitSuggest?()
     await runSuggest(apiKey: apiKey)
   }
 
@@ -196,7 +199,7 @@ final class CutSuggestionsPageModel: ViewModel {
   /// and, unlike the manual button, it does NOT open the key-entry sheet when no key resolves —
   /// a background pass must never nag. The button remains the way to add a key and run by hand.
   func autoSuggestCutsIfNeeded() async {
-    guard !isSuggesting, suggestions.isEmpty else { return }
+    guard automaticSuggestionsEnabled, !isSuggesting, suggestions.isEmpty else { return }
     guard let apiKey = resolvedAPIKey() else { return }
     await runSuggest(apiKey: apiKey, isBackgroundPass: true)
   }
@@ -264,8 +267,8 @@ final class CutSuggestionsPageModel: ViewModel {
       sourceFingerprint: sourceFingerprint, transcriptHash: editPlan.transcriptHash)
     {
     case .accepted(let slice, _):
-      onAccept?(slice, id)
       actionMessage = nil
+      onAccept?(slice, id)
     case .stale(let reason):
       actionMessage = cutSuggestionStaleMessage(reason)
     case .invalid(let reason):

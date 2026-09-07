@@ -43,6 +43,43 @@ struct ProjectDocumentTests {
 
   // MARK: - Reading
 
+  @Test func untouchedV1ReadKeepsBytesAndExplicitSaveUpgradesWithSameAudio() throws {
+    let root = try fixturePackage()
+    let bytes = try #require(root.fileWrappers?["project.json"]?.regularFileContents)
+    let audio = try #require(root.fileWrappers?["audio"]?.fileWrappers?["canonical.aiff"])
+    let document = try ProjectDocument(reading: root)
+    let snapshot = try document.snapshot(contentType: .pieProject)
+    expectNoDifference(snapshot.content.file.schemaVersion, 1)
+    expectNoDifference(snapshot.content.file.content.suggestionRecoveryOwnerID, nil)
+    expectNoDifference(snapshot.editGeneration, 0)
+    expectNoDifference(root.fileWrappers?["project.json"]?.regularFileContents, bytes)
+
+    let saved = try ProjectDocument.makeFileWrapper(snapshot: snapshot.content, existingFile: root)
+    let reopened = try ProjectPackage.decode(saved)
+    expectNoDifference(reopened.file.schemaVersion, 2)
+    #expect(reopened.audioWrapper === audio)
+    expectNoDifference(reopened.file.content, snapshot.content.file.content)
+  }
+
+  @Test func rereadingSavedPackageRestoresItsLedgerAndSchema() throws {
+    let root = try fixturePackage()
+    let document = try ProjectDocument(reading: root)
+    let saved = try #require(document.content)
+    var edited = saved.file
+    edited.schemaVersion = 2
+    edited.content.issuedSuggestionNumbers = [
+      SequenceReservation(
+        candidateID: Fixtures.uuid(7),
+        key: .init(typeID: "spotlight", fields: [], provisionalCandidateID: nil),
+        number: 3, canonicalValues: [:])
+    ]
+    document.sink.commit(edited, nil, nil)
+    let reverted = try ProjectDocument(reading: root)
+    expectNoDifference(reverted.content, saved)
+    expectNoDifference(reverted.content?.file.schemaVersion, 1)
+    expectNoDifference(reverted.content?.file.content.issuedSuggestionNumbers, [])
+  }
+
   @Test func readableContentTypesIsThePieProjectType() {
     expectNoDifference(ProjectDocument.readableContentTypes, [.pieProject])
     expectNoDifference(UTType.pieProject.identifier, "fm.playola.interview-editor.project")

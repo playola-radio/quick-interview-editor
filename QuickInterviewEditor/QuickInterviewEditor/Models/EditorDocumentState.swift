@@ -9,6 +9,12 @@ struct EditorDocumentState: Equatable, Codable, Sendable {
   var slices: IdentifiedArrayOf<Slice>
   var timelineRemovals: IdentifiedArrayOf<TimelineRemoval>
   var cutSuggestions: IdentifiedArrayOf<CutSuggestion>
+  var suggestionStarts: SuggestionStarts
+  var suggestionBatch: SuggestionBatch?
+  var issuedSuggestionNumbers: [SequenceReservation]
+  var unfinishedSuggestionRun: SuggestionRunCheckpoint?
+  var lastAppliedSuggestionRunID: UUID?
+  var suggestionRecoveryOwnerID: UUID?
   var speakerCountOverride: Int?
   var speakerDisplayNames: [String: String]
 
@@ -16,17 +22,31 @@ struct EditorDocumentState: Equatable, Codable, Sendable {
     slices: IdentifiedArrayOf<Slice> = [],
     timelineRemovals: IdentifiedArrayOf<TimelineRemoval> = [],
     cutSuggestions: IdentifiedArrayOf<CutSuggestion> = [],
+    suggestionStarts: SuggestionStarts = SuggestionStarts(),
+    suggestionBatch: SuggestionBatch? = nil,
+    issuedSuggestionNumbers: [SequenceReservation] = [],
+    unfinishedSuggestionRun: SuggestionRunCheckpoint? = nil,
+    lastAppliedSuggestionRunID: UUID? = nil,
+    suggestionRecoveryOwnerID: UUID? = nil,
     speakerCountOverride: Int? = nil,
     speakerDisplayNames: [String: String] = [:]
   ) {
     self.slices = slices
     self.timelineRemovals = timelineRemovals
     self.cutSuggestions = cutSuggestions
+    self.suggestionStarts = suggestionStarts
+    self.suggestionBatch = suggestionBatch
+    self.issuedSuggestionNumbers = issuedSuggestionNumbers
+    self.unfinishedSuggestionRun = unfinishedSuggestionRun
+    self.lastAppliedSuggestionRunID = lastAppliedSuggestionRunID
+    self.suggestionRecoveryOwnerID = suggestionRecoveryOwnerID
     self.speakerCountOverride = speakerCountOverride
     self.speakerDisplayNames = speakerDisplayNames
   }
 
   enum CodingKeys: String, CodingKey {
+    case suggestionStarts, suggestionBatch, issuedSuggestionNumbers, unfinishedSuggestionRun,
+      lastAppliedSuggestionRunID, suggestionRecoveryOwnerID
     case slices, timelineRemovals, cutSuggestions, speakerCountOverride, speakerDisplayNames
   }
 
@@ -41,11 +61,30 @@ struct EditorDocumentState: Equatable, Codable, Sendable {
         IdentifiedArrayOf<TimelineRemoval>.self, forKey: .timelineRemovals),
       cutSuggestions: try container.decodeIfPresent(
         IdentifiedArrayOf<CutSuggestion>.self, forKey: .cutSuggestions) ?? [],
+      suggestionStarts: try container.decodeIfPresent(
+        SuggestionStarts.self, forKey: .suggestionStarts) ?? SuggestionStarts(),
+      suggestionBatch: try container.decodeIfPresent(
+        SuggestionBatch.self, forKey: .suggestionBatch),
+      issuedSuggestionNumbers: try container.decodeIfPresent(
+        [SequenceReservation].self, forKey: .issuedSuggestionNumbers) ?? [],
+      unfinishedSuggestionRun: try container.decodeIfPresent(
+        SuggestionRunCheckpoint.self, forKey: .unfinishedSuggestionRun),
+      lastAppliedSuggestionRunID: try container.decodeIfPresent(
+        UUID.self, forKey: .lastAppliedSuggestionRunID),
+      suggestionRecoveryOwnerID: try container.decodeIfPresent(
+        UUID.self, forKey: .suggestionRecoveryOwnerID),
       speakerCountOverride: try container.decodeIfPresent(
         Int.self, forKey: .speakerCountOverride),
       speakerDisplayNames: try container.decodeIfPresent(
         [String: String].self, forKey: .speakerDisplayNames) ?? [:]
     )
+    for candidate in cutSuggestions where candidate.status == .accepted && candidate.naming == nil {
+      guard slices[id: candidate.id]?.suggestionTypeID == nil,
+        slices[id: candidate.id]?.suggestionNaming == nil,
+        SuggestionDefaults.types.contains(where: { $0.id == candidate.productType.rawValue })
+      else { continue }
+      slices[id: candidate.id]?.suggestionTypeID = candidate.productType.rawValue
+    }
   }
 }
 
@@ -66,6 +105,8 @@ extension EditorDocumentState {
         return updated
       })
     rekeyed.cutSuggestions = []
+    rekeyed.suggestionBatch = nil
+    rekeyed.unfinishedSuggestionRun = nil
     return rekeyed
   }
 }

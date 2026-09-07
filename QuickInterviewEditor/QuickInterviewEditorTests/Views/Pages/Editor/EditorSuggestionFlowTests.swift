@@ -28,6 +28,205 @@ struct EditorSuggestionFlowTests {
     return suggestion
   }
 
+  private func numberedSuggestion(
+    plan: EditPlan, id: UUID = Fixtures.uuid(1), typeID: String = "spotlight",
+    values: [String: String] = [:]
+  ) throws -> (candidate: CutSuggestion, batch: SuggestionBatch) {
+    var candidate = freshSuggestion(id, plan: plan)
+    let type = try #require(SuggestionDefaults.types.first { $0.id == typeID })
+    candidate.productType = ProductType(rawValue: typeID)!
+    candidate.title = "Spotlight 3"
+    let reservation = SequenceReservation(
+      candidateID: candidate.id,
+      key: suggestionSequenceKey(type: type, values: values, candidateID: candidate.id),
+      number: 3, canonicalValues: values)
+    candidate.naming = SuggestionNamingRecord(
+      runID: Fixtures.uuid(2), typeID: type.id, typeName: type.name, typeGroup: type.group,
+      discoveryLabel: "Writing on the road", extractedValues: values, missingFieldIDs: [],
+      correctedValues: [:], reservation: reservation)
+    let snapshot = SuggestionRunSnapshot(
+      runID: Fixtures.uuid(2), configuration: SuggestionDefaults.configuration,
+      configurationHash: "fixture",
+      model: "fixture-model", discoveryPromptVersion: "configured-v1",
+      extractionPromptVersion: "fields-v1", productSpecVersion: "configured-v1",
+      transcriptHash: plan.transcriptHash, sourceFingerprint: fingerprint,
+      sampleRate: plan.source.sampleRate)
+    return (
+      candidate,
+      SuggestionBatch(snapshot: snapshot, actualStarts: SuggestionStarts(), canonicalGroups: [])
+    )
+  }
+
+  @Test func undoAcceptanceKeepsItsIssuedNumber() async throws {
+    let plan = Fixtures.editPlan()
+    let model = editor(plan)
+    let (candidate, batch) = try numberedSuggestion(plan: plan)
+    let reservation = try #require(candidate.naming?.reservation)
+    model.mutateDocument(recordUndo: false) {
+      $0.cutSuggestions = [candidate]
+      $0.suggestionBatch = batch
+    }
+    var changes: [EditorDocumentState] = []
+    model.onDocumentStateChanged = { changes.append($0) }
+
+    model.cutSuggestions.acceptTapped(candidate.id)
+    expectNoDifference(changes.count, 1)
+    expectNoDifference(model.slices.first?.suggestionNaming, candidate.naming)
+    await model.undoTapped()
+    expectNoDifference(model.slices.count, 0)
+    expectNoDifference(model.documentState.issuedSuggestionNumbers, [reservation])
+    expectNoDifference(model.documentCutSuggestions[id: candidate.id]?.status, .pending)
+    await model.redoTapped()
+    expectNoDifference(model.documentCutSuggestions[id: candidate.id]?.status, .accepted)
+    expectNoDifference(model.documentState.issuedSuggestionNumbers, [reservation])
+    await model.undoTapped()
+    model.cutSuggestions.acceptTapped(candidate.id)
+    model.cutSuggestions.acceptTapped(candidate.id)
+    expectNoDifference(model.slices.count, 1)
+    expectNoDifference(model.documentState.issuedSuggestionNumbers, [reservation])
+  }
+
+  @Test func reservationConflictIsVisibleThroughThePageAndDoesNotMutateDocument() throws {
+    let model = editor()
+    let (candidate, batch) = try numberedSuggestion(plan: model.editPlan)
+    var taken = try #require(candidate.naming?.reservation)
+    taken.candidateID = Fixtures.uuid(9)
+    model.mutateDocument(recordUndo: false) {
+      $0.cutSuggestions = [candidate]
+      $0.suggestionBatch = batch
+      $0.issuedSuggestionNumbers = [taken]
+    }
+    let before = model.documentState
+    model.cutSuggestions.acceptTapped(candidate.id)
+    expectNoDifference(model.documentState, before)
+    #expect(model.cutSuggestions.actionMessage?.contains("another suggestion") == true)
+    #expect(!model.canUndo)
+  }
+
+  @Test func finalAcceptanceIgnoresUntrustedChildSliceAndChecksCurrentProvenance() throws {
+    let model = editor()
+    var (candidate, batch) = try numberedSuggestion(plan: model.editPlan)
+    try model.replaceSuggestionBatch(candidates: [candidate], batch: batch)
+    let forged = Fixtures.slice(id: Fixtures.uuid(8))
+    model.acceptCutSuggestion(forged, id: candidate.id)
+    expectNoDifference(model.slices.first?.id, candidate.id)
+    expectNoDifference(model.slices.first?.wordIDs, candidate.wordIDs)
+    candidate.provenance.transcriptHash = "stale"
+    model.mutateDocument(recordUndo: false) { $0.cutSuggestions[id: candidate.id] = candidate }
+    let before = model.documentState
+    model.acceptCutSuggestion(forged, id: candidate.id)
+    expectNoDifference(model.documentState, before)
+    expectNoDifference(
+      model.cutSuggestions.actionMessage, cutSuggestionStaleMessage(.transcriptChanged))
+  }
+
+  @Test func deletedAndReopenedAcceptedNumberIsNotReusedByFreshRun() throws {
+    let model = editor()
+    let (candidate, batch) = try numberedSuggestion(plan: model.editPlan)
+    try model.replaceSuggestionBatch(candidates: [candidate], batch: batch)
+    model.cutSuggestions.acceptTapped(candidate.id)
+    model.mutateSlices { $0[id: candidate.id]?.name = "Manually renamed" }
+    model.mutateSlices { $0.remove(id: candidate.id) }
+    let saved = try JSONEncoder().encode(model.documentState)
+    let reopened = try JSONDecoder().decode(EditorDocumentState.self, from: saved)
+    let fresh = try numberedSuggestion(plan: model.editPlan, id: Fixtures.uuid(7)).candidate
+    let result = try numberSuggestions(
+      [fresh], snapshot: batch.snapshot, starts: reopened.suggestionStarts,
+      issued: reopened.issuedSuggestionNumbers, retained: [])
+    expectNoDifference(result.candidates.first?.naming?.reservation?.number, 4)
+    expectNoDifference(
+      reopened.issuedSuggestionNumbers, [try #require(candidate.naming?.reservation)])
+  }
+
+  @Test func correctedGroupSpellingAndChangedNumberKeepOriginalIssuedIdentity() async throws {
+    let model = editor()
+    let (candidate, batch) = try numberedSuggestion(
+      plan: model.editPlan, typeID: "intro", values: ["song-title": "Café", "artist-name": "Björk"])
+    try model.replaceSuggestionBatch(candidates: [candidate], batch: batch)
+    model.cutSuggestions.acceptTapped(candidate.id)
+    let original = try #require(candidate.naming?.reservation)
+    await model.undoTapped()
+    model.mutateDocument {
+      $0.cutSuggestions[id: candidate.id]?.naming?.correctedValues = [
+        "song-title": "CAFÉ", "artist-name": "Björk",
+      ]
+      $0.cutSuggestions[id: candidate.id]?.naming?.reservation?.canonicalValues = [
+        "song-title": "CAFÉ", "artist-name": "Björk",
+      ]
+    }
+    model.cutSuggestions.acceptTapped(candidate.id)
+    expectNoDifference(model.documentState.issuedSuggestionNumbers, [original])
+    await model.undoTapped()
+    model.mutateDocument {
+      $0.cutSuggestions[id: candidate.id]?.naming?.reservation?.number = 8
+    }
+    model.cutSuggestions.acceptTapped(candidate.id)
+    var changed = original
+    changed.number = 8
+    changed.canonicalValues = ["song-title": "CAFÉ", "artist-name": "Björk"]
+    expectNoDifference(model.documentState.issuedSuggestionNumbers, [original, changed])
+    await model.undoTapped()
+    expectNoDifference(model.documentState.issuedSuggestionNumbers, [original, changed])
+    let type = try #require(batch.snapshot.configuration.types.first { $0.id == "intro" })
+    let values = ["song-title": "Another Song", "artist-name": "Björk"]
+    let moved = SequenceReservation(
+      candidateID: candidate.id,
+      key: suggestionSequenceKey(type: type, values: values, candidateID: candidate.id),
+      number: 1, canonicalValues: values)
+    model.mutateDocument {
+      $0.cutSuggestions[id: candidate.id]?.naming?.correctedValues = values
+      $0.cutSuggestions[id: candidate.id]?.naming?.reservation = moved
+    }
+    model.cutSuggestions.acceptTapped(candidate.id)
+    expectNoDifference(model.documentState.issuedSuggestionNumbers, [original, changed, moved])
+    await model.undoTapped()
+    expectNoDifference(model.documentState.issuedSuggestionNumbers, [original, changed, moved])
+  }
+
+  @Test func replacingBatchRebasesCandidatesAndMetadataTogetherAndFutureStartsUndoSeparately()
+    async throws
+  {
+    let model = editor()
+    model.mutateDocument { $0.speakerCountOverride = 2 }
+    let (candidate, batch) = try numberedSuggestion(plan: model.editPlan)
+    try model.replaceSuggestionBatch(candidates: [candidate], batch: batch)
+    await model.undoTapped()
+    expectNoDifference(model.documentState.suggestionBatch, batch)
+    expectNoDifference(model.documentCutSuggestions.elements, [candidate])
+    model.mutateDocument {
+      $0.suggestionStarts.types["spotlight"] = .init(number: 20, isExplicit: true)
+    }
+    await model.undoTapped()
+    expectNoDifference(model.documentState.suggestionStarts, SuggestionStarts())
+    expectNoDifference(model.documentState.suggestionBatch, batch)
+  }
+
+  @Test func explicitPendingRenumberIsUndoableWithoutChangingRejectedOrIssued() async throws {
+    let model = editor()
+    let (candidate, batch) = try numberedSuggestion(plan: model.editPlan)
+    var rejected = try numberedSuggestion(plan: model.editPlan, id: Fixtures.uuid(6)).candidate
+    rejected.reject()
+    rejected.naming?.reservation?.number = 4
+    try model.replaceSuggestionBatch(candidates: [candidate, rejected], batch: batch)
+    model.cutSuggestions.acceptTapped(candidate.id)
+    await model.undoTapped()
+    let ledger = model.documentState.issuedSuggestionNumbers
+    let before = model.documentState
+    let result = try numberSuggestions(
+      model.documentCutSuggestions.elements, snapshot: batch.snapshot,
+      starts: SuggestionStarts(types: ["spotlight": .init(number: 10, isExplicit: true)]),
+      issued: ledger, retained: model.documentCutSuggestions.compactMap { $0.naming?.reservation },
+      mode: .pendingRenumber(selectedCandidateIDs: [candidate.id]), existingBatch: batch)
+    try model.replaceSuggestionBatch(
+      candidates: result.candidates, batch: result.batch, recordUndo: true)
+    expectNoDifference(
+      model.documentCutSuggestions[id: candidate.id]?.naming?.reservation?.number, 10)
+    expectNoDifference(model.documentCutSuggestions[id: rejected.id], rejected)
+    expectNoDifference(model.documentState.issuedSuggestionNumbers, ledger)
+    await model.undoTapped()
+    expectNoDifference(model.documentState, before)
+  }
+
   @Test func backgroundPassStoresSuggestionsAndDirtiesButLeavesCanUndoFalse() {
     let plan = Fixtures.editPlan()
     let model = editor(plan)

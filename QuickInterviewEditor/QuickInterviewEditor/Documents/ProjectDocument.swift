@@ -116,6 +116,8 @@ final class ProjectDocument: ReferenceFileDocument {
   nonisolated static func makeFileWrapper(snapshot: Content, existingFile: FileWrapper?) throws
     -> FileWrapper
   {
+    var snapshot = snapshot
+    snapshot.file.schemaVersion = ProjectFile.currentSchemaVersion
     let audio: FileWrapper
     switch snapshot.audio {
     case .packageChild(let sessionCopy):

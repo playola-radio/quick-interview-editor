@@ -45,6 +45,7 @@ final class EditorModel: ViewModel {
   // MARK: - Dependencies
   @ObservationIgnored @Dependency(\.audioPlayer) var audioPlayer
   @ObservationIgnored @Dependency(\.engine) var engine
+  @ObservationIgnored @Dependency(\.uuid) var uuid
   @ObservationIgnored @Dependency(\.exportRender) var exportRender
   @ObservationIgnored @Dependency(\.workspace) var workspace
   @ObservationIgnored @Dependency(\.continuousClock) var clock
@@ -115,6 +116,12 @@ final class EditorModel: ViewModel {
     self.timelineRemovals = Self.validatedRemovals(
       initialDocument.timelineRemovals, sourceDurationSamples: editPlan.source.durationSamples)
     self.documentCutSuggestions = initialDocument.cutSuggestions
+    self.suggestionStarts = initialDocument.suggestionStarts
+    self.suggestionBatch = initialDocument.suggestionBatch
+    self.issuedSuggestionNumbers = initialDocument.issuedSuggestionNumbers
+    self.unfinishedSuggestionRun = initialDocument.unfinishedSuggestionRun
+    self.lastAppliedSuggestionRunID = initialDocument.lastAppliedSuggestionRunID
+    self.suggestionRecoveryOwnerID = initialDocument.suggestionRecoveryOwnerID
     self.speakerCountOverride = initialDocument.speakerCountOverride
     self.speakerDisplayNames = initialDocument.speakerDisplayNames
     syncEditedTimeline()
@@ -214,6 +221,12 @@ final class EditorModel: ViewModel {
   /// only through `mutateDocument` (accept/reject undoably; the background pass with
   /// `recordUndo: false`), so it moves with the rest of the document on undo.
   var documentCutSuggestions: IdentifiedArrayOf<CutSuggestion> = []
+  var suggestionStarts: SuggestionStarts = SuggestionStarts()
+  var suggestionBatch: SuggestionBatch?
+  var issuedSuggestionNumbers: [SequenceReservation] = []
+  var unfinishedSuggestionRun: SuggestionRunCheckpoint?
+  var lastAppliedSuggestionRunID: UUID?
+  var suggestionRecoveryOwnerID: UUID?
   /// Paragraph/speaker spec: per-file `override ?? auto_speaker_count`. Part of the
   /// document so it saves/undoes with everything else; unused by the editor UI yet.
   var speakerCountOverride: Int?
@@ -375,7 +388,14 @@ final class EditorModel: ViewModel {
   var documentState: EditorDocumentState {
     EditorDocumentState(
       slices: slices, timelineRemovals: timelineRemovals,
-      cutSuggestions: documentCutSuggestions, speakerCountOverride: speakerCountOverride,
+      cutSuggestions: documentCutSuggestions,
+      suggestionStarts: suggestionStarts,
+      suggestionBatch: suggestionBatch,
+      issuedSuggestionNumbers: issuedSuggestionNumbers,
+      unfinishedSuggestionRun: unfinishedSuggestionRun,
+      lastAppliedSuggestionRunID: lastAppliedSuggestionRunID,
+      suggestionRecoveryOwnerID: suggestionRecoveryOwnerID,
+      speakerCountOverride: speakerCountOverride,
       speakerDisplayNames: speakerDisplayNames)
   }
 
@@ -1945,15 +1965,26 @@ final class EditorModel: ViewModel {
   /// rewind past it and drop it. Restoring history via `undoTapped`/`redoTapped` deliberately
   /// bypasses this — it assigns the fields directly so replaying the stack never records a new
   /// entry.
-  func mutateDocument(recordUndo: Bool = true, _ body: (inout EditorDocumentState) -> Void) {
+  func mutateDocument(
+    recordUndo: Bool = true,
+    recordingPermanentReservations reservations: [SequenceReservation] = [],
+    _ body: (inout EditorDocumentState) -> Void
+  ) {
     finishCutSuggestionTitleEdit()
     let old = documentState
     var new = old
     body(&new)
+    new.recordPermanentReservations(reservations)
     guard new != old else { return }
     slices = new.slices
     timelineRemovals = new.timelineRemovals
     documentCutSuggestions = new.cutSuggestions
+    suggestionStarts = new.suggestionStarts
+    suggestionBatch = new.suggestionBatch
+    issuedSuggestionNumbers = new.issuedSuggestionNumbers
+    unfinishedSuggestionRun = new.unfinishedSuggestionRun
+    lastAppliedSuggestionRunID = new.lastAppliedSuggestionRunID
+    suggestionRecoveryOwnerID = new.suggestionRecoveryOwnerID
     speakerCountOverride = new.speakerCountOverride
     speakerDisplayNames = new.speakerDisplayNames
     if recordUndo {
@@ -1964,6 +1995,7 @@ final class EditorModel: ViewModel {
       // earlier edit can't rewind to a snapshot that predates it and silently drop it.
       documentUndo.rebase(body)
     }
+    documentUndo.rebase { $0.recordPermanentReservations(reservations) }
     syncEditedTimeline()
     onDocumentStateChanged?(documentState)
   }
@@ -2010,14 +2042,39 @@ final class EditorModel: ViewModel {
   /// half-accepted state (a green slice beside its own amber pending band) that two separate
   /// mutations would leave between undos. The derived slice shares the suggestion's id, so
   /// re-accepting is a no-op on the slice while still (re)confirming the status.
-  func acceptCutSuggestion(_ slice: Slice, id: CutSuggestion.ID) {
-    let firstAccept = slices[id: slice.id] == nil
-    let nudged = offsetNudgedClip(slice)
-    mutateDocument {
-      if $0.slices[id: nudged.id] == nil { $0.slices.append(nudged) }
-      $0.cutSuggestions[id: id]?.accept()
+  func acceptCutSuggestion(_: Slice, id: CutSuggestion.ID) {
+    do {
+      let validated = try suggestionSliceForAcceptance(
+        id: id, state: documentState, plan: editPlan, sourceFingerprint: sourceFingerprint)
+      let firstAccept = slices[id: id] == nil
+      let nudged = offsetNudgedClip(validated)
+      let reservations = validated.suggestionNaming?.reservation.map { [$0] } ?? []
+      mutateDocument(recordingPermanentReservations: reservations) {
+        if $0.slices[id: id] == nil { $0.slices.append(nudged) }
+        $0.cutSuggestions[id: id]?.accept()
+      }
+      if firstAccept { sliceScrollTarget = id }
+    } catch {
+      cutSuggestions.actionMessage = error.localizedDescription
     }
-    if firstAccept { sliceScrollTarget = nudged.id }
+  }
+
+  @discardableResult
+  func ensureSuggestionRecoveryOwner() -> UUID {
+    if let suggestionRecoveryOwnerID { return suggestionRecoveryOwnerID }
+    let ownerID = uuid()
+    mutateDocument(recordUndo: false) { $0.suggestionRecoveryOwnerID = ownerID }
+    return ownerID
+  }
+
+  func replaceSuggestionBatch(
+    candidates: [CutSuggestion], batch: SuggestionBatch, recordUndo: Bool = false
+  ) throws {
+    try validateSuggestionRunApplication(candidates: candidates, batch: batch)
+    mutateDocument(recordUndo: recordUndo) {
+      $0.cutSuggestions = IdentifiedArray(candidates, uniquingIDsWith: { first, _ in first })
+      $0.suggestionBatch = batch
+    }
   }
 
   /// The single funnel for every NEW clip (Mark as Clip, fine-tune commit): nudges its cut
@@ -2777,6 +2834,12 @@ final class EditorModel: ViewModel {
     slices = restored.slices
     timelineRemovals = restored.timelineRemovals
     documentCutSuggestions = restored.cutSuggestions
+    suggestionStarts = restored.suggestionStarts
+    suggestionBatch = restored.suggestionBatch
+    issuedSuggestionNumbers = restored.issuedSuggestionNumbers
+    unfinishedSuggestionRun = restored.unfinishedSuggestionRun
+    lastAppliedSuggestionRunID = restored.lastAppliedSuggestionRunID
+    suggestionRecoveryOwnerID = restored.suggestionRecoveryOwnerID
     speakerCountOverride = restored.speakerCountOverride
     speakerDisplayNames = restored.speakerDisplayNames
     syncEditedTimeline()

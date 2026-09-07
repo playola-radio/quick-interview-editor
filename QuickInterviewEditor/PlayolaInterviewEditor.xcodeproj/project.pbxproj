@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		C42C8CC522F7B93F629EFD36 /* SuggestionDocumentMutation.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE4548F8D79C746DC8D56791 /* SuggestionDocumentMutation.swift */; };
 		01D7C91E1661CAC01C302317 /* CutSuggestClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19C10707636C7ADF47D1D8D2 /* CutSuggestClient.swift */; };
 		A51100000000000000000001 /* SuggestionConfigurationClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50100000000000000000001 /* SuggestionConfigurationClient.swift */; };
 		A51200000000000000000001 /* SuggestionConfigurationKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50200000000000000000001 /* SuggestionConfigurationKey.swift */; };
@@ -292,6 +293,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		DE4548F8D79C746DC8D56791 /* SuggestionDocumentMutation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SuggestionDocumentMutation.swift; sourceTree = "<group>"; };
 		00CB15B7C712A336D37F4347 /* DeclickFadeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeclickFadeTests.swift; sourceTree = "<group>"; };
 		027A2E184255660E29E80464 /* SaveStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SaveStatus.swift; sourceTree = "<group>"; };
 		028ADEA4355BF9ABA3DCC870 /* ReTranscribeIdentityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReTranscribeIdentityTests.swift; sourceTree = "<group>"; };
@@ -891,6 +893,7 @@
 				112E01B5A6A1BF5DC6759841 /* SuggestionNaming.swift */,
 				0E26EDE355427CF55ECE1C16 /* SuggestionNumbering.swift */,
 				C201194EBAEB235AB244E0C1 /* SuggestionRun.swift */,
+				DE4548F8D79C746DC8D56791 /* SuggestionDocumentMutation.swift */,
 				A20000000000000000000010 /* SuggestionRunWire.swift */,
 				9220B5BD3835A038A74C6DA0 /* TimelineRemoval.swift */,
 				26119561988C8741B3FAEE42 /* TranscriptClipBand.swift */,
@@ -1404,6 +1407,7 @@
 				FD54F31D91D655D951DE6242 /* SuggestionNaming.swift in Sources */,
 				D802EB036728A38A83C28740 /* SuggestionNumbering.swift in Sources */,
 				2A7032ECD17956195270C628 /* SuggestionRun.swift in Sources */,
+				C42C8CC522F7B93F629EFD36 /* SuggestionDocumentMutation.swift in Sources */,
 				A10000000000000000000010 /* SuggestionRunWire.swift in Sources */,
 				A37451C895DB7C3A6FF95E35 /* TimelineRemoval.swift in Sources */,
 				7B6C410FD660EB359EFE351D /* TranscriptCache.swift in Sources */,
