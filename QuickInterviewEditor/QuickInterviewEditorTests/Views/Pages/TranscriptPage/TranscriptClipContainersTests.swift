@@ -135,4 +135,66 @@ struct TranscriptClipContainersTests {
     let containers = model(clipBands: bands).clipContainers
     expectNoDifference(containers.map(\.range.location), [0, 20])
   }
+
+  // MARK: - changed(from:to:) — the resize-drag repaint diff
+
+  private func container(_ location: Int, _ length: Int, _ kind: TranscriptClipKind = .approved)
+    -> TranscriptClipContainer
+  {
+    TranscriptClipContainer(
+      range: NSRange(location: location, length: length), kind: kind,
+      colorIndex: 0)
+  }
+
+  /// Nothing moved between two renders, so no container needs repainting — the fast path a
+  /// steady (non-drag) frame takes.
+  @Test func changedIsEmptyWhenRendersMatch() {
+    let same = [container(0, 11), container(16, 7, .suggested)]
+    expectNoDifference(TranscriptClipContainer.changed(from: same, to: same), [])
+  }
+
+  /// A resize that grows one clip changes only that clip's container: the old span leaves and
+  /// the new span enters, while every untouched clip/suggestion is omitted. This is the whole
+  /// point — a drag over a 37-container transcript repaints 2 containers, not 37.
+  @Test func changedReturnsOnlyTheMovedContainerBothWays() {
+    let untouched = container(40, 5, .suggested)
+    let old = [container(0, 11), untouched]
+    let new = [container(0, 16), untouched]
+    expectNoDifference(
+      TranscriptClipContainer.changed(from: old, to: new),
+      [container(0, 11), container(0, 16)])
+  }
+
+  /// A newly-created container (none removed) enters; a deleted one (none added) leaves.
+  @Test func changedHandlesPureAddAndPureRemove() {
+    let base = [container(0, 11)]
+    expectNoDifference(
+      TranscriptClipContainer.changed(from: base, to: base + [container(16, 7, .suggested)]),
+      [container(16, 7, .suggested)])
+    expectNoDifference(
+      TranscriptClipContainer.changed(from: base + [container(16, 7, .suggested)], to: base),
+      [container(16, 7, .suggested)])
+  }
+
+  /// A container whose only change is kind (same range) still counts as changed — its words
+  /// need the new colour/strikethrough even though the span is identical.
+  @Test func changedDetectsKindOnlyChange() {
+    let old = [container(0, 11, .approved)]
+    let new = [container(0, 11, .rejected)]
+    expectNoDifference(
+      TranscriptClipContainer.changed(from: old, to: new),
+      [container(0, 11, .approved), container(0, 11, .rejected)])
+  }
+
+  /// Documents the helper's precondition (see `changed(from:to:)`): the diff keys on member
+  /// equality, so the SAME two containers in a different array order register as no change. This
+  /// is only safe because `clipContainers` are non-overlapping and position-ordered, so a word's
+  /// winning container never flips by reordering alone. If this test ever needs to change, the
+  /// non-overlap invariant has been relaxed and the helper must repaint on reorder too.
+  @Test func changedIgnoresPureReorderingBecauseContainersNeverOverlap() {
+    let clip = container(0, 11, .approved)
+    let suggestion = container(16, 7, .suggested)
+    expectNoDifference(
+      TranscriptClipContainer.changed(from: [clip, suggestion], to: [suggestion, clip]), [])
+  }
 }

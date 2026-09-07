@@ -355,7 +355,7 @@ struct TranscriptTextView: NSViewRepresentable {
       guard let storage = textView?.textStorage, let layoutManager = clipLayoutManager else {
         return
       }
-      let affected = lastClipContainers + new
+      let affected = TranscriptClipContainer.changed(from: lastClipContainers, to: new)
       lastClipContainers = new
       // The clip's own `colorIndex` is the palette variant, so every run of one clip shares a
       // colour while adjacent clips differ.
