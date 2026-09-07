@@ -1998,6 +1998,50 @@ final class EditorModel: ViewModel {
     }
   }
 
+  /// Commits a cut-point move as one undo step: writes the moved `removedRange` AND pins the fade to
+  /// the frozen EFFECTIVE `length`, so a stored-overlong `lengthSamples` can't silently re-grow once
+  /// the moved bound frees up handle. Preserves the removal's `id` (does NOT route through
+  /// `removeSourceRange`, which mints a new UUID). Guarded mid-export like `updateCrossfade`.
+  func updateRemovalRange(
+    id: TimelineRemoval.ID, removedRange: Range<Int>, freezingCrossfadeLength length: Int
+  ) {
+    guard !isExporting, timelineRemovals[id: id] != nil else { return }
+    mutateDocument { doc in
+      doc.timelineRemovals[id: id]?.removedRange = removedRange
+      doc.timelineRemovals[id: id]?.crossfade.lengthSamples = length
+    }
+  }
+
+  /// Clamps a proposed `removedRange` for a cut-point move so it stays non-empty, never crosses the
+  /// other cut, and never overlaps or starves a neighbor removal's fade. Reads the COMMITTED,
+  /// normalized `editedTimeline` (unchanged mid-drag): `removals`/`seams` there carry the effective
+  /// (clamped) fade lengths. `frozenLength` is the moving seam's own effective length, pinned at drag
+  /// begin. Only the moving edge changes; the other is held. Returns the committed range unchanged if
+  /// the removal isn't found (defensive; unreachable in normal flow).
+  func clampedRemovalRange(
+    id: TimelineRemoval.ID, proposed: Range<Int>, frozenLength: Int
+  ) -> Range<Int> {
+    let timeline = editedTimeline
+    guard let index = timeline.removals.firstIndex(where: { $0.id == id }) else { return proposed }
+    let removals = timeline.removals
+    let seams = timeline.seams
+    let cL = removals[index].removedRange.lowerBound
+    let cR = removals[index].removedRange.upperBound
+    let prevUpper = index > 0 ? removals[index - 1].removedRange.upperBound : 0
+    let nextLower =
+      index + 1 < removals.count
+      ? removals[index + 1].removedRange.lowerBound : editPlan.source.durationSamples
+    let prevF = index > 0 ? seams[index - 1].crossfadeLength : 0
+    let nextF = index + 1 < seams.count ? seams[index + 1].crossfadeLength : 0
+
+    if proposed.lowerBound != cL {
+      let newCL = min(max(proposed.lowerBound, prevUpper + prevF + frozenLength), cR - 1)
+      return newCL..<cR
+    }
+    let newCR = max(min(proposed.upperBound, nextLower - frozenLength - nextF), cL + 1)
+    return cL..<newCR
+  }
+
   // MARK: - Crossfade stretch (edge drag)
   /// Begins an edge-drag stretch of seam `id`: selects it and seeds the draft with its current
   /// length. A no-op for an unknown removal OR one with no derivable seam (an invalid timeline —
