@@ -1604,11 +1604,26 @@ final class EditorModel: ViewModel {
     // hasn't run yet), so `activeEditingRange` would capture that old draft and later read as a
     // phantom resize.
     if revealWords(suggestion.wordIDs) {
+      reanchorStalePendingDraft()
       selectedCutSuggestionID = suggestion.id
       suggestionBaselineRange = selectedSourceRange
     } else {
       clearSuggestionEditingLink()
     }
+  }
+
+  /// A reveal replaces the selection wholesale, so a leftover PENDING-SELECTION grip drag belongs to
+  /// the *prior* selection and must not survive to read as this suggestion's resize. `syncEditSession`
+  /// normally discards such a draft by re-anchoring, but its `committedRange != range` shortcut skips
+  /// that when the abandoned baseline coincidentally equals the freshly revealed selection — leaking
+  /// the old draft into `suggestionEditingRange`. Re-anchor it here, deterministically, before the
+  /// view's onChange `syncEditSession` runs. An unsaved SLICE edit is protected (held until
+  /// Save/Cancel) and left untouched.
+  private func reanchorStalePendingDraft() {
+    guard fineTune.target == .pendingSelection, fineTune.hasUnsavedChange,
+      let range = selectedSourceRange
+    else { return }
+    fineTune.begin(target: .pendingSelection, range: range)
   }
 
   /// The live adjusted extent to accept a suggestion at, or nil to fall back to its word-derived

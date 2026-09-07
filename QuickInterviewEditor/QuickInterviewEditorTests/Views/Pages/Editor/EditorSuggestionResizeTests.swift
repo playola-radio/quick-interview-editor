@@ -315,6 +315,26 @@ struct EditorSuggestionResizeTests {
     #expect(model.adjustedRangeForSuggestion(sug.id) == nil)
   }
 
+  @Test func aStalePendingDraftWhoseCommittedRangeMatchesTheSuggestionIsNotAResize() {
+    // Adversarial variant of the test above: the prior pending session's committed baseline
+    // *coincidentally equals* the suggestion's own selection (100_000..<300_000). The
+    // `committedRange == selectedSourceRange` gate alone would wave the stale draft through as a
+    // phantom resize, and `syncEditSession`'s `committedRange != range` re-anchor shortcut would miss
+    // it too. Revealing the suggestion must re-anchor the abandoned draft so an unresized accept
+    // stays on the word-derived path.
+    let plan = plan()
+    let model = editor(plan)
+    let sug = suggestion(plan, id: Fixtures.uuid(1), wordIDs: [1, 2, 3, 4])
+    model.documentCutSuggestions = [sug]
+
+    // Committed baseline == the suggestion's own span; draft dragged out to cover "Bob", never accepted.
+    model.fineTune.begin(target: .pendingSelection, range: 100_000..<300_000)
+    model.fineTune.draftRange = 100_000..<450_000
+    model.cutSuggestionSelected(sug)  // reveal must discard the stale drag
+
+    #expect(model.adjustedRangeForSuggestion(sug.id) == nil)
+  }
+
   @Test func aFineTuneGripResizeOfTheSelectedSuggestionIsHonored() {
     // The positive case the gate must still allow: the pane is tuning THIS selection (committed ==
     // selection) and a grip drag moved the draft — that is a real resize and must be accepted.
