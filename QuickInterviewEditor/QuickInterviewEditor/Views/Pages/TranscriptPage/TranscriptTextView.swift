@@ -367,8 +367,7 @@ struct TranscriptTextView: NSViewRepresentable {
       }
       storage.beginEditing()
       for container in affected {
-        for wordRange in model.document.wordRanges
-        where NSLocationInRange(wordRange.range.location, container.range) {
+        for wordRange in model.document.words(startingWithin: container.range) {
           setForeground(storage: storage, wordRange: wordRange.range, wordID: wordRange.wordID)
         }
       }

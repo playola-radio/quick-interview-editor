@@ -51,6 +51,58 @@ struct TranscriptDocumentTests {
     expectNoDifference(doc.wordID(atUTF16Offset: 0), nil)
   }
 
+  // MARK: - words(startingWithin:)
+
+  /// The bounded lookup must return exactly the words whose start location falls inside the
+  /// character range — the same predicate the clip-container foreground pass used to evaluate
+  /// with a full scan, now used per container on the resize hot path.
+  @Test func wordsStartingWithinReturnsCoveredWords() {
+    // "Hello world Foo bar" → ranges: 1@0..5, 2@6..11, 3@12..15, 4@16..19
+    let doc = TranscriptDocument(words: [
+      word(1, "Hello"), word(2, "world"), word(3, "Foo"), word(4, "bar"),
+    ])
+    let covered = doc.words(startingWithin: NSRange(location: 6, length: 10)).map(\.wordID)
+    expectNoDifference(covered, [2, 3])  // starts 6 and 12 are inside [6, 16); 16 (bar) is not
+  }
+
+  @Test func wordsStartingWithinIsInclusiveOfRangeStartExclusiveOfEnd() {
+    let doc = TranscriptDocument(words: [
+      word(1, "Hello"), word(2, "world"), word(3, "Foo"),
+    ])
+    // Range starting exactly at word 2's location includes it.
+    expectNoDifference(
+      doc.words(startingWithin: NSRange(location: 6, length: 1)).map(\.wordID), [2])
+    // Whole document.
+    expectNoDifference(
+      doc.words(startingWithin: NSRange(location: 0, length: 100)).map(\.wordID), [1, 2, 3])
+  }
+
+  @Test func wordsStartingWithinEmptyOrOutOfRangeIsEmpty() {
+    let doc = TranscriptDocument(words: [word(1, "Hello"), word(2, "world")])
+    expectNoDifference(doc.words(startingWithin: NSRange(location: 6, length: 0)).isEmpty, true)
+    expectNoDifference(doc.words(startingWithin: NSRange(location: 100, length: 5)).isEmpty, true)
+    expectNoDifference(
+      TranscriptDocument(words: []).words(startingWithin: NSRange(location: 0, length: 5)).isEmpty,
+      true)
+  }
+
+  /// The bounded lookup must agree with the full-scan predicate it replaced across every
+  /// sub-range, so the optimization can never drop or add a word versus the original behavior.
+  @Test func wordsStartingWithinMatchesFullScanPredicate() {
+    let words = (0..<40).map { word($0, "w\($0)") }
+    let doc = TranscriptDocument(words: words)
+    let total = doc.text.utf16.count
+    for start in stride(from: 0, through: total, by: 3) {
+      for length in stride(from: 0, through: total - start + 5, by: 5) {
+        let range = NSRange(location: start, length: length)
+        let bounded = Set(doc.words(startingWithin: range).map(\.wordID))
+        let scanned = Set(
+          doc.wordRanges.filter { NSLocationInRange($0.range.location, range) }.map(\.wordID))
+        expectNoDifference(bounded, scanned)
+      }
+    }
+  }
+
   // MARK: - Paragraph breaks
 
   @Test func singleParagraphRendersLikeSpaceJoined() {

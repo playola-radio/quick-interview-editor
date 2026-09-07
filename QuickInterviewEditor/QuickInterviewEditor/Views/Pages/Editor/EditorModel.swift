@@ -769,10 +769,17 @@ final class EditorModel: ViewModel {
   /// so a suggestion's resize handles always reflect its own semantic range. Draft-aware
   /// substitution is added in the clip/suggestion resize tasks.
   var transcriptResizeItems: [TranscriptResizeItem] {
+    // Index every transcript position of each word ID ONCE, then order each item by gathering its
+    // IDs' positions + sort — O(n) once plus O(m log m) per item — instead of a full O(n)
+    // `order.filter` per item. On a long transcript with many clips/suggestions this per-item full
+    // scan was a dominant per-drag cost. All positions (not just the first) are indexed so the
+    // output stays identical to `order.filter(set.contains)` when word IDs repeat (IDs are not
+    // guaranteed unique): every occurrence of a matched ID is emitted, in transcript order.
     let order = transcriptOrder()
+    var positions: [Word.ID: [Int]] = [:]
+    for (index, id) in order.enumerated() { positions[id, default: []].append(index) }
     func ordered(_ ids: some Sequence<Word.ID>) -> [Word.ID] {
-      let set = Set(ids)
-      return order.filter(set.contains)
+      Set(ids).flatMap { positions[$0] ?? [] }.sorted().map { order[$0] }
     }
     var items: [TranscriptResizeItem] = []
     if !selectedWordIDs.isEmpty {

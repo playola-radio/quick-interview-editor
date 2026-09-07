@@ -54,4 +54,30 @@ struct TranscriptResizeItemsTests {
     model.slices = [slice(Fixtures.uuid(1), wordIDs: [1, 2])]
     expectNoDifference(model.transcriptResizeItems.contains { $0.identity == .selection }, false)
   }
+
+  /// Regression: word IDs are not guaranteed unique. When the transcript repeats an ID, an
+  /// item's ordered word run must include EVERY occurrence in transcript order — matching the
+  /// original `order.filter(set.contains)` that the position-index optimization replaced. Here
+  /// ID 1 appears at transcript positions 0 and 2, so a clip covering {1, 2} orders to [1, 2, 1].
+  @Test func clipWordRunKeepsEveryOccurrenceOfADuplicateID() {
+    func word(_ id: Int, _ start: Int) -> Word {
+      Word(
+        id: id, text: "w", start: Double(start), end: nil, startSample: start,
+        endSample: start + 100)
+    }
+    let plan = EditPlan(
+      schemaVersion: 1,
+      source: EditPlan.Source(
+        path: "/x.aiff", sampleRate: 44100, channels: 1, durationSamples: 10_000),
+      words: [word(1, 0), word(2, 200), word(1, 400), word(3, 600)],
+      silences: [], segments: [])
+    let model = EditorModel(
+      sourceURL: URL(fileURLWithPath: "/clip.m4a"),
+      canonicalAudioURL: Fixtures.canonicalAudioURL, editPlan: plan,
+      initialDocument: EditorDocumentState(cutSuggestions: []))
+    model.slices = [slice(Fixtures.uuid(1), wordIDs: [1, 2])]
+
+    let clip = model.transcriptResizeItems.first { $0.identity == .clip(Fixtures.uuid(1)) }
+    expectNoDifference(clip?.wordIDs, [1, 2, 1])
+  }
 }

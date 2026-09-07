@@ -54,6 +54,28 @@ struct TranscriptDocument: Equatable {
     return indices
   }
 
+  /// The words whose `range.location` falls within `characterRange`, matching the
+  /// `NSLocationInRange(word.location, characterRange)` predicate but bounded to the covered
+  /// span instead of a full scan. Relies on the sorted, non-overlapping `wordRanges` invariant:
+  /// binary-search the first word at or after the range start, then walk forward while the word
+  /// start stays below the range end. Called per clip container on the resize hot path, so the
+  /// full-document scan it replaces (O(words) per container) was the dominant per-drag cost on a
+  /// long transcript.
+  func words(startingWithin characterRange: NSRange) -> ArraySlice<TranscriptWordRange> {
+    guard characterRange.length > 0, !wordRanges.isEmpty else { return [] }
+    let lowerBound = characterRange.location
+    let upperBound = characterRange.location + characterRange.length
+    var low = 0
+    var high = wordRanges.count
+    while low < high {
+      let mid = (low + high) / 2
+      if wordRanges[mid].range.location < lowerBound { low = mid + 1 } else { high = mid }
+    }
+    var end = low
+    while end < wordRanges.count, wordRanges[end].range.location < upperBound { end += 1 }
+    return wordRanges[low..<end]
+  }
+
   /// The word an offset lands in, or the nearest preceding word when the offset is on a
   /// separator or past the end. Nil only when there are no words.
   ///
