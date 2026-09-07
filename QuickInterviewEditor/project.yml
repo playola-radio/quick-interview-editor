@@ -123,6 +123,8 @@ targets:
         buildPhase: resources
       - path: ../tests/fixtures/suggestion-contract-v2.json
         buildPhase: resources
+      - path: ../tests/fixtures/suggestion-recovery-python.json
+        buildPhase: resources
       - path: ../tests/fixtures/suggestion-result-v2.json
         buildPhase: resources
       - path: QuickInterviewEditorTests/Fixtures/project-v1.pie

@@ -6,6 +6,18 @@ import Testing
 
 struct ProjectPackageTests {
 
+  @Test func malformedRecoveryChildIsNotSilentlyDropped() throws {
+    let root = try ProjectPackage.encode(
+      file: Fixtures.projectFile(), plan: Fixtures.editPlan(),
+      audio: FileWrapper(regularFileWithContents: Data()))
+    let invalid = FileWrapper(directoryWithFileWrappers: [:])
+    invalid.preferredFilename = "suggestion-recovery.json"
+    root.addFileWrapper(invalid)
+    #expect(throws: ProjectPackageError.malformedRecoveryArchive) {
+      try ProjectPackage.decode(root)
+    }
+  }
+
   // MARK: - Helpers
 
   private func tree(projectJSON: Data, planJSON: Data, audio: Data?) -> FileWrapper {

@@ -7,6 +7,12 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A61200000000000000000006 /* suggestion-recovery-python.json in Resources */ = {isa = PBXBuildFile; fileRef = A62200000000000000000006 /* suggestion-recovery-python.json */; };
+		A61200000000000000000005 /* RecoveryPythonBytes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A62200000000000000000005 /* RecoveryPythonBytes.swift */; };
+		A61200000000000000000004 /* SuggestionRecoveryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A62200000000000000000004 /* SuggestionRecoveryStore.swift */; };
+		A61200000000000000000003 /* SuggestionRecoveryArchive.swift in Sources */ = {isa = PBXBuildFile; fileRef = A62200000000000000000003 /* SuggestionRecoveryArchive.swift */; };
+		A61200000000000000000002 /* SuggestionRecoveryClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A62200000000000000000002 /* SuggestionRecoveryClient.swift */; };
+		A61200000000000000000001 /* SuggestionRecoveryClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A62200000000000000000001 /* SuggestionRecoveryClientTests.swift */; };
 		C42C8CC522F7B93F629EFD36 /* SuggestionDocumentMutation.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE4548F8D79C746DC8D56791 /* SuggestionDocumentMutation.swift */; };
 		01D7C91E1661CAC01C302317 /* CutSuggestClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19C10707636C7ADF47D1D8D2 /* CutSuggestClient.swift */; };
 		A51100000000000000000001 /* SuggestionConfigurationClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50100000000000000000001 /* SuggestionConfigurationClient.swift */; };
@@ -293,6 +299,12 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		A62200000000000000000006 /* suggestion-recovery-python.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "suggestion-recovery-python.json"; sourceTree = "<group>"; };
+		A62200000000000000000005 /* RecoveryPythonBytes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecoveryPythonBytes.swift; sourceTree = "<group>"; };
+		A62200000000000000000004 /* SuggestionRecoveryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SuggestionRecoveryStore.swift; sourceTree = "<group>"; };
+		A62200000000000000000003 /* SuggestionRecoveryArchive.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SuggestionRecoveryArchive.swift; sourceTree = "<group>"; };
+		A62200000000000000000002 /* SuggestionRecoveryClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SuggestionRecoveryClient.swift; sourceTree = "<group>"; };
+		A62200000000000000000001 /* SuggestionRecoveryClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SuggestionRecoveryClientTests.swift; sourceTree = "<group>"; };
 		DE4548F8D79C746DC8D56791 /* SuggestionDocumentMutation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SuggestionDocumentMutation.swift; sourceTree = "<group>"; };
 		00CB15B7C712A336D37F4347 /* DeclickFadeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeclickFadeTests.swift; sourceTree = "<group>"; };
 		027A2E184255660E29E80464 /* SaveStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SaveStatus.swift; sourceTree = "<group>"; };
@@ -615,6 +627,7 @@
 			isa = PBXGroup;
 			children = (
 				F1390189440139BA8C94615C /* suggestion-contract-v2.json */,
+				A62200000000000000000006 /* suggestion-recovery-python.json */,
 				A40000000000000000000010 /* suggestion-result-v2.json */,
 			);
 			name = fixtures;
@@ -798,6 +811,10 @@
 				673C43F2570A4E37EC98B443 /* CanonicalAudioStore.swift */,
 				4E32BB450B552387BA89D644 /* CanonicalAudioStoreClient.swift */,
 				19C10707636C7ADF47D1D8D2 /* CutSuggestClient.swift */,
+				A62200000000000000000002 /* SuggestionRecoveryClient.swift */,
+				A62200000000000000000003 /* SuggestionRecoveryArchive.swift */,
+				A62200000000000000000005 /* RecoveryPythonBytes.swift */,
+				A62200000000000000000004 /* SuggestionRecoveryStore.swift */,
 				A50100000000000000000001 /* SuggestionConfigurationClient.swift */,
 				AEDFB606BB8225A945F32ECB /* CutSuggesterResolution.swift */,
 				EA42CFB8849AA54025078F47 /* EngineClient.swift */,
@@ -972,6 +989,7 @@
 			isa = PBXGroup;
 			children = (
 				CADC14E15DC7974242A8D9E9 /* AppDirectoriesTests.swift */,
+				A62200000000000000000001 /* SuggestionRecoveryClientTests.swift */,
 				A50300000000000000000001 /* SuggestionConfigurationClientTests.swift */,
 				3F379881CB641BD259652050 /* AudioPlayerClientTests.swift */,
 				5752E22907F411A02AB49404 /* CanonicalAudioStoreTests.swift */,
@@ -1298,6 +1316,7 @@
 				07436348089C720576DBB80C /* project-state.json in Resources */,
 				2A244FB0213309DFD6FC2C7F /* project-v1.pie in Resources */,
 				1D4C6374AD132FAACB81DEF8 /* suggestion-contract-v2.json in Resources */,
+				A61200000000000000000006 /* suggestion-recovery-python.json in Resources */,
 				A30000000000000000000010 /* suggestion-result-v2.json in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -1330,6 +1349,10 @@
 				DD1C90BCE4BDCFEA873A092A /* CrossfadeRenderer.swift in Sources */,
 				B46FCE5C23FD3771E078263F /* CrossfadeStretchDraft.swift in Sources */,
 				01D7C91E1661CAC01C302317 /* CutSuggestClient.swift in Sources */,
+				A61200000000000000000002 /* SuggestionRecoveryClient.swift in Sources */,
+				A61200000000000000000003 /* SuggestionRecoveryArchive.swift in Sources */,
+				A61200000000000000000005 /* RecoveryPythonBytes.swift in Sources */,
+				A61200000000000000000004 /* SuggestionRecoveryStore.swift in Sources */,
 				A51100000000000000000001 /* SuggestionConfigurationClient.swift in Sources */,
 				A51200000000000000000001 /* SuggestionConfigurationKey.swift in Sources */,
 				13B037232D290B9E996E7091 /* CutSuggestOptions.swift in Sources */,
@@ -1456,6 +1479,7 @@
 				2EE162E90AFA66571839F26E /* ClipBoundarySettingsModelTests.swift in Sources */,
 				B460D374BF10B225D98287A6 /* CrossfadeRendererTests.swift in Sources */,
 				2AB5719F9A60E584F4DE1185 /* CutSuggestClientTests.swift in Sources */,
+				A61200000000000000000001 /* SuggestionRecoveryClientTests.swift in Sources */,
 				A51300000000000000000001 /* SuggestionConfigurationClientTests.swift in Sources */,
 				134B854766129FE4A42894E6 /* CutSuggesterResolverTests.swift in Sources */,
 				BD1FDDC78FF467DC9FA72A8F /* CutSuggestionAcceptTests.swift in Sources */,

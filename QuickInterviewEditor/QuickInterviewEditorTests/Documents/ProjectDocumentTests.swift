@@ -12,6 +12,36 @@ import UniformTypeIdentifiers
 @MainActor
 struct ProjectDocumentTests {
 
+  @Test func recoveryPublicationIsAtomicAndOrdinaryEditsRetainArchive() throws {
+    let root = try fixturePackage()
+    let document = try ProjectDocument(reading: root)
+    var file = try #require(document.content?.file)
+    let oldSnapshot = try document.snapshot(contentType: .pieProject)
+    file.content.suggestionRecoveryOwnerID = Fixtures.uuid(90)
+    let archive = Data("portable paid responses".utf8)
+    document.sink.commitRecovery(file, archive)
+    let accepted = try document.snapshot(contentType: .pieProject)
+    expectNoDifference(oldSnapshot.content.recoveryArchive, nil)
+    expectNoDifference(oldSnapshot.content.file.content.suggestionRecoveryOwnerID, nil)
+    expectNoDifference(accepted.content.recoveryArchive, archive)
+    expectNoDifference(accepted.content.file.content.suggestionRecoveryOwnerID, Fixtures.uuid(90))
+    file.content.speakerCountOverride = 2
+    document.sink.commit(file, nil, nil)
+    expectNoDifference(document.content?.recoveryArchive, archive)
+    let audio = try #require(root.fileWrappers?["audio"]?.fileWrappers?["canonical.aiff"])
+    let saved = try ProjectDocument.makeFileWrapper(
+      snapshot: try document.snapshot(contentType: .pieProject).content, existingFile: root)
+    let decoded = try ProjectPackage.decode(saved)
+    expectNoDifference(decoded.recoveryArchive, archive)
+    #expect(decoded.audioWrapper === audio)
+    let reopened = try ProjectDocument(reading: saved)
+    expectNoDifference(reopened.content?.recoveryArchive, archive)
+    document.sink.commitRecovery(file, nil)
+    let removed = try ProjectDocument.makeFileWrapper(
+      snapshot: try document.snapshot(contentType: .pieProject).content, existingFile: root)
+    expectNoDifference(removed.fileWrappers?["suggestion-recovery.json"], nil)
+  }
+
   // MARK: - Helpers
 
   private func fixturePackage() throws -> FileWrapper {
@@ -206,11 +236,13 @@ struct ProjectDocumentTests {
     let sessionCopy = try tempAudioFile(bytes)
     let snapshot = ProjectDocument.Content(
       file: Fixtures.projectFile(source: Fixtures.projectSource(canonicalByteCount: bytes.count)),
-      plan: Fixtures.editPlan(), audio: .packageChild(sessionCopy: sessionCopy))
+      plan: Fixtures.editPlan(), audio: .packageChild(sessionCopy: sessionCopy),
+      recoveryArchive: Data("portable recovery".utf8))
 
     let written = try ProjectDocument.makeFileWrapper(snapshot: snapshot, existingFile: nil)
 
     expectNoDifference(try writtenAudio(of: written), bytes)
+    expectNoDifference(try ProjectPackage.decode(written).recoveryArchive, snapshot.recoveryArchive)
   }
 
   @Test func saveWithNeitherExistingFileNorSessionCopyThrows() {

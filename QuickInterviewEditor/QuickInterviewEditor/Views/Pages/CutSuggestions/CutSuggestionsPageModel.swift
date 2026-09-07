@@ -172,6 +172,8 @@ final class CutSuggestionsPageModel: ViewModel {
   }
 
   // MARK: - User Actions
+  var recoveryBlocksSuggestions = false
+
   func viewAppeared() { refreshKeyState() }
 
   /// Clicking a row asks the editor to reveal it (select its words, scroll the transcript, zoom
@@ -183,7 +185,7 @@ final class CutSuggestionsPageModel: ViewModel {
   }
 
   func suggestCutsTapped() async {
-    guard !isSuggesting else { return }
+    guard !recoveryBlocksSuggestions, !isSuggesting else { return }
     // No key resolved → don't call the LLM; take the user to key entry instead.
     guard let apiKey = resolvedAPIKey() else {
       addAPIKeyTapped()
@@ -199,7 +201,9 @@ final class CutSuggestionsPageModel: ViewModel {
   /// and, unlike the manual button, it does NOT open the key-entry sheet when no key resolves —
   /// a background pass must never nag. The button remains the way to add a key and run by hand.
   func autoSuggestCutsIfNeeded() async {
-    guard automaticSuggestionsEnabled, !isSuggesting, suggestions.isEmpty else { return }
+    guard !recoveryBlocksSuggestions, automaticSuggestionsEnabled, !isSuggesting,
+      suggestions.isEmpty
+    else { return }
     guard let apiKey = resolvedAPIKey() else { return }
     await runSuggest(apiKey: apiKey, isBackgroundPass: true)
   }

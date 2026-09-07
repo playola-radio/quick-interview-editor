@@ -37,6 +37,7 @@ final class ProjectDocument: ReferenceFileDocument {
     var file: ProjectFile
     var plan: EditPlan
     var audio: CanonicalAudioSource
+    var recoveryArchive: Data?
   }
 
   /// The value `snapshot` hands to `fileWrapper`: the content to write plus the edit
@@ -82,7 +83,8 @@ final class ProjectDocument: ReferenceFileDocument {
     let decoded = try ProjectPackage.decode(root)
     try ProjectPackage.verifyAudio(decoded.audioWrapper, against: decoded.file.source)
     content = Content(
-      file: decoded.file, plan: decoded.plan, audio: .packageChild(sessionCopy: nil))
+      file: decoded.file, plan: decoded.plan, audio: .packageChild(sessionCopy: nil),
+      recoveryArchive: decoded.recoveryArchive)
   }
 
   nonisolated func snapshot(contentType: UTType) throws -> Snapshot {
@@ -127,14 +129,17 @@ final class ProjectDocument: ReferenceFileDocument {
       {
         try ProjectPackage.verifyAudio(existing, against: snapshot.file.source)
         return try ProjectPackage.rewriteMetadata(
-          in: existingFile, file: snapshot.file, plan: snapshot.plan)
+          in: existingFile, file: snapshot.file, plan: snapshot.plan,
+          recoveryArchive: snapshot.recoveryArchive)
       }
       guard let sessionCopy else { throw ProjectDocumentError.missingPackageAudio }
       audio = try sessionAudioWrapper(at: sessionCopy, source: snapshot.file.source)
     case .sessionFile(let url):
       audio = try sessionAudioWrapper(at: url, source: snapshot.file.source)
     }
-    return try ProjectPackage.encode(file: snapshot.file, plan: snapshot.plan, audio: audio)
+    return try ProjectPackage.encode(
+      file: snapshot.file, plan: snapshot.plan, audio: audio,
+      recoveryArchive: snapshot.recoveryArchive)
   }
 
   private nonisolated static func sessionAudioWrapper(at url: URL, source: ProjectSource) throws
@@ -157,6 +162,7 @@ final class ProjectDocument: ReferenceFileDocument {
   var sink: ProjectDocumentSink {
     ProjectDocumentSink(
       commit: { [weak self] file, plan, audio in self?.commit(file, plan: plan, audio: audio) },
+      commitRecovery: { [weak self] file, archive in self?.commitRecovery(file, archive: archive) },
       registerChange: { [weak self] in self?.registerChange() })
   }
 
@@ -178,6 +184,14 @@ final class ProjectDocument: ReferenceFileDocument {
       context: nil, subtype: 0, data1: 0, data2: 0)
     {
       NSApp?.postEvent(nudge, atStart: false)
+    }
+  }
+
+  private func commitRecovery(_ file: ProjectFile, archive: Data?) {
+    latest.withLock { content in
+      guard content != nil else { return }
+      content?.file = file
+      content?.recoveryArchive = archive
     }
   }
 

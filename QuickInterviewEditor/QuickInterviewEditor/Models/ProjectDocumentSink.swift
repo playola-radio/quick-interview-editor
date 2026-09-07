@@ -10,5 +10,6 @@ struct ProjectDocumentSink: Sendable {
   /// editor content edit rewrites only `file`), non-nil on transcription/import/re-transcribe.
   var commit: @MainActor @Sendable (ProjectFile, EditPlan?, CanonicalAudioSource?) -> Void
   /// Marks the document dirty for the current change so NSDocument autosaves it (spec A7).
+  var commitRecovery: @MainActor @Sendable (ProjectFile, Data?) -> Void = { _, _ in }
   var registerChange: @MainActor @Sendable () -> Void
 }

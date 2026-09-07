@@ -19,6 +19,8 @@ final class ProjectModel: ViewModel {
   @ObservationIgnored @Dependency(\.engineFingerprint) var engineFingerprint
   @ObservationIgnored @Dependency(\.continuousClock) var clock
   @ObservationIgnored @Dependency(\.date) var date
+  @ObservationIgnored @Dependency(\.suggestionRecovery) var suggestionRecovery
+  @ObservationIgnored @Dependency(\.uuid) var uuid
 
   // MARK: - Initialization
   @ObservationIgnored private let sink: ProjectDocumentSink
@@ -35,14 +37,23 @@ final class ProjectModel: ViewModel {
   @ObservationIgnored private var lastRun: (input: TranscriptionInput, policy: CachePolicy)?
   /// Where the opened package lives on disk; hydration reads `audio/canonical.aiff` from it.
   /// `nil` for an untitled window.
-  @ObservationIgnored private let packageURL: URL?
+  @ObservationIgnored private(set) var packageURL: URL?
+  @ObservationIgnored private var recoveryArchive: Data?
+  @ObservationIgnored private var recoveryInstanceID: UUID?
+  @ObservationIgnored private var recoveryGeneration = 0
+  @ObservationIgnored var invalidateSuggestionAttempt: () -> Void = {}
+  @ObservationIgnored var cancelSuggestionAttempt: () async -> Void = {}
+  private(set) var recoveryOwner: SuggestionRecoveryOwner?
+  private(set) var staleRecovery: SuggestionRecoveryError?
+  private(set) var recoveryErrorMessage: String?
+  private(set) var recoveryActionsBlocked = false
   /// The window's autosave indicator, written by the document and read by the toolbar. Owned here
   /// so the view reads its display values off the model like everything else.
   let saveStatus: SaveStatus
 
   init(
     file: ProjectFile?, plan: EditPlan?, audio: CanonicalAudioSource?, packageURL: URL? = nil,
-    sink: ProjectDocumentSink, saveStatus: SaveStatus = SaveStatus()
+    sink: ProjectDocumentSink, saveStatus: SaveStatus = SaveStatus(), recoveryArchive: Data? = nil
   ) {
     self.sink = sink
     self.file = file
@@ -50,6 +61,7 @@ final class ProjectModel: ViewModel {
     self.loadedAudio = audio
     self.packageURL = packageURL
     self.saveStatus = saveStatus
+    self.recoveryArchive = recoveryArchive
     self.phase = file == nil ? .empty : .queued
     super.init()
   }
@@ -264,6 +276,7 @@ final class ProjectModel: ViewModel {
     stopTicking()
     await transcriptionTask?.value
     await tearDownEditor()
+    if let recoveryInstanceID { await suggestionRecovery.releaseOwner(recoveryInstanceID) }
     releaseSessionAudio()
   }
 
@@ -404,11 +417,14 @@ final class ProjectModel: ViewModel {
     loadedPlan = result.editPlan
     loadedAudio = .sessionFile(result.canonicalAudioURL)
     wireEditor(editor)
-    phase = .loaded
     sink.commit(newFile, result.editPlan, .sessionFile(result.canonicalAudioURL))
     // A completed transcription is the first thing worth keeping (spec A7): an untitled window
     // must go dirty here so closing it asks to save and autosave arms.
     sink.registerChange()
+    await recoverSuggestions()
+    synchronizeRecoveryEditor()
+    guard !Task.isCancelled else { return }
+    phase = .loaded
     // The document no longer references the previous session audio (spec A5: re-transcribe
     // replaces plan + audio in one commit), but a save already snapshotted may. Retire it —
     // deleting it here or earlier would point that save, or a failed or cancelled run's save, at
@@ -459,6 +475,8 @@ final class ProjectModel: ViewModel {
         return
       }
     }
+    await recoverSuggestions()
+    guard !Task.isCancelled, let file = self.file else { return }
     let editor = buildEditor(
       sourceURL: URL(fileURLWithPath: file.source.originalFileName),
       canonicalAudioURL: canonicalAudioURL, editPlan: plan,
@@ -466,6 +484,228 @@ final class ProjectModel: ViewModel {
     self.editor = editor
     wireEditor(editor)
     phase = .loaded
+  }
+
+  func documentURLChanged(_ url: URL?) {
+    guard packageURL?.standardizedFileURL != url?.standardizedFileURL else { return }
+    recoveryGeneration += 1
+    recoveryActionsBlocked = true
+    editor?.cutSuggestions.recoveryBlocksSuggestions = true
+    invalidateSuggestionAttempt()
+    packageURL = url?.standardizedFileURL
+  }
+
+  func documentLocationObserved() async {
+    await cancelSuggestionAttempt()
+    await recoverSuggestions()
+    synchronizeRecoveryEditor()
+    await savedProjectObserved()
+  }
+
+  func savedProjectObserved() async {
+    guard let owner = recoveryOwner, let runID = file?.content.lastAppliedSuggestionRunID,
+      recoveryArchive != nil
+    else { return }
+    let generation = recoveryGeneration
+    do {
+      try await suggestionRecovery.confirmSaved(owner, runID)
+      guard generation == recoveryGeneration, recoveryOwner == owner,
+        file?.content.lastAppliedSuggestionRunID == runID,
+        let file
+      else { return }
+      recoveryArchive = nil
+      sink.commitRecovery(file, nil)
+      sink.registerChange()
+    } catch { return }
+  }
+
+  func prepareSuggestionRecovery(_ preparation: SuggestionRecoveryPreparation) async throws -> URL {
+    guard !recoveryActionsBlocked, let file, let plan = loadedPlan else {
+      throw SuggestionRecoveryError.invalid("Recovery ownership is not ready.")
+    }
+    let generation = recoveryGeneration
+    var owner =
+      recoveryOwner
+      ?? SuggestionRecoveryOwner(
+        id: file.content.suggestionRecoveryOwnerID ?? uuid(), documentURL: packageURL,
+        sourceFingerprint: file.source.originalFingerprint, transcriptHash: plan.transcriptHash)
+    if recoveryInstanceID == nil { recoveryInstanceID = uuid() }
+    owner = try await suggestionRecovery.claimOwner(owner, recoveryInstanceID!)
+    guard generation == recoveryGeneration else { throw CancellationError() }
+    let directory = try await suggestionRecovery.prepare(owner, preparation)
+    let capture = try await suggestionRecovery.capture(owner, preparation.snapshot.runID, nil)
+    guard !Task.isCancelled, !recoveryActionsBlocked, generation == recoveryGeneration else {
+      throw CancellationError()
+    }
+    try acceptSuggestionRecovery(capture, owner: owner)
+    return directory
+  }
+
+  func acceptSuggestionRecovery(
+    _ capture: SuggestionRecoveryCapture, owner: SuggestionRecoveryOwner
+  ) throws {
+    guard !recoveryActionsBlocked, var file, let plan = loadedPlan,
+      owner.sourceFingerprint == file.source.originalFingerprint,
+      owner.transcriptHash == plan.transcriptHash,
+      capture.checkpoint.snapshot.sourceFingerprint == owner.sourceFingerprint,
+      capture.checkpoint.snapshot.transcriptHash == owner.transcriptHash,
+      owner.documentURL?.standardizedFileURL.path == packageURL?.standardizedFileURL.path
+    else { throw CancellationError() }
+    if let current = file.content.unfinishedSuggestionRun {
+      guard current.snapshot.runID == capture.checkpoint.snapshot.runID,
+        current.pythonRevision <= capture.checkpoint.pythonRevision,
+        current.controlRevision <= capture.checkpoint.controlRevision
+      else { throw CancellationError() }
+    }
+    guard recoveryOwner == nil || recoveryOwner?.id == owner.id else { throw CancellationError() }
+    file.schemaVersion = ProjectFile.currentSchemaVersion
+    file.content.suggestionRecoveryOwnerID = owner.id
+    file.content.unfinishedSuggestionRun = capture.checkpoint
+    self.file = file
+    recoveryOwner = owner
+    recoveryArchive = capture.archive
+    sink.commitRecovery(file, capture.archive)
+    sink.registerChange()
+    synchronizeRecoveryEditor()
+  }
+
+  func discardSuggestionRecovery() async throws {
+    guard !recoveryActionsBlocked || staleRecovery != nil else {
+      throw SuggestionRecoveryError.missingRun
+    }
+    let owner: SuggestionRecoveryOwner
+    let runID: UUID
+    if case .staleIdentity(let staleOwner, let staleRunID) = staleRecovery {
+      owner = staleOwner
+      runID = staleRunID
+    } else {
+      guard let current = recoveryOwner, let checkpoint = file?.content.unfinishedSuggestionRun
+      else { throw SuggestionRecoveryError.missingRun }
+      owner = current
+      runID = checkpoint.snapshot.runID
+    }
+    recoveryGeneration += 1
+    let generation = recoveryGeneration
+    recoveryActionsBlocked = true
+    invalidateSuggestionAttempt()
+    await cancelSuggestionAttempt()
+    guard generation == recoveryGeneration else { throw CancellationError() }
+    do { try await suggestionRecovery.discard(owner, runID) } catch {
+      recoveryFailed(error)
+      throw error
+    }
+    guard generation == recoveryGeneration, var file else { throw CancellationError() }
+    file.content.unfinishedSuggestionRun = nil
+    recoveryArchive = nil
+    staleRecovery = nil
+    recoveryErrorMessage = nil
+    recoveryActionsBlocked = false
+    recoveryOwner = SuggestionRecoveryOwner(
+      id: owner.id, documentURL: packageURL,
+      sourceFingerprint: file.source.originalFingerprint,
+      transcriptHash: loadedPlan?.transcriptHash ?? "")
+    file.content.suggestionRecoveryOwnerID = owner.id
+    self.file = file
+    sink.commitRecovery(file, nil)
+    sink.registerChange()
+    synchronizeRecoveryEditor()
+  }
+
+  private func recoverSuggestions() async {
+    guard let initialFile = file, let plan = loadedPlan else { return }
+    let generation = recoveryGeneration
+    do {
+      let portable = try recoveryArchive.map(SuggestionRecoveryArchive.decode)
+      let owner = try await suggestionRecovery.resolveOwner(
+        .init(
+          persistedID: initialFile.content.suggestionRecoveryOwnerID, documentURL: packageURL,
+          sourceFingerprint: initialFile.source.originalFingerprint,
+          transcriptHash: plan.transcriptHash,
+          archivedOwner: portable?.manifest.owner))
+      guard generation == recoveryGeneration else { return }
+      guard var owner else {
+        recoveryActionsBlocked = false
+        return
+      }
+      if recoveryInstanceID == nil { recoveryInstanceID = uuid() }
+      owner = try await suggestionRecovery.claimOwner(owner, recoveryInstanceID!)
+      guard generation == recoveryGeneration else { return }
+      if let recoveryArchive { try await suggestionRecovery.restore(owner, recoveryArchive) }
+      let capture = try await loadRecoveryCapture(
+        owner, required: initialFile.content.unfinishedSuggestionRun != nil)
+      guard
+        publishRecovered(
+          owner: owner, capture: capture, generation: generation,
+          sourceFingerprint: initialFile.source.originalFingerprint,
+          transcriptHash: plan.transcriptHash)
+      else { return }
+      await savedProjectObserved()
+    } catch {
+      guard generation == recoveryGeneration else { return }
+      recoveryFailed(error)
+    }
+  }
+
+  private func loadRecoveryCapture(_ owner: SuggestionRecoveryOwner, required: Bool) async throws
+    -> SuggestionRecoveryCapture?
+  {
+    guard let checkpoint = try await suggestionRecovery.load(owner) else {
+      if required { throw SuggestionRecoveryError.missingRun }
+      return nil
+    }
+    return try await suggestionRecovery.capture(owner, checkpoint.snapshot.runID, nil)
+  }
+
+  private func recoveryFailed(_ error: any Error) {
+    recoveryActionsBlocked = true
+    recoveryErrorMessage = error.localizedDescription
+    if let diagnostic = error as? SuggestionRecoveryError, case .staleIdentity = diagnostic {
+      staleRecovery = diagnostic
+    }
+  }
+
+  private func publishRecovered(
+    owner: SuggestionRecoveryOwner, capture: SuggestionRecoveryCapture?,
+    generation: Int, sourceFingerprint: String, transcriptHash: String
+  ) -> Bool {
+    guard !Task.isCancelled, generation == recoveryGeneration, var file = self.file,
+      file.source.originalFingerprint == sourceFingerprint,
+      loadedPlan?.transcriptHash == transcriptHash
+    else { return false }
+    let previousFile = file
+    file.content.suggestionRecoveryOwnerID = owner.id
+    if let capture {
+      file.content.unfinishedSuggestionRun =
+        capture.checkpoint.snapshot.runID == file.content.lastAppliedSuggestionRunID
+        ? nil : capture.checkpoint
+      recoveryArchive = capture.archive
+    }
+    recoveryOwner = owner
+    recoveryActionsBlocked = false
+    staleRecovery = nil
+    recoveryErrorMessage = nil
+    self.file = file
+    if file != previousFile || recoveryArchive != nil {
+      sink.commitRecovery(file, recoveryArchive)
+      if file != previousFile { sink.registerChange() }
+    }
+    return true
+  }
+
+  private func synchronizeRecoveryEditor() {
+    guard let editor, let file else { return }
+    editor.mutateDocument(recordUndo: false) {
+      $0.suggestionRecoveryOwnerID = file.content.suggestionRecoveryOwnerID
+      $0.unfinishedSuggestionRun = file.content.unfinishedSuggestionRun
+      $0.lastAppliedSuggestionRunID = file.content.lastAppliedSuggestionRunID
+    }
+    editor.cutSuggestions.recoveryBlocksSuggestions =
+      recoveryActionsBlocked || file.content.unfinishedSuggestionRun != nil
+    editor.cutSuggestions.automaticSuggestionsEnabled =
+      file.schemaVersion != 1
+      && file.content.unfinishedSuggestionRun == nil && recoveryArchive == nil
+      && !recoveryActionsBlocked
+    editor.cutSuggestions.actionMessage = recoveryErrorMessage
   }
 
   /// The document a new editor starts from. Re-running the same source (retry, re-import) keeps
@@ -528,7 +768,13 @@ final class ProjectModel: ViewModel {
   /// autosaves on. The commit carries `nil` plan/audio because a content edit never touches
   /// those. Diffing discipline is the editor's: it only fires for a real post-init change.
   private func wireEditor(_ editor: EditorModel) {
-    editor.cutSuggestions.automaticSuggestionsEnabled = file?.schemaVersion != 1
+    editor.cutSuggestions.automaticSuggestionsEnabled =
+      file?.schemaVersion != 1
+      && file?.content.unfinishedSuggestionRun == nil && recoveryArchive == nil
+      && !recoveryActionsBlocked
+    editor.cutSuggestions.recoveryBlocksSuggestions =
+      recoveryActionsBlocked || file?.content.unfinishedSuggestionRun != nil
+    editor.cutSuggestions.actionMessage = recoveryErrorMessage
     editor.cutSuggestions.onExplicitSuggest = { [weak self, weak editor] in
       guard let self, let editor, self.editor === editor, var file = self.file,
         file.schemaVersion < ProjectFile.currentSchemaVersion
@@ -545,12 +791,14 @@ final class ProjectModel: ViewModel {
       // model's current editor may drive the document; a stale one would clobber the
       // freshly-transcribed content committed after teardown.
       guard let self, let editor, self.editor === editor, var file = self.file else { return }
+      guard file.content != state else { return }
       file.content = state
       file.schemaVersion = ProjectFile.currentSchemaVersion
       editor.cutSuggestions.automaticSuggestionsEnabled = true
       self.file = file
       self.sink.commit(file, nil, nil)
       self.sink.registerChange()
+      self.synchronizeRecoveryEditor()
     }
   }
 
@@ -637,11 +885,14 @@ final class ProjectModel: ViewModel {
   /// close never leaves stale playback or export work running. The session audio is deliberately
   /// not released here: the document keeps referencing it until the window closes.
   private func tearDownEditor() async {
+    recoveryGeneration += 1
     guard let previous = editor else { return }
     // Drop the reference before the awaits: a buffered completion on `previous` (e.g. a late
     // cut-suggestion) that fires while playback/export teardown is suspended would otherwise
     // still satisfy the `self.editor === editor` guard in `wireEditor` and commit stale content.
     editor = nil
+    invalidateSuggestionAttempt()
+    await cancelSuggestionAttempt()
     previous.cancelExportTapped()
     await previous.stopPlaybackTapped()
     await previous.awaitExportTeardown()

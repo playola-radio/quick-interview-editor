@@ -8,6 +8,7 @@ enum ProjectPackageError: Error, Equatable, LocalizedError {
   case missingAudio
   case unsupportedSchema(Int)
   case audioMismatch
+  case malformedRecoveryArchive
 
   var errorDescription: String? {
     switch self {
@@ -20,6 +21,8 @@ enum ProjectPackageError: Error, Equatable, LocalizedError {
       }
       return "This project uses an unsupported format version (\(version))."
     case .audioMismatch: return "The project's bundled audio does not match the project."
+    case .malformedRecoveryArchive:
+      return "The project's suggestion recovery archive is not a regular file."
     }
   }
 }
@@ -30,6 +33,7 @@ struct DecodedPackage {
   var file: ProjectFile
   var plan: EditPlan
   var audioWrapper: FileWrapper
+  var recoveryArchive: Data?
 }
 
 /// Encodes and decodes a `.pie` package's directory `FileWrapper` tree
@@ -93,19 +97,30 @@ enum ProjectPackage {
       throw ProjectPackageError.missingAudio
     }
 
-    return DecodedPackage(file: file, plan: plan, audioWrapper: audioWrapper)
+    if let archive = root.fileWrappers?["suggestion-recovery.json"], !archive.isRegularFile {
+      throw ProjectPackageError.malformedRecoveryArchive
+    }
+    return DecodedPackage(
+      file: file, plan: plan, audioWrapper: audioWrapper,
+      recoveryArchive: root.fileWrappers?["suggestion-recovery.json"]?.regularFileContents)
   }
 
-  static func encode(file: ProjectFile, plan: EditPlan, audio: FileWrapper) throws -> FileWrapper {
+  static func encode(
+    file: ProjectFile, plan: EditPlan, audio: FileWrapper, recoveryArchive: Data? = nil
+  ) throws -> FileWrapper {
     audio.preferredFilename = "canonical.aiff"
     let audioDirWrapper = FileWrapper(directoryWithFileWrappers: ["canonical.aiff": audio])
     audioDirWrapper.preferredFilename = "audio"
 
-    return FileWrapper(directoryWithFileWrappers: [
+    var children: [String: FileWrapper] = [
       "project.json": try metadataWrapper(file),
       "plan.json": try metadataWrapper(plan),
       "audio": audioDirWrapper,
-    ])
+    ]
+    if let recoveryArchive {
+      children["suggestion-recovery.json"] = FileWrapper(regularFileWithContents: recoveryArchive)
+    }
+    return FileWrapper(directoryWithFileWrappers: children)
   }
 
   /// Rewrites `project.json` and `plan.json` inside an on-disk package's root wrapper and
@@ -113,18 +128,25 @@ enum ProjectPackage {
   /// existing tree (moving a read-from-disk child into a new tree trips `FileWrapper`'s
   /// parent bookkeeping), and NSDocument sees it as unchanged so a save never re-copies the
   /// AIFF.
-  static func rewriteMetadata(in root: FileWrapper, file: ProjectFile, plan: EditPlan) throws
+  static func rewriteMetadata(
+    in root: FileWrapper, file: ProjectFile, plan: EditPlan, recoveryArchive: Data? = nil
+  ) throws
     -> FileWrapper
   {
     let project = try metadataWrapper(file)
     let planWrapper = try metadataWrapper(plan)
-    for name in ["project.json", "plan.json"] {
+    for name in ["project.json", "plan.json", "suggestion-recovery.json"] {
       if let stale = root.fileWrappers?[name] { root.removeFileWrapper(stale) }
     }
     project.preferredFilename = "project.json"
     planWrapper.preferredFilename = "plan.json"
     root.addFileWrapper(project)
     root.addFileWrapper(planWrapper)
+    if let recoveryArchive {
+      let archive = FileWrapper(regularFileWithContents: recoveryArchive)
+      archive.preferredFilename = "suggestion-recovery.json"
+      root.addFileWrapper(archive)
+    }
     return root
   }
 

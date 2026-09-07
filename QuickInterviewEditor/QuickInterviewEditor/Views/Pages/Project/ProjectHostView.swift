@@ -6,17 +6,19 @@ import SwiftUI
 /// the model to menu commands as the focused project. Visuals live in `ProjectView`.
 struct ProjectHostView: View {
   let document: ProjectDocument
+  let fileURL: URL?
   @State private var model: ProjectModel
   @Environment(\.undoManager) private var undoManager
   @Environment(AppLaunchModel.self) private var launch
 
   init(document: ProjectDocument, fileURL: URL?) {
     self.document = document
+    self.fileURL = fileURL
     let content = document.content
     _model = State(
       initialValue: ProjectModel(
         file: content?.file, plan: content?.plan, audio: content?.audio, packageURL: fileURL,
-        sink: document.sink))
+        sink: document.sink, recoveryArchive: content?.recoveryArchive))
   }
 
   var body: some View {
@@ -30,6 +32,13 @@ struct ProjectHostView: View {
       .onAppear {
         document.saveStatus = model.saveStatus
         launch.viewAppeared()
+      }
+      .onChange(of: fileURL) { _, url in
+        model.documentURLChanged(url)
+        Task { await model.documentLocationObserved() }
+      }
+      .onChange(of: model.saveStatus.isSaving) { _, _ in
+        Task { await model.savedProjectObserved() }
       }
       .task { await model.viewAppeared() }
       .onDisappear { Task { await model.viewDisappeared() } }
