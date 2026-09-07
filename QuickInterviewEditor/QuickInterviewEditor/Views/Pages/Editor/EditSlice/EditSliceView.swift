@@ -30,6 +30,13 @@ struct EditSliceView: View {
         Button(model.stopLabel) { Task { await model.stopTapped() } }
         Button(model.removeSectionLabel) { Task { await model.removeSelectionTapped() } }
           .disabled(!model.canRemoveSelection)
+        Button {
+          model.editingCompleteToggled()
+        } label: {
+          Label(model.editingCompleteLabel, systemImage: model.editingCompleteSystemImage)
+        }
+        .foregroundStyle(model.editingComplete ? Color(red: 0.4, green: 0.8, blue: 0.5) : .primary)
+        .help(model.editingCompleteLabel)
         Spacer()
         Button(model.cancelLabel) { model.cancelTapped() }
         Button(model.saveLabel) { model.saveTapped() }

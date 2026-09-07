@@ -31,6 +31,13 @@ struct SlicesPanelView: View {
         Button(model.exportAllLabel) { model.exportAllTapped() }
           .disabled(!model.canExportAll)
       }
+      Picker(model.sliceFilterPickerLabel, selection: $model.sliceFilter) {
+        ForEach(model.sliceFilterOptions) { filter in
+          Text(model.sliceFilterLabel(filter)).tag(filter)
+        }
+      }
+      .pickerStyle(.segmented)
+      .accessibilityLabel(model.sliceFilterPickerLabel)
       if let note = model.removalsInvalidNote {
         Text(note).font(.system(size: 11))
           .foregroundStyle(Color(red: 0.89, green: 0.58, blue: 0.58))
@@ -38,14 +45,14 @@ struct SlicesPanelView: View {
       if model.showsExportStatus {
         ExportStatus(model: model)
       }
-      if model.sliceRows.isEmpty {
-        Text(model.emptyStateMessage)
+      if model.visibleSliceRows.isEmpty {
+        Text(model.sliceListEmptyMessage)
           .font(.system(size: 12)).foregroundStyle(Color(white: 0.5))
           .frame(maxWidth: .infinity, alignment: .leading)
       } else {
         ScrollViewReader { proxy in
           List {
-            ForEach(model.sliceRows) { row in
+            ForEach(model.visibleSliceRows) { row in
               SliceCard(model: model, row: row)
                 .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
                 .listRowSeparator(.hidden)
@@ -53,13 +60,13 @@ struct SlicesPanelView: View {
             }
             .onMove { model.moveSlices(fromOffsets: $0, toOffset: $1) }
             .onDelete { indexSet in
-              let ids = indexSet.map { model.sliceRows[$0].id }
+              let ids = indexSet.map { model.visibleSliceRows[$0].id }
               Task { await model.deleteSlices(ids) }
             }
           }
           .listStyle(.plain)
           .scrollContentBackground(.hidden)
-          .animation(.default, value: model.sliceRows.map(\.id))
+          .animation(.default, value: model.visibleSliceRows.map(\.id))
           .onChange(of: model.sliceScrollTarget) { _, target in
             guard let target else { return }
             withAnimation { proxy.scrollTo(target, anchor: .bottom) }
@@ -88,6 +95,18 @@ private struct SliceCard: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 6) {
       HStack {
+        Button {
+          model.setSliceEditingComplete(row.id, to: !row.editingComplete)
+        } label: {
+          Image(systemName: row.completionSystemImage)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(
+          row.editingComplete
+            ? Color(red: 0.4, green: 0.8, blue: 0.5) : Color(white: 0.5)
+        )
+        .help(row.completionHelp)
+        .accessibilityLabel(row.completionLabel)
         TextField(
           "",
           text: Binding(
@@ -95,6 +114,7 @@ private struct SliceCard: View {
             set: { model.renameSlice(row.id, to: $0) })
         )
         .textFieldStyle(.plain).font(.system(size: 14, weight: .semibold))
+        .opacity(row.editingComplete ? 0.6 : 1)
         .focused($nameFocused)
         .padding(.horizontal, 6).padding(.vertical, 3)
         .background(
@@ -167,6 +187,13 @@ private struct SliceCard: View {
     .overlay(
       RoundedRectangle(cornerRadius: 11)
         .stroke(Color(red: 0.8, green: 0.4, blue: 0.4), lineWidth: row.isActive ? 1.5 : 0)
+    )
+    // A subtle green border marks a clip the user has marked editing-complete.
+    .overlay(
+      RoundedRectangle(cornerRadius: 11)
+        .stroke(
+          Color(red: 0.4, green: 0.8, blue: 0.5).opacity(0.5),
+          lineWidth: row.editingComplete ? 1 : 0)
     )
     .simultaneousGesture(
       TapGesture(count: 2).onEnded { model.editSliceTapped(row.id) }

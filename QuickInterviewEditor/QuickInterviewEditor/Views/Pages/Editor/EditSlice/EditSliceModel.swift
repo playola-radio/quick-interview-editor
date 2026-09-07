@@ -17,6 +17,7 @@ final class EditSliceModel: ViewModel, Identifiable {
   /// editor's viewport). It stays source-pure: the fine-tune insets and the amplitude-zoom button
   /// read it directly. The navigable lane renders on ``editedWaveform`` instead.
   let waveform: WaveformModel
+  var editingComplete: Bool
   /// The collapsed (EDITED) lane the sheet renders and hit-tests, pinned to this slice's edited
   /// extent so you cannot scroll or zoom past its boundaries. It shares ``waveform``'s source
   /// pyramid and carries the parent's ``EditedTimeline`` (seeded and kept in sync by `EditorModel`;
@@ -27,6 +28,7 @@ final class EditSliceModel: ViewModel, Identifiable {
   init(slice: Slice, editPlan: EditPlan) {
     sliceID = slice.id
     title = slice.name
+    editingComplete = slice.editingComplete
     fineTune = FineTuneModel(
       sampleRate: editPlan.source.sampleRate,
       durationSamples: editPlan.source.durationSamples,
@@ -56,6 +58,9 @@ final class EditSliceModel: ViewModel, Identifiable {
   // MARK: - Properties
   var onCommit: (Range<Int>) -> Void = { _ in }
   var onDismiss: () -> Void = {}
+  /// Applies an editing-complete toggle immediately (no Save dependency), routed to the
+  /// parent's `setSliceEditingComplete`.
+  var onSetEditingComplete: (Bool) -> Void = { _ in }
   var onPlay: (Range<Int>) async -> Void = { _ in }
   var onPause: () async -> Void = {}
   var onStop: () async -> Void = {}
@@ -114,6 +119,10 @@ final class EditSliceModel: ViewModel, Identifiable {
   var canSave: Bool { fineTune.hasUnsavedChange }
   var playPauseLabel: String { isPlaying ? "Pause" : "Play" }
   var playButtonSystemImage: String { isPlaying ? "pause.fill" : "play.fill" }
+  var editingCompleteLabel: String {
+    editingComplete ? "Mark as still editing" : "Mark editing complete"
+  }
+  var editingCompleteSystemImage: String { editingComplete ? "checkmark.circle.fill" : "circle" }
 
   /// What the lane highlights: the live marquee removal selection when the user is picking an interior
   /// span to cut, otherwise the draft kept range (so the kept region reads clearly against the
@@ -313,6 +322,13 @@ final class EditSliceModel: ViewModel, Identifiable {
   func cancelTapped() {
     fineTune.resetDraft()
     onDismiss()
+  }
+
+  /// Flips the completion flag and applies it immediately — there is no Save dependency for
+  /// this toggle, so Cancel does not revert it.
+  func editingCompleteToggled() {
+    editingComplete.toggle()
+    onSetEditingComplete(editingComplete)
   }
 
   func cutInDragged(toInsetX positionX: CGFloat) { fineTune.dragCutIn(toInsetX: positionX) }
