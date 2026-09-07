@@ -23,6 +23,9 @@ enum EditorKey {
   /// Deselects a selected crossfade seam (decision 6). Consumed only when a seam is selected,
   /// so it falls through otherwise (e.g. to dismiss a sheet).
   case escape
+  case showClipsPanel
+  case showSuggestionsPanel
+  case showBothPanels
 }
 
 @MainActor
@@ -458,6 +461,7 @@ final class EditorModel: ViewModel {
     "This clip's audio is entirely inside a removed section — there is nothing to export."
   let slicesTabLabel = "Clips"
   let suggestionsTabLabel = "Suggestions"
+  let bothTabLabel = "Both"
   let rightPanelPickerLabel = "Right panel"
   let revealClipLabel = "Reveal clip in transcript and waveform"
   let restoreRemovedAudioLabel = "Restore Removed Audio"
@@ -773,6 +777,8 @@ final class EditorModel: ViewModel {
   }
 
   // MARK: - View Helpers
+  /// The right column's fixed width — doubled when both panels show side by side.
+  var rightPanelWidth: CGFloat { rightPanelTab == .both ? 604 : 302 }
   /// The panel's plain "Add slice" builds from the raw selection, so it's disabled whenever any
   /// fine-tune draft is unsaved — a tuned pending selection (whose adjustments it would discard)
   /// or a dirty existing-slice edit with a held selection (which requires Save/Cancel first). A
@@ -1431,8 +1437,21 @@ final class EditorModel: ViewModel {
       deselectSeam()
     case .nudgeCutInEarlier, .nudgeCutInLater, .nudgeCutOutEarlier, .nudgeCutOutLater:
       return nudgeSelection(key)
+    case .showClipsPanel, .showSuggestionsPanel, .showBothPanels:
+      switchRightPanel(key)
     }
     return true
+  }
+
+  /// ⌘1/⌘2/⌘3 right-panel switching, split out of `editorKeyDown`'s switch to keep its
+  /// cyclomatic complexity in check.
+  private func switchRightPanel(_ key: EditorKey) {
+    switch key {
+    case .showClipsPanel: rightPanelTab = .slices
+    case .showSuggestionsPanel: rightPanelTab = .suggestions
+    case .showBothPanels: rightPanelTab = .both
+    default: break
+    }
   }
 
   /// Delete-key arbitration (decision 6), split out of `editorKeyDown`'s switch to keep its
@@ -3192,6 +3211,7 @@ enum TransportContext: Equatable {
 enum RightPanelTab: String, CaseIterable, Identifiable, Equatable {
   case slices
   case suggestions
+  case both
   var id: String { rawValue }
 }
 
