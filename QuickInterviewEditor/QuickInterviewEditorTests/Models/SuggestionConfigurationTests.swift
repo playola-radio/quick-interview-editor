@@ -430,10 +430,13 @@ struct SuggestionConfigurationTests {
   }
 
   @Test func decodingExistingConfigurationRequiresSchemaVersionAndRevision() throws {
-    let data = Data(#"{"types": [], "fields": []}"#.utf8)
-
-    #expect(throws: DecodingError.self) {
-      _ = try JSONDecoder().decode(SuggestionConfiguration.self, from: data)
+    for data in [
+      Data(#"{"revision": 0, "types": [], "fields": []}"#.utf8),
+      Data(#"{"schemaVersion": 1, "types": [], "fields": []}"#.utf8),
+    ] {
+      #expect(throws: DecodingError.self) {
+        _ = try JSONDecoder().decode(SuggestionConfiguration.self, from: data)
+      }
     }
   }
 
