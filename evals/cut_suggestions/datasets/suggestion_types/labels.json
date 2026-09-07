@@ -1,0 +1,33 @@
+{
+  "source": "suggestion_types",
+  "synthetic": true,
+  "transcript": "transcript.json",
+  "spanCoordinates": "inclusive global sentence indices",
+  "format": {
+    "positives": [{"type": "configured type ID", "start": 0, "end": 1, "note": "editorial rationale"}],
+    "negativeSpans": [{"start": 0, "end": 0, "forbiddenTypes": ["type ID"], "note": "must not be a suggestion of these types"}]
+  },
+  "positives": [
+    {"type": "intro", "start": 0, "end": 3, "note": "Synthetic complete eight-second handoff."},
+    {"type": "image-id", "start": 4, "end": 5, "note": "First complete repeated station ID."},
+    {"type": "image-id", "start": 6, "end": 7, "note": "Second complete repeated station ID, intentionally distinct."},
+    {"type": "image-promo", "start": 8, "end": 22, "note": "Synthetic fifteen-sentence subscription promo of 37.5 seconds."},
+    {"type": "image-id", "start": 15, "end": 16, "note": "Complete two-sentence ID nested in the longer promo."},
+    {"type": "image-post-commercial", "start": 23, "end": 23, "note": "Explicit return from ads."},
+    {"type": "intro", "start": 24, "end": 25, "note": "Host introduces another performer's recording."},
+    {"type": "spotlight", "start": 29, "end": 36, "note": "Synthetic sixteen-second Spotlight with passing station and song mentions, not an image."},
+    {"type": "image-pre-commercial", "start": 28, "end": 28, "note": "Pre-commercial classification wins a matching promo classification by precedence."}
+  ],
+  "subtypeClassifications": [
+    {"start": 28, "end": 28, "submittedTypes": ["image-promo", "image-pre-commercial"], "winner": "image-pre-commercial", "note": "Substantially matching built-in classifications resolve by priority."}
+  ],
+  "negativeSpans": [
+    {"start": 12, "end": 12, "forbiddenTypes": ["image-id"], "note": "Incidental self-identification inside the promo."},
+    {"start": 26, "end": 26, "forbiddenTypes": ["intro"], "note": "Yeah is an acknowledgement, not an intro."},
+    {"start": 27, "end": 27, "forbiddenTypes": ["intro"], "note": "An isolated song title is not a complete handoff."},
+    {"start": 37, "end": 37, "forbiddenTypes": ["intro"], "note": "False start is not an intro."},
+    {"start": 30, "end": 30, "forbiddenTypes": ["image-id", "image-promo"], "note": "Actual URL in a Spotlight story is not imaging."},
+    {"start": 35, "end": 35, "forbiddenTypes": ["image-id"], "note": "Passing station and song mention in the Spotlight is incidental."}
+  ],
+  "notes": "All text and labels are synthetic. This fixture documents Task 17 runner input; unit fixtures validate structural behavior only and do not prove live-model editorial quality. An incidental self-ID sentence within the promo is deliberately unlabeled."
+}

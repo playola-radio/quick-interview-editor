@@ -4,7 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from cut_suggester.models import ProductType
+from cut_suggester.models import DEFAULT_SPECS, ProductType, Sentence
+from cut_suggester.postprocess import build_candidate, enforce_duration_window
 from cut_suggester.suggestion_config import (
     ConfigurationError,
     configured_tuned_specs,
@@ -60,6 +61,23 @@ def test_configured_tuned_specs_use_only_present_exact_ids_and_edited_guidance()
 
     assert set(specs) == {ProductType.SPOTLIGHT}
     assert specs[ProductType.SPOTLIGHT].description == "Edited spotlight guidance"
+
+
+def test_configured_intro_allows_complete_eight_second_take_without_changing_legacy_spec():
+    specs = configured_tuned_specs(_config())
+    sentences = [
+        Sentence(0, 1, "Complete handoff", (1,), 0, 8, 0, 8000),
+    ]
+    candidate = build_candidate(
+        sentences, {"type": "intro", "start": 0, "end": 0, "label": "Complete handoff"},
+        DEFAULT_SPECS, 1000,
+    )
+
+    assert specs[ProductType.INTRO].hard_min_sec == 1
+    assert specs[ProductType.INTRO].target_min_sec == 15
+    assert ProductType.INTRO.value == "intro"
+    assert enforce_duration_window([candidate], specs)[0] == [candidate]
+    assert enforce_duration_window([candidate], DEFAULT_SPECS)[1] == [candidate]
 
 
 def test_configuration_name_normalization_matches_foundation_width_and_folding_rules():

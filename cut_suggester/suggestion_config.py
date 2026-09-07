@@ -181,7 +181,10 @@ def configured_tuned_specs(config: object) -> dict[ProductType, ProductSpec]:
             product_type=product_type,
             target_min_sec=default.target_min_sec,
             target_max_sec=default.target_max_sec,
-            hard_min_sec=default.hard_min_sec,
+            # Configured searches preserve the legacy target and maximum, but a
+            # complete short handoff is useful editorially.  The legacy
+            # INTRO_SPEC remains pinned at twelve seconds for its cached eval.
+            hard_min_sec=1 if product_type is ProductType.INTRO else default.hard_min_sec,
             hard_max_sec=default.hard_max_sec,
             description=item["guidelines"],
         )
