@@ -742,7 +742,8 @@ final class EditorModel: ViewModel {
     let claimed = Set(approved.flatMap(\.wordIDs))
     let suggested = documentCutSuggestions.pending.compactMap {
       suggestion -> TranscriptClipBand? in
-      let unclaimed = suggestion.wordIDs.filter { !claimed.contains($0) }
+      let words = draftedWordIDs(forSuggestion: suggestion.id) ?? suggestion.wordIDs
+      let unclaimed = words.filter { !claimed.contains($0) }
       guard !unclaimed.isEmpty else { return nil }
       return TranscriptClipBand(id: suggestion.id, wordIDs: unclaimed, kind: .suggested)
     }
@@ -797,6 +798,14 @@ final class EditorModel: ViewModel {
     return draft.draftedWordIDs
   }
 
+  /// The in-flight drafted word run for suggestion `id`, or nil when no `.suggestion` resize of
+  /// that suggestion is active. Mirrors `draftedWordIDs(forClip:)` so a dragged suggestion's amber
+  /// band moves live, before `claimed` is computed.
+  private func draftedWordIDs(forSuggestion id: CutSuggestion.ID) -> [Word.ID]? {
+    guard let draft = transcriptResizeDraft, draft.identity == .suggestion(id) else { return nil }
+    return draft.draftedWordIDs
+  }
+
   private func sourceRange(coveringWordIDs ids: [Word.ID]) -> Range<Int>? {
     let set = Set(ids)
     let words = editPlan.words.filter { set.contains($0.id) }
@@ -805,6 +814,25 @@ final class EditorModel: ViewModel {
     let ends = words.compactMap(\.endSample)
     guard let lo = starts.min(), let hi = ends.max(), lo < hi else { return nil }
     return lo..<hi
+  }
+
+  /// A copy of `suggestion` retargeted to `ids`: samples and seconds are derived from the EXACT
+  /// drafted words' bounds (never audio overlap), so a resize can only ever land on word
+  /// boundaries already present in the transcript.
+  private func updatedSuggestion(
+    _ suggestion: CutSuggestion, toWordIDs ids: [Word.ID]
+  ) -> CutSuggestion {
+    var updated = suggestion
+    updated.wordIDs = ids
+    if let range = sourceRange(coveringWordIDs: ids) {
+      let rate = Double(editPlan.source.sampleRate)
+      updated.startSample = range.lowerBound
+      updated.endSample = range.upperBound
+      updated.startSec = Double(range.lowerBound) / rate
+      updated.endSec = Double(range.upperBound) / rate
+      updated.durationSec = Double(range.count) / rate
+    }
+    return updated
   }
 
   /// Substitutes the in-flight draft's drafted words for the matching clip/suggestion item so the
@@ -883,8 +911,11 @@ final class EditorModel: ViewModel {
         let current = slices[id: id]
       else { return }
       mutateSlices { $0[id: id] = updatedSlice(current, to: range) }
-    case .suggestion:
-      break
+    case .suggestion(let id):
+      guard let current = documentCutSuggestions[id: id], current.isPending else { return }
+      let updated = updatedSuggestion(current, toWordIDs: draft.draftedWordIDs)
+      guard updated != current else { return }
+      mutateDocument { $0.cutSuggestions[id: id] = updated }
     }
   }
 
