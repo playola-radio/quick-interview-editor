@@ -32,7 +32,9 @@ enum SuggestionDefaults {
       name: "ID Image",
       group: .audioImages,
       guidelines:
-        "a complete spoken artist/station identification or station-branding liner, including listening-to statements. A brief self-identification at the beginning of a longer anecdote is not automatically a separate ID. Prefer a more specific imaging subtype for explicit break transitions or direct promotions.",
+        "a complete spoken artist/station identification or station-branding liner, including listening-to "
+        + "statements. A brief self-identification at the beginning of a longer anecdote is not automatically "
+        + "a separate ID. Prefer a more specific imaging subtype for explicit break transitions or direct promotions.",
       template: [
         NamingComponent(kind: .literal, value: "ID "),
         NamingComponent(kind: .sequence, value: nil),
@@ -43,7 +45,8 @@ enum SuggestionDefaults {
       name: "Pre-commercial Image",
       group: .audioImages,
       guidelines:
-        "introduces an upcoming commercial break, asks the listener to stay through ads, or explains that the upcoming commercials support musicians. Include short transitions about paying the musicians.",
+        "introduces an upcoming commercial break, asks the listener to stay through ads, or explains that the "
+        + "upcoming commercials support musicians. Include short transitions about paying the musicians.",
       template: [
         NamingComponent(kind: .literal, value: "Pre-Com "),
         NamingComponent(kind: .sequence, value: nil),
@@ -54,7 +57,8 @@ enum SuggestionDefaults {
       name: "Post-commercial Image",
       group: .audioImages,
       guidelines:
-        "returns from a commercial break, welcomes the listener back, or explicitly resumes station programming after the break.",
+        "returns from a commercial break, welcomes the listener back, or explicitly resumes station "
+        + "programming after the break.",
       template: [
         NamingComponent(kind: .literal, value: "Post-Com "),
         NamingComponent(kind: .sequence, value: nil),
@@ -65,7 +69,8 @@ enum SuggestionDefaults {
       name: "Promo Image",
       group: .audioImages,
       guidelines:
-        "directly promotes a website, subscription, event/tour, release, or other listener action. A passing factual mention within a story is not automatically promotional imaging.",
+        "directly promotes a website, subscription, event/tour, release, or other listener action. A passing "
+        + "factual mention within a story is not automatically promotional imaging.",
       template: [
         NamingComponent(kind: .literal, value: "Promo "),
         NamingComponent(kind: .sequence, value: nil),
@@ -78,19 +83,25 @@ enum SuggestionDefaults {
       id: "song-title",
       name: "Song Title",
       instructions:
-        "Identify the title of the recording this clip introduces. Use the candidate and relevant context elsewhere in the source transcript. Distinguish the introduced recording from songs mentioned as background. Return missing when the text does not establish the title; do not invent it."
+        "Identify the title of the recording this clip introduces. Use the candidate and relevant context elsewhere "
+        + "in the source transcript. Distinguish the introduced recording from songs mentioned as background. "
+        + "Return missing when the text does not establish the title; do not invent it."
     ),
     SuggestionField(
       id: "artist-name",
       name: "Artist Name",
       instructions:
-        "Identify the performer singing the introduced recording. Do not substitute the station DJ, the speaker, the songwriter, or the first musician mentioned. For explicit collaborations, include the established performers. Use speaker identity elsewhere in the transcript only when the text establishes that this is their performance. Return missing when the performer cannot be established."
+        "Identify the performer singing the introduced recording. Do not substitute the station DJ, the speaker, "
+        + "the songwriter, or the first musician mentioned. For explicit collaborations, include the established "
+        + "performers. Use speaker identity elsewhere in the transcript only when the text establishes that this is "
+        + "their performance. Return missing when the performer cannot be established."
     ),
     SuggestionField(
       id: "descriptive-title",
       name: "Descriptive Title",
       instructions:
-        "Produce a concise 3–6-word description of this clip's complete thought or purpose, using only the source transcript. Do not make this output name control candidate merging."
+        "Produce a concise 3–6-word description of this clip's complete thought or purpose, using only the source "
+        + "transcript. Do not make this output name control candidate merging."
     ),
   ]
 }

@@ -78,15 +78,25 @@ extension SuggestionConfiguration {
   static let currentSchemaVersion = 1
 
   func validationMessages() -> [String] {
-    var messages: [String] = []
+    configurationValidationMessages()
+      + typeValidationMessages()
+      + fieldValidationMessages()
+      + referenceValidationMessages()
+  }
 
+  private func configurationValidationMessages() -> [String] {
+    var messages: [String] = []
     if schemaVersion != Self.currentSchemaVersion {
       messages.append("Unsupported suggestion configuration schema version \(schemaVersion).")
     }
     if types.isEmpty {
       messages.append("Suggestion configuration must contain at least one type.")
     }
+    return messages
+  }
 
+  private func typeValidationMessages() -> [String] {
+    var messages: [String] = []
     var typeIDs: Set<String> = []
     var typeNamesByGroup: Set<String> = []
     for type in types {
@@ -109,7 +119,11 @@ extension SuggestionConfiguration {
         messages.append("Suggestion type guidelines cannot be empty for '\(type.id)'.")
       }
     }
+    return messages
+  }
 
+  private func fieldValidationMessages() -> [String] {
+    var messages: [String] = []
     var fieldIDs: Set<String> = []
     var fieldNames: Set<String> = []
     for field in fields {
@@ -129,21 +143,32 @@ extension SuggestionConfiguration {
         messages.append("Suggestion field instructions cannot be empty for '\(field.id)'.")
       }
     }
+    return messages
+  }
 
+  private func referenceValidationMessages() -> [String] {
+    let fieldIDs = Set(fields.map(\.id))
+    var messages: [String] = []
     for type in types {
       messages.append(contentsOf: templateValidationMessages(for: type, fieldIDs: fieldIDs))
+      messages.append(contentsOf: sequenceFieldValidationMessages(for: type, fieldIDs: fieldIDs))
+    }
+    return messages
+  }
 
-      var groupingIDs: Set<String> = []
-      for fieldID in type.sequenceFieldIDs {
-        if !groupingIDs.insert(fieldID).inserted {
-          messages.append("Type '\(type.name)' has duplicate sequence field '\(fieldID)'.")
-        }
-        if !fieldIDs.contains(fieldID) {
-          messages.append("Type '\(type.name)' references unknown sequence field '\(fieldID)'.")
-        }
+  private func sequenceFieldValidationMessages(
+    for type: SuggestionTypeDefinition, fieldIDs: Set<String>
+  ) -> [String] {
+    var messages: [String] = []
+    var groupingIDs: Set<String> = []
+    for fieldID in type.sequenceFieldIDs {
+      if !groupingIDs.insert(fieldID).inserted {
+        messages.append("Type '\(type.name)' has duplicate sequence field '\(fieldID)'.")
+      }
+      if !fieldIDs.contains(fieldID) {
+        messages.append("Type '\(type.name)' references unknown sequence field '\(fieldID)'.")
       }
     }
-
     return messages
   }
 

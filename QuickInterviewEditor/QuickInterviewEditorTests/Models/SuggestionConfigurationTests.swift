@@ -115,31 +115,42 @@ struct SuggestionConfigurationTests {
       "sets up ONE named song and ends on the handoff (~15-45s)")
     expectNoDifference(
       byID["image-id"]?.guidelines,
-      "a complete spoken artist/station identification or station-branding liner, including listening-to statements. A brief self-identification at the beginning of a longer anecdote is not automatically a separate ID. Prefer a more specific imaging subtype for explicit break transitions or direct promotions."
+      "a complete spoken artist/station identification or station-branding liner, including listening-to "
+        + "statements. A brief self-identification at the beginning of a longer anecdote is not automatically "
+        + "a separate ID. Prefer a more specific imaging subtype for explicit break transitions or direct promotions."
     )
     expectNoDifference(
       byID["image-pre-commercial"]?.guidelines,
-      "introduces an upcoming commercial break, asks the listener to stay through ads, or explains that the upcoming commercials support musicians. Include short transitions about paying the musicians."
+      "introduces an upcoming commercial break, asks the listener to stay through ads, or explains that the "
+        + "upcoming commercials support musicians. Include short transitions about paying the musicians."
     )
     expectNoDifference(
       byID["image-post-commercial"]?.guidelines,
-      "returns from a commercial break, welcomes the listener back, or explicitly resumes station programming after the break."
+      "returns from a commercial break, welcomes the listener back, or explicitly resumes station "
+        + "programming after the break."
     )
     expectNoDifference(
       byID["image-promo"]?.guidelines,
-      "directly promotes a website, subscription, event/tour, release, or other listener action. A passing factual mention within a story is not automatically promotional imaging."
+      "directly promotes a website, subscription, event/tour, release, or other listener action. A passing "
+        + "factual mention within a story is not automatically promotional imaging."
     )
     expectNoDifference(
       fieldsByID["song-title"]?.instructions,
-      "Identify the title of the recording this clip introduces. Use the candidate and relevant context elsewhere in the source transcript. Distinguish the introduced recording from songs mentioned as background. Return missing when the text does not establish the title; do not invent it."
+      "Identify the title of the recording this clip introduces. Use the candidate and relevant context elsewhere "
+        + "in the source transcript. Distinguish the introduced recording from songs mentioned as background. "
+        + "Return missing when the text does not establish the title; do not invent it."
     )
     expectNoDifference(
       fieldsByID["artist-name"]?.instructions,
-      "Identify the performer singing the introduced recording. Do not substitute the station DJ, the speaker, the songwriter, or the first musician mentioned. For explicit collaborations, include the established performers. Use speaker identity elsewhere in the transcript only when the text establishes that this is their performance. Return missing when the performer cannot be established."
+      "Identify the performer singing the introduced recording. Do not substitute the station DJ, the speaker, "
+        + "the songwriter, or the first musician mentioned. For explicit collaborations, include the established "
+        + "performers. Use speaker identity elsewhere in the transcript only when the text establishes that this is "
+        + "their performance. Return missing when the performer cannot be established."
     )
     expectNoDifference(
       fieldsByID["descriptive-title"]?.instructions,
-      "Produce a concise 3–6-word description of this clip's complete thought or purpose, using only the source transcript. Do not make this output name control candidate merging."
+      "Produce a concise 3–6-word description of this clip's complete thought or purpose, using only the source "
+        + "transcript. Do not make this output name control candidate merging."
     )
   }
 
@@ -189,12 +200,34 @@ struct SuggestionConfigurationTests {
   @Test(arguments: ValidationCase.allCases)
   func reportsEveryInvalidConfigurationRule(_ testCase: ValidationCase) {
     var configuration = validConfiguration()
+    applyConfigurationCase(testCase, to: &configuration)
+    applyTypeCase(testCase, to: &configuration)
+    applyFieldCase(testCase, to: &configuration)
+    applyTemplateCase(testCase, to: &configuration)
 
+    #expect(
+      configuration.validationMessages().contains {
+        $0.localizedCaseInsensitiveContains(testCase.expectedMessageFragment)
+      })
+  }
+
+  private func applyConfigurationCase(
+    _ testCase: ValidationCase, to configuration: inout SuggestionConfiguration
+  ) {
     switch testCase {
     case .unsupportedSchema:
       configuration.schemaVersion = 2
     case .noTypes:
       configuration.types = []
+    default:
+      break
+    }
+  }
+
+  private func applyTypeCase(
+    _ testCase: ValidationCase, to configuration: inout SuggestionConfiguration
+  ) {
+    switch testCase {
     case .blankTypeID:
       configuration.types[0].id = " \n"
     case .duplicateTypeID:
@@ -208,6 +241,15 @@ struct SuggestionConfigurationTests {
       configuration.types.append(duplicate)
     case .blankGuidelines:
       configuration.types[0].guidelines = " "
+    default:
+      break
+    }
+  }
+
+  private func applyFieldCase(
+    _ testCase: ValidationCase, to configuration: inout SuggestionConfiguration
+  ) {
+    switch testCase {
     case .blankFieldID:
       configuration.fields[0].id = "\n"
     case .duplicateFieldID:
@@ -219,6 +261,15 @@ struct SuggestionConfigurationTests {
         SuggestionField(id: "other", name: "  EXAMPLE   FIELD", instructions: "Extract it"))
     case .blankInstructions:
       configuration.fields[0].instructions = "\t"
+    default:
+      break
+    }
+  }
+
+  private func applyTemplateCase(
+    _ testCase: ValidationCase, to configuration: inout SuggestionConfiguration
+  ) {
+    switch testCase {
     case .duplicateGroupingReference:
       configuration.types[0].sequenceFieldIDs = ["field", "field"]
     case .missingGroupingField:
@@ -238,12 +289,9 @@ struct SuggestionConfigurationTests {
       configuration.types[0].template = []
     case .whitespaceOnlyLiteralTemplate:
       configuration.types[0].template = [NamingComponent(kind: .literal, value: " \t")]
+    default:
+      break
     }
-
-    #expect(
-      configuration.validationMessages().contains {
-        $0.localizedCaseInsensitiveContains(testCase.expectedMessageFragment)
-      })
   }
 
   @Test func defaultsAreValid() {
