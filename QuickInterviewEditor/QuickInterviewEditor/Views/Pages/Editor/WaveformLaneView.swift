@@ -344,6 +344,7 @@ private struct WaveformRulerInteractionLayer: NSViewRepresentable {
     }
 
     override func mouseDown(with event: NSEvent) {
+      endActiveTextEditing()
       onRulerMove?(localX(event))
     }
 
@@ -424,6 +425,7 @@ private struct WaveformInteractionLayer: NSViewRepresentable {
     }
 
     override func mouseDown(with event: NSEvent) {
+      endActiveTextEditing()
       dragStartX = localX(event)
       didDrag = false
     }
@@ -465,7 +467,8 @@ private struct WaveformInteractionLayer: NSViewRepresentable {
     /// Right-click: ask the model what (if anything) sits under the pointer. An empty result
     /// (no seam) shows no menu; the model both selects the seam and supplies its actions.
     override func menu(for event: NSEvent) -> NSMenu? {
-      waveformContextMenu(from: onContextMenu?(localX(event)) ?? [])
+      endActiveTextEditing()
+      return waveformContextMenu(from: onContextMenu?(localX(event)) ?? [])
     }
   }
 }
@@ -582,6 +585,7 @@ private struct WaveformEdgeHandleLayer: NSViewRepresentable {
     }
 
     override func mouseDown(with event: NSEvent) {
+      endActiveTextEditing()
       activeEdge = edge(nearestToX: localX(event))
       if let activeEdge { onEdgeDragBegan?(activeEdge) }
     }
@@ -599,7 +603,8 @@ private struct WaveformEdgeHandleLayer: NSViewRepresentable {
     /// Right-click on an edge zone: forward to the seam menu so a bowtie sitting under a selection
     /// edge stays restorable. Empty result (no seam here) shows no menu, same as the marquee layer.
     override func menu(for event: NSEvent) -> NSMenu? {
-      waveformContextMenu(from: onContextMenu?(localX(event)) ?? [])
+      endActiveTextEditing()
+      return waveformContextMenu(from: onContextMenu?(localX(event)) ?? [])
     }
 
     /// Forward ⌘-scroll zoom and plain-scroll pan through, exactly like `WaveformInteractionLayer`'s
@@ -711,6 +716,7 @@ private struct SeamStretchHandleLayer: NSViewRepresentable {
     }
 
     override func mouseDown(with event: NSEvent) {
+      endActiveTextEditing()
       let posX = localX(event)
       active = handle(nearestToX: posX)
       downX = posX
@@ -748,7 +754,8 @@ private struct SeamStretchHandleLayer: NSViewRepresentable {
     /// reachable at the exact pixels this layer claims from the marquee beneath. Empty result (no seam
     /// here) shows no menu, same as the marquee and selection-edge layers.
     override func menu(for event: NSEvent) -> NSMenu? {
-      waveformContextMenu(from: onContextMenu?(localX(event)) ?? [])
+      endActiveTextEditing()
+      return waveformContextMenu(from: onContextMenu?(localX(event)) ?? [])
     }
 
     /// Forward ⌘-scroll zoom and plain-scroll pan through, exactly like `WaveformInteractionLayer`'s
@@ -898,6 +905,9 @@ private struct WaveformAmplitudeZoomDragArea: NSViewRepresentable {
     }
 
     override func mouseDown(with event: NSEvent) {
+      // Ends editing even when amplitude zoom is disabled: this view still claims the click, so a
+      // click here must dismiss an in-progress rename like every other content layer.
+      endActiveTextEditing()
       guard isEnabled else { return }
       if event.clickCount >= 2 {
         dragStartY = nil
