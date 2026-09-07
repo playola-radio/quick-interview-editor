@@ -102,7 +102,17 @@ struct TranscriptTextView: NSViewRepresentable {
     private var lastScrollTarget: Word.ID?
     private var lastFollowMode: TranscriptFollowMode = .following
     private var lastReveal: TranscriptReveal?
-    private var resizeItems: [TranscriptResizeItem] = []
+    // `resizeZones()` forces TextKit glyph geometry for every resize item and is called from the
+    // overlay's `hitTest`/`cursorUpdate` — i.e. on every mouse-move and, as content scrolls under a
+    // stationary pointer, on every scroll tick. Memoize it: zones are in document-view coordinates
+    // (scroll-independent), so they only change when `apply(...)` reassigns `resizeItems` (which
+    // `didSet` drops the cache for, covering text/font/item changes) or when the container rewraps
+    // on a width change (checked live in `resizeZones()`).
+    private var resizeItems: [TranscriptResizeItem] = [] {
+      didSet { cachedResizeZones = nil }
+    }
+    private var cachedResizeZones: [TranscriptResizeHandleZone]?
+    private var cachedResizeZonesWidth: CGFloat?
     private var scrollTimer: Timer?
     private var scrollFromY: CGFloat = 0
     private var scrollToY: CGFloat = 0
@@ -447,10 +457,16 @@ struct TranscriptTextView: NSViewRepresentable {
     /// document-view coordinates (text-container coords plus `textContainerInset`, matching
     /// `utf16Offset(at:)`'s inset handling so zones and the lenient hit-test agree).
     func resizeZones() -> [TranscriptResizeHandleZone] {
-      guard let layoutManager = textView?.layoutManager,
-        let textContainer = textView?.textContainer
+      guard let textView, let layoutManager = textView.layoutManager,
+        let textContainer = textView.textContainer
       else { return [] }
-      let inset = textView?.textContainerInset ?? .zero
+      // A width change rewraps the text (new line fragments → new zone rects) without an `apply`
+      // call, so validate the cache against the current width before returning it.
+      let width = textView.bounds.width
+      if let cached = cachedResizeZones, cachedResizeZonesWidth == width {
+        return cached
+      }
+      let inset = textView.textContainerInset
       var zones: [TranscriptResizeHandleZone] = []
       for item in resizeItems {
         guard let first = item.wordIDs.first, let last = item.wordIDs.last,
@@ -472,6 +488,8 @@ struct TranscriptTextView: NSViewRepresentable {
         if let handleZone = zone(firstRange, .start) { zones.append(handleZone) }
         if let handleZone = zone(lastRange, .end) { zones.append(handleZone) }
       }
+      cachedResizeZones = zones
+      cachedResizeZonesWidth = width
       return zones
     }
 
