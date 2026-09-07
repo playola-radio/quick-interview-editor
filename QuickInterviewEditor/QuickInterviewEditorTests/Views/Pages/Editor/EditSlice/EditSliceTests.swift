@@ -1525,11 +1525,11 @@ struct EditSliceTests {
     draft.frozenVisibleStart + Int((Double(posX) * draft.frozenSamplesPerPixel).rounded(.down))
   }
 
-  /// A full ⌥-drag of the LEFT cut moves `cL` and commits the moved range plus the FROZEN effective
-  /// fade length through the parent's `onMoveCutPoint` funnel. The moved bound is `cL = committed −
+  /// A full ⌥-drag of the LEFT cut moves `cL` and commits ONLY the moved range through the parent's
+  /// `onMoveCutPoint` funnel (the stored fade is never rewritten). The moved bound is `cL = committed −
   /// delta` in edited samples, so we derive the expectation from the drag's frozen viewport rather than
   /// a hardcoded spp; the drag stays small so no clamp binds.
-  @Test func cutPointDragMovesTheLeftCutAndCommitsTheMovedRangeAndFrozenLength() {
+  @Test func cutPointDragMovesTheLeftCutAndCommitsTheMovedRange() {
     let model = laneModel()  // slice 10_000..<20_000
     let id = UUID()
     let removal = TimelineRemoval(
@@ -1537,11 +1537,7 @@ struct EditSliceTests {
     model.currentCrossfadeLength = { $0 == id ? 600 : nil }
     model.syncTimeline(EditedTimeline(sourceDurationSamples: 100_000, removals: [removal]))
     var ranges: [Range<Int>] = []
-    var lengths: [Int] = []
-    model.onMoveCutPoint = { _, range, length in
-      ranges.append(range)
-      lengths.append(length)
-    }
+    model.onMoveCutPoint = { _, range in ranges.append(range) }
 
     model.crossfadeCutPointDragBegan(id: id, edge: .lower, atX: 300)
     guard let draft = model.crossfadeCutPointDraft else {
@@ -1556,7 +1552,6 @@ struct EditSliceTests {
     model.crossfadeCutPointDragEnded()
 
     expectNoDifference(ranges, [expected])
-    expectNoDifference(lengths, [600])
     expectNoDifference(model.crossfadeCutPointDraft, nil)
   }
 
@@ -1570,7 +1565,7 @@ struct EditSliceTests {
     model.currentCrossfadeLength = { $0 == id ? 600 : nil }
     model.syncTimeline(EditedTimeline(sourceDurationSamples: 100_000, removals: [removal]))
     var ranges: [Range<Int>] = []
-    model.onMoveCutPoint = { _, range, _ in ranges.append(range) }
+    model.onMoveCutPoint = { _, range in ranges.append(range) }
 
     model.crossfadeCutPointDragBegan(id: id, edge: .upper, atX: 300)
     guard let draft = model.crossfadeCutPointDraft else {
@@ -1596,7 +1591,7 @@ struct EditSliceTests {
     model.currentCrossfadeLength = { $0 == id ? 600 : nil }
     model.syncTimeline(EditedTimeline(sourceDurationSamples: 100_000, removals: [removal]))
     var committed = 0
-    model.onMoveCutPoint = { _, _, _ in committed += 1 }
+    model.onMoveCutPoint = { _, _ in committed += 1 }
 
     model.crossfadeCutPointDragBegan(id: id, edge: .lower, atX: 300)
     model.crossfadeCutPointDragged(toX: 300)  // back on the press position: no delta
@@ -1625,8 +1620,8 @@ struct EditSliceTests {
 
   /// The slice narrows the parent's global clamp: a removal OUTSIDE the slice widens the global handle,
   /// but the sheet still floors `cL` at the slice edge. The parent clamp (wired to mimic the real
-  /// neighbor-aware clamp) would allow `cL` down to `prevUpper + prevF + L = 9_600`, but the slice
-  /// floor (10_000) is tighter and wins.
+  /// neighbor-aware clamp) would allow `cL` down to `prevUpper + prevF = 9_000` (no own-fade
+  /// reservation), but the slice floor (10_000) is tighter and wins.
   @Test func cutPointDragIntersectsTheParentClampWithTheSliceWindow() {
     let model = laneModel()  // slice 10_000..<20_000
     let id = UUID()
@@ -1635,9 +1630,9 @@ struct EditSliceTests {
     let interior = TimelineRemoval(
       id: id, removedRange: 13_000..<15_000, crossfade: Crossfade(lengthSamples: 600))
     model.currentCrossfadeLength = { $0 == id ? 600 : nil }
-    // Mimic the parent's lower-edge clamp: cL floored at prevUpper(9_000)+prevF(0)+L(600)=9_600.
-    model.clampCutPointRange = { _, proposed, length in
-      max(proposed.lowerBound, 9_000 + length)..<proposed.upperBound
+    // Mimic the parent's lower-edge clamp: cL floored at prevUpper(9_000)+prevF(0)=9_000.
+    model.clampCutPointRange = { _, proposed in
+      max(proposed.lowerBound, 9_000)..<proposed.upperBound
     }
     model.syncTimeline(
       EditedTimeline(sourceDurationSamples: 100_000, removals: [outside, interior]))
@@ -1657,7 +1652,7 @@ struct EditSliceTests {
     model.currentCrossfadeLength = { $0 == id ? 600 : nil }
     model.syncTimeline(EditedTimeline(sourceDurationSamples: 100_000, removals: [removal]))
     var committed = 0
-    model.onMoveCutPoint = { _, _, _ in committed += 1 }
+    model.onMoveCutPoint = { _, _ in committed += 1 }
     let startBeforeDrag = model.editedWaveform.visibleStartSample
     let sppBeforeDrag = model.editedWaveform.samplesPerPixel
 
@@ -1745,13 +1740,12 @@ struct EditSliceTests {
     expectNoDifference(model.waveformSelection, nil)
   }
 
-  /// A cut-point drag never rewrites the STORED fade: it commits the document's stored length, not the
-  /// clamped effective length — even when global geometry already caps the fade below what's stored. A
-  /// neighbor removal ending at 11_000 leaves only 1_000 kept samples before cL=12_000, so the interior
-  /// seam stores 2_500 but renders an effective 1_000. Moving its far (upper) cut still commits 2_500
-  /// (non-destructive: pull a cut back out and the full fade returns), never the effective 1_000. This
-  /// is the value the sheet must freeze — `currentCrossfadeLength`, not `seam.crossfadeLength`.
-  @Test func cutPointDragPreservesTheStoredFadeLengthOnCommit() {
+  /// A cut-point drag on a geometry-capped seam commits ONLY the moved range — it hands the parent no
+  /// fade length at all, so it can't rewrite the stored fade (the parent's `updateRemovalRange`
+  /// preserves the stored length structurally; see `EditorCrossfadeCutPointTests`). A neighbor removal
+  /// ending at 11_000 leaves only 1_000 kept samples before cL=12_000, so the interior seam stores
+  /// 2_500 but renders an effective 1_000; moving its far (upper) cut still commits cleanly.
+  @Test func cutPointDragOnAGeometryCappedSeamCommitsTheMovedRange() {
     let model = laneModel()  // slice 10_000..<20_000
     let id = UUID()
     let outside = TimelineRemoval(
@@ -1759,8 +1753,8 @@ struct EditSliceTests {
     let interior = TimelineRemoval(
       id: id, removedRange: 12_000..<15_000, crossfade: Crossfade(lengthSamples: 2_500))
     model.currentCrossfadeLength = { $0 == id ? 2_500 : nil }
-    var committedLengths: [Int] = []
-    model.onMoveCutPoint = { _, _, length in committedLengths.append(length) }
+    var ranges: [Range<Int>] = []
+    model.onMoveCutPoint = { _, range in ranges.append(range) }
     model.syncTimeline(
       EditedTimeline(sourceDurationSamples: 100_000, removals: [outside, interior]))
     let effective = model.editedWaveform.timeline.seams.first { $0.id == id }?.crossfadeLength
@@ -1768,9 +1762,10 @@ struct EditSliceTests {
 
     model.crossfadeCutPointDragBegan(id: id, edge: .upper, atX: 300)
     model.crossfadeCutPointDragged(toX: 320)  // nudge the far cut inward — a real change
+    let drafted = model.crossfadeCutPointDraft?.draftedRange
     model.crossfadeCutPointDragEnded()
 
-    expectNoDifference(committedLengths, [2_500])  // stored length preserved, not shrunk to 1_000
+    expectNoDifference(ranges, drafted.map { [$0] } ?? [])
   }
 
   /// No fade-room reservation at the slice edge: dragging `cL` far left on an OVERLONG stored fade
@@ -1791,6 +1786,36 @@ struct EditSliceTests {
     model.crossfadeCutPointDragged(toX: 5_000)  // push cL far below the slice start
 
     expectNoDifference(model.crossfadeCutPointDraft?.draftedRange, 10_000..<15_000)
+  }
+
+  /// Regression (Codex challenge P2b): the sheet's cut-point PREVIEW must build its timeline from the
+  /// parent's STORED removals — exactly as the parent's commit does — not from the lane's already-
+  /// clamped EFFECTIVE removals. A prev-neighbor whose stored fade (1_500) is geometry-capped to 1_000
+  /// by the initial island would otherwise stay stuck at 1_000 in the preview while the commit (stored
+  /// basis) expands it back to 1_500 as the drag grows the island — shifting every downstream seam's
+  /// edited position so the bowtie jumps on release. With stored removals injected, preview == commit.
+  @Test func cutPointPreviewBuildsNeighborFadeFromStoredNotEffective() {
+    let model = laneModel()  // slice 10_000..<20_000, spp 10, visibleStart 10_000
+    let neighborID = UUID()
+    let draggedID = UUID()
+    let neighbor = TimelineRemoval(
+      id: neighborID, removedRange: 10_500..<11_000, crossfade: Crossfade(lengthSamples: 1_500))
+    let dragged = TimelineRemoval(
+      id: draggedID, removedRange: 12_000..<16_000, crossfade: Crossfade(lengthSamples: 200))
+    model.currentCrossfadeLength = { $0 == draggedID ? 200 : ($0 == neighborID ? 1_500 : nil) }
+    model.currentStoredRemovals = { [neighbor, dragged] }
+    model.syncTimeline(
+      EditedTimeline(sourceDurationSamples: 100_000, removals: [neighbor, dragged]))
+    let effectiveBefore =
+      model.editedWaveform.timeline.seams.first { $0.id == neighborID }?.crossfadeLength
+    expectNoDifference(effectiveBefore, 1_000)  // island [11_000,12_000) caps the stored 1_500
+
+    model.crossfadeCutPointDragBegan(id: draggedID, edge: .lower, atX: 300)
+    model.crossfadeCutPointDragged(toX: 50)  // slide cL right, growing the island well past 1_500
+
+    let previewNeighborFade =
+      model.editedWaveform.timeline.seams.first { $0.id == neighborID }?.crossfadeLength
+    expectNoDifference(previewNeighborFade, 1_500)  // stored basis restores the full fade; no jump
   }
 
   /// A plain body click landing on a bowtie selects that crossfade — the "clicking within the X on the

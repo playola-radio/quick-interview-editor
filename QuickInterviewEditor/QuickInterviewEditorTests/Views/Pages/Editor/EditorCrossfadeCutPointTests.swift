@@ -99,15 +99,15 @@ struct EditorCrossfadeCutPointTests {
 
   // MARK: - Commit funnel
 
-  @Test func updateRemovalRangeMovesBoundAndFreezesLengthPreservingID() {
+  @Test func updateRemovalRangeMovesBoundPreservingStoredLengthAndID() {
     withStorage {
       let model = editor(fingerprint: "fp-cut-commit")
       let id = addRemoval(model, range: 48_000..<96_000, length: 600)
 
-      model.updateRemovalRange(id: id, removedRange: 46_000..<96_000, freezingCrossfadeLength: 600)
+      model.updateRemovalRange(id: id, removedRange: 46_000..<96_000)
 
       expectNoDifference(model.timelineRemovals[id: id]?.removedRange, 46_000..<96_000)
-      expectNoDifference(model.timelineRemovals[id: id]?.crossfade.lengthSamples, 600)
+      expectNoDifference(model.timelineRemovals[id: id]?.crossfade.lengthSamples, 600)  // untouched
       #expect(model.timelineRemovals[id: id]?.id == id)  // identity preserved
     }
   }
@@ -119,7 +119,7 @@ struct EditorCrossfadeCutPointTests {
       // isExporting is computed off exportPhase.
       model.exportPhase = .exporting(current: 0, total: 1)
 
-      model.updateRemovalRange(id: id, removedRange: 46_000..<96_000, freezingCrossfadeLength: 600)
+      model.updateRemovalRange(id: id, removedRange: 46_000..<96_000)
 
       expectNoDifference(model.timelineRemovals[id: id]?.removedRange, 48_000..<96_000)
     }
@@ -135,38 +135,39 @@ struct EditorCrossfadeCutPointTests {
       // Propose cL past cR: pinned to cR - 1. `200_000..<200_000` (not `200_000..<96_000`) because Swift's
       // `Range` enforces lowerBound <= upperBound even via `uncheckedBounds`; the moving-lower-edge branch
       // of clampedRemovalRange only reads `proposed.lowerBound`, so the paired upperBound is irrelevant here.
-      let clamped = model.clampedRemovalRange(
-        id: id, proposed: 200_000..<200_000, frozenLength: 600)
+      let clamped = model.clampedRemovalRange(id: id, proposed: 200_000..<200_000)
 
       expectNoDifference(clamped, 95_999..<96_000)
     }
   }
 
-  @Test func clampUpperRespectsNeighborRemovalAndItsFade() {
+  @Test func clampUpperReachesTheNeighborRemovalBoundaryNotItsFade() {
     withStorage {
       let model = editor(fingerprint: "fp-cut-clamp-upper-neighbor")
       let id = addRemoval(model, id: Fixtures.uuid(1), range: 48_000..<96_000, length: 600)
-      // Neighbor removal to the right, fade 400: cR upper bound = 150_000 - 600 - 400 = 149_000.
+      // Neighbor removal to the right at 150_000: cR upper bound = 150_000, flush against the neighbor
+      // (Option C: no fade reservation — a neighbor removal is just another edge, so both shared fades
+      // render shorter rather than the cut being walled off short of it).
       addRemoval(model, id: Fixtures.uuid(2), range: 150_000..<200_000, length: 400)
 
-      let clamped = model.clampedRemovalRange(
-        id: id, proposed: 48_000..<300_000, frozenLength: 600)
+      let clamped = model.clampedRemovalRange(id: id, proposed: 48_000..<300_000)
 
-      expectNoDifference(clamped, 48_000..<149_000)
+      expectNoDifference(clamped, 48_000..<150_000)
     }
   }
 
-  @Test func clampLowerRespectsNeighborRemovalAndItsFade() {
+  @Test func clampLowerReachesTheNeighborRemovalBoundaryNotItsFade() {
     withStorage {
       let model = editor(fingerprint: "fp-cut-clamp-lower-neighbor")
       addRemoval(model, id: Fixtures.uuid(1), range: 48_000..<96_000, length: 400)
       let id = addRemoval(model, id: Fixtures.uuid(2), range: 150_000..<200_000, length: 600)
 
-      // Neighbor removal to the left, fade 400: cL lower bound = 96_000 + 400 + 600 = 97_000.
-      let clamped = model.clampedRemovalRange(
-        id: id, proposed: 0..<200_000, frozenLength: 600)
+      // Neighbor removal to the left ending at 96_000: cL lower bound = 96_000, flush against the
+      // neighbor (Option C: no fade reservation — the cut reaches the neighbor boundary, both shared
+      // fades render shorter rather than the cut being walled off short of it).
+      let clamped = model.clampedRemovalRange(id: id, proposed: 0..<200_000)
 
-      expectNoDifference(clamped, 97_000..<200_000)
+      expectNoDifference(clamped, 96_000..<200_000)
     }
   }
 
@@ -179,10 +180,136 @@ struct EditorCrossfadeCutPointTests {
       // `0..<48_000`) because Swift's `Range` enforces lowerBound <= upperBound, and the
       // moving-upper-edge branch of clampedRemovalRange is selected by `proposed.lowerBound == cL` —
       // it then only reads `proposed.upperBound`, so the paired lowerBound must equal cL to route here.
-      let clamped = model.clampedRemovalRange(
-        id: id, proposed: 48_000..<48_000, frozenLength: 600)
+      let clamped = model.clampedRemovalRange(id: id, proposed: 48_000..<48_000)
 
       expectNoDifference(clamped, 48_000..<48_001)
+    }
+  }
+
+  // MARK: - Reach the edge (own-fade reservation removed)
+
+  /// The moving cut may run all the way to the source START — the clamp reserves NO room for the
+  /// removal's OWN fade, even one much longer than the material before it. With no previous neighbor
+  /// the floor is `prevUpper(0) + prevF(0) = 0`; the old own-fade reservation would have walled cL off
+  /// at `frozenLength`. `EditedTimeline` renders the fade shorter (down to a hard cut) instead.
+  @Test func clampLowerCanReachTheSourceStartWithoutOwnFadeReservation() {
+    withStorage {
+      let model = editor(fingerprint: "fp-cut-reach-start")
+      let id = addRemoval(model, range: 48_000..<96_000, length: 2_000)
+
+      let clamped = model.clampedRemovalRange(id: id, proposed: (-12_000)..<96_000)
+
+      expectNoDifference(clamped, 0..<96_000)  // reaches source start, not walled off at the fade
+    }
+  }
+
+  /// Symmetric to the lower edge: the last removal's cut-out may run all the way to the source END
+  /// (`nextLower = source.durationSamples`, `nextF = 0`), no own-fade reservation. The bundled fixture
+  /// source is 1_855_488 samples.
+  @Test func clampUpperCanReachTheSourceEndWithoutOwnFadeReservation() {
+    withStorage {
+      let model = editor(fingerprint: "fp-cut-reach-end")
+      let id = addRemoval(model, range: 48_000..<96_000, length: 2_000)
+
+      let clamped = model.clampedRemovalRange(id: id, proposed: 48_000..<3_000_000)
+
+      expectNoDifference(clamped, 48_000..<1_855_488)  // reaches source end
+    }
+  }
+
+  /// The clamp moves only ONE edge: when a (defensive) proposal changes BOTH bounds, the lower-edge
+  /// branch (`proposed.lowerBound != cL`) wins and the committed upper bound is held. Documents that
+  /// callers move a single cut per drag — the paired bound is never silently applied.
+  @Test func clampReadsOnlyTheMovingLowerEdgeWhenBothBoundsDiffer() {
+    withStorage {
+      let model = editor(fingerprint: "fp-cut-both-bounds")
+      let id = addRemoval(model, range: 48_000..<96_000, length: 600)
+
+      let clamped = model.clampedRemovalRange(id: id, proposed: 40_000..<200_000)
+
+      expectNoDifference(clamped, 40_000..<96_000)  // upper (200_000) ignored; committed cR held
+    }
+  }
+
+  /// Crowding an upper cut flush against a following removal renders BOTH shared fades shorter, never
+  /// rewriting either STORED length (Option C, decision B: a neighbor removal is just another edge —
+  /// the clamp reserves no fade room). `EditedTimeline` allocates seams left-to-right, so the left
+  /// (moving) seam claims the shrunken island first and the right neighbor's rendered fade is starved
+  /// to a hard cut. Encodes Codex's worked example: current fade 600, next fade 400, island 400 →
+  /// current renders 400, next renders 0, both stored lengths untouched.
+  @Test func crowdingUpperCutFlushToNeighborShortensBothSharedFadesPreservingStored() {
+    withStorage {
+      let model = editor(fingerprint: "fp-cut-neighbor-crowd")
+      let idA = addRemoval(model, id: Fixtures.uuid(1), range: 48_000..<80_000, length: 600)
+      let idB = addRemoval(model, id: Fixtures.uuid(2), range: 100_000..<200_000, length: 400)
+
+      // Move A's cut-out from 80_000 toward B, leaving a 400-sample island before B (100_000).
+      // The clamp reaches toward the neighbor, not walled off at its fade.
+      let clamped = model.clampedRemovalRange(id: idA, proposed: 48_000..<99_600)
+      expectNoDifference(clamped, 48_000..<99_600)
+      model.updateRemovalRange(id: idA, removedRange: clamped)
+
+      // Stored fade lengths are untouched (non-destructive).
+      expectNoDifference(model.timelineRemovals[id: idA]?.crossfade.lengthSamples, 600)
+      expectNoDifference(model.timelineRemovals[id: idB]?.crossfade.lengthSamples, 400)
+
+      // Both shared fades render shorter: A's own fade 600 → 400 (island), B starved 400 → 0.
+      let seams = model.editedTimeline.seams
+      expectNoDifference(seams.first(where: { $0.id == idA })?.crossfadeLength, 400)
+      expectNoDifference(seams.first(where: { $0.id == idB })?.crossfadeLength, 0)
+    }
+  }
+
+  // MARK: - Reach the edge (drag lifecycle)
+
+  /// Dragging the left cut toward the source start past the stored fade length shortens the rendered
+  /// (EFFECTIVE) fade to the shrinking left handle while the STORED length is preserved (Option C:
+  /// non-destructive). cL 48_000 → 800 leaves only 800 kept samples before the cut, so the 2_000-sample
+  /// stored fade renders as 800; the stored value survives for when the cut is pulled back out.
+  @Test func draggingLeftCutTowardTheStartShortensEffectiveFadePreservingStored() {
+    withStorage {
+      let model = editor(fingerprint: "fp-cut-reach-shortens")
+      primeGeometry(model)  // spp 200, visibleStart 0
+      let id = addRemoval(model, range: 48_000..<96_000, length: 2_000)
+      let effective = {
+        model.editedWaveform.timeline.seams.first(where: { $0.id == id })?.crossfadeLength
+      }
+      expectNoDifference(effective(), 2_000)  // full stored fade before the drag
+
+      // dragStart edited = 20_000; +236px → delta +47_200 → cL 48_000 → 800.
+      model.crossfadeCutPointDragBegan(id: id, edge: .lower, atX: 100)
+      model.crossfadeCutPointDragged(toX: 336)
+      expectNoDifference(model.crossfadeCutPointDraft?.draftedRange, 800..<96_000)
+      model.crossfadeCutPointDragEnded()
+
+      // Stored fade preserved; rendered fade shortened to the 800-sample left handle.
+      expectNoDifference(model.timelineRemovals[id: id]?.crossfade.lengthSamples, 2_000)
+      expectNoDifference(effective(), 800)
+    }
+  }
+
+  /// The crossfade stays pinned to its start-of-drag screen position even as its EFFECTIVE length
+  /// shrinks near the edge — the viewport re-anchors on the seam's actual edited position
+  /// (`editedCrossfadeStart`), NOT on ΔcL. With visibleStart 100_000, dragging cL 48_000 → 800 moves
+  /// the seam's edited start 46_000 → 0 (the fade clamps to the 800 handle), so the viewport shifts by
+  /// −46_000 to 54_000. A naive ΔcL anchor would shift by −47_200 (to 52_800) and let the fade drift.
+  @Test func draggingLeftCutTowardTheStartKeepsTheCrossfadePinnedWhileTheFadeShrinks() {
+    withStorage {
+      let model = editor(fingerprint: "fp-cut-reach-pinned")
+      model.editedWaveform.viewportWidth = 1000
+      model.editedWaveform.samplesPerPixel = 200
+      model.editedWaveform.visibleStartSample = 100_000
+      let id = addRemoval(model, range: 48_000..<96_000, length: 2_000)
+      let seamStart = { model.editedWaveform.timeline.seams.first?.editedCrossfadeStart ?? 0 }
+      let offsetBefore = seamStart() - model.editedWaveform.visibleStartSample
+
+      model.crossfadeCutPointDragBegan(id: id, edge: .lower, atX: 100)  // dragStart edited 120_000
+      model.crossfadeCutPointDragged(toX: 336)  // +47_200 → cL 800
+
+      expectNoDifference(model.crossfadeCutPointDraft?.draftedRange, 800..<96_000)
+      expectNoDifference(model.editedWaveform.visibleStartSample, 54_000)
+      let offsetAfter = seamStart() - model.editedWaveform.visibleStartSample
+      expectNoDifference(offsetAfter, offsetBefore)  // crossfade held its screen position
     }
   }
 

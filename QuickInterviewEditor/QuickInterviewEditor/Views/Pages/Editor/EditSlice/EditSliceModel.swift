@@ -83,18 +83,25 @@ final class EditSliceModel: ViewModel, Identifiable {
   /// parent's `updateCrossfade` funnel would discard on release — the main lane's begin-time refusal.
   var canEditCrossfade: () -> Bool = { true }
   /// Commits a cut-point move through the parent's `updateRemovalRange` funnel as one undo step: the
-  /// moved `removedRange` plus the pinned STORED fade length (the document's `lengthSamples`, NOT the
-  /// clamped effective) — moving a cut never rewrites the stored duration, so the move is
+  /// moved `removedRange` only — moving a cut never rewrites the stored fade duration, so the move is
   /// non-destructive: the fade renders as short as fits near the edge and the full stored length
   /// returns when the cut pulls back out. The sheet drafts against its own lane and hands the clamped
-  /// range + frozen length here; the parent fans the result back via `syncTimeline`.
-  var onMoveCutPoint: (TimelineRemoval.ID, Range<Int>, Int) -> Void = { _, _, _ in }
+  /// range here; the parent fans the result back via `syncTimeline`.
+  var onMoveCutPoint: (TimelineRemoval.ID, Range<Int>) -> Void = { _, _ in }
   /// Clamps a proposed cut-point range against the parent's GLOBAL timeline (neighbor removals, the
   /// opposite cut, non-empty). The sheet intersects the result with the slice window
   /// (``sliceLocalClampedRemovalRange``). Returns `proposed` unchanged by default (unwired parent).
-  var clampCutPointRange: (TimelineRemoval.ID, Range<Int>, Int) -> Range<Int> = { _, proposed, _ in
+  var clampCutPointRange: (TimelineRemoval.ID, Range<Int>) -> Range<Int> = { _, proposed in
     proposed
   }
+  /// The parent document's STORED removals (the whole global set, with un-clamped fade lengths). The
+  /// cut-point preview builds its timeline from THESE — exactly as the parent's commit does — so the
+  /// live bowtie and the released commit land on identical geometry (no jump). The lane's own
+  /// ``editedWaveform`` carries EFFECTIVE (already geometry-clamped) fades, so previewing from it lets a
+  /// crowded neighbor's rendered fade stay stuck below its stored length while the commit expands it
+  /// back, shifting every downstream seam on release. Returns an empty set by default (unwired parent),
+  /// which falls the preview back to the lane's effective removals.
+  var currentStoredRemovals: () -> [TimelineRemoval] = { [] }
   /// Undo / redo the shared document (routed to the parent's `undoTapped`/`redoTapped`). A modal
   /// removal is a document edit on the parent's undo stack, so ⌘Z inside the sheet rewinds it — the
   /// sheet's own key monitor forwards ⌘Z/⌘⇧Z here because the main window's undo shortcut is not in
@@ -670,11 +677,11 @@ final class EditSliceModel: ViewModel, Identifiable {
 
   /// A cut-point drag to view-x: map x → edited sample against the FROZEN viewport, derive the source
   /// delta, apply it to the moving bound (`committed − delta`), clamp to the slice, hold the draft, and
-  /// reflow the preview timeline live. The viewport re-anchors by ΔcL exactly like the main editor so
-  /// the CROSSFADE stays pinned to its start-of-drag screen position and the moving side slides under
-  /// it (a right-cut leaves cL untouched → no shift → only the right slides). When the slice fully fits
-  /// the pinned lane the shift naturally clamps away, so the seam simply reflows in place. The document
-  /// stays untouched — commit is on release.
+  /// reflow the preview timeline live. The viewport re-anchors by the seam's edited-position delta
+  /// exactly like the main editor so the CROSSFADE stays pinned to its start-of-drag screen position
+  /// and the moving side slides under it (a right-cut leaves the seam put → no shift → only the right
+  /// slides). When the slice fully fits the pinned lane the shift naturally clamps away, so the seam
+  /// simply reflows in place. The document stays untouched — commit is on release.
   func crossfadeCutPointDragged(toX posX: CGFloat) {
     guard var draft = crossfadeCutPointDraft else { return }
     let editedNow = WaveformViewport.xToSample(
@@ -694,12 +701,20 @@ final class EditSliceModel: ViewModel, Identifiable {
       proposed = draft.committedRange.lowerBound..<proposedCR
     }
     let clamped = sliceLocalClampedRemovalRange(
-      id: draft.id, edge: draft.edge, proposed: proposed, frozenLength: draft.frozenCrossfadeLength)
+      id: draft.id, edge: draft.edge, proposed: proposed)
     draft.draftedRange = clamped
     crossfadeCutPointDraft = draft
     let preview = previewCutPointTimeline(
       id: draft.id, removedRange: clamped, length: draft.frozenCrossfadeLength)
-    let crossfadeShift = clamped.lowerBound - draft.committedRange.lowerBound
+    // Anchor on the seam's actual edited position (`editedCrossfadeStart`) in the preview vs. the
+    // frozen committed timeline so the crossfade holds its screen position even when the effective
+    // fade shrinks near the slice edge — ΔcL alone would drift there. Reduces to ΔcL at full length; a
+    // right-cut leaves the seam put → shift 0. A missing seam falls back to no shift.
+    let previewSeamStart =
+      preview.seams.first(where: { $0.id == draft.id })?.editedCrossfadeStart
+    let frozenSeamStart =
+      draft.frozenCommittedTimeline.seams.first(where: { $0.id == draft.id })?.editedCrossfadeStart
+    let crossfadeShift = (previewSeamStart ?? 0) - (frozenSeamStart ?? 0)
     editedWaveform.previewCutPoint(
       timeline: preview, visibleStart: draft.frozenVisibleStart + crossfadeShift)
   }
@@ -716,7 +731,7 @@ final class EditSliceModel: ViewModel, Identifiable {
     guard let removal = editedWaveform.timeline.removals.first(where: { $0.id == draft.id }),
       draft.draftedRange != removal.removedRange
     else { return }
-    onMoveCutPoint(draft.id, draft.draftedRange, draft.frozenCrossfadeLength)
+    onMoveCutPoint(draft.id, draft.draftedRange)
   }
 
   /// Aborts an in-flight cut-point drag without committing: drops the draft and restores the committed
@@ -739,9 +754,9 @@ final class EditSliceModel: ViewModel, Identifiable {
   /// dragged right up to the slice edge (where the fade renders as a hard cut) instead of snapping
   /// away. Only the moving edge changes; the other is held.
   private func sliceLocalClampedRemovalRange(
-    id: TimelineRemoval.ID, edge: RemovalBoundary, proposed: Range<Int>, frozenLength: Int
+    id: TimelineRemoval.ID, edge: RemovalBoundary, proposed: Range<Int>
   ) -> Range<Int> {
-    let global = clampCutPointRange(id, proposed, frozenLength)
+    let global = clampCutPointRange(id, proposed)
     guard let slice = slicePlaybackRange else { return global }
     let cL = global.lowerBound
     let cR = global.upperBound
@@ -761,7 +776,12 @@ final class EditSliceModel: ViewModel, Identifiable {
   private func previewCutPointTimeline(
     id: TimelineRemoval.ID, removedRange: Range<Int>, length: Int
   ) -> EditedTimeline {
-    var removals = editedWaveform.timeline.removals
+    // Build from the parent's STORED removals so the preview re-clamps from full stored fades exactly
+    // as the commit does; the lane's own removals carry EFFECTIVE (already-clamped) fades, so a crowded
+    // neighbor would render stuck-short here and jump on release. Fall back to the lane's removals when
+    // the parent is unwired (isolated tests without an injected stored set).
+    let stored = currentStoredRemovals()
+    var removals = stored.isEmpty ? editedWaveform.timeline.removals : stored
     guard let index = removals.firstIndex(where: { $0.id == id }) else {
       return editedWaveform.timeline
     }
