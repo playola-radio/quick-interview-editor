@@ -781,9 +781,13 @@ final class EditorModel: ViewModel {
     for slice in slices {
       items.append(.init(identity: .clip(slice.id), wordIDs: ordered(slice.wordIDs)))
     }
-    for suggestion in documentCutSuggestions.pending {
-      items.append(
-        .init(identity: .suggestion(suggestion.id), wordIDs: ordered(suggestion.wordIDs)))
+    if cutSuggestions.showsSuggestionBands {
+      let clipClaimed = Set(slices.flatMap { draftedWordIDs(forClip: $0.id) ?? $0.wordIDs })
+      for suggestion in documentCutSuggestions.pending {
+        let words = ordered(suggestion.wordIDs)
+        guard words.contains(where: { !clipClaimed.contains($0) }) else { continue }
+        items.append(.init(identity: .suggestion(suggestion.id), wordIDs: words))
+      }
     }
     return applyingResizeDraft(to: items)
   }
@@ -865,11 +869,18 @@ final class EditorModel: ViewModel {
   /// clip stops the transport before the edit, mirroring `crossfadeStretchBegan`.
   func transcriptResizeBegan(_ identity: TranscriptResizeItemIdentity, _ edge: TranscriptResizeEdge)
   {
+    switch identity {
+    case .selection: break
+    case .clip: guard !isExporting, !hasUncommittedSliceEdit else { return }
+    case .suggestion: guard !isExporting else { return }
+    }
     guard let item = transcriptResizeItems.first(where: { $0.identity == identity }) else { return }
     transcriptResizeDraft = TranscriptResizeDraft(
       identity: identity, edge: edge,
       originalWordIDs: item.wordIDs, draftedWordIDs: item.wordIDs,
-      originalSelectionRange: identity == .selection ? audioSelection : nil)
+      originalSelectionRange: identity == .selection ? audioSelection : nil,
+      originalAnchorID: identity == .selection ? transcript.selectionAnchorSnapshot.anchor : nil,
+      originalFocusID: identity == .selection ? transcript.selectionAnchorSnapshot.focus : nil)
     switch identity {
     case .selection: selectionEditingEdge = selectionEdge(for: edge)
     case .clip: stopPlaybackForTimelineEdit()
@@ -942,6 +953,8 @@ final class EditorModel: ViewModel {
       } else if let range = sourceRange(coveringWordIDs: draft.originalWordIDs) {
         selectSourceRange(range, snapPlayhead: false, origin: .transcript)
       }
+      transcript.restoreSelectionAnchor(
+        anchor: draft.originalAnchorID, focus: draft.originalFocusID)
     }
   }
 

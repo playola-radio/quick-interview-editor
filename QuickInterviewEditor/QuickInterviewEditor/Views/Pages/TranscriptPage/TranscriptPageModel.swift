@@ -325,6 +325,19 @@ class TranscriptPageModel: ViewModel {
     selectionFocusID = nil
   }
 
+  /// The current gesture anchor/focus, captured before a mutation that would invalidate them
+  /// (e.g. a resize's `applyEdgeEdit`) so the caller can restore Shift-extend on cancel.
+  var selectionAnchorSnapshot: (anchor: Word.ID?, focus: Word.ID?) {
+    (selectionAnchorID, selectionFocusID)
+  }
+
+  /// Restores a previously captured anchor/focus snapshot, undoing an `invalidateSelectionAnchor()`
+  /// caused by a since-cancelled gesture.
+  func restoreSelectionAnchor(anchor: Word.ID?, focus: Word.ID?) {
+    selectionAnchorID = anchor
+    selectionFocusID = focus
+  }
+
   /// Selects exactly one word (anchor == focus). Used by the waveform→transcript sync
   /// when the user clicks a point in the audio.
   func selectWord(_ id: Word.ID) {

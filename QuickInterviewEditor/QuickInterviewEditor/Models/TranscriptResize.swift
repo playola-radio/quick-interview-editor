@@ -48,6 +48,10 @@ struct TranscriptResizeDraft: Equatable, Sendable {
   /// The exact `audioSelection` at grab time, captured only for `.selection` drafts so cancel
   /// restores it precisely instead of expanding a freeform selection to whole-word bounds.
   var originalSelectionRange: Range<Int>?
+  /// The transcript gesture anchor/focus at grab time, captured only for `.selection` drafts so
+  /// cancel can restore the Shift-extend pivot the drag's `applyEdgeEdit` invalidated.
+  var originalAnchorID: Word.ID?
+  var originalFocusID: Word.ID?
 }
 
 enum TranscriptResizeMath {

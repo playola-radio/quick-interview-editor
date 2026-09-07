@@ -174,4 +174,81 @@ struct TranscriptResizeTests {
     expectNoDifference(model.audioSelection, original)
     expectNoDifference(model.transcriptResizeDraft, nil)
   }
+
+  // MARK: - FIX A: guard `began` against a dirty slice edit or export
+
+  private func selectWords(_ transcript: TranscriptPageModel, _ first: Int, _ last: Int) {
+    transcript.transcriptDragBegan(
+      atUTF16Offset: transcript.document.wordRanges[first].range.location)
+    transcript.transcriptDragged(
+      toUTF16Offset: transcript.document.wordRanges[last].range.location)
+  }
+
+  /// Reuses the exact `EditorFineTuneTests` setup for making `hasUncommittedSliceEdit == true`:
+  /// add a real slice, open its fine-tune session, then nudge a cut point so it's dirty.
+  private func makeDirtySliceEdit(_ model: EditorModel) -> Slice.ID {
+    selectWords(model.transcript, 0, 3)
+    model.addSliceTapped()
+    let id = model.slices[0].id
+    model.sliceSelected(id)
+    model.cutOutNudged(byMs: 10)
+    return id
+  }
+
+  /// Regression for Codex challenge P1#4: a clip resize must not be able to begin while the SAME
+  /// slice has an uncommitted fine-tune draft, or the transcript resize commit and the later
+  /// fine-tune Save would silently clobber each other.
+  @Test func clipResizeBlockedWhileSliceEditUncommitted() {
+    let model = editor()
+    let clipID = makeDirtySliceEdit(model)
+    expectNoDifference(model.hasUncommittedSliceEdit, true)
+    let before = model.slices
+
+    model.transcriptResizeBegan(.clip(clipID), .end)
+    expectNoDifference(model.transcriptResizeDraft, nil)
+
+    model.transcriptResizeDragged(toWord: 4)
+    model.transcriptResizeEnded()
+    expectNoDifference(model.slices, before)
+  }
+
+  /// Regression for Codex challenge P2#5: `began` (not just the commit) must refuse a clip/
+  /// suggestion resize during export, so a resize preview can't live-update over the audio that's
+  /// currently rendering.
+  @Test func clipResizeBlockedDuringExportAtBegan() {
+    let clipID = Fixtures.uuid(1)
+    let model = editor(slices: [clip(clipID, wordIDs: [1, 2])])
+    let before = model.slices
+
+    model.exportPhase = .exporting(current: 0, total: 1)
+    model.transcriptResizeBegan(.clip(clipID), .end)
+    expectNoDifference(model.transcriptResizeDraft, nil)
+
+    model.transcriptResizeDragged(toWord: 4)
+    model.transcriptResizeEnded()
+    expectNoDifference(model.slices, before)
+  }
+
+  // MARK: - FIX D: selection-resize cancel restores the Shift-extend anchor
+
+  /// Regression for Codex challenge P2#8: cancel restores `audioSelection`, but the transcript's
+  /// private gesture anchor (invalidated by the drag's `applyEdgeEdit`) must also be restored, or
+  /// a subsequent Shift-click loses its extend pivot even though the visible selection looks
+  /// unchanged. Mirrors `selectionResizeInvalidatesTranscriptShiftExtendAnchor`, inverted: cancel
+  /// RESTORES the anchor instead of leaving it invalidated.
+  @Test func selectionResizeCancelRestoresShiftExtendAnchor() {
+    let model = editor()
+    model.transcript.selectWords(anchorID: 3, focusID: 4)
+    expectNoDifference(model.selectedWordIDs, [3, 4])
+
+    model.transcriptResizeBegan(.selection, .end)
+    model.transcriptResizeDragged(toWord: 6)
+    model.transcriptResizeCancelled()
+    expectNoDifference(model.selectedWordIDs, [3, 4])
+
+    // A Shift-click on a word beyond the resized-then-cancelled span should extend from the
+    // RESTORED anchor (word 3), not start a fresh single-word selection.
+    model.transcript.wordClicked(6, extending: true)
+    expectNoDifference(model.selectedWordIDs, [3, 4, 5, 6])
+  }
 }

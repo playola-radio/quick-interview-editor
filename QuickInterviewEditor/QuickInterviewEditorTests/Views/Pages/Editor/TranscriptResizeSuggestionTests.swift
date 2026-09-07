@@ -63,6 +63,53 @@ struct TranscriptResizeSuggestionTests {
     expectNoDifference(model.transcriptResizeDraft, nil)
   }
 
+  private func slice(_ id: UUID, wordIDs: [Word.ID]) -> Slice {
+    Slice(
+      id: id, name: "A story", startSample: 0, endSample: 100,
+      wordIDs: wordIDs, snippet: "a story")
+  }
+
+  /// Regression for Codex challenge P1#3: `transcriptResizeItems` must match `clipBands`'
+  /// visibility rules. A suggestion fully covered by a clip draws no band, so it must publish no
+  /// resize handles either — otherwise the invisible suggestion still steals clicks. A
+  /// partially-covered suggestion in the same setup survives with its FULL (unfiltered) wordIDs.
+  @Test func suggestionFullyCoveredByClipHasNoResizeItem() {
+    let fullyCovered = Fixtures.cutSuggestion(
+      id: Fixtures.uuid(1), wordIDs: [1, 2], status: .pending)
+    let partiallyCovered = Fixtures.cutSuggestion(
+      id: Fixtures.uuid(2), wordIDs: [3, 4], status: .pending)
+    let model = editor(suggestions: [fullyCovered, partiallyCovered])
+    model.slices = [
+      slice(Fixtures.uuid(3), wordIDs: [1, 2]),
+      slice(Fixtures.uuid(4), wordIDs: [3]),
+    ]
+
+    let suggestionItems = model.transcriptResizeItems.filter {
+      if case .suggestion = $0.identity { return true }
+      return false
+    }
+    expectNoDifference(suggestionItems.map(\.identity), [.suggestion(Fixtures.uuid(2))])
+    expectNoDifference(suggestionItems.first?.wordIDs, [3, 4])
+  }
+
+  /// Regression for Codex challenge P1#3: toggling the Suggestions panel's show/hide bands off
+  /// must drop every `.suggestion` resize item, mirroring `clipBands`' early return, and restore
+  /// them when toggled back on.
+  @Test func suggestionResizeItemsHiddenWhenBandsToggledOff() {
+    let suggestionID = Fixtures.uuid(1)
+    let suggestion = Fixtures.cutSuggestion(id: suggestionID, wordIDs: [1, 2], status: .pending)
+    let model = editor(suggestions: [suggestion])
+    expectNoDifference(
+      model.transcriptResizeItems.map(\.identity), [.suggestion(suggestionID)])
+
+    model.cutSuggestions.showsSuggestionBands = false
+    expectNoDifference(model.transcriptResizeItems, [])
+
+    model.cutSuggestions.showsSuggestionBands = true
+    expectNoDifference(
+      model.transcriptResizeItems.map(\.identity), [.suggestion(suggestionID)])
+  }
+
   @Test func suggestionResizeBackToOriginalRecordsNoUndo() {
     let suggestionID = Fixtures.uuid(1)
     let suggestion = Fixtures.cutSuggestion(

@@ -50,6 +50,7 @@ final class TranscriptResizeHandleOverlayView: NSView {
   }
 
   override func mouseDown(with event: NSEvent) {
+    endActiveTextEditing()
     let point = convert(event.locationInWindow, from: nil)
     activeHandle = coordinator?.resizeHandle(at: point)
     downPoint = point
