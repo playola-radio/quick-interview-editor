@@ -241,7 +241,11 @@ struct SuggestionRunTests {
     var accepted = candidate(
       id: Fixtures.uuid(3), startSample: 300,
       values: ["song-title": "Song", "artist-name": "Artist"])
+    var rejected = candidate(
+      id: Fixtures.uuid(4), startSample: 400,
+      values: ["song-title": "Song", "artist-name": "Artist"])
     accepted.status = .accepted
+    rejected.status = .rejected
     let key = suggestionSequenceKey(
       type: SuggestionDefaults.types[0], values: ["song-title": "Song", "artist-name": "Artist"],
       candidateID: selected.id)
@@ -251,20 +255,24 @@ struct SuggestionRunTests {
       candidateID: unselected.id, key: key, number: 2, canonicalValues: [:])
     accepted.naming?.reservation = .init(
       candidateID: accepted.id, key: key, number: 3, canonicalValues: [:])
+    rejected.naming?.reservation = .init(
+      candidateID: rejected.id, key: key, number: 4, canonicalValues: [:])
     let beforeAccepted = accepted
+    let beforeRejected = rejected
     let result = try numberSuggestions(
-      [selected, unselected, accepted], snapshot: snapshot,
+      [selected, unselected, accepted, rejected], snapshot: snapshot,
       starts: .init(groups: [.init(key: key, start: .init(number: 2, isExplicit: true))]),
       issued: [],
       retained: [
         selected.naming!.reservation!, unselected.naming!.reservation!,
-        accepted.naming!.reservation!,
+        accepted.naming!.reservation!, rejected.naming!.reservation!,
       ],
-      mode: .pendingRenumber(selectedCandidateIDs: [selected.id, accepted.id]))
+      mode: .pendingRenumber(selectedCandidateIDs: [selected.id, accepted.id, rejected.id]))
 
-    expectNoDifference(result.candidates[0].naming?.reservation?.number, 4)
+    expectNoDifference(result.candidates[0].naming?.reservation?.number, 5)
     expectNoDifference(result.candidates[1], unselected)
     expectNoDifference(result.candidates[2], beforeAccepted)
+    expectNoDifference(result.candidates[3], beforeRejected)
   }
 
   @Test func sameOwnerIssuedReservationRetainsIdentityAcrossCanonicalSpellingChange() throws {
@@ -286,6 +294,23 @@ struct SuggestionRunTests {
 
     expectNoDifference(result.candidates[0].naming?.reservation?.identity, issued.identity)
     expectNoDifference(result.candidates[0].title, "Issued Song 4, Issued Artist")
+  }
+
+  @Test func foreignReservationOwnerIsRejectedBeforeNumbering() throws {
+    let snapshot = introSnapshot()
+    var candidate = candidate(
+      id: Fixtures.uuid(1), startSample: 100,
+      values: ["song-title": "Song", "artist-name": "Artist"])
+    let key = suggestionSequenceKey(
+      type: SuggestionDefaults.types[0],
+      values: ["song-title": "Song", "artist-name": "Artist"], candidateID: candidate.id)
+    candidate.naming?.reservation = .init(
+      candidateID: Fixtures.uuid(2), key: key, number: 4, canonicalValues: [:])
+
+    #expect(throws: SuggestionBatchNumberingError.invalidNaming(candidateID: candidate.id)) {
+      try numberSuggestions(
+        [candidate], snapshot: snapshot, starts: .init(), issued: [], retained: [])
+    }
   }
 
   @Test func changedGroupCorrectionAllocatesAfterDestinationOccupancy() throws {

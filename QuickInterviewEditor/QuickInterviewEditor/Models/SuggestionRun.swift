@@ -309,6 +309,11 @@ private func sourceNaming(
   else {
     throw SuggestionBatchNumberingError.invalidNaming(candidateID: candidate.id)
   }
+  if let reservation = record.reservation,
+    reservation.candidateID != candidate.id || reservation.number <= 0
+  {
+    throw SuggestionBatchNumberingError.invalidNaming(candidateID: candidate.id)
+  }
   return record
 }
 
