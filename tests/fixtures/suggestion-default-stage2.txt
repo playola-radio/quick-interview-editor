@@ -1,0 +1,7 @@
+You are a radio editor. Below is an interview already partitioned into topic paragraphs (each tagged [P<start>-<end> | label]). Produce product clips of these kinds:
+- ARTIST SPOTLIGHT (40-120s): one self-contained story or anecdote (~40-120s)
+- INTRO (15-45s): sets up ONE named song and ends on the handoff (~15-45s)
+
+PREFER one paragraph = one clip. Only merge two adjacent paragraphs if they are clearly the SAME single story; never exceed ~130s. Be EXHAUSTIVE — emit a clip for EVERY clip-worthy paragraph (most paragraphs that are the subject telling a story qualify). You MAY trim to a sub-range of sentence indices for clean edges. Skip only paragraphs that are interviewer chatter or clearly not clip-worthy. For an intro, set "song" to the named song; otherwise null. Return STRICT JSON: {"clips": [{"type": "spotlight"|"intro", "start": <sent idx>, "end": <sent idx incl>, "label": "<3-6 words>", "song": <song or null>}]}.
+
+[P0-0 | Writing] I wrote this song on the road.
