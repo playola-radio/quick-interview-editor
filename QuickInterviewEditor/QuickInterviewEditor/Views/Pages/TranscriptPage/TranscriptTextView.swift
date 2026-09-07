@@ -57,11 +57,17 @@ struct TranscriptTextView: NSViewRepresentable {
 
     scroll.documentView = textView
 
+    let overlay = TranscriptResizeHandleOverlayView(frame: textView.bounds)
+    overlay.coordinator = context.coordinator
+    overlay.autoresizingMask = [.width, .height]
+    textView.addSubview(overlay)
+
     context.coordinator.model = model
     context.coordinator.textView = textView
     context.coordinator.scrollView = scroll
     context.coordinator.paragraphSpacing = paragraphSpacing
     context.coordinator.lineSpacing = lineSpacing
+    context.coordinator.resizeOverlay = overlay
     context.coordinator.observeScroll()
     context.coordinator.rebuildText(
       text: text, fontSize: fontSize, selected: selected, clipContainers: clipContainers,
@@ -84,6 +90,7 @@ struct TranscriptTextView: NSViewRepresentable {
     var model: TranscriptPageModel
     weak var textView: NSTextView?
     weak var scrollView: NSScrollView?
+    weak var resizeOverlay: TranscriptResizeHandleOverlayView?
     var paragraphSpacing: Double = 0
     var lineSpacing: Double = 0
     private var lastText = ""

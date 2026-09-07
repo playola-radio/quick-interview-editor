@@ -175,6 +175,7 @@
 		AFD996551EC4474E1ECAA39A /* FineTuneModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42FDC5127D4F87D92B9DD311 /* FineTuneModel.swift */; };
 		B0E5E0AA4AE684340CD50A13 /* ProjectModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4636414F28E9730CF50D91C /* ProjectModel.swift */; };
 		B2C1040F605B0078A02105F7 /* AppDirectoriesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CADC14E15DC7974242A8D9E9 /* AppDirectoriesTests.swift */; };
+		B35D092B5D9C954C2D7C1EB0 /* TranscriptResizeHandleOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2853CD1FD14CABB681DEEE7 /* TranscriptResizeHandleOverlayView.swift */; };
 		B4537897B1117B5C1CB655B0 /* ViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48134431D51ACB38523BCA95 /* ViewModel.swift */; };
 		B460D374BF10B225D98287A6 /* CrossfadeRendererTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF60A5BFC09E61265B973FB6 /* CrossfadeRendererTests.swift */; };
 		B46FCE5C23FD3771E078263F /* CrossfadeStretchDraft.swift in Sources */ = {isa = PBXBuildFile; fileRef = C64A9EA59AAAC40D0CDCC3BA /* CrossfadeStretchDraft.swift */; };
@@ -484,6 +485,7 @@
 		DE55411E774B85364D5A8B85 /* CutSuggestOptions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CutSuggestOptions.swift; sourceTree = "<group>"; };
 		E0D25450C4B3308994C118AB /* AppLaunchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLaunchTests.swift; sourceTree = "<group>"; };
 		E1A20F88BFEAEED2ED4D8361 /* UndoStack.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UndoStack.swift; sourceTree = "<group>"; };
+		E2853CD1FD14CABB681DEEE7 /* TranscriptResizeHandleOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptResizeHandleOverlayView.swift; sourceTree = "<group>"; };
 		E34F3BE83ABC5A5F9AC915D6 /* LiveCutSuggester.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveCutSuggester.swift; sourceTree = "<group>"; };
 		E397CCD0BEC205BF7ABEDE4B /* TranscriptRevealTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptRevealTests.swift; sourceTree = "<group>"; };
 		E3AEBF05FDB35420234953B2 /* EngineResolution.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EngineResolution.swift; sourceTree = "<group>"; };
@@ -636,6 +638,7 @@
 				C73252596A3C2C2851E71464 /* ClipContainerLayoutManager.swift */,
 				90359985FEB8A5C71B96F4D5 /* TranscriptPageModel.swift */,
 				6D95906BEAED8EC0770F5195 /* TranscriptPageView.swift */,
+				E2853CD1FD14CABB681DEEE7 /* TranscriptResizeHandleOverlayView.swift */,
 				F8504466C93C5CA86828A58D /* TranscriptTextView.swift */,
 			);
 			path = TranscriptPage;
@@ -1327,6 +1330,7 @@
 				D35FC3A9ADC552BC20C05BA9 /* TranscriptPageView.swift in Sources */,
 				5F383649D1D90D2FD9D1D17A /* TranscriptParagraph.swift in Sources */,
 				6674BCE805CA8A0F1FE3EF9D /* TranscriptResize.swift in Sources */,
+				B35D092B5D9C954C2D7C1EB0 /* TranscriptResizeHandleOverlayView.swift in Sources */,
 				8519B7B8119D7D809D3411AC /* TranscriptTextView.swift in Sources */,
 				78A97462C041CC863D58AC91 /* TranscriptUnit.swift in Sources */,
 				BC8A348C4600E0EDA94D5CC2 /* TranscriptionCacheKey.swift in Sources */,
