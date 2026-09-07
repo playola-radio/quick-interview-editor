@@ -516,7 +516,7 @@ def test_explicit_missing_is_valid_but_absent_result_is_not():
 }
 ```
 
-The actual fixture additionally contains the complete `configuration` object generated in Task 2. `mode` is `fresh`, `automatic`, or `resume`. Credentials remain only in child environment. Pass the app-owned journal directory as `--journal-dir`, never a model-provided path. Its owner manifest is Swift-owned; Python writes only its run subdirectory.
+The actual fixture additionally contains the complete `configuration` object generated in Task 2. `mode` is `fresh`, `automatic`, or `resume`. Credentials remain only in child environment. Pass the app-owned **run directory** returned by `SuggestionRecoveryClient.prepare` as `--journal-dir`, never a model-provided path. This is already `SuggestionRecovery/<owner UUID>/<run UUID>/`; Python must not append a second run-ID directory. The owner manifest outside that run directory is Swift-owned; Python writes only inside the supplied run directory.
 
 - [ ] Write an atomic journal regression against this public API:
 
