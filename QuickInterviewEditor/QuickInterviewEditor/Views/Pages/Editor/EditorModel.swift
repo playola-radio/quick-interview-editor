@@ -405,19 +405,16 @@ final class EditorModel: ViewModel {
       self.crossfadeStretchDraft = nil
     }
     let newTimeline = editedTimeline
-    // Same guard for a live cut-point draft: drop it when its baseline no longer matches the document —
-    // its removal is gone (restore/undo/redo), its committed range moved (an undo/redo or nudge of the
-    // very cut being dragged), OR its seam's EFFECTIVE fade length changed underneath it (a neighbor edit
-    // reflowed the clamp). Its drafted range was measured against that baseline, so releasing would write
-    // it over the newer state. (Our own commit clears the draft before mutating, so this never fires on
-    // the normal drag reflow.) Read the effective length from the freshly rebuilt `newTimeline`, and undo
-    // the preview's viewport compensation first so the rebuild below re-clamps from the pre-drag scroll.
-    if let crossfadeCutPointDraft,
-      timelineRemovals[id: crossfadeCutPointDraft.id]?.removedRange
-        != crossfadeCutPointDraft.committedRange
-        || newTimeline.seams.first(where: { $0.id == crossfadeCutPointDraft.id })?.crossfadeLength
-          != crossfadeCutPointDraft.frozenCrossfadeLength
-    {
+    // Same guard for a live cut-point draft: drop it when the committed timeline no longer matches the
+    // one frozen at drag begin. The drafted range was clamped against that exact layout, so ANY change
+    // to it — the dragged removal's own range (undo/redo/nudge of this cut), its effective fade length,
+    // OR a NEIGHBOR removal reflowing this seam's clamp bounds while leaving its own range and length
+    // unchanged — makes the draft stale; releasing would write it over the newer state. Comparing the
+    // whole `newTimeline` catches the neighbor-only case that a per-seam range/length check misses.
+    // (Our own commit clears the draft before mutating, so this never fires on the normal drag reflow.)
+    // Undo the preview's viewport compensation first so the rebuild below re-clamps from the pre-drag
+    // scroll position.
+    if let crossfadeCutPointDraft, newTimeline != crossfadeCutPointDraft.frozenCommittedTimeline {
       editedWaveform.visibleStartSample = crossfadeCutPointDraft.frozenVisibleStart
       self.crossfadeCutPointDraft = nil
     }
@@ -2273,7 +2270,8 @@ final class EditorModel: ViewModel {
       samplesPerPixel: editedWaveform.samplesPerPixel)
     crossfadeCutPointDraft = CrossfadeCutPointDraft(
       id: id, edge: edge, committedRange: removal.removedRange, draftedRange: removal.removedRange,
-      frozenCrossfadeLength: seam.crossfadeLength, dragStartEditedSample: dragStartEdited,
+      frozenCrossfadeLength: seam.crossfadeLength, frozenCommittedTimeline: editedTimeline,
+      dragStartEditedSample: dragStartEdited,
       frozenVisibleStart: editedWaveform.visibleStartSample,
       frozenSamplesPerPixel: editedWaveform.samplesPerPixel)
   }

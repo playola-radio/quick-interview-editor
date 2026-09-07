@@ -51,6 +51,7 @@ struct EditorCrossfadeCutPointTests {
     let original = CrossfadeCutPointDraft(
       id: Fixtures.uuid(1), edge: .lower, committedRange: 48_000..<96_000,
       draftedRange: 46_000..<96_000, frozenCrossfadeLength: 600,
+      frozenCommittedTimeline: EditedTimeline(sourceDurationSamples: 1_000_000, removals: []),
       dragStartEditedSample: 20_000, frozenVisibleStart: 0, frozenSamplesPerPixel: 200)
     var copy = original
     copy.draftedRange = 46_000..<96_000
@@ -328,6 +329,39 @@ struct EditorCrossfadeCutPointTests {
       // by the stale drafted 46_000..<96_000.
       model.crossfadeCutPointDragEnded()
       expectNoDifference(model.timelineRemovals[id: id]?.removedRange, 48_000..<96_441)
+    }
+  }
+
+  @Test func midDragNeighborMutationInvalidatesDraftAndBlocksStaleCommit() {
+    withStorage {
+      let model = editor(fingerprint: "fp-cut-neighbor-stale")
+      primeGeometry(model)
+      let id = addRemoval(model, id: Fixtures.uuid(1), range: 48_000..<96_000, length: 600)
+      model.selectSeam(id)
+
+      // Begin dragging the LEFT cut inward; the draft's committed baseline is 48_000..<96_000.
+      model.crossfadeCutPointDragBegan(id: id, edge: .lower, atX: 100)
+      model.crossfadeCutPointDragged(toX: 110)  // draft → 46_000..<96_000
+      expectNoDifference(model.crossfadeCutPointDraft?.draftedRange, 46_000..<96_000)
+
+      // Mid-drag a DISTANT neighbor removal appears (an undo/redo of an unrelated cut is the same
+      // class of document mutation). It leaves THIS seam's own range AND effective fade length
+      // untouched — the earlier per-seam guard (own range OR own effective length changed) would keep
+      // the stale draft alive — but the drafted range was clamped against the pre-mutation layout, so
+      // the whole-timeline baseline guard must still drop it.
+      addRemoval(model, id: Fixtures.uuid(2), range: 500_000..<600_000, length: 400)
+      // Own range unchanged.
+      expectNoDifference(model.timelineRemovals[id: id]?.removedRange, 48_000..<96_000)
+      // Own effective fade length unchanged — only a neighbor moved.
+      expectNoDifference(
+        model.editedWaveform.timeline.seams.first(where: { $0.id == id })?.crossfadeLength, 600)
+      // Draft invalidated by the neighbor change.
+      expectNoDifference(model.crossfadeCutPointDraft, nil)
+
+      // Mouse-up commits nothing: the drag is abandoned rather than committing the stale
+      // 46_000..<96_000 against the reflowed layout.
+      model.crossfadeCutPointDragEnded()
+      expectNoDifference(model.timelineRemovals[id: id]?.removedRange, 48_000..<96_000)
     }
   }
 
