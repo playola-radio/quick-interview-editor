@@ -1514,4 +1514,335 @@ struct EditSliceTests {
 
     #expect(model.isPlaying == true)
   }
+
+  // MARK: - Crossfade cut-point drag (⌥-drag the outside waveform) — mirrors EditorModel, slice-scoped
+
+  /// Maps a lane view-x to its edited sample against a drag's FROZEN viewport, exactly as
+  /// ``WaveformViewport/xToSample`` does — so a test can predict the drafted range without baking in
+  /// the pinned lane's re-fit `samplesPerPixel` (a removal shrinks the slice's edited footprint, so it
+  /// is NOT the identity-timeline 10).
+  private func editedSample(_ posX: CGFloat, in draft: CrossfadeCutPointDraft) -> Int {
+    draft.frozenVisibleStart + Int((Double(posX) * draft.frozenSamplesPerPixel).rounded(.down))
+  }
+
+  /// A full ⌥-drag of the LEFT cut moves `cL` and commits the moved range plus the FROZEN effective
+  /// fade length through the parent's `onMoveCutPoint` funnel. The moved bound is `cL = committed −
+  /// delta` in edited samples, so we derive the expectation from the drag's frozen viewport rather than
+  /// a hardcoded spp; the drag stays small so no clamp binds.
+  @Test func cutPointDragMovesTheLeftCutAndCommitsTheMovedRangeAndFrozenLength() {
+    let model = laneModel()  // slice 10_000..<20_000
+    let id = UUID()
+    let removal = TimelineRemoval(
+      id: id, removedRange: 13_000..<15_000, crossfade: Crossfade(lengthSamples: 600))
+    model.currentCrossfadeLength = { $0 == id ? 600 : nil }
+    model.syncTimeline(EditedTimeline(sourceDurationSamples: 100_000, removals: [removal]))
+    var ranges: [Range<Int>] = []
+    var lengths: [Int] = []
+    model.onMoveCutPoint = { _, range, length in
+      ranges.append(range)
+      lengths.append(length)
+    }
+
+    model.crossfadeCutPointDragBegan(id: id, edge: .lower, atX: 300)
+    guard let draft = model.crossfadeCutPointDraft else {
+      Issue.record("expected a cut-point draft after begin")
+      return
+    }
+    let delta = editedSample(340, in: draft) - draft.dragStartEditedSample
+    let expected = (13_000 - delta)..<15_000
+    #expect(delta != 0)  // the drag actually moves the cut
+    model.crossfadeCutPointDragged(toX: 340)
+    expectNoDifference(model.crossfadeCutPointDraft?.draftedRange, expected)
+    model.crossfadeCutPointDragEnded()
+
+    expectNoDifference(ranges, [expected])
+    expectNoDifference(lengths, [600])
+    expectNoDifference(model.crossfadeCutPointDraft, nil)
+  }
+
+  /// Dragging the RIGHT cut moves `cR` (`committed − delta`) and leaves `cL` untouched. Derived from
+  /// the drag's frozen viewport; the drag stays small so no clamp binds.
+  @Test func cutPointDragMovesTheRightCut() {
+    let model = laneModel()
+    let id = UUID()
+    let removal = TimelineRemoval(
+      id: id, removedRange: 13_000..<15_000, crossfade: Crossfade(lengthSamples: 600))
+    model.currentCrossfadeLength = { $0 == id ? 600 : nil }
+    model.syncTimeline(EditedTimeline(sourceDurationSamples: 100_000, removals: [removal]))
+    var ranges: [Range<Int>] = []
+    model.onMoveCutPoint = { _, range, _ in ranges.append(range) }
+
+    model.crossfadeCutPointDragBegan(id: id, edge: .upper, atX: 300)
+    guard let draft = model.crossfadeCutPointDraft else {
+      Issue.record("expected a cut-point draft after begin")
+      return
+    }
+    let delta = editedSample(340, in: draft) - draft.dragStartEditedSample
+    let expected = 13_000..<(15_000 - delta)
+    #expect(delta != 0)
+    model.crossfadeCutPointDragged(toX: 340)
+    expectNoDifference(model.crossfadeCutPointDraft?.draftedRange, expected)
+    model.crossfadeCutPointDragEnded()
+
+    expectNoDifference(ranges, [expected])
+  }
+
+  /// A drag that nets no range change commits nothing (no phantom undo entry).
+  @Test func cutPointDragThatNetsNoChangeCommitsNothing() {
+    let model = laneModel()
+    let id = UUID()
+    let removal = TimelineRemoval(
+      id: id, removedRange: 13_000..<15_000, crossfade: Crossfade(lengthSamples: 600))
+    model.currentCrossfadeLength = { $0 == id ? 600 : nil }
+    model.syncTimeline(EditedTimeline(sourceDurationSamples: 100_000, removals: [removal]))
+    var committed = 0
+    model.onMoveCutPoint = { _, _, _ in committed += 1 }
+
+    model.crossfadeCutPointDragBegan(id: id, edge: .lower, atX: 300)
+    model.crossfadeCutPointDragged(toX: 300)  // back on the press position: no delta
+    model.crossfadeCutPointDragEnded()
+
+    #expect(committed == 0)
+    expectNoDifference(model.crossfadeCutPointDraft, nil)
+  }
+
+  /// The moved cut clamps to the slice's own edge, not a fade-room-reserved floor: a large leftward
+  /// drag of `cL` (proposing well below the slice start) lands at `slice.lower` (10_000). The fade
+  /// renders shorter here instead of the cut snapping away, and the stored length is untouched.
+  @Test func cutPointDragClampsToTheSliceWindow() {
+    let model = laneModel()  // slice 10_000..<20_000
+    let id = UUID()
+    let removal = TimelineRemoval(
+      id: id, removedRange: 13_000..<15_000, crossfade: Crossfade(lengthSamples: 600))
+    model.currentCrossfadeLength = { $0 == id ? 600 : nil }
+    model.syncTimeline(EditedTimeline(sourceDurationSamples: 100_000, removals: [removal]))
+
+    model.crossfadeCutPointDragBegan(id: id, edge: .lower, atX: 300)  // cL 13_000
+    model.crossfadeCutPointDragged(toX: 5_000)  // push cL far below the slice start
+
+    expectNoDifference(model.crossfadeCutPointDraft?.draftedRange, 10_000..<15_000)
+  }
+
+  /// The slice narrows the parent's global clamp: a removal OUTSIDE the slice widens the global handle,
+  /// but the sheet still floors `cL` at the slice edge. The parent clamp (wired to mimic the real
+  /// neighbor-aware clamp) would allow `cL` down to `prevUpper + prevF + L = 9_600`, but the slice
+  /// floor (10_000) is tighter and wins.
+  @Test func cutPointDragIntersectsTheParentClampWithTheSliceWindow() {
+    let model = laneModel()  // slice 10_000..<20_000
+    let id = UUID()
+    let outside = TimelineRemoval(
+      id: UUID(), removedRange: 2_000..<9_000, crossfade: Crossfade(lengthSamples: 0))
+    let interior = TimelineRemoval(
+      id: id, removedRange: 13_000..<15_000, crossfade: Crossfade(lengthSamples: 600))
+    model.currentCrossfadeLength = { $0 == id ? 600 : nil }
+    // Mimic the parent's lower-edge clamp: cL floored at prevUpper(9_000)+prevF(0)+L(600)=9_600.
+    model.clampCutPointRange = { _, proposed, length in
+      max(proposed.lowerBound, 9_000 + length)..<proposed.upperBound
+    }
+    model.syncTimeline(
+      EditedTimeline(sourceDurationSamples: 100_000, removals: [outside, interior]))
+
+    model.crossfadeCutPointDragBegan(id: id, edge: .lower, atX: 300)  // cL 13_000
+    model.crossfadeCutPointDragged(toX: 5_000)  // parent floor 9_600, slice floor 10_000 wins
+
+    expectNoDifference(model.crossfadeCutPointDraft?.draftedRange, 10_000..<15_000)
+  }
+
+  /// Cancel drops the draft, commits nothing, and restores the frozen viewport the live preview moved.
+  @Test func cutPointDragCancelledCommitsNothingAndRestoresTheViewport() {
+    let model = laneModel()
+    let id = UUID()
+    let removal = TimelineRemoval(
+      id: id, removedRange: 13_000..<15_000, crossfade: Crossfade(lengthSamples: 600))
+    model.currentCrossfadeLength = { $0 == id ? 600 : nil }
+    model.syncTimeline(EditedTimeline(sourceDurationSamples: 100_000, removals: [removal]))
+    var committed = 0
+    model.onMoveCutPoint = { _, _, _ in committed += 1 }
+    let startBeforeDrag = model.editedWaveform.visibleStartSample
+    let sppBeforeDrag = model.editedWaveform.samplesPerPixel
+
+    model.crossfadeCutPointDragBegan(id: id, edge: .lower, atX: 300)
+    model.crossfadeCutPointDragged(toX: 5_000)  // reflow the preview far off its start
+    model.crossfadeCutPointDragCancelled()
+
+    #expect(committed == 0)
+    expectNoDifference(model.crossfadeCutPointDraft, nil)
+    expectNoDifference(model.editedWaveform.visibleStartSample, startBeforeDrag)
+    expectNoDifference(model.editedWaveform.samplesPerPixel, sppBeforeDrag)
+  }
+
+  /// A boundary seam (a removal crossing/touching a slice edge) plays as a hard cut here, so a
+  /// cut-point drag on it is refused at begin — it would author a fade this slice never plays. Mirrors
+  /// `crossfadeStretchBeganIsANoOpForABoundarySeam`.
+  @Test func cutPointDragBeganIsANoOpForABoundarySeam() {
+    let model = laneModel()  // slice 10_000..<20_000
+    let id = UUID()
+    let removal = TimelineRemoval(
+      id: id, removedRange: 8_000..<12_000, crossfade: Crossfade(lengthSamples: 600))
+    model.currentCrossfadeLength = { $0 == id ? 600 : nil }
+    model.syncTimeline(EditedTimeline(sourceDurationSamples: 100_000, removals: [removal]))
+
+    model.crossfadeCutPointDragBegan(id: id, edge: .upper, atX: 300)
+
+    expectNoDifference(model.crossfadeCutPointDraft, nil)
+  }
+
+  /// Refused at begin when the parent won't accept a crossfade edit (mid-export): the lane must not
+  /// preview a move the release would discard. Mirrors the stretch guard.
+  @Test func cutPointDragBeganIsANoOpWhenTheParentRefusesCrossfadeEdits() {
+    let model = laneModel()
+    let id = UUID()
+    let removal = TimelineRemoval(
+      id: id, removedRange: 13_000..<15_000, crossfade: Crossfade(lengthSamples: 600))
+    model.currentCrossfadeLength = { $0 == id ? 600 : nil }
+    model.canEditCrossfade = { false }
+    model.syncTimeline(EditedTimeline(sourceDurationSamples: 100_000, removals: [removal]))
+
+    model.crossfadeCutPointDragBegan(id: id, edge: .lower, atX: 300)
+
+    expectNoDifference(model.crossfadeCutPointDraft, nil)
+  }
+
+  /// A parent commit underneath a live drag (this seam or a neighbor, an undo/redo) makes the drafted
+  /// range stale — it was clamped against the frozen layout — so `syncTimeline` drops it. Mirrors
+  /// `syncTimelineDropsAStaleStretchDraft`.
+  @Test func syncTimelineDropsAStaleCutPointDraft() {
+    let model = laneModel()
+    let id = UUID()
+    let removal = TimelineRemoval(
+      id: id, removedRange: 13_000..<15_000, crossfade: Crossfade(lengthSamples: 600))
+    model.currentCrossfadeLength = { $0 == id ? 600 : nil }
+    model.syncTimeline(EditedTimeline(sourceDurationSamples: 100_000, removals: [removal]))
+    model.crossfadeCutPointDragBegan(id: id, edge: .lower, atX: 300)
+    model.crossfadeCutPointDragged(toX: 200)
+    #expect(model.crossfadeCutPointDraft != nil)
+
+    // A neighbor removal appears underneath the drag: the whole committed timeline no longer matches.
+    let neighbour = TimelineRemoval(
+      id: UUID(), removedRange: 16_000..<17_000, crossfade: Crossfade(lengthSamples: 0))
+    model.syncTimeline(
+      EditedTimeline(sourceDurationSamples: 100_000, removals: [removal, neighbour]))
+
+    expectNoDifference(model.crossfadeCutPointDraft, nil)
+  }
+
+  /// A ⌥-click (no drag) on the outside audio flanking a bowtie selects the seam — the sheet's only
+  /// click-to-select path (the "can't select the crossfade in the clip editor" fix). Also clears any
+  /// live marquee, so the two selections never coexist.
+  @Test func cutPointSeamSelectedSelectsTheSeamAndClearsTheMarquee() {
+    let model = laneModel()
+    let id = UUID()
+    let removal = TimelineRemoval(
+      id: id, removedRange: 13_000..<15_000, crossfade: Crossfade(lengthSamples: 600))
+    model.syncTimeline(EditedTimeline(sourceDurationSamples: 100_000, removals: [removal]))
+    model.waveformAreaSelectBegan(atX: 100, extending: false)
+    model.waveformAreaSelectChanged(toX: 200)
+    #expect(model.waveformSelection != nil)
+
+    model.cutPointSeamSelected(id)
+
+    expectNoDifference(model.selectedSeamID, id)
+    expectNoDifference(model.waveformSelection, nil)
+  }
+
+  /// A cut-point drag never rewrites the STORED fade: it commits the document's stored length, not the
+  /// clamped effective length — even when global geometry already caps the fade below what's stored. A
+  /// neighbor removal ending at 11_000 leaves only 1_000 kept samples before cL=12_000, so the interior
+  /// seam stores 2_500 but renders an effective 1_000. Moving its far (upper) cut still commits 2_500
+  /// (non-destructive: pull a cut back out and the full fade returns), never the effective 1_000. This
+  /// is the value the sheet must freeze — `currentCrossfadeLength`, not `seam.crossfadeLength`.
+  @Test func cutPointDragPreservesTheStoredFadeLengthOnCommit() {
+    let model = laneModel()  // slice 10_000..<20_000
+    let id = UUID()
+    let outside = TimelineRemoval(
+      id: UUID(), removedRange: 2_000..<11_000, crossfade: Crossfade(lengthSamples: 0))
+    let interior = TimelineRemoval(
+      id: id, removedRange: 12_000..<15_000, crossfade: Crossfade(lengthSamples: 2_500))
+    model.currentCrossfadeLength = { $0 == id ? 2_500 : nil }
+    var committedLengths: [Int] = []
+    model.onMoveCutPoint = { _, _, length in committedLengths.append(length) }
+    model.syncTimeline(
+      EditedTimeline(sourceDurationSamples: 100_000, removals: [outside, interior]))
+    let effective = model.editedWaveform.timeline.seams.first { $0.id == id }?.crossfadeLength
+    expectNoDifference(effective, 1_000)  // global geometry caps the fade below the stored 2_500
+
+    model.crossfadeCutPointDragBegan(id: id, edge: .upper, atX: 300)
+    model.crossfadeCutPointDragged(toX: 320)  // nudge the far cut inward — a real change
+    model.crossfadeCutPointDragEnded()
+
+    expectNoDifference(committedLengths, [2_500])  // stored length preserved, not shrunk to 1_000
+  }
+
+  /// No fade-room reservation at the slice edge: dragging `cL` far left on an OVERLONG stored fade
+  /// (2_500, more than the slice can play) lands the cut at the slice edge (10_000), not snapped inward
+  /// to `sliceStart + storedLength` (12_500). The fade simply renders shorter there — no jump.
+  @Test func cutPointDragCanReachTheSliceEdgeOnAnOverlongFade() {
+    let model = laneModel()  // slice 10_000..<20_000
+    let id = UUID()
+    let outside = TimelineRemoval(
+      id: UUID(), removedRange: 2_000..<9_000, crossfade: Crossfade(lengthSamples: 0))
+    let interior = TimelineRemoval(
+      id: id, removedRange: 12_000..<15_000, crossfade: Crossfade(lengthSamples: 2_500))
+    model.currentCrossfadeLength = { $0 == id ? 2_500 : nil }
+    model.syncTimeline(
+      EditedTimeline(sourceDurationSamples: 100_000, removals: [outside, interior]))
+    model.crossfadeCutPointDragBegan(id: id, edge: .lower, atX: 300)
+
+    model.crossfadeCutPointDragged(toX: 5_000)  // push cL far below the slice start
+
+    expectNoDifference(model.crossfadeCutPointDraft?.draftedRange, 10_000..<15_000)
+  }
+
+  /// A plain body click landing on a bowtie selects that crossfade — the "clicking within the X on the
+  /// crossfade does nothing" fix. Before this, the sheet's body click only seeked; the main editor
+  /// selects a crossfade on click, so the clip editor must too.
+  @Test func waveformBodyClickedOnABowtieSelectsTheSeam() async {
+    let model = laneModel()
+    let id = UUID()
+    let removal = TimelineRemoval(
+      id: id, removedRange: 13_000..<15_000, crossfade: Crossfade(lengthSamples: 600))
+    model.syncTimeline(EditedTimeline(sourceDurationSamples: 100_000, removals: [removal]))
+    guard let span = model.seamOverlays.first?.span else {
+      Issue.record("expected a drawn bowtie for the removal")
+      return
+    }
+    let bowtieCenter = span.positionX + span.width / 2
+
+    await model.waveformBodyClicked(atX: bowtieCenter, extending: false)
+
+    expectNoDifference(model.selectedSeamID, id)
+  }
+
+  /// A plain body click that misses every bowtie seeks the playhead and selects nothing — the seam
+  /// test must not swallow ordinary clicks.
+  @Test func waveformBodyClickedOffAnyBowtieSeeksAndSelectsNothing() async {
+    let model = laneModel()
+    let id = UUID()
+    let removal = TimelineRemoval(
+      id: id, removedRange: 13_000..<15_000, crossfade: Crossfade(lengthSamples: 600))
+    model.syncTimeline(EditedTimeline(sourceDurationSamples: 100_000, removals: [removal]))
+
+    await model.waveformBodyClicked(atX: 0, extending: false)
+
+    expectNoDifference(model.selectedSeamID, nil)
+  }
+
+  /// Shift is a selection-extend gesture, so a shift-click on a bowtie skips the seam test and seeks —
+  /// it never hijacks the click into a seam selection.
+  @Test func waveformBodyClickedWithShiftSkipsTheSeamTest() async {
+    let model = laneModel()
+    let id = UUID()
+    let removal = TimelineRemoval(
+      id: id, removedRange: 13_000..<15_000, crossfade: Crossfade(lengthSamples: 600))
+    model.syncTimeline(EditedTimeline(sourceDurationSamples: 100_000, removals: [removal]))
+    guard let span = model.seamOverlays.first?.span else {
+      Issue.record("expected a drawn bowtie for the removal")
+      return
+    }
+    let bowtieCenter = span.positionX + span.width / 2
+
+    await model.waveformBodyClicked(atX: bowtieCenter, extending: true)
+
+    expectNoDifference(model.selectedSeamID, nil)
+  }
 }

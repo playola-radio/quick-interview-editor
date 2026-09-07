@@ -249,6 +249,49 @@ struct EditorCrossfadeCutPointTests {
     }
   }
 
+  @Test func draggingLeftCutReanchorsViewportToPinTheCrossfade() {
+    withStorage {
+      let model = editor(fingerprint: "fp-cut-reanchor-left")
+      model.editedWaveform.viewportWidth = 1000
+      model.editedWaveform.samplesPerPixel = 200
+      model.editedWaveform.visibleStartSample = 40_000  // positive, so a shift is observable
+      let id = addRemoval(model, range: 48_000..<96_000, length: 600)
+      // Crossfade start (edited) = cL − L = 47_400; its screen offset from the viewport is fixed.
+      let seamScreenOffsetBefore =
+        (model.editedWaveform.timeline.seams.first?.editedCrossfadeStart ?? 0)
+        - model.editedWaveform.visibleStartSample
+
+      model.crossfadeCutPointDragBegan(id: id, edge: .lower, atX: 100)  // dragStart edited = 60_000
+      model.crossfadeCutPointDragged(toX: 90)  // −10px → delta −2000 → cL 48_000 → 50_000
+
+      expectNoDifference(model.crossfadeCutPointDraft?.draftedRange, 50_000..<96_000)
+      // Viewport re-anchored by ΔcL (+2000) so the crossfade holds its screen position.
+      expectNoDifference(model.editedWaveform.visibleStartSample, 42_000)
+      let seamScreenOffsetAfter =
+        (model.editedWaveform.timeline.seams.first?.editedCrossfadeStart ?? 0)
+        - model.editedWaveform.visibleStartSample
+      expectNoDifference(seamScreenOffsetAfter, seamScreenOffsetBefore)
+    }
+  }
+
+  @Test func draggingRightCutLeavesTheViewportAnchored() {
+    withStorage {
+      let model = editor(fingerprint: "fp-cut-reanchor-right")
+      model.editedWaveform.viewportWidth = 1000
+      model.editedWaveform.samplesPerPixel = 200
+      model.editedWaveform.visibleStartSample = 40_000
+      let id = addRemoval(model, range: 48_000..<96_000, length: 600)
+
+      // dragStart edited = 100_000; −10px → cR 96_000 → 98_000.
+      model.crossfadeCutPointDragBegan(id: id, edge: .upper, atX: 300)
+      model.crossfadeCutPointDragged(toX: 290)
+
+      expectNoDifference(model.crossfadeCutPointDraft?.draftedRange, 48_000..<98_000)
+      // cL untouched → the crossfade (and everything left of it) stays put; only the right slides.
+      expectNoDifference(model.editedWaveform.visibleStartSample, 40_000)
+    }
+  }
+
   @Test func cancellingDragRestoresCommittedTimelineAndDropsDraft() {
     withStorage {
       let model = editor(fingerprint: "fp-cut-drag-cancel")
@@ -276,16 +319,16 @@ struct EditorCrossfadeCutPointTests {
     }
   }
 
-  // MARK: - Effective length freeze
+  // MARK: - Non-destructive move (stored length preserved)
 
-  @Test func movingCutFreezesEffectiveLengthNotStoredLength() {
+  @Test func movingCutPreservesStoredLengthWhileRenderClampsEffective() {
     withStorage {
-      let model = editor(fingerprint: "fp-cut-freeze-effective")
+      let model = editor(fingerprint: "fp-cut-preserve-stored")
       primeGeometry(model)
       // Left handle (1_000 samples) is smaller than the stored fade (2_000), so `EditedTimeline`
       // clamps the seam's EFFECTIVE `crossfadeLength` down to 1_000 — every other fixture in this
       // file uses a fade small enough that stored == effective, which would let a regression that
-      // freezes the STORED length (2_000) instead of the effective one pass unnoticed.
+      // committed the EFFECTIVE length (1_000) instead of the stored one pass unnoticed.
       let id = addRemoval(model, range: 1_000..<5_000, length: 2_000)
       let effectiveLength = {
         model.editedWaveform.timeline.seams.first(where: { $0.id == id })?.crossfadeLength
@@ -296,11 +339,42 @@ struct EditorCrossfadeCutPointTests {
       model.crossfadeCutPointDragged(toX: 290)  // -10px leftward → delta -2000 → cR + 2000
       model.crossfadeCutPointDragEnded()
 
-      // Committed fade is pinned to the EFFECTIVE length (1_000) that was frozen at drag begin, not
-      // the original stored length (2_000).
-      expectNoDifference(model.timelineRemovals[id: id]?.crossfade.lengthSamples, 1_000)
-      // The rendered seam's crossfade length is unchanged by the move.
+      // Moving the cut is non-destructive: the STORED fade duration (2_000) survives, never rewritten
+      // down to the geometry-clamped effective length (Option C).
+      expectNoDifference(model.timelineRemovals[id: id]?.crossfade.lengthSamples, 2_000)
+      // The rendered seam's crossfade still clamps to the 1_000-sample handle — the stored overhang
+      // just renders shorter, and would return in full if the cut were pulled back out.
       expectNoDifference(effectiveLength(), 1_000)
+    }
+  }
+
+  @Test func draggingLeftCutAwayFromEdgeGrowsPreviewFadeToMatchCommit() {
+    withStorage {
+      let model = editor(fingerprint: "fp-cut-preview-matches-commit")
+      primeGeometry(model)  // spp 200, visibleStart 0 → xToSample(x) = x * 200
+      // Removal hard against the source start: the left handle (100) is far smaller than the stored
+      // fade (2_000), so `EditedTimeline` clamps the seam's EFFECTIVE length down to 100 at begin.
+      let id = addRemoval(model, range: 100..<40_000, length: 2_000)
+      let effective = {
+        model.editedWaveform.timeline.seams.first(where: { $0.id == id })?.crossfadeLength
+      }
+      expectNoDifference(effective(), 100)
+
+      // Drag the LEFT cut inward (rightward, away from the start): dragStart edited = 60_000,
+      // toX 275 → edited 55_000 → delta −5_000 → cL 100 → 5_100. The left handle grows to 5_100, so
+      // the fade can now render its full stored 2_000.
+      model.crossfadeCutPointDragBegan(id: id, edge: .lower, atX: 300)
+      model.crossfadeCutPointDragged(toX: 275)
+      expectNoDifference(model.crossfadeCutPointDraft?.draftedRange, 5_100..<40_000)
+      // The LIVE PREVIEW already renders the grown fade (2_000), not the 100 frozen at begin — the
+      // preview is built from the stored length, so it clamps to the live handle just like the commit.
+      let previewEffective = effective()
+      expectNoDifference(previewEffective, 2_000)
+
+      model.crossfadeCutPointDragEnded()
+      // The committed render matches the preview exactly — no fade-pop on release.
+      expectNoDifference(effective(), previewEffective)
+      expectNoDifference(effective(), 2_000)
     }
   }
 
@@ -388,6 +462,21 @@ struct EditorCrossfadeCutPointTests {
       _ = model.editorKeyDown(.nudgeRightCutLater)  // cR + 441
 
       expectNoDifference(model.timelineRemovals[id: id]?.removedRange, 48_000..<96_441)
+    }
+  }
+
+  @Test func nudgePreservesStoredFadeLengthNotEffective() {
+    withStorage {
+      let model = editor(fingerprint: "fp-cut-nudge-preserve-stored")
+      // Stored fade 2_000 but the left handle is only 1_000 → effective clamps to 1_000. A nudge that
+      // committed the effective length would shrink the stored duration; it must pin the stored one.
+      let id = addRemoval(model, range: 1_000..<5_000, length: 2_000)
+      model.selectSeam(id)
+
+      // cR + 441; the left handle (and so the effective length) is unchanged.
+      _ = model.editorKeyDown(.nudgeRightCutLater)
+
+      expectNoDifference(model.timelineRemovals[id: id]?.crossfade.lengthSamples, 2_000)
     }
   }
 

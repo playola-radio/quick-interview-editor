@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// Claims ⌥-drags in the narrow OUTSIDE zones adjacent to each bowtie — left of `leadingHandleX`
+/// Claims ⌥-drags in the OUTSIDE zones flanking each bowtie — left of `leadingHandleX`
 /// (moves the left cut `cL`) and right of `trailingHandleX` (moves the right cut `cR`) — to move that
 /// removal's cut point without changing the fade length. Sits ABOVE `SeamStretchHandleLayer`, but
 /// claims ONLY ⌥-modified hits (read via `NSEvent.modifierFlags` in `hitTest`, i.e. at mouse-down),
@@ -44,8 +44,11 @@ struct SeamCutPointHandleLayer: NSViewRepresentable {
     var onDragCancelled: (() -> Void)?
     var onSelect: ((UUID) -> Void)?
 
-    /// Width of an outside grab zone flanking each bowtie edge.
-    private let zoneWidth: CGFloat = 12
+    /// Width of the outside grab zone flanking each bowtie edge for an UNSELECTED seam — just enough to
+    /// bootstrap the first ⌥-grab (which auto-selects). Once a seam is selected its zones expand to the
+    /// whole outside region (see `zone(nearestToX:)`): a ⌥-drag has no competing gesture on the waveform
+    /// body, so a huge target is safe and makes trimming the selected crossfade's cuts effortless.
+    private let zoneWidth: CGFloat = 32
     /// Minimum travel before a grab becomes a drag, so a ⌥-click never opens a draft / no-op undo.
     private let dragThreshold: CGFloat = 6
     private var active: (id: UUID, edge: RemovalBoundary)?
@@ -65,18 +68,27 @@ struct SeamCutPointHandleLayer: NSViewRepresentable {
     }
 
     /// The outside zone whose bowtie edge is nearest `x`: left of a seam's `leadingHandleX` moves
-    /// `cL` (`.lower`), right of its `trailingHandleX` moves `cR` (`.upper`). Nil when no zone covers
-    /// `x`. Off-screen handles (nil) are skipped.
+    /// `cL` (`.lower`), right of its `trailingHandleX` moves `cR` (`.upper`). A SELECTED seam's zones
+    /// span the whole outside region (`bounds` edge → handle) so its cuts grab from anywhere on the
+    /// correct side; an unselected seam keeps the narrow `zoneWidth` flank that bootstraps selection.
+    /// Ties break to the nearest bowtie edge, so a huge selected-seam zone never steals a grab that
+    /// lands right on another seam's flank. Nil when no zone covers `x`; off-screen handles are skipped.
     private func zone(nearestToX posX: CGFloat) -> (id: UUID, edge: RemovalBoundary)? {
       var best: (target: (id: UUID, edge: RemovalBoundary), distance: CGFloat)?
       for seam in seams {
-        if let lead = seam.leadingHandleX, posX >= lead - zoneWidth, posX < lead {
-          let distance = lead - posX
-          if best == nil || distance < best!.distance { best = ((seam.id, .lower), distance) }
+        if let lead = seam.leadingHandleX {
+          let leftEdge = seam.isSelected ? bounds.minX : lead - zoneWidth
+          if posX >= leftEdge, posX < lead {
+            let distance = lead - posX
+            if best == nil || distance < best!.distance { best = ((seam.id, .lower), distance) }
+          }
         }
-        if let trail = seam.trailingHandleX, posX > trail, posX <= trail + zoneWidth {
-          let distance = posX - trail
-          if best == nil || distance < best!.distance { best = ((seam.id, .upper), distance) }
+        if let trail = seam.trailingHandleX {
+          let rightEdge = seam.isSelected ? bounds.maxX : trail + zoneWidth
+          if posX > trail, posX <= rightEdge {
+            let distance = posX - trail
+            if best == nil || distance < best!.distance { best = ((seam.id, .upper), distance) }
+          }
         }
       }
       return best?.target
