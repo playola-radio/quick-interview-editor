@@ -1,0 +1,52 @@
+{
+  "schema_version": 2,
+  "run_id": "12345678-1234-5678-1234-567812345678",
+  "checkpoint_revision": 3,
+  "status": "ready",
+  "suggestions": [
+    {
+      "product_type": "intro",
+      "start_index": 12,
+      "end_index": 14,
+      "label": "Nobody Wins handoff",
+      "song": null,
+      "song_verified": false,
+      "word_ids": [101, 102, 103],
+      "start_sample": 288000,
+      "end_sample": 360000,
+      "start_sec": 6.0,
+      "end_sec": 7.5,
+      "duration_sec": 1.5,
+      "rank": 0,
+      "score": 0.0,
+      "warnings": [],
+      "candidate_id": "00000000-0000-0000-0000-000000000001",
+      "fields": {
+        "song-title": "Nobody Wins",
+        "artist-name": "American Aquarium"
+      }
+    },
+    {
+      "product_type": "custom-voice",
+      "start_index": 30,
+      "end_index": 31,
+      "label": "Artist reflection",
+      "song": null,
+      "song_verified": false,
+      "word_ids": [201, 202],
+      "start_sample": 720000,
+      "end_sample": 768000,
+      "start_sec": 15.0,
+      "end_sec": 16.0,
+      "duration_sec": 1.0,
+      "rank": 0,
+      "score": 0.0,
+      "warnings": [],
+      "candidate_id": "00000000-0000-0000-0000-000000000002",
+      "fields": {
+        "descriptive-title": "Artist reflection",
+        "artist-name": null
+      }
+    }
+  ]
+}
