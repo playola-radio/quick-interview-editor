@@ -143,6 +143,49 @@ struct SuggestionRunTests {
     expectNoDifference(noSequence.candidates[0].naming?.reservation, nil)
   }
 
+  @Test func correctionRejectsSameKeyReservationOwnedByAnotherCandidate() throws {
+    let snapshot = introSnapshot()
+    var candidate = candidate(
+      id: Fixtures.uuid(1), startSample: 100,
+      values: ["song-title": "Song", "artist-name": "Artist"])
+    let key = suggestionSequenceKey(
+      type: SuggestionDefaults.types[0],
+      values: ["song-title": "Song", "artist-name": "Artist"], candidateID: candidate.id)
+    candidate.naming?.reservation = .init(
+      candidateID: candidate.id, key: key, number: 4, canonicalValues: [:])
+    let otherOwner = SequenceReservation(
+      candidateID: Fixtures.uuid(2), key: key, number: 4, canonicalValues: [:])
+    let expected = SuggestionBatchNumberingError.conflictingReservation(
+      candidate.naming!.reservation!.identity)
+
+    for (issued, retained) in [([otherOwner], []), ([], [otherOwner])] {
+      #expect(throws: expected) {
+        try numberSuggestions(
+          [candidate], snapshot: snapshot, starts: .init(), issued: issued, retained: retained,
+          mode: .correction(candidateID: candidate.id))
+      }
+    }
+    expectNoDifference(candidate.naming?.reservation?.number, 4)
+  }
+
+  @Test func allocatorRejectsDecodedConfigurationWithDuplicateSequenceFields() throws {
+    var corrupted = introSnapshot()
+    corrupted.configuration.types[0].sequenceFieldIDs = ["song-title", "song-title"]
+    let decoded: SuggestionRunSnapshot = try decode(encode(corrupted))
+    let candidate = candidate(
+      id: Fixtures.uuid(1), startSample: 100,
+      values: ["song-title": "Song", "artist-name": "Artist"])
+
+    #expect(
+      throws: SuggestionBatchNumberingError.invalidConfiguration(
+        decoded.configuration.validationMessages()
+      )
+    ) {
+      try numberSuggestions(
+        [candidate], snapshot: decoded, starts: .init(), issued: [], retained: [])
+    }
+  }
+
   @Test func missingTemplateValueFallsBackAndEmptyBatchDoesNotOverflow() throws {
     let snapshot = introSnapshot()
     let missing = candidate(id: Fixtures.uuid(1), startSample: 100, values: ["song-title": "Song"])
@@ -156,6 +199,23 @@ struct SuggestionRunTests {
       issued: [.init(candidateID: Fixtures.uuid(9), key: key, number: .max, canonicalValues: [:])],
       retained: [])
     expectNoDifference(empty.candidates, [])
+  }
+
+  @Test func provisionalCanonicalGroupsHaveStableOrderWhenInputIsReordered() throws {
+    let snapshot = introSnapshot()
+    let first = candidate(
+      id: Fixtures.uuid(1), startSample: 100, values: ["artist-name": "Artist"])
+    let second = candidate(
+      id: Fixtures.uuid(2), startSample: 100, values: ["artist-name": "Artist"])
+
+    let forward = try numberSuggestions(
+      [first, second], snapshot: snapshot, starts: .init(), issued: [], retained: [])
+    let reverse = try numberSuggestions(
+      [second, first], snapshot: snapshot, starts: .init(), issued: [], retained: [])
+
+    expectNoDifference(forward.batch.canonicalGroups, reverse.batch.canonicalGroups)
+    expectNoDifference(
+      forward.batch.canonicalGroups.map { $0.key.provisionalCandidateID }, [first.id, second.id])
   }
 
   @Test func oldBatchSnapshotRemainsCanonicalForCorrectionAndRunValidation() throws {

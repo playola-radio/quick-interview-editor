@@ -65,6 +65,7 @@ enum SuggestionNumberingMode: Sendable {
 }
 
 enum SuggestionBatchNumberingError: Error, Equatable {
+  case invalidConfiguration([String])
   case unknownType(String)
   case invalidNaming(candidateID: UUID)
   case conflictingReservation(SequenceReservationIdentity)
@@ -183,9 +184,11 @@ func numberSuggestions(
     let reservation: SequenceReservation?
     if hasSequence {
       if shouldPreserveExistingReservation(source.reservation, mode: mode, owners: owners),
-        let existing = source.reservation, existing.key == key,
-        !hasAnotherOwner(existing, in: owners)
+        let existing = source.reservation, existing.key == key
       {
+        if hasAnotherOwner(existing, in: owners) {
+          throw SuggestionBatchNumberingError.conflictingReservation(existing.identity)
+        }
         reservation = SequenceReservation(
           candidateID: original.id, key: key, number: existing.number,
           canonicalValues: canonicalValues)
@@ -228,12 +231,27 @@ func numberSuggestions(
       canonicalGroups:
         canonicalGroups
         .map { .init(key: $0.key, values: $0.value) }
-        .sorted {
-          $0.key.typeID < $1.key.typeID
-            || ($0.key.typeID == $1.key.typeID
-              && $0.key.fields.description < $1.key.fields.description)
-        })
+        .sorted(by: canonicalGroupPrecedes))
   )
+}
+
+private func canonicalGroupPrecedes(
+  _ lhs: SuggestionBatch.CanonicalGroup, _ rhs: SuggestionBatch.CanonicalGroup
+) -> Bool {
+  guard lhs.key.typeID == rhs.key.typeID else { return lhs.key.typeID < rhs.key.typeID }
+  let leftFields = lhs.key.fields.sorted { ($0.fieldID, $0.value) < ($1.fieldID, $1.value) }
+  let rightFields = rhs.key.fields.sorted { ($0.fieldID, $0.value) < ($1.fieldID, $1.value) }
+  for (left, right) in zip(leftFields, rightFields) {
+    guard left.fieldID == right.fieldID else { return left.fieldID < right.fieldID }
+    guard left.value == right.value else { return left.value < right.value }
+  }
+  guard leftFields.count == rightFields.count else { return leftFields.count < rightFields.count }
+  switch (lhs.key.provisionalCandidateID, rhs.key.provisionalCandidateID) {
+  case (let left?, let right?): return left.uuidString < right.uuidString
+  case (nil, .some): return true
+  case (.some, nil): return false
+  case (nil, nil): return false
+  }
 }
 
 private func modeRecordsActualStart(_ mode: SuggestionNumberingMode) -> Bool {
@@ -259,6 +277,10 @@ private func selectedCandidateIDs(
 private func validateNumberingInput(
   candidates: [CutSuggestion], snapshot: SuggestionRunSnapshot, starts: SuggestionStarts
 ) throws {
+  let configurationMessages = snapshot.configuration.validationMessages()
+  guard configurationMessages.isEmpty else {
+    throw SuggestionBatchNumberingError.invalidConfiguration(configurationMessages)
+  }
   var candidateIDs = Set<UUID>()
   for candidate in candidates where !candidateIDs.insert(candidate.id).inserted {
     throw SuggestionBatchNumberingError.duplicateCandidateID(candidate.id)
