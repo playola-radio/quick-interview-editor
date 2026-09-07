@@ -35,6 +35,7 @@
 		1B8DA8919B1F3EE18F4F5FAE /* ModelSetupTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70B9B19D5724C6446D7A6FCF /* ModelSetupTests.swift */; };
 		1C8332362058376AA56225C2 /* EditPlanDecodingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2D5355CB914FC23265BF83F /* EditPlanDecodingTests.swift */; };
 		1D4C6374AD132FAACB81DEF8 /* suggestion-contract-v2.json in Resources */ = {isa = PBXBuildFile; fileRef = F1390189440139BA8C94615C /* suggestion-contract-v2.json */; };
+		A30000000000000000000010 /* suggestion-result-v2.json in Resources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000010 /* suggestion-result-v2.json */; };
 		1F18051276033CEC4EC6627C /* KeychainClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A89FF6DAD46A1340E28D1B8 /* KeychainClientTests.swift */; };
 		211213F7B0B9789F2BC6ED5D /* FineTuneGeometryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0AF49CAFC4DEB2AC1B6C9732 /* FineTuneGeometryTests.swift */; };
 		211A39885990B7091BAC6889 /* AppLaunchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0D25450C4B3308994C118AB /* AppLaunchTests.swift */; };
@@ -53,6 +54,7 @@
 		2A30D5A70FAA1CCAA0DCEC56 /* BoundaryInset.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35158E7CE1A9A9D52CC12728 /* BoundaryInset.swift */; };
 		2A3411BECC192F8C8D4C813C /* TranscriptFollowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A8A7D8125AB200BC54332B3 /* TranscriptFollowTests.swift */; };
 		2A7032ECD17956195270C628 /* SuggestionRun.swift in Sources */ = {isa = PBXBuildFile; fileRef = C201194EBAEB235AB244E0C1 /* SuggestionRun.swift */; };
+		A10000000000000000000010 /* SuggestionRunWire.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000010 /* SuggestionRunWire.swift */; };
 		2AB5719F9A60E584F4DE1185 /* CutSuggestClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E86A062FD2FFCFC570035919 /* CutSuggestClientTests.swift */; };
 		2C92CE748FC5D6B7EB68C5E4 /* EditorEditSlicePresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E6CDAFD169715E44AE5E9EA /* EditorEditSlicePresentationTests.swift */; };
 		2CE1C1C93B59EE6860FE2333 /* BoundaryRangeEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 731A67BC11627978D74D22CC /* BoundaryRangeEditor.swift */; };
@@ -488,6 +490,7 @@
 		C002864903B4CD94592A20BA /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		C098497C57EEC28B2BD125AC /* PlaylistFrameTimeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistFrameTimeline.swift; sourceTree = "<group>"; };
 		C201194EBAEB235AB244E0C1 /* SuggestionRun.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SuggestionRun.swift; sourceTree = "<group>"; };
+		A20000000000000000000010 /* SuggestionRunWire.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SuggestionRunWire.swift; sourceTree = "<group>"; };
 		C494C2E61773F830EC6F3D47 /* TranscriptDocument.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptDocument.swift; sourceTree = "<group>"; };
 		C64A9EA59AAAC40D0CDCC3BA /* CrossfadeStretchDraft.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrossfadeStretchDraft.swift; sourceTree = "<group>"; };
 		C6AC140FED898B406666B294 /* UpdaterCommandsModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdaterCommandsModel.swift; sourceTree = "<group>"; };
@@ -540,6 +543,7 @@
 		F0C51C2D00EA2A7E26041BD7 /* EditorAuditionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorAuditionTests.swift; sourceTree = "<group>"; };
 		F11D9F8DFA91C04D53475E20 /* ProjectPackageTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectPackageTests.swift; sourceTree = "<group>"; };
 		F1390189440139BA8C94615C /* suggestion-contract-v2.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "suggestion-contract-v2.json"; sourceTree = "<group>"; };
+		A40000000000000000000010 /* suggestion-result-v2.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "suggestion-result-v2.json"; sourceTree = "<group>"; };
 		F1D26D9E066A4862A42548A2 /* EditPlanV2DecodeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditPlanV2DecodeTests.swift; sourceTree = "<group>"; };
 		F1EAD8A5047138D2FF650F08 /* CutSuggestion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CutSuggestion.swift; sourceTree = "<group>"; };
 		F34222546B383B2E21DFEE5A /* EditorCurrentWordTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorCurrentWordTests.swift; sourceTree = "<group>"; };
@@ -609,6 +613,7 @@
 			isa = PBXGroup;
 			children = (
 				F1390189440139BA8C94615C /* suggestion-contract-v2.json */,
+				A40000000000000000000010 /* suggestion-result-v2.json */,
 			);
 			name = fixtures;
 			path = ../tests/fixtures;
@@ -886,6 +891,7 @@
 				112E01B5A6A1BF5DC6759841 /* SuggestionNaming.swift */,
 				0E26EDE355427CF55ECE1C16 /* SuggestionNumbering.swift */,
 				C201194EBAEB235AB244E0C1 /* SuggestionRun.swift */,
+				A20000000000000000000010 /* SuggestionRunWire.swift */,
 				9220B5BD3835A038A74C6DA0 /* TimelineRemoval.swift */,
 				26119561988C8741B3FAEE42 /* TranscriptClipBand.swift */,
 				C494C2E61773F830EC6F3D47 /* TranscriptDocument.swift */,
@@ -1289,6 +1295,7 @@
 				07436348089C720576DBB80C /* project-state.json in Resources */,
 				2A244FB0213309DFD6FC2C7F /* project-v1.pie in Resources */,
 				1D4C6374AD132FAACB81DEF8 /* suggestion-contract-v2.json in Resources */,
+				A30000000000000000000010 /* suggestion-result-v2.json in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1397,6 +1404,7 @@
 				FD54F31D91D655D951DE6242 /* SuggestionNaming.swift in Sources */,
 				D802EB036728A38A83C28740 /* SuggestionNumbering.swift in Sources */,
 				2A7032ECD17956195270C628 /* SuggestionRun.swift in Sources */,
+				A10000000000000000000010 /* SuggestionRunWire.swift in Sources */,
 				A37451C895DB7C3A6FF95E35 /* TimelineRemoval.swift in Sources */,
 				7B6C410FD660EB359EFE351D /* TranscriptCache.swift in Sources */,
 				1588D5A47AB7263F1982C57A /* TranscriptClipBand.swift in Sources */,

@@ -140,6 +140,9 @@ extension CutSuggestion {
   ) throws -> (suggestions: [CutSuggestion], meta: WireMeta?) {
     let response: WireResponse
     do {
+      guard String(data: data, encoding: .utf8) != nil else {
+        throw CutSuggestClientError.decodeFailed("Output is not UTF-8.")
+      }
       response = try JSONDecoder().decode(WireResponse.self, from: data)
     } catch {
       // swiftlint:disable:next optional_data_string_conversion

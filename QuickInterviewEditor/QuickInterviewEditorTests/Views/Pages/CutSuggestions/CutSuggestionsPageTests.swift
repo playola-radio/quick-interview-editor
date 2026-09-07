@@ -140,28 +140,40 @@ struct CutSuggestionsPageTests {
     expectNoDifference(store.value[id: Fixtures.uuid(1)]?.title, "first")
   }
 
-  @Test func emptyCompletionSurfacesFailureAndLeavesExistingSuggestions() async {
+  @Test func emptyCompletionSucceedsAndReplacesExistingSuggestions() async {
     let fingerprint = "fp-empty"
     let existing = Fixtures.cutSuggestion(id: Fixtures.uuid(1), wordIDs: [10, 11, 12])
     let store = LockIsolated<IdentifiedArrayOf<CutSuggestion>>([existing])
 
     await withDependencies {
       $0.keychain = .inMemory("sk-keychain")
-      $0.cutSuggest = fixtureClient(completed: [])
+      $0.cutSuggest = CutSuggestClient { _, _ in
+        AsyncThrowingStream { continuation in
+          continuation.yield(.diagnostic("0 raw clips."))
+          continuation.yield(.completed([]))
+          continuation.finish()
+        }
+      }
     } operation: {
       let model = CutSuggestionsPageModel(
         editPlan: Fixtures.editPlan(), sourceFingerprint: fingerprint)
       wire(model, to: store)
       await model.suggestCutsTapped()
 
-      guard case .failed(let message) = model.phase else {
-        Issue.record("expected .failed, got \(model.phase)")
-        return
+      expectNoDifference(model.phase, .idle)
+      expectNoDifference(model.lastRunDiagnostic, "0 raw clips.")
+      await withDependencies {
+        $0.cutSuggest = fixtureClient(completed: [])
+      } operation: {
+        let freshModel = CutSuggestionsPageModel(
+          editPlan: Fixtures.editPlan(), sourceFingerprint: fingerprint)
+        freshModel.lastRunDiagnostic = "Previous diagnostic"
+        await freshModel.suggestCutsTapped()
+        expectNoDifference(freshModel.lastRunDiagnostic, nil)
       }
-      #expect(message.contains("produced no usable suggestions"))
     }
 
-    expectNoDifference(store.value.elements, [existing])
+    expectNoDifference(store.value.elements, [])
   }
 
   @Test func streamFinishingWithoutCompletionSurfacesFailure() async {

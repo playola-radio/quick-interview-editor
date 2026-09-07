@@ -82,6 +82,7 @@ final class CutSuggestionsPageModel: ViewModel {
   /// The message shown when accepting a suggestion failed (stale / invalid). Cleared on a
   /// successful accept or a new run.
   var actionMessage: String?
+  var lastRunDiagnostic: String?
   /// The API-key entry sheet, presented when onboarding or when the user taps to add a key.
   var keyEntry: SettingsModel?
   /// Whether pending suggestions are drawn as faint outline bands in the transcript. The ranked
@@ -206,6 +207,7 @@ final class CutSuggestionsPageModel: ViewModel {
   /// to overwrite suggestions that appeared while it was in flight (see the completion handler).
   private func runSuggest(apiKey: String, isBackgroundPass: Bool = false) async {
     actionMessage = nil
+    lastRunDiagnostic = nil
     phase = .suggesting(startingMessage)
     let request = buildRequest()
     do {
@@ -213,13 +215,14 @@ final class CutSuggestionsPageModel: ViewModel {
         switch event {
         case .progress(let message):
           phase = .suggesting(message)
+        case .diagnostic(let message):
+          lastRunDiagnostic = message
+        case .checkpoint:
+          break
+        case .recoverableFailure(_, _, let message):
+          phase = .failed(message)
+          return
         case .completed(let candidates):
-          guard !candidates.isEmpty else {
-            phase = .failed(
-              "The cut-suggester completed but produced no usable suggestions. "
-                + "Existing suggestions were left unchanged.")
-            return
-          }
           let stamped = candidates.map { stampProvenance(on: $0, from: request) }
           // A background pass guards emptiness at start, but suggestions can land while it's in
           // flight (a manual run, or a decision the user just made). Re-check right before

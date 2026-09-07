@@ -25,3 +25,12 @@ struct CutSuggestClientTests {
     expectNoDifference(events, [.progress("Analyzing transcript…"), .completed([])])
   }
 }
+
+extension CutSuggestClientTests {
+  @Test func legacyRequestDefaultsPreserveExistingCallSites() {
+    expectNoDifference(Self.request.snapshot, nil)
+    expectNoDifference(Self.request.mode, .fresh)
+    expectNoDifference(Self.request.journalDirectory, nil)
+    expectNoDifference(Self.request.options.model, "claude-sonnet-5")
+  }
+}

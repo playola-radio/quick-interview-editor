@@ -11,6 +11,26 @@ struct SuggestionRunSnapshot: Codable, Equatable, Sendable {
   var transcriptHash: String
   var sourceFingerprint: String
   var sampleRate: Int
+  var stage1Window: Int = 130
+  var stage1Step: Int = 110
+}
+
+extension SuggestionRunSnapshot {
+  init(from decoder: any Decoder) throws {
+    let values = try decoder.container(keyedBy: CodingKeys.self)
+    runID = try values.decode(UUID.self, forKey: .runID)
+    configuration = try values.decode(SuggestionConfiguration.self, forKey: .configuration)
+    configurationHash = try values.decode(String.self, forKey: .configurationHash)
+    model = try values.decode(String.self, forKey: .model)
+    discoveryPromptVersion = try values.decode(String.self, forKey: .discoveryPromptVersion)
+    extractionPromptVersion = try values.decode(String.self, forKey: .extractionPromptVersion)
+    productSpecVersion = try values.decode(String.self, forKey: .productSpecVersion)
+    transcriptHash = try values.decode(String.self, forKey: .transcriptHash)
+    sourceFingerprint = try values.decode(String.self, forKey: .sourceFingerprint)
+    sampleRate = try values.decode(Int.self, forKey: .sampleRate)
+    stage1Window = try values.decodeIfPresent(Int.self, forKey: .stage1Window) ?? 130
+    stage1Step = try values.decodeIfPresent(Int.self, forKey: .stage1Step) ?? 110
+  }
 }
 
 struct SuggestionNamingRecord: Codable, Equatable, Sendable {
@@ -56,6 +76,7 @@ struct SuggestionRunCheckpoint: Codable, Equatable, Sendable {
   var completedRequestKeys: [String]
   var failedRequestKeys: [String]
   var proposedStarts: SuggestionStarts
+  var failureMessage: String?
 }
 
 enum SuggestionNumberingMode: Sendable {
