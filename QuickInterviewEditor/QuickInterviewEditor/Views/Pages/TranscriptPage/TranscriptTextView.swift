@@ -457,7 +457,8 @@ struct TranscriptTextView: NSViewRepresentable {
           let firstRange = range(for: first), let lastRange = range(for: last)
         else { continue }
         func zone(_ nsRange: NSRange, _ edge: TranscriptResizeEdge) -> TranscriptResizeHandleZone? {
-          let glyphRange = layoutManager.glyphRange(forCharacterRange: nsRange, actualCharacterRange: nil)
+          let glyphRange = layoutManager.glyphRange(
+            forCharacterRange: nsRange, actualCharacterRange: nil)
           var rect = layoutManager.boundingRect(forGlyphRange: glyphRange, in: textContainer)
           rect.origin.x += inset.width
           rect.origin.y += inset.height
@@ -468,8 +469,8 @@ struct TranscriptTextView: NSViewRepresentable {
           return TranscriptResizeHandleZone(
             identity: item.identity, edge: edge, rect: grab, priority: item.identity.priority)
         }
-        if let z = zone(firstRange, .start) { zones.append(z) }
-        if let z = zone(lastRange, .end) { zones.append(z) }
+        if let handleZone = zone(firstRange, .start) { zones.append(handleZone) }
+        if let handleZone = zone(lastRange, .end) { zones.append(handleZone) }
       }
       return zones
     }
@@ -480,11 +481,13 @@ struct TranscriptTextView: NSViewRepresentable {
     func resizeHandle(at point: NSPoint) -> (TranscriptResizeItemIdentity, TranscriptResizeEdge)? {
       let hits = resizeZones().filter { $0.rect.contains(point) }
       guard !hits.isEmpty else { return nil }
-      let best = hits.sorted { a, b in
-        if a.priority != b.priority { return a.priority > b.priority }
-        func dx(_ z: TranscriptResizeHandleZone) -> CGFloat { abs(point.x - z.rect.midX) }
-        if dx(a) != dx(b) { return dx(a) < dx(b) }
-        return "\(a.identity)\(a.edge)" < "\(b.identity)\(b.edge)"
+      let best = hits.sorted { lhs, rhs in
+        if lhs.priority != rhs.priority { return lhs.priority > rhs.priority }
+        func dx(_ handleZone: TranscriptResizeHandleZone) -> CGFloat {
+          abs(point.x - handleZone.rect.midX)
+        }
+        if dx(lhs) != dx(rhs) { return dx(lhs) < dx(rhs) }
+        return "\(lhs.identity)\(lhs.edge)" < "\(rhs.identity)\(rhs.edge)"
       }.first!
       return (best.identity, best.edge)
     }

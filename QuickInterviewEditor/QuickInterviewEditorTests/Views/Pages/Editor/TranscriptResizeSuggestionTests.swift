@@ -51,4 +51,37 @@ struct TranscriptResizeSuggestionTests {
 
     expectNoDifference(model.transcriptResizeDraft, nil)
   }
+
+  @Test func rejectedSuggestionIsNotResizable() {
+    let suggestionID = Fixtures.uuid(1)
+    let suggestion = Fixtures.cutSuggestion(
+      id: suggestionID, wordIDs: [1, 2], status: .rejected)
+    let model = editor(suggestions: [suggestion])
+
+    model.transcriptResizeBegan(.suggestion(suggestionID), .end)
+
+    expectNoDifference(model.transcriptResizeDraft, nil)
+  }
+
+  @Test func suggestionResizeBackToOriginalRecordsNoUndo() {
+    let suggestionID = Fixtures.uuid(1)
+    let suggestion = Fixtures.cutSuggestion(
+      id: suggestionID, wordIDs: [1, 2], status: .pending)
+    let model = editor(suggestions: [suggestion])
+
+    // A real resize first, so the suggestion's samples are internally consistent with its words.
+    model.transcriptResizeBegan(.suggestion(suggestionID), .end)
+    model.transcriptResizeDragged(toWord: 4)
+    model.transcriptResizeEnded()
+    let before = model.documentCutSuggestions[id: suggestionID]
+    let undoCountBefore = model.documentUndo.undo.count
+
+    // Dragging back to the same drafted words nets no change, so `ended` must be a no-op.
+    model.transcriptResizeBegan(.suggestion(suggestionID), .end)
+    model.transcriptResizeDragged(toWord: 4)
+    model.transcriptResizeEnded()
+
+    expectNoDifference(model.documentCutSuggestions[id: suggestionID], before)
+    expectNoDifference(model.documentUndo.undo.count, undoCountBefore)
+  }
 }

@@ -23,7 +23,9 @@ final class TranscriptResizeHandleOverlayView: NSView {
     if let trackingArea { removeTrackingArea(trackingArea) }
     let area = NSTrackingArea(
       rect: bounds,
-      options: [.cursorUpdate, .mouseEnteredAndExited, .mouseMoved, .activeInKeyWindow, .inVisibleRect],
+      options: [
+        .cursorUpdate, .mouseEnteredAndExited, .mouseMoved, .activeInKeyWindow, .inVisibleRect,
+      ],
       owner: self, userInfo: nil)
     addTrackingArea(area)
     trackingArea = area
@@ -34,27 +36,30 @@ final class TranscriptResizeHandleOverlayView: NSView {
   override func mouseExited(with event: NSEvent) { NSCursor.arrow.set() }
 
   private func setCursor(for event: NSEvent) {
-    let p = convert(event.locationInWindow, from: nil)
-    if coordinator?.resizeHandle(at: p) != nil { NSCursor.resizeLeftRight.set() }
-    else { NSCursor.arrow.set() }
+    let point = convert(event.locationInWindow, from: nil)
+    if coordinator?.resizeHandle(at: point) != nil {
+      NSCursor.resizeLeftRight.set()
+    } else {
+      NSCursor.arrow.set()
+    }
   }
 
   override func mouseDown(with event: NSEvent) {
-    let p = convert(event.locationInWindow, from: nil)
-    activeHandle = coordinator?.resizeHandle(at: p)
-    downPoint = p
+    let point = convert(event.locationInWindow, from: nil)
+    activeHandle = coordinator?.resizeHandle(at: point)
+    downPoint = point
     didBeginResize = false
   }
 
   override func mouseDragged(with event: NSEvent) {
     guard let handle = activeHandle, let down = downPoint, let coordinator else { return }
-    let p = convert(event.locationInWindow, from: nil)
+    let point = convert(event.locationInWindow, from: nil)
     if !didBeginResize {
-      guard abs(p.x - down.x) >= TranscriptResizeMetrics.dragThreshold else { return }
+      guard abs(point.x - down.x) >= TranscriptResizeMetrics.dragThreshold else { return }
       didBeginResize = true
       coordinator.model.transcriptResizeBegan(handle.0, handle.1)
     }
-    if let wordID = coordinator.wordIDForResize(at: p) {
+    if let wordID = coordinator.wordIDForResize(at: point) {
       coordinator.model.transcriptResizeDragged(toWord: wordID)
     }
   }

@@ -912,7 +912,9 @@ final class EditorModel: ViewModel {
       else { return }
       mutateSlices { $0[id: id] = updatedSlice(current, to: range) }
     case .suggestion(let id):
-      guard let current = documentCutSuggestions[id: id], current.isPending else { return }
+      guard let current = documentCutSuggestions[id: id], current.isPending,
+        sourceRange(coveringWordIDs: draft.draftedWordIDs) != nil
+      else { return }
       let updated = updatedSuggestion(current, toWordIDs: draft.draftedWordIDs)
       guard updated != current else { return }
       mutateDocument { $0.cutSuggestions[id: id] = updated }
