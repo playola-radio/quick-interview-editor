@@ -68,9 +68,14 @@ enum InvalidReason: Equatable {
 ///   - transcriptHash: The current transcript's canonical hash (`EditPlan.transcriptHash`),
 ///     compared against the suggestion's provenance hash to detect transcript drift from an
 ///     engine re-run of the same file.
+///   - adjustedRange: When the user resized the suggestion in the editor before accepting,
+///     the live adjusted extent (a canonical plan-sample range). When non-nil the clip is
+///     built from *this* range — its word membership is re-derived by any-overlap, exactly
+///     like a slice drawn in the editor, so words the resize added or dropped are honored.
+///     When nil the clip is derived from the suggestion's own words (the default accept).
 func acceptCutSuggestion(
   _ id: CutSuggestion.ID, in state: ProjectState, plan: EditPlan, sourceFingerprint: String,
-  transcriptHash: String
+  transcriptHash: String, adjustedRange: Range<Int>? = nil
 ) -> AcceptResult {
   guard let suggestion = state.cutSuggestions[id: id] else {
     return .invalid(.unknownSuggestion)
@@ -89,6 +94,10 @@ func acceptCutSuggestion(
     return .invalid(.noWords)
   }
 
+  // Drift check runs regardless of the path: if the suggestion's own words no longer resolve
+  // to a valid contiguous run, the suggestion is stale/malformed and shouldn't be accepted —
+  // even when the user resized it. On the adjusted path we discard the derived range below and
+  // rebuild from `adjustedRange` instead.
   let words: [Word]
   let range: Range<Int>
   switch resolveWords(suggestion.wordIDs, in: plan) {
@@ -96,6 +105,29 @@ func acceptCutSuggestion(
     words = resolved
     range = resolvedRange
   case .failed(let result): return result
+  }
+
+  if let adjustedRange {
+    // The user resized the suggestion: the clip is exactly the adjusted extent, clamped to
+    // the file, with membership re-derived by any-overlap (the same rule as an editor-drawn
+    // clip). No membership-equality guard — changing which words the clip contains is the
+    // whole point of resizing.
+    let lower = max(0, adjustedRange.lowerBound)
+    let upper = min(plan.source.durationSamples, adjustedRange.upperBound)
+    guard lower < upper else {
+      return .invalid(.noWords)
+    }
+    let clamped = lower..<upper
+    let adjustedWordIDs = wordIDs(anyOverlap: clamped, words: plan.words)
+    guard !adjustedWordIDs.isEmpty else {
+      return .invalid(.noWords)
+    }
+    let slice = buildSlice(
+      id: suggestion.id, name: sliceName(for: suggestion), range: clamped,
+      wordIDs: adjustedWordIDs, plan: plan)
+    var newState = state
+    newState.acceptSuggestion(id)
+    return .accepted(slice, newState)
   }
 
   let slice = buildSlice(

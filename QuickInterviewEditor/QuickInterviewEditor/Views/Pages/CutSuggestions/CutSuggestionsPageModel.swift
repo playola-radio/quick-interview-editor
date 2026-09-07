@@ -51,6 +51,11 @@ final class CutSuggestionsPageModel: ViewModel {
   /// Asks the editor to reveal a suggestion across both panes (select its words, scroll the
   /// transcript, zoom the waveform) when the user clicks a row. Wired by `EditorModel`.
   @ObservationIgnored var onSelectSuggestion: ((CutSuggestion) -> Void)?
+  /// The live adjusted extent to accept a suggestion at, or nil to fall back to its word-derived
+  /// range. Wired by `EditorModel`: non-nil only for the suggestion the user is currently resizing
+  /// (Shift-extend / marquee-extend / fine-tune grip), so a resized suggestion's Accept produces a
+  /// clip matching what's on screen. Nil (or unwired) preserves the word-derived accept.
+  @ObservationIgnored var adjustedRangeForAccept: (@MainActor (CutSuggestion.ID) -> Range<Int>?)?
 
   init(
     editPlan: EditPlan,
@@ -258,7 +263,8 @@ final class CutSuggestionsPageModel: ViewModel {
     finishTitleEditing(id)
     switch acceptCutSuggestion(
       id, in: ProjectState(cutSuggestions: currentSuggestions()), plan: editPlan,
-      sourceFingerprint: sourceFingerprint, transcriptHash: editPlan.transcriptHash)
+      sourceFingerprint: sourceFingerprint, transcriptHash: editPlan.transcriptHash,
+      adjustedRange: adjustedRangeForAccept?(id))
     {
     case .accepted(let slice, _):
       onAccept?(slice, id)

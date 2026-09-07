@@ -167,6 +167,10 @@ final class EditorModel: ViewModel {
     cutSuggestions.onSelectSuggestion = { [weak self] suggestion in
       self?.cutSuggestionSelected(suggestion)
     }
+    // Accept honors a live resize of the selected suggestion (Shift-extend / marquee / fine-tune).
+    cutSuggestions.adjustedRangeForAccept = { [weak self] id in
+      self?.adjustedRangeForSuggestion(id)
+    }
   }
 
   // MARK: - Export Phase
@@ -501,6 +505,17 @@ final class EditorModel: ViewModel {
   var selectionAnchorSample: Int?
   /// The edge currently being drag-edited (set in Task 8).
   var selectionEditingEdge: SelectionEdge?
+  /// The cut suggestion the current selection is *editing* — set when a suggestion is revealed and
+  /// retained while the user resizes it (Shift-extend, waveform-marquee extend, or fine-tune grip),
+  /// so Accept can honor the live extent. Any selection-replacing write (fresh click/drag/marquee)
+  /// or a clear drops it back to nil, so only that one suggestion's accept ever uses the adjusted
+  /// range. See `adjustedRangeForSuggestion`.
+  var selectedCutSuggestionID: CutSuggestion.ID?
+  /// The extent the edited suggestion was revealed at (its word-derived covering span). Accept only
+  /// treats the suggestion as *resized* when the live `activeEditingRange` differs from this
+  /// baseline; a plain select-then-accept leaves them equal and falls back to the word-derived path.
+  /// Cleared together with `selectedCutSuggestionID`.
+  var suggestionBaselineRange: Range<Int>?
 
   // MARK: - Seam selection
   /// The crossfade seam currently selected, identified by its removal's id (a `TimelineSeam`'s id
@@ -575,7 +590,7 @@ final class EditorModel: ViewModel {
     {
       selectSourceRange(
         min(anchor, wordRange.lowerBound)..<max(anchor, wordRange.upperBound), snapPlayhead: false,
-        origin: .transcript)
+        origin: .transcript, retainingSuggestion: true)
     } else if let wordRange = sourceRange(ofWord: id) {
       selectionAnchorSample = wordRange.lowerBound
       selectSourceRange(wordRange, snapPlayhead: true, origin: .transcript)
@@ -1075,7 +1090,11 @@ final class EditorModel: ViewModel {
     // nothing to extend, so fall through to plain-click behavior (select the containing word) —
     // matching Logic, and avoiding a degenerate `sample..<sample` that would clear instead.
     if extending, let anchor = selectionAnchorSample ?? audioSelection?.lowerBound {
-      selectSourceRange(min(anchor, sample)..<max(anchor, sample), snapPlayhead: false)
+      // A Shift-click is a resize gesture, like transcript Shift-extend and marquee-extend, so it
+      // must retain any edited suggestion's link — otherwise the on-screen extension is visible but
+      // Accept falls back to the suggestion's original words.
+      selectSourceRange(
+        min(anchor, sample)..<max(anchor, sample), snapPlayhead: false, retainingSuggestion: true)
       return
     }
     guard let wordID = wordID(atSample: sample),
@@ -1110,6 +1129,11 @@ final class EditorModel: ViewModel {
     // A marquee writes `audioSelection` live from its first move; drop any seam selection up front
     // so the two never coexist (decision 6).
     selectedSeamID = nil
+    // A fresh (non-extending) marquee replaces the selection, so drop any edited-suggestion link
+    // now — its live writes bypass `selectSourceRange`, so waiting for mouse-up would leave a stale
+    // link pairing the old suggestion with the new dragged range if Accept fired mid-drag. An
+    // extending marquee keeps the link; it is re-affirmed at mouse-up (`retainingSuggestion`).
+    if !extending { clearSuggestionEditingLink() }
     cancelAutoScroll()
     areaSelectGeneration &+= 1
     // Shift-extend keeps the pre-drag anchor edge (in source samples), so only the focus moves.
@@ -1145,13 +1169,17 @@ final class EditorModel: ViewModel {
     areaSelectDrag?.currentX = positionX
     cancelAutoScroll()
     let range = marqueeSourceRange()
+    // A Shift-extend marquee (existing anchor preserved) resizes the current selection rather than
+    // replacing it, so it keeps an active suggestion's editing link the same way a transcript
+    // Shift-extend does. Capture before niling the drag below.
+    let wasExtending = areaSelectDrag?.existingAnchorSample != nil
     areaSelectDrag = nil
     isWaveformAreaSelecting = false
     // Retire this drag's epoch too (not only `Began`), so a tick already resumed past its sleep bails
     // on the generation guard even before the next drag starts.
     areaSelectGeneration &+= 1
     if let range {
-      selectSourceRange(range, snapPlayhead: true)
+      selectSourceRange(range, snapPlayhead: true, retainingSuggestion: wasExtending)
       revealSourceRange(range)
     } else {
       clearSelection()
@@ -1192,12 +1220,18 @@ final class EditorModel: ViewModel {
   /// clobbering this placement. An empty/degenerate range clears. This is the single write path the
   /// waveform (marquee + click), slice/suggestion reveal, and transcript intents all funnel through.
   func selectSourceRange(
-    _ range: Range<Int>, snapPlayhead: Bool, origin: SelectionOrigin = .external
+    _ range: Range<Int>, snapPlayhead: Bool, origin: SelectionOrigin = .external,
+    retainingSuggestion: Bool = false
   ) {
     // A freeform-selection write and a seam selection are mutually exclusive (decision 6): any
     // range write drops the seam. This is the single range-write funnel, so clearing here covers
     // every caller (transcript, marquee end, word click, reveal).
     selectedSeamID = nil
+    // A selection-replacing write ends any suggestion's editing session, so its accept falls back to
+    // the word-derived range. Only an explicit resize (Shift-extend / marquee-extend, which pass
+    // `retainingSuggestion`) keeps the link. Reveal writes don't retain either — `cutSuggestionSelected`
+    // re-establishes the link right after the reveal.
+    if !retainingSuggestion { clearSuggestionEditingLink() }
     // Clamp to the file's real extent so a selection built from bad word bounds (a word whose
     // `endSample` overruns the audio) can never persist an out-of-file removal that revalidation
     // silently drops on reload. `selectSourceRange` is the single write path, so clamping here
@@ -1255,6 +1289,7 @@ final class EditorModel: ViewModel {
     audioSelection = nil
     selectionAnchorSample = nil
     selectionEditingEdge = nil
+    clearSuggestionEditingLink()
     transcript.invalidateSelectionAnchor()
   }
 
@@ -1626,7 +1661,69 @@ final class EditorModel: ViewModel {
   /// and opening the fine-tune pane so Preview/Audition are available) and reveals it in both
   /// panes. A no-op for a suggestion with no words.
   func cutSuggestionSelected(_ suggestion: CutSuggestion) {
-    revealWords(suggestion.wordIDs)
+    // Establish the editing link only if the reveal actually selected the suggestion's words.
+    // `revealWords` funnels through `selectSourceRange`, which clears the link, so we set it here
+    // *after* — and leave it nil when the suggestion is stale (words gone). Capture the revealed
+    // *selection* as the baseline so a later accept can tell "resized" from "merely selected". Read
+    // `selectedSourceRange`, not `activeEditingRange`: a pending fine-tune draft from a prior
+    // selection is still stale here (its retarget is the view's onChange `syncEditSession`, which
+    // hasn't run yet), so `activeEditingRange` would capture that old draft and later read as a
+    // phantom resize.
+    if revealWords(suggestion.wordIDs) {
+      reanchorStalePendingDraft()
+      selectedCutSuggestionID = suggestion.id
+      suggestionBaselineRange = selectedSourceRange
+    } else {
+      clearSuggestionEditingLink()
+    }
+  }
+
+  /// A reveal replaces the selection wholesale, so a leftover PENDING-SELECTION grip drag belongs to
+  /// the *prior* selection and must not survive to read as this suggestion's resize. `syncEditSession`
+  /// normally discards such a draft by re-anchoring, but its `committedRange != range` shortcut skips
+  /// that when the abandoned baseline coincidentally equals the freshly revealed selection — leaking
+  /// the old draft into `suggestionEditingRange`. Re-anchor it here, deterministically, before the
+  /// view's onChange `syncEditSession` runs. An unsaved SLICE edit is protected (held until
+  /// Save/Cancel) and left untouched.
+  private func reanchorStalePendingDraft() {
+    guard fineTune.target == .pendingSelection, fineTune.hasUnsavedChange,
+      let range = selectedSourceRange
+    else { return }
+    fineTune.begin(target: .pendingSelection, range: range)
+  }
+
+  /// The live adjusted extent to accept a suggestion at, or nil to fall back to its word-derived
+  /// range. Non-nil only for the suggestion currently being edited *and only once its extent has
+  /// actually changed* from the revealed baseline — a plain select-then-accept returns nil so it
+  /// keeps the word-derived membership (and its staleness guard) instead of the any-overlap path.
+  func adjustedRangeForSuggestion(_ id: CutSuggestion.ID) -> Range<Int>? {
+    guard selectedCutSuggestionID == id, let range = suggestionEditingRange,
+      range != suggestionBaselineRange
+    else { return nil }
+    return range
+  }
+
+  /// The suggestion's live extent: its Shift-extend / marquee selection, plus a fine-tune grip drag
+  /// *only when the pane is actually tuning this selection*. The `committedRange == selectedSourceRange`
+  /// gate is what makes that precise: the fine-tune retarget is the view's onChange `syncEditSession`,
+  /// so both a held existing-slice edit and a not-yet-retargeted pending draft from a *previous*
+  /// selection can still be open here — either would leak an unrelated `draftRange` into the accept.
+  /// A draft only belongs to the current selection once its committed baseline matches it; a live
+  /// grip drag changes `draftRange` but not `committedRange`, so an in-progress resize still passes.
+  private var suggestionEditingRange: Range<Int>? {
+    if fineTune.target == .pendingSelection, fineTune.committedRange == selectedSourceRange,
+      let draft = fineTune.draftRange
+    {
+      return draft
+    }
+    return selectedSourceRange
+  }
+
+  /// Drops the suggestion-editing link and its baseline together. Every clear site routes here so
+  /// the two never drift apart (a stale baseline with a nil id, or vice versa).
+  private func clearSuggestionEditingLink() {
+    selectedCutSuggestionID = nil
+    suggestionBaselineRange = nil
   }
 
   /// Clicking a saved clip reveals it the same way a suggestion does — its words are selected,
@@ -1641,7 +1738,8 @@ final class EditorModel: ViewModel {
   /// unsorted or sparse `wordIDs` still frames the right range. Reveals only when the selection
   /// actually resolved — a stale item whose words are gone leaves the current view untouched
   /// instead of jumping to the previous selection.
-  private func revealWords(_ wordIDs: [Word.ID]) {
+  @discardableResult
+  private func revealWords(_ wordIDs: [Word.ID]) -> Bool {
     let positions = wordIDs.compactMap { id in
       editPlan.words.firstIndex(where: { $0.id == id })
     }
@@ -1650,7 +1748,7 @@ final class EditorModel: ViewModel {
     guard positions.count == wordIDs.count,
       let lower = positions.min(), let upper = positions.max(),
       let range = sourceRange(coveringWords: editPlan.words[lower].id, editPlan.words[upper].id)
-    else { return }
+    else { return false }
     // Pin the Shift-extend anchor to the new selection's start edge, like every other
     // selection-replacing writer (plain click, marquee, transcript select). A reveal that skipped this
     // would leave `selectionAnchorSample` on the *previous* selection, so a later Shift-extend or edge
@@ -1660,8 +1758,9 @@ final class EditorModel: ViewModel {
     // Only frame the reveal if the selection actually resolved. A range built from out-of-file word
     // bounds collapses to no selection in the funnel; scrolling to that phantom word anyway would
     // leave the panes inconsistent (highlight gone, transcript jumped). Matches this method's contract.
-    guard audioSelection != nil else { return }
+    guard audioSelection != nil else { return false }
     revealSourceRange(range, zoomWaveform: true)
+    return true
   }
 
   /// Zooms and scrolls the waveform to frame the current selection (padded). A no-op
