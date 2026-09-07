@@ -333,6 +333,8 @@ final class EditorModel: ViewModel {
   /// Which pane the right column shows. The clips list and the cut-suggester share the
   /// column so accepting a suggestion visibly lands a clip in the Slices tab.
   var rightPanelTab: RightPanelTab = .slices
+  /// The Slices panel's completion filter (All / In progress / Complete).
+  var sliceFilter: SliceFilter = .all
   /// The number the next auto-named "Slice N" gets. Seeded in `init` from the loaded slices (so a
   /// rebuilt editor keeps counting past existing clips) and bumped as clips are added in-session.
   private var nextSliceNumber = 1
@@ -484,6 +486,9 @@ final class EditorModel: ViewModel {
   let removedBadgeHelp =
     "This clip's audio is entirely inside a removed section — there is nothing to export."
   let slicesTabLabel = "Clips"
+  let noFilteredSlicesMessage = "No clips match this filter."
+  let sliceFilterPickerLabel = "Filter clips"
+  let editingCompleteLabel = "Editing Complete"
   let suggestionsTabLabel = "Suggestions"
   let bothTabLabel = "Both"
   let rightPanelPickerLabel = "Right panel"
@@ -933,9 +938,38 @@ final class EditorModel: ViewModel {
           canFineTune: !fineTune.hasUnsavedChange || activeSliceID == slice.id,
           canExport: canExport,
           removedLabel: canExport ? "" : removedBadgeLabel,
-          removedHelp: canExport ? "" : removedBadgeHelp
+          removedHelp: canExport ? "" : removedBadgeHelp,
+          editingComplete: slice.editingComplete,
+          completionSystemImage: slice.editingComplete ? "checkmark.circle.fill" : "circle",
+          completionLabel: editingCompleteLabel,
+          completionHelp: editingCompleteLabel
         )
       })
+  }
+
+  /// `sliceRows` narrowed by `sliceFilter` — what the Slices panel actually lists.
+  var visibleSliceRows: IdentifiedArrayOf<SliceRowState> {
+    switch sliceFilter {
+    case .all: return sliceRows
+    case .inProgress: return sliceRows.filter { !$0.editingComplete }
+    case .complete: return sliceRows.filter(\.editingComplete)
+    }
+  }
+
+  var sliceFilterOptions: [SliceFilter] { SliceFilter.allCases }
+
+  func sliceFilterLabel(_ filter: SliceFilter) -> String {
+    switch filter {
+    case .all: return "All"
+    case .inProgress: return "In progress"
+    case .complete: return "Complete"
+    }
+  }
+
+  /// The Slices panel's empty-state copy: no clips at all vs. clips exist but the current
+  /// filter hides them all.
+  var sliceListEmptyMessage: String {
+    slices.isEmpty ? emptyStateMessage : noFilteredSlicesMessage
   }
 
   let fineTuneLabel = "Edit cuts"
@@ -1743,6 +1777,8 @@ final class EditorModel: ViewModel {
     child.onUndo = { [weak self] in await self?.undoTapped() }
     child.onRedo = { [weak self] in await self?.redoTapped() }
     child.onCommit = { [weak self] range in self?.commitSliceEdit(id: id, range: range) }
+    child.onSetEditingComplete = { [weak self] value in self?.setSliceEditingComplete(id, to: value)
+    }
     child.onPlay = { [weak self] range in
       // Logic model: Play always plays `range` from the playhead as a fresh, exclusive `.sliceEdit`
       // playback (the child derives `range` from the cursor). Pause merely freezes the cursor; the
@@ -2090,8 +2126,41 @@ final class EditorModel: ViewModel {
     mutateSlices { $0[id: id]?.name = name }
   }
 
+  func setSliceEditingComplete(_ id: Slice.ID, to value: Bool) {
+    mutateSlices { $0[id: id]?.editingComplete = value }
+  }
+
+  /// The panel emits offsets indexed into `visibleSliceRows`, which is a filtered subset
+  /// when a clip filter is active. Applying them to the visible rows and reconstructing the
+  /// full order keeps hidden clips in their absolute slots and reorders only what the user
+  /// dragged. With the `.all` filter this reduces to a plain `move` on the full collection.
   func moveSlices(fromOffsets source: IndexSet, toOffset destination: Int) {
-    mutateSlices { $0.move(fromOffsets: source, toOffset: destination) }
+    let reorderedVisibleIDs = Self.moved(
+      visibleSliceRows.map(\.id), fromOffsets: source, toOffset: destination)
+    let visibleIDs = Set(reorderedVisibleIDs)
+    mutateSlices { slices in
+      var next = reorderedVisibleIDs.makeIterator()
+      let reordered = slices.ids.map { visibleIDs.contains($0) ? next.next()! : $0 }
+      slices = IdentifiedArrayOf(uniqueElements: reordered.map { slices[id: $0]! })
+    }
+  }
+
+  /// Reorders `array` the way SwiftUI's `List` `onMove` expects: pull the elements at `source`
+  /// out and reinsert them so `destination` is the pre-removal gap they land in. Kept as a
+  /// stdlib-only helper so the reorder does not depend on SwiftUI's `RangeReplaceableCollection`
+  /// extension leaking into this (non-SwiftUI) model file.
+  private static func moved<Element>(
+    _ array: [Element], fromOffsets source: IndexSet, toOffset destination: Int
+  ) -> [Element] {
+    let sources = source.filter { array.indices.contains($0) }.sorted()
+    guard !sources.isEmpty else { return array }
+    let clampedDestination = min(max(destination, 0), array.count)
+    let moving = sources.map { array[$0] }
+    var result = array
+    for index in sources.reversed() { result.remove(at: index) }
+    let insertionIndex = clampedDestination - sources.filter { $0 < clampedDestination }.count
+    result.insert(contentsOf: moving, at: insertionIndex)
+    return result
   }
 
   func deleteSlice(_ id: Slice.ID) async {
@@ -2162,6 +2231,11 @@ final class EditorModel: ViewModel {
     if let editing = editSlice, editSliceRangeIsStale(editing) {
       stopActiveTransportSnapshotting()
       editSlice = nil
+    } else if let editing = editSlice, let slice = slices[id: editing.sliceID] {
+      // The sheet survived (boundaries intact) but a shared-document undo/redo can still have
+      // flipped this slice's editing-complete flag underneath it. The flag was seeded once at open,
+      // so re-sync it here or the sheet shows a stale icon and the next toggle sends a no-op value.
+      editing.editingComplete = slice.editingComplete
     }
     if case .slice(let playing) = transportContext, slices[id: playing] == nil {
       await endTransportPlayback()
@@ -3302,6 +3376,15 @@ enum RightPanelTab: String, CaseIterable, Identifiable, Equatable {
   var id: String { rawValue }
 }
 
+/// The Slices panel's completion filter — All clips, only those still in progress, or only
+/// those marked editing-complete.
+enum SliceFilter: String, CaseIterable, Identifiable, Equatable {
+  case all
+  case inProgress
+  case complete
+  var id: String { rawValue }
+}
+
 struct SliceRowState: Identifiable, Equatable {
   var id: Slice.ID
   var name: String
@@ -3317,6 +3400,10 @@ struct SliceRowState: Identifiable, Equatable {
   var canExport: Bool
   var removedLabel: String
   var removedHelp: String
+  var editingComplete: Bool
+  var completionSystemImage: String
+  var completionLabel: String
+  var completionHelp: String
 }
 
 /// The identity of a fine-tune edit session — the active slice, or a live transcript
