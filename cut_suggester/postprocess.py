@@ -165,6 +165,7 @@ def merge_adjacent_same_label(
         j = i
         while (
             j + 1 < len(ordered)
+            and ordered[i].product_type is ProductType.SPOTLIGHT
             and ordered[j + 1].product_type is ordered[i].product_type
             and _norm_label(ordered[j + 1].label) == _norm_label(ordered[i].label)
             and ordered[j + 1].start_index <= ordered[j].end_index + max_gap_sentences + 1

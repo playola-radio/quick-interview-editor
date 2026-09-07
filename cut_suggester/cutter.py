@@ -87,7 +87,7 @@ def parse_partition_response(text: str, a: int, b: int) -> list[TopicPartition]:
     return out
 
 
-def parse_clip_response(text: str) -> list[dict]:
+def _parse_clip_array(text: str) -> list[object]:
     if not text.strip():
         raise CutSuggesterOutputError(
             "classification response was empty; the provider likely hit its output limit "
@@ -103,7 +103,12 @@ def parse_clip_response(text: str) -> list[dict]:
     clips = data.get("clips") if isinstance(data, dict) else None
     if not isinstance(clips, list):
         raise CutSuggesterOutputError("classification response did not contain a 'clips' array")
-    return [c for c in clips if isinstance(c, dict)]
+    return clips
+
+
+def parse_clip_response(text: str) -> list[dict]:
+    """Legacy parser: retain only object entries from a valid clips array."""
+    return [c for c in _parse_clip_array(text) if isinstance(c, dict)]
 
 
 def stage1_partition(
@@ -145,9 +150,17 @@ def stage2_classify(
     partitions: list[TopicPartition],
     llm: LLMClient,
     specs: dict[ProductType, ProductSpec],
+    *,
+    strict: bool = False,
 ) -> list[dict]:
     resp = llm.complete(stage2_prompt(sentences, partitions, specs), purpose="classify")
-    return parse_clip_response(resp.text)
+    raw_array = _parse_clip_array(resp.text)
+    clips = [item for item in raw_array if isinstance(item, dict)]
+    if strict and raw_array and not any(
+        validate_clip(item)[0] and ProductType(item["type"]) in specs for item in clips
+    ):
+        raise CutSuggesterOutputError("classification response contained no valid requested clips")
+    return clips
 
 
 def suggest_cuts(
@@ -155,12 +168,26 @@ def suggest_cuts(
     llm: LLMClient,
     *,
     specs: dict[ProductType, ProductSpec] | None = None,
+    configuration: dict | None = None,
+    strict: bool = False,
     sample_rate: int = DEFAULT_SAMPLE_RATE,
     window: int = STAGE1_WINDOW,
     step: int = STAGE1_STEP,
     progress: ProgressFn = _noop_progress,
 ) -> CutSuggestResult:
-    specs = specs or DEFAULT_SPECS
+    if configuration is not None:
+        if specs is not None:
+            raise ValueError("pass either specs or configuration, not both")
+        from .suggestion_config import configured_tuned_specs
+        specs = configured_tuned_specs(configuration)
+        strict = True
+    specs = DEFAULT_SPECS if specs is None else specs
+
+    if not specs:
+        return CutSuggestResult(candidates=[], partitions=[], dropped=[], meta={
+            "n_sentences": len(sentences), "n_partitions": 0, "n_raw_clips": 0,
+            "n_invalid_clips": 0, "n_dropped_duration": 0,
+        })
 
     if not sentences:
         return CutSuggestResult(candidates=[], partitions=[], dropped=[], meta={
@@ -171,13 +198,15 @@ def suggest_cuts(
     progress(phase="started", message="Analyzing transcript")
     partitions = stage1_partition(sentences, llm, window=window, step=step, progress=progress)
     progress(phase="classifying", message="Selecting product clips")
-    raw_clips = stage2_classify(sentences, partitions, llm, specs)
+    raw_clips = stage2_classify(sentences, partitions, llm, specs, strict=strict)
 
     progress(phase="postprocessing", message="Building candidates")
     candidates: list[CutCandidate] = []
     invalid = 0
     for raw in raw_clips:
         ok, _reason = validate_clip(raw)
+        if ok and ProductType(raw["type"]) not in specs:
+            ok = False
         if not ok:
             invalid += 1
             continue

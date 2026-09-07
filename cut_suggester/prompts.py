@@ -45,6 +45,12 @@ def stage2_prompt(
         blocks.append(f"[P{p.start}-{p.end} | {p.label}] {seg}")
     body = "\n\n".join(blocks)
     spec_lines = "\n".join(_spec_line(specs[t]) for t in (ProductType.SPOTLIGHT, ProductType.INTRO) if t in specs)
+    default_pair = set(specs) == {ProductType.SPOTLIGHT, ProductType.INTRO}
+    type_alternatives = '"spotlight"|"intro"' if default_pair else "|".join(
+        f'"{product_type.value}"'
+        for product_type in (ProductType.SPOTLIGHT, ProductType.INTRO)
+        if product_type in specs
+    )
     return (
         "You are a radio editor. Below is an interview already partitioned into "
         "topic paragraphs (each tagged [P<start>-<end> | label]). Produce product "
@@ -57,7 +63,7 @@ def stage2_prompt(
         "sentence indices for clean edges. Skip only paragraphs that are "
         "interviewer chatter or clearly not clip-worthy. For an intro, set "
         '"song" to the named song; otherwise null. Return STRICT JSON: '
-        '{"clips": [{"type": "spotlight"|"intro", "start": <sent idx>, "end": '
+        '{"clips": [{"type": ' + type_alternatives + ', "start": <sent idx>, "end": '
         '<sent idx incl>, "label": "<3-6 words>", "song": <song or null>}]}.\n\n'
         + body
     )
