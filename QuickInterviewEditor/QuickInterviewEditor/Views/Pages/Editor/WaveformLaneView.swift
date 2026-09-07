@@ -905,8 +905,10 @@ private struct WaveformAmplitudeZoomDragArea: NSViewRepresentable {
     }
 
     override func mouseDown(with event: NSEvent) {
-      guard isEnabled else { return }
+      // Ends editing even when amplitude zoom is disabled: this view still claims the click, so a
+      // click here must dismiss an in-progress rename like every other content layer.
       endActiveTextEditing()
+      guard isEnabled else { return }
       if event.clickCount >= 2 {
         dragStartY = nil
         waveform?.amplitudeZoomResetTapped()
