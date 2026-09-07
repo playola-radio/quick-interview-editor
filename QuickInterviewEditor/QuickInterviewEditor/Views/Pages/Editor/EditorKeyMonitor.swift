@@ -81,19 +81,22 @@ struct EditorKeyMonitor: NSViewRepresentable {
       default: break
       }
       if modifiers.isEmpty, characters?.lowercased() == "z" { return .zoomFit }
-      if modifiers == .command, let digitKey = Self.digitKey(forCharacters: characters) {
+      if modifiers == .command, let digitKey = Self.digitKey(forKeyCode: keyCode) {
         return digitKey
       }
       return nil
     }
 
     /// ⌘1/⌘2/⌘3 switch the editor's right panel — split out of `editorKey` to keep its
-    /// cyclomatic complexity in check.
-    private static func digitKey(forCharacters characters: String?) -> EditorKey? {
-      switch characters {
-      case "1": return .showClipsPanel
-      case "2": return .showSuggestionsPanel
-      case "3": return .showBothPanels
+    /// cyclomatic complexity in check. Matched by physical key code (the number-row 1/2/3 keys are
+    /// 18/19/20) rather than `charactersIgnoringModifiers`, which breaks on layouts whose number row
+    /// isn't unshifted ASCII digits (e.g. AZERTY types & é " there) — mirroring the arrow and
+    /// comma/period keys, which key off physical codes for the same reason.
+    private static func digitKey(forKeyCode keyCode: UInt16) -> EditorKey? {
+      switch keyCode {
+      case 18: return .showClipsPanel  // 1
+      case 19: return .showSuggestionsPanel  // 2
+      case 20: return .showBothPanels  // 3
       default: return nil
       }
     }
