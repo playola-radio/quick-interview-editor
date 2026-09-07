@@ -3,7 +3,8 @@ import SwiftUI
 
 /// A logic-free bridge, sibling to ``EditorKeyMonitor``: while the slice-edit sheet is the key
 /// window, it forwards the zoom keys (⌘← / ⌘→ step-zoom, Z zoom-to-fit) to the sheet's
-/// ``EditSliceModel`` lane, Space to its Play/Pause transport, Return / keypad Enter to jump the
+/// ``EditSliceModel`` lane, Space to its Play/Stop transport (stop returns the playhead to the play
+/// origin, matching the main window), Return / keypad Enter to jump the
 /// playhead to the clip's cut-in, and `[` / `]` to its audition
 /// In/Out (otherwise these would beep — the sheet mounts no other key handler). The main editor's
 /// own monitors stand down while the sheet is up (their window is not key), so nothing
@@ -180,7 +181,7 @@ struct SliceEditKeyMonitor: NSViewRepresentable {
         return true
       case .speedUp, .speedDown, .escape, .nudgeCutInEarlier, .nudgeCutInLater,
         .nudgeCutOutEarlier, .nudgeCutOutLater, .showClipsPanel, .showSuggestionsPanel,
-        .showBothPanels:
+        .showBothPanels, .returnToLastPlayStart:
         return false
       }
     }
@@ -198,12 +199,14 @@ struct SliceEditKeyMonitor: NSViewRepresentable {
 
     private func handleSpace(isARepeat: Bool, window: NSWindow, model: EditSliceModel) -> Bool {
       // Space activates a focused control (button) via Full Keyboard Access; don't hijack it there —
-      // fire Play/Pause only when focus is on the sheet's content, matching how ``AuditionKeyMonitor``
+      // fire the transport only when focus is on the sheet's content, matching how ``AuditionKeyMonitor``
       // treats Space in the main editor.
       if window.firstResponder is NSControl { return false }
       // Swallow auto-repeat so holding Space doesn't retrigger the transport (or beep).
       if isARepeat { return true }
-      Task { await model.playPauseTapped() }
+      // Play/Stop toggle — unified with the main window: Space stops and returns the playhead to the
+      // play origin rather than pausing in place (the dedicated Play/Pause button still pauses).
+      Task { await model.playStopTapped() }
       return true
     }
   }

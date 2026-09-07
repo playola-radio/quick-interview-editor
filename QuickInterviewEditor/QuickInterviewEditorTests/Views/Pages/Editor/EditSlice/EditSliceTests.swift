@@ -237,6 +237,80 @@ struct EditSliceTests {
     #expect(model.isPlaying == false)
   }
 
+  // MARK: - Space unifies with the main window: stop (not pause), returning to the play origin
+
+  @Test func spaceTogglePlaysFromTheCursorWhenStopped() async {
+    let (model, slice) = makeModel()
+    var played: [Range<Int>] = []
+    model.onPlay = { played.append($0) }
+
+    await model.playStopTapped()
+
+    expectNoDifference(played, [slice.startSample..<slice.endSample])
+    #expect(model.isPlaying == true)
+  }
+
+  @Test func spaceToggleStopsInsteadOfPausingWhenPlaying() async {
+    let (model, _) = makeModel()
+    var pauses = 0
+    var stops = 0
+    model.onPause = { pauses += 1 }
+    model.onStop = { stops += 1 }
+    model.updatePlayback(sample: 12_000, isPlaying: true)
+
+    await model.playStopTapped()
+
+    #expect(stops == 1)  // stops (returning to the play origin via the parent) — never pauses in place
+    #expect(pauses == 0)
+    #expect(model.isPlaying == false)
+  }
+
+  @Test func spaceToggleStopsAnActiveAudition() async {
+    let (model, _) = makeModel()
+    var stops = 0
+    model.onPlay = { _ in }
+    model.onStop = { stops += 1 }
+    await model.auditionInTapped()
+    #expect(model.activeAudition != nil)
+
+    await model.playStopTapped()  // an audition counts as playing → Space stops it
+
+    #expect(stops == 1)
+    #expect(model.activeAudition == nil)
+    #expect(model.isPlaying == false)
+  }
+
+  /// Two Spaces in a row: the first starts playback (suspended in `onPlay`), the second — arriving
+  /// while `isPlaying` is already true — must route through `stopTapped` and end the very playback
+  /// the first started, not spawn a duplicate. Guards the concurrent-`Task` shape the key monitor
+  /// actually schedules (each keyDown enqueues its own task).
+  @Test func doubleSpaceStopsThePlaybackTheFirstSpaceStarted() async {
+    let (model, _) = makeModel()
+    let playGate = VoidGate()
+    var plays = 0
+    var stops = 0
+    model.onPlay = { _ in
+      plays += 1
+      await playGate.suspend()
+    }
+    model.onStop = { stops += 1 }
+
+    let firstSpace = Task { await model.playStopTapped() }  // plays → suspends in onPlay
+    await Task.yield()
+    #expect(model.isPlaying == true)
+
+    await model.playStopTapped()  // second Space, now playing → stops the first playback
+
+    #expect(stops == 1)
+    #expect(model.isPlaying == false)
+
+    await playGate.release()
+    await firstSpace.value
+
+    #expect(plays == 1)  // no duplicate playback was started
+    #expect(model.isPlaying == false)
+  }
+
   @Test func stopTappedDelegatesToOnStop() async {
     let (model, _) = makeModel()
     var stops = 0
@@ -1342,13 +1416,13 @@ struct EditSliceTests {
     #expect(model.auditionStatusText == nil)
 
     await model.auditionInTapped()
-    expectNoDifference(model.auditionStatusText, "Auditioning in-cut — Space to pause")
+    expectNoDifference(model.auditionStatusText, "Auditioning in-cut — Space to stop")
 
     await model.auditionInTapped()  // toggle off
     #expect(model.auditionStatusText == nil)
 
     await model.auditionOutTapped()
-    expectNoDifference(model.auditionStatusText, "Auditioning out-cut — Space to pause")
+    expectNoDifference(model.auditionStatusText, "Auditioning out-cut — Space to stop")
   }
 
   // MARK: - Transport action races (stale-continuation guard)

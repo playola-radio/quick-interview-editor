@@ -26,6 +26,9 @@ enum EditorKey {
   case showClipsPanel
   case showSuggestionsPanel
   case showBothPanels
+  /// Seeks the playhead to where free transport last started (the cursor if nothing has played
+  /// yet) and plays from there, superseding any live/paused playback. Bound to plain `R`.
+  case returnToLastPlayStart
 }
 
 @MainActor
@@ -298,6 +301,12 @@ final class EditorModel: ViewModel {
   }
   /// Where the transport last started playing, in EDITED samples; Stop returns the cursor here.
   var transportOriginEditedSample: Int?
+  /// Where FREE transport (Space/Play) last started, in EDITED samples — the `R` key seeks here and
+  /// replays. Unlike `transportOriginEditedSample` it survives Stop (`resetTransportState` leaves it
+  /// alone), and only free playback writes it: slice/audition/preview starts never move it, so `R`
+  /// always returns to the last full playthrough's start. `syncEditedTimeline` remaps it through
+  /// source coordinates on every timeline edit so it keeps pointing at the same recorded moment.
+  var lastFreePlayStartEditedSample: Int?
   /// The EXACT source sample of a source-range playback's origin (nil for edited-timeline
   /// playback). Stop and the timeline remap restore through it, so an origin inside a
   /// crossfade tail or removed span isn't round-tripped to the post-cut side.
@@ -403,10 +412,15 @@ final class EditorModel: ViewModel {
     let sourceOrigin =
       transportOriginSourceAnchor
       ?? transportOriginEditedSample.map(editedWaveform.timeline.editedToSource)
+    // The `R` replay target survives Stop, so it never has a source anchor — remap it through the
+    // lossy round trip like an edited-axis origin so R keeps pointing at the same recorded moment.
+    let sourceReplayStart = lastFreePlayStartEditedSample.map(
+      editedWaveform.timeline.editedToSource)
     editedWaveform.timeline = newTimeline
     editedWaveform.timelineChanged()
     placeCursor(atSource: sourceCursor)
     transportOriginEditedSample = sourceOrigin.map(editedCursor(forSource:))
+    lastFreePlayStartEditedSample = sourceReplayStart.map(editedCursor(forSource:))
     // Fan the same timeline into an open slice-edit sheet so its collapsed lane reflects the change
     // (a removal / undo / redo on the main timeline) immediately, re-pinned to the slice's new span.
     editSlice?.syncTimeline(newTimeline)
@@ -1448,14 +1462,22 @@ final class EditorModel: ViewModel {
     case .removeSection:
       return handleRemoveSectionKey()
     case .escape:
-      // Consumed only when it actually deselects a seam, so a no-op Escape still propagates.
-      guard selectedSeamID != nil else { return false }
-      deselectSeam()
+      return handleEscapeKey()
     case .nudgeCutInEarlier, .nudgeCutInLater, .nudgeCutOutEarlier, .nudgeCutOutLater:
       return nudgeSelection(key)
     case .showClipsPanel, .showSuggestionsPanel, .showBothPanels:
       switchRightPanel(key)
+    case .returnToLastPlayStart:
+      Task { await returnToLastPlayStartTapped() }
     }
+    return true
+  }
+
+  /// Esc handling, split out of `editorKeyDown`'s switch to keep its cyclomatic complexity in
+  /// check. Consumed only when it actually deselects a seam, so a no-op Escape still propagates.
+  private func handleEscapeKey() -> Bool {
+    guard selectedSeamID != nil else { return false }
+    deselectSeam()
     return true
   }
 
@@ -2456,6 +2478,9 @@ final class EditorModel: ViewModel {
     slicePlaybackConversion = resolved.slicePlaylist
     transportOriginEditedSample = resolved.startEditedSample
     transportOriginSourceAnchor = resolved.sourceRange?.lowerBound
+    if case .free = context {
+      lastFreePlayStartEditedSample = resolved.startEditedSample
+    }
     if let sourceRange = resolved.sourceRange {
       placeCursor(atSource: sourceRange.lowerBound)
     } else {
@@ -2543,6 +2568,21 @@ final class EditorModel: ViewModel {
     } else {
       await transportPlayTapped()  // resumes when paused, starts from the cursor when stopped
     }
+  }
+
+  /// `R`: seeks the playhead to where free transport last started — the current cursor if nothing
+  /// has played yet — and plays from there. Always begins a fresh free playback, so a live or
+  /// paused session is superseded and audio jumps straight back to that spot and keeps going.
+  func returnToLastPlayStartTapped() async {
+    let editedDuration = editedWaveform.timeline.editedDurationSamples
+    func isPlayable(_ sample: Int) -> Bool { sample >= 0 && sample < editedDuration }
+    // A remembered start can be remapped to the edited end (its source moment was removed through
+    // EOF) and so become unplayable — fall back to the cursor (D2=B) rather than silently no-op,
+    // which would also leave any live/paused session running against this method's contract.
+    let remembered = lastFreePlayStartEditedSample.flatMap { isPlayable($0) ? $0 : nil }
+    let target = remembered ?? playheadEditedSample
+    guard isPlayable(target) else { return }
+    await beginTransportPlayback(.editedTimeline(fromEdited: target), context: .free)
   }
 
   /// Selection reconciliation, driven by `EditorView.onChange(of: audioSelection)`.
