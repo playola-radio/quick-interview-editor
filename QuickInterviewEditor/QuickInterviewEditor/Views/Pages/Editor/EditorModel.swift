@@ -903,13 +903,16 @@ final class EditorModel: ViewModel {
   /// through the draft-aware computed spans, and the document is committed only on release.
   func transcriptResizeDragged(toWord id: Word.ID) {
     guard var draft = transcriptResizeDraft else { return }
+    // Dedup on the snapped target word only: resizes snap to whole words (D1), so ticks that stay
+    // inside the same word are pure re-renders. Do NOT also dedup on an unchanged word run — a
+    // freeform selection's edge must still snap to the word boundary via `applyEdgeEdit` even when
+    // the covered word run is unchanged (its sample range still moves).
     guard id != lastResizeTargetWord else { return }
     lastResizeTargetWord = id
     guard
       let newWords = TranscriptResizeMath.resized(
         itemWordIDs: draft.originalWordIDs, edge: draft.edge,
-        toTargetWord: id, transcriptOrder: transcriptOrder()),
-      newWords != draft.draftedWordIDs
+        toTargetWord: id, transcriptOrder: transcriptOrder())
     else { return }
     draft.draftedWordIDs = newWords
     transcriptResizeDraft = draft

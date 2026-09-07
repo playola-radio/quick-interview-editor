@@ -106,6 +106,18 @@ struct TranscriptResizeMathTests {
     expectNoDifference(result?.0, .clip(nearID))
   }
 
+  /// Same item (selection), start and end zones equidistant from the point: the edge tie-break
+  /// resolves to `.end`, preserving the pre-extraction string-key ordering (`"…end" < "…start"`).
+  @Test func sameItemEdgeTieResolvesToEnd() {
+    let zones = [
+      zone(.selection, .start, minX: 0, width: 24),  // midX 12
+      zone(.selection, .end, minX: 16, width: 24),  // midX 28
+    ]
+    let result = TranscriptResizeMath.resolveHandle(hitting: CGPoint(x: 20, y: 5), in: zones)
+    expectNoDifference(result?.0, .selection)
+    expectNoDifference(result?.1, .end)
+  }
+
   /// Full tie (same priority, same edge-distance): resolution is deterministic — the same
   /// input never flickers between the two equally-eligible zones.
   @Test func fullTieResolvesDeterministically() {

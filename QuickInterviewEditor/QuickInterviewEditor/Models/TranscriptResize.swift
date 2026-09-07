@@ -10,8 +10,10 @@ enum TranscriptResizeMetrics {
 enum TranscriptResizeEdge: Equatable, Sendable {
   case start, end
 
-  /// Stable ordinal for the deterministic hit-resolution tie-break.
-  fileprivate var tieBreakOrdinal: Int { self == .start ? 0 : 1 }
+  /// Stable ordinal for the deterministic hit-resolution tie-break. `.end` sorts ahead of `.start`
+  /// so an exact same-item start/end distance tie resolves to `.end`, matching the pre-extraction
+  /// string key (`"…end" < "…start"`).
+  fileprivate var tieBreakOrdinal: Int { self == .end ? 0 : 1 }
 }
 
 enum TranscriptResizeItemIdentity: Equatable, Hashable, Sendable {

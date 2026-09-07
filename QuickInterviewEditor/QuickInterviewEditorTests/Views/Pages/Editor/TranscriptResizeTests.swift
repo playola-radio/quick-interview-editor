@@ -175,6 +175,24 @@ struct TranscriptResizeTests {
     expectNoDifference(model.transcriptResizeDraft, nil)
   }
 
+  /// Regression for Codex phase-3 (perf-loop) P2 #1: dragging a freeform selection's edge to a word
+  /// that leaves the covered word RUN unchanged must still snap the sample range to whole-word
+  /// bounds (D1). The perf dedup keys on the target word only; it must not additionally skip on an
+  /// unchanged run, or a freeform selection whose end already sits inside word 3 never snaps when
+  /// the user drags the end handle but stays on word 3. Freeform 60_000..<80_000 covers words
+  /// [1, 2, 3]; the end-drag to word 3 must snap it to sourceRange([1, 2, 3]) = 54772..<98916.
+  @Test func selectionResizeSnapsFreeformRangeWhenWordRunUnchanged() {
+    let model = editor()
+    model.selectSourceRange(60_000..<80_000, snapPlayhead: false)
+    expectNoDifference(model.selectedWordIDs, [1, 2, 3])
+
+    model.transcriptResizeBegan(.selection, .end)
+    model.transcriptResizeDragged(toWord: 3)
+
+    expectNoDifference(model.selectedWordIDs, [1, 2, 3])
+    expectNoDifference(model.audioSelection, 54772..<98916)
+  }
+
   // MARK: - FIX A: guard `began` against a dirty slice edit or export
 
   private func selectWords(_ transcript: TranscriptPageModel, _ first: Int, _ last: Int) {
