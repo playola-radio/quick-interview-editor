@@ -1521,16 +1521,29 @@ final class EditorModel: ViewModel {
       return handleRemoveSectionKey()
     case .escape:
       return handleEscapeKey()
-    case .nudgeCutInEarlier, .nudgeCutInLater, .nudgeCutOutEarlier, .nudgeCutOutLater:
-      return nudgeSelection(key)
+    case .nudgeCutInEarlier, .nudgeCutInLater, .nudgeCutOutEarlier, .nudgeCutOutLater,
+      .nudgeLeftCutEarlier, .nudgeLeftCutLater, .nudgeRightCutEarlier, .nudgeRightCutLater:
+      return handleNudgeKey(key)
     case .showClipsPanel, .showSuggestionsPanel, .showBothPanels:
       switchRightPanel(key)
     case .returnToLastPlayStart:
       Task { await returnToLastPlayStartTapped() }
-    case .nudgeLeftCutEarlier, .nudgeLeftCutLater, .nudgeRightCutEarlier, .nudgeRightCutLater:
-      return nudgeSeamCut(key)
     }
     return true
+  }
+
+  /// Routes an arrow-nudge key, split out of `editorKeyDown`'s switch to keep its cyclomatic
+  /// complexity in check: ⌥-less cut-in/out nudges act on the marquee selection, while the ⌥/⌥⇧
+  /// left/right-cut nudges act on the selected crossfade seam.
+  private func handleNudgeKey(_ key: EditorKey) -> Bool {
+    switch key {
+    case .nudgeCutInEarlier, .nudgeCutInLater, .nudgeCutOutEarlier, .nudgeCutOutLater:
+      return nudgeSelection(key)
+    case .nudgeLeftCutEarlier, .nudgeLeftCutLater, .nudgeRightCutEarlier, .nudgeRightCutLater:
+      return nudgeSeamCut(key)
+    default:
+      return true
+    }
   }
 
   /// Esc handling, split out of `editorKeyDown`'s switch to keep its cyclomatic complexity in
@@ -1850,18 +1863,7 @@ final class EditorModel: ViewModel {
     child.currentCrossfadeLength = { [weak self] removalID in
       self?.timelineRemovals[id: removalID]?.crossfade.lengthSamples
     }
-    // A cut-point ⌥-drag inside the sheet commits through the SAME `updateRemovalRange` funnel the main
-    // editor uses (moved range + pinned STORED fade length, so the move is non-destructive), so it is
-    // identical on both surfaces and one ⌘Z step; the parent fans the result back into the open sheet
-    // via `syncEditedTimeline`. The
-    // sheet drafts against its own lane and narrows the clamp to the slice window, delegating the
-    // neighbor/cross-cut/non-empty part to the parent's tested `clampedRemovalRange`.
-    child.onMoveCutPoint = { [weak self] removalID, range, length in
-      self?.updateRemovalRange(id: removalID, removedRange: range, freezingCrossfadeLength: length)
-    }
-    child.clampCutPointRange = { [weak self] removalID, proposed, length in
-      self?.clampedRemovalRange(id: removalID, proposed: proposed, frozenLength: length) ?? proposed
-    }
+    wireSliceCutPointCommit(child)
     // Mirror the main lane's begin-time refusal: `updateCrossfade` is frozen mid-export, so the sheet
     // must not preview a stretch its release would discard.
     child.canEditCrossfade = { [weak self] in self?.isExporting == false }
@@ -1915,6 +1917,21 @@ final class EditorModel: ViewModel {
       self?.editSlice = nil
     }
     editSlice = child
+  }
+
+  /// Wires the sheet's cut-point ⌥-drag through the SAME `updateRemovalRange` funnel the main editor
+  /// uses (moved range + pinned STORED fade length, so the move is non-destructive), so it is
+  /// identical on both surfaces and one ⌘Z step; the parent fans the result back into the open sheet
+  /// via `syncEditedTimeline`. The sheet drafts against its own lane and narrows the clamp to the
+  /// slice window, delegating the neighbor/cross-cut/non-empty part to the parent's tested
+  /// `clampedRemovalRange`. Split out of `editSliceTapped` to keep its body within the linter's limit.
+  private func wireSliceCutPointCommit(_ child: EditSliceModel) {
+    child.onMoveCutPoint = { [weak self] removalID, range, length in
+      self?.updateRemovalRange(id: removalID, removedRange: range, freezingCrossfadeLength: length)
+    }
+    child.clampCutPointRange = { [weak self] removalID, proposed, length in
+      self?.clampedRemovalRange(id: removalID, proposed: proposed, frozenLength: length) ?? proposed
+    }
   }
 
   /// Stops whatever playback the transport currently owns, capturing its session SYNCHRONOUSLY so
