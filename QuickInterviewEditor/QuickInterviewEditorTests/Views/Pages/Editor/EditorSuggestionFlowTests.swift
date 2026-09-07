@@ -107,7 +107,7 @@ struct EditorSuggestionFlowTests {
     expectNoDifference(model.documentCutSuggestions[id: suggestion.id]?.status, .pending)
   }
 
-  @Test func editingASuggestionTitleFlowsThroughTheDocumentAndIsUndoable() async {
+  @Test func editingASuggestionTitleCoalescesTypingIntoOneUndoableAction() async {
     let plan = Fixtures.editPlan()
     let model = editor(plan)
     let suggestion = freshSuggestion(Fixtures.uuid(1), plan: plan)
@@ -116,10 +116,19 @@ struct EditorSuggestionFlowTests {
     var seen: [EditorDocumentState] = []
     model.onDocumentStateChanged = { seen.append($0) }
 
+    model.cutSuggestions.titleFocusChanged(suggestion.id, isFocused: true)
+    model.cutSuggestions.titleChanged(suggestion.id, to: "R")
+    model.cutSuggestions.titleChanged(suggestion.id, to: "Renamed")
     model.cutSuggestions.titleChanged(suggestion.id, to: "Renamed cut")
 
     expectNoDifference(model.documentCutSuggestions[id: suggestion.id]?.title, "Renamed cut")
-    expectNoDifference(seen.count, 1)
+    expectNoDifference(seen.count, 3)
+    expectNoDifference(model.documentUndo.undo.count, 0)
+    #expect(!model.canUndo)
+
+    model.cutSuggestions.titleFocusChanged(suggestion.id, isFocused: false)
+
+    expectNoDifference(model.documentUndo.undo.count, 1)
     #expect(model.canUndo)
 
     await model.undoTapped()
@@ -133,10 +142,13 @@ struct EditorSuggestionFlowTests {
     let suggestion = freshSuggestion(Fixtures.uuid(1), plan: plan)
     model.cutSuggestions.onSuggestionsProduced?([suggestion])
 
+    model.cutSuggestions.titleFocusChanged(suggestion.id, isFocused: true)
+    model.cutSuggestions.titleChanged(suggestion.id, to: "My custom")
     model.cutSuggestions.titleChanged(suggestion.id, to: "My custom clip name")
     model.cutSuggestions.acceptTapped(suggestion.id)
 
     expectNoDifference(model.slices[id: suggestion.id]?.name, "My custom clip name")
+    expectNoDifference(model.documentUndo.undo.count, 2)
   }
 
   @Test func speakerOverridesFlowThroughTheDocumentAndAreUndoable() async {

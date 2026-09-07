@@ -140,8 +140,14 @@ final class EditorModel: ViewModel {
     cutSuggestions.onReject = { [weak self] id in
       self?.mutateDocument { $0.cutSuggestions[id: id]?.reject() }
     }
+    cutSuggestions.onTitleEditingBegan = { [weak self] id in
+      self?.cutSuggestionTitleEditingBegan(id)
+    }
     cutSuggestions.onTitleChanged = { [weak self] id, newTitle in
-      self?.mutateDocument { $0.cutSuggestions[id: id]?.title = newTitle }
+      self?.cutSuggestionTitleChanged(id, to: newTitle)
+    }
+    cutSuggestions.onTitleEditingEnded = { [weak self] id in
+      self?.cutSuggestionTitleEditingEnded(id)
     }
     cutSuggestions.onSuggestionsProduced = { [weak self] produced in
       self?.mutateDocument(recordUndo: false) {
@@ -194,6 +200,7 @@ final class EditorModel: ViewModel {
   /// selection, zoom, playback, or export phase. Every document mutation routes
   /// through `mutateDocument`, which records here.
   var documentUndo = UndoStack<EditorDocumentState>()
+  private var cutSuggestionTitleEdit: (id: CutSuggestion.ID, before: EditorDocumentState)?
   /// Fired after every committed document change (mutation, undo, redo) with the new
   /// document — the single dirtiness signal. The tab model wires this to persistence, so
   /// the editor itself never touches the sidecar.
@@ -804,8 +811,14 @@ final class EditorModel: ViewModel {
   // an export for the same reason `canRemoveSelectedSection` is: the document that gated the
   // export is the one being written to disk, and rewinding it mid-run would leave the
   // finished AIFFs stale relative to what the user sees.
-  var canUndo: Bool { documentUndo.canUndo && !hasUncommittedSliceEdit && !isExporting }
-  var canRedo: Bool { documentUndo.canRedo && !hasUncommittedSliceEdit && !isExporting }
+  var canUndo: Bool {
+    documentUndo.canUndo && cutSuggestionTitleEdit == nil && !hasUncommittedSliceEdit
+      && !isExporting
+  }
+  var canRedo: Bool {
+    documentUndo.canRedo && cutSuggestionTitleEdit == nil && !hasUncommittedSliceEdit
+      && !isExporting
+  }
 
   var sliceCountLabel: String {
     "\(slices.count) \(slices.count == 1 ? "clip" : "clips")"
@@ -1480,6 +1493,7 @@ final class EditorModel: ViewModel {
   /// bypasses this — it assigns the fields directly so replaying the stack never records a new
   /// entry.
   func mutateDocument(recordUndo: Bool = true, _ body: (inout EditorDocumentState) -> Void) {
+    finishCutSuggestionTitleEdit()
     let old = documentState
     var new = old
     body(&new)
@@ -1499,6 +1513,36 @@ final class EditorModel: ViewModel {
     }
     syncEditedTimeline()
     onDocumentStateChanged?(documentState)
+  }
+
+  private func cutSuggestionTitleEditingBegan(_ id: CutSuggestion.ID) {
+    finishCutSuggestionTitleEdit()
+    guard documentCutSuggestions[id: id] != nil else { return }
+    cutSuggestionTitleEdit = (id, documentState)
+  }
+
+  private func cutSuggestionTitleChanged(_ id: CutSuggestion.ID, to newTitle: String) {
+    guard cutSuggestionTitleEdit?.id == id else {
+      mutateDocument { $0.cutSuggestions[id: id]?.title = newTitle }
+      return
+    }
+    let old = documentState
+    var new = old
+    new.cutSuggestions[id: id]?.title = newTitle
+    guard new != old else { return }
+    documentCutSuggestions = new.cutSuggestions
+    onDocumentStateChanged?(documentState)
+  }
+
+  private func cutSuggestionTitleEditingEnded(_ id: CutSuggestion.ID) {
+    guard cutSuggestionTitleEdit?.id == id else { return }
+    finishCutSuggestionTitleEdit()
+  }
+
+  private func finishCutSuggestionTitleEdit() {
+    guard let edit = cutSuggestionTitleEdit else { return }
+    cutSuggestionTitleEdit = nil
+    documentUndo.record(before: edit.before, after: documentState)
   }
 
   /// `slices`-only convenience over `mutateDocument`, kept so every existing slice
@@ -2034,7 +2078,7 @@ final class EditorModel: ViewModel {
     // Guard here too, not just on `canUndo`: a menu item or keyboard shortcut could fire this
     // while an existing-slice edit is open, which would rewind `slices` under a live draft —
     // or mid-export, which would leave the finished AIFFs stale.
-    guard !hasUncommittedSliceEdit, !isExporting,
+    guard cutSuggestionTitleEdit == nil, !hasUncommittedSliceEdit, !isExporting,
       let restored = documentUndo.undo(current: documentState)
     else { return }
     restore(restored)
@@ -2044,7 +2088,7 @@ final class EditorModel: ViewModel {
   /// Reapplies the next document snapshot on the redo branch, then reconciles playback. Same
   /// persist-only-on-change behavior as `undoTapped`.
   func redoTapped() async {
-    guard !hasUncommittedSliceEdit, !isExporting,
+    guard cutSuggestionTitleEdit == nil, !hasUncommittedSliceEdit, !isExporting,
       let restored = documentUndo.redo(current: documentState)
     else { return }
     restore(restored)

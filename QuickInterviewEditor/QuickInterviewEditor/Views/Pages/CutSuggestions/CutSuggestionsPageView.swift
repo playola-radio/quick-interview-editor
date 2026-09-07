@@ -91,15 +91,8 @@ private struct SuggestionCard: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 4) {
-      HStack(alignment: .firstTextBaseline) {
-        Text(row.rankLabel)
-          .font(.caption)
-          .foregroundStyle(.secondary)
-        titleView
-        Spacer()
-        Text(row.statusLabel)
-          .font(.caption)
-          .foregroundStyle(.secondary)
+      if row.showsEditableTitle {
+        header { editableTitle }
       }
       // The descriptive lines are a plain-style button so the reveal is keyboard- and
       // VoiceOver-accessible. The title field and Accept/Reject buttons stay outside it so a
@@ -108,6 +101,9 @@ private struct SuggestionCard: View {
         model.rowTapped(row.id)
       } label: {
         VStack(alignment: .leading, spacing: 4) {
+          if row.showsRevealableTitle {
+            header { Text(row.title) }
+          }
           if let songLine = row.songLine {
             Text(songLine)
               .font(.caption)
@@ -144,26 +140,36 @@ private struct SuggestionCard: View {
     .clipShape(RoundedRectangle(cornerRadius: 6))
   }
 
-  @ViewBuilder private var titleView: some View {
-    if row.showsEditableTitle {
-      TextField(
-        row.titlePlaceholder,
-        text: Binding(
-          get: { model.editableTitle(for: row.id) },
-          set: { model.titleChanged(row.id, to: $0) })
-      )
-      .textFieldStyle(.plain)
-      .focused($titleFocused)
-      .padding(.horizontal, 6).padding(.vertical, 3)
-      .background(
-        RoundedRectangle(cornerRadius: 5)
-          .fill(Color.white.opacity(titleFocused ? 0.14 : (titleHovering ? 0.07 : 0)))
-      )
-      .onHover { titleHovering = $0 }
-      .help(model.suggestionTitleHelp)
-      .accessibilityLabel(model.suggestionTitleLabel)
-    } else {
-      Text(row.title)
+  private func header<Title: View>(@ViewBuilder title: () -> Title) -> some View {
+    HStack(alignment: .firstTextBaseline) {
+      Text(row.rankLabel)
+        .font(.caption)
+        .foregroundStyle(.secondary)
+      title()
+      Spacer()
+      Text(row.statusLabel)
+        .font(.caption)
+        .foregroundStyle(.secondary)
     }
+  }
+
+  private var editableTitle: some View {
+    TextField(
+      row.titlePlaceholder,
+      text: $model[dynamicMember: \.[editableTitle: row.id]]
+    )
+    .textFieldStyle(.plain)
+    .focused($titleFocused)
+    .padding(.horizontal, 6).padding(.vertical, 3)
+    .background(
+      RoundedRectangle(cornerRadius: 5)
+        .fill(Color.white.opacity(titleFocused ? 0.14 : (titleHovering ? 0.07 : 0)))
+    )
+    .onChange(of: titleFocused) { _, isFocused in
+      model.titleFocusChanged(row.id, isFocused: isFocused)
+    }
+    .onHover { titleHovering = $0 }
+    .help(model.suggestionTitleHelp)
+    .accessibilityLabel(model.suggestionTitleLabel)
   }
 }

@@ -26,6 +26,8 @@ struct SuggestionRow: Identifiable, Equatable, Sendable {
   /// Render the title as an editable field only while the suggestion is still pending — once
   /// accepted its clip already exists (rename it in the sidebar), and rejected rows are inert.
   var showsEditableTitle: Bool
+  /// Keep the static title inside the row's reveal control after a suggestion is completed.
+  var showsRevealableTitle: Bool
   /// The product-type fallback shown as the title field's placeholder, so a pending suggestion
   /// whose generated title is blank still shows the name its clip would take.
   var titlePlaceholder: String
@@ -87,6 +89,7 @@ func suggestionRow(
     showsRejectButton: pending,
     showsFreshnessWarning: stale && pending,
     showsEditableTitle: pending,
+    showsRevealableTitle: !pending,
     titlePlaceholder: suggestion.productType.displayLabel
   )
 }

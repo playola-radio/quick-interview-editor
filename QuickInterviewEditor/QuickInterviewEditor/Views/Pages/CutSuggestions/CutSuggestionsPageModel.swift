@@ -37,9 +37,11 @@ final class CutSuggestionsPageModel: ViewModel {
   @ObservationIgnored var onAccept: (@MainActor (Slice, CutSuggestion.ID) -> Void)?
   /// Asks the editor to flip a suggestion to `.rejected` in the document (undoably).
   @ObservationIgnored var onReject: (@MainActor (CutSuggestion.ID) -> Void)?
-  /// Asks the editor to rename a suggestion in the document (undoably). The accepted clip
-  /// inherits this title, so editing here before accepting names the slice.
+  /// Asks the editor to rename a suggestion in the document. Focus callbacks bracket the live
+  /// changes so the editor can coalesce one typing session into one undoable action.
   @ObservationIgnored var onTitleChanged: (@MainActor (CutSuggestion.ID, String) -> Void)?
+  @ObservationIgnored var onTitleEditingBegan: (@MainActor (CutSuggestion.ID) -> Void)?
+  @ObservationIgnored var onTitleEditingEnded: (@MainActor (CutSuggestion.ID) -> Void)?
   /// Hands a completed run's stamped candidates to the editor to store in the document
   /// (non-undoably — a background analysis pass must not pollute the undo stack).
   @ObservationIgnored var onSuggestionsProduced: (@MainActor ([CutSuggestion]) -> Void)?
@@ -86,6 +88,7 @@ final class CutSuggestionsPageModel: ViewModel {
   /// list in this panel is unaffected — this only mutes the transcript overlay so the user can
   /// hide the proposals while keeping the list. Session-local: defaults on and resets per load.
   var showsSuggestionBands = true
+  private var editingTitleID: CutSuggestion.ID?
 
   // MARK: - Display Text
   let startingMessage = "Analyzing transcript…"
@@ -133,6 +136,11 @@ final class CutSuggestionsPageModel: ViewModel {
   /// stale row snapshot. Empty string for an unknown ID.
   func editableTitle(for id: CutSuggestion.ID) -> String {
     currentSuggestions()[id: id]?.title ?? ""
+  }
+
+  subscript(editableTitle id: CutSuggestion.ID) -> String {
+    get { editableTitle(for: id) }
+    set { titleChanged(id, to: newValue) }
   }
 
   var isSuggesting: Bool {
@@ -247,6 +255,7 @@ final class CutSuggestionsPageModel: ViewModel {
   /// fingerprint, and `actionMessage`) keeps the outcome message local; the editor owns
   /// the undoable document write.
   func acceptTapped(_ id: CutSuggestion.ID) {
+    finishTitleEditing(id)
     switch acceptCutSuggestion(
       id, in: ProjectState(cutSuggestions: currentSuggestions()), plan: editPlan,
       sourceFingerprint: sourceFingerprint, transcriptHash: editPlan.transcriptHash)
@@ -262,15 +271,26 @@ final class CutSuggestionsPageModel: ViewModel {
   }
 
   func rejectTapped(_ id: CutSuggestion.ID) {
+    finishTitleEditing(id)
     onReject?(id)
     actionMessage = nil
   }
 
-  /// Renames a suggestion as the user types in its title field. Routed to the editor
-  /// (`onTitleChanged`) so the change lands undoably in the document; accepting afterwards
-  /// names the derived slice from this title.
+  /// Renames a suggestion as the user types in its title field. Routed to the editor so the
+  /// document and accepted-slice name stay live while the surrounding focus session is coalesced.
   func titleChanged(_ id: CutSuggestion.ID, to newTitle: String) {
     onTitleChanged?(id, newTitle)
+  }
+
+  func titleFocusChanged(_ id: CutSuggestion.ID, isFocused: Bool) {
+    if isFocused {
+      guard editingTitleID != id else { return }
+      if let editingTitleID { finishTitleEditing(editingTitleID) }
+      editingTitleID = id
+      onTitleEditingBegan?(id)
+    } else {
+      finishTitleEditing(id)
+    }
   }
 
   /// Presents the key-entry sheet; on save/clear it refreshes the resolved-key state and
@@ -286,6 +306,12 @@ final class CutSuggestionsPageModel: ViewModel {
 
   // MARK: - Private Helpers
   private func refreshKeyState() { hasAPIKey = resolvedAPIKey() != nil }
+
+  private func finishTitleEditing(_ id: CutSuggestion.ID) {
+    guard editingTitleID == id else { return }
+    editingTitleID = nil
+    onTitleEditingEnded?(id)
+  }
 
   /// Resolves the key by the fixed order (Keychain, then `ANTHROPIC_API_KEY`). A Keychain
   /// read failure degrades to "no Keychain value" rather than throwing into the UI.

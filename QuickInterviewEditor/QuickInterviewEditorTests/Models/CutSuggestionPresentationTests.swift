@@ -60,6 +60,15 @@ struct CutSuggestionPresentationTests {
     expectNoDifference(
       suggestionRow(rejected, currentTranscriptHash: "t", currentFingerprint: "fp")
         .showsEditableTitle, false)
+    expectNoDifference(
+      suggestionRow(pending, currentTranscriptHash: "t", currentFingerprint: "fp")
+        .showsRevealableTitle, false)
+    expectNoDifference(
+      suggestionRow(accepted, currentTranscriptHash: "t", currentFingerprint: "fp")
+        .showsRevealableTitle, true)
+    expectNoDifference(
+      suggestionRow(rejected, currentTranscriptHash: "t", currentFingerprint: "fp")
+        .showsRevealableTitle, true)
   }
 
   @Test func titlePlaceholderIsTheProductTypeLabelSoBlankTitlesStillShowAName() {
