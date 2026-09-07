@@ -260,7 +260,8 @@ struct EditSliceTests {
 
     await model.playStopTapped()
 
-    #expect(stops == 1)  // stops (returning to the play origin via the parent) — never pauses in place
+    // Stops (returning to the play origin via the parent) — never pauses in place.
+    #expect(stops == 1)
     #expect(pauses == 0)
     #expect(model.isPlaying == false)
   }
