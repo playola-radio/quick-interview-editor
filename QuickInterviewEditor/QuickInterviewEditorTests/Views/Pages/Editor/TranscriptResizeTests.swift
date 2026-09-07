@@ -135,4 +135,43 @@ struct TranscriptResizeTests {
     expectNoDifference(model.selectedWordIDs, [6])
     expectNoDifference(model.audioSelection, 139488..<150072)
   }
+
+  /// Regression for Codex phase-3 P2 #1: every sibling document-mutation entry point in
+  /// `EditorModel` guards on `!isExporting` (removal, crossfade, cut-suggestion edits, slice
+  /// edits). A clip resize commit was missing that guard, so releasing mid-export could mutate
+  /// the document while its AIFFs render from the old bounds.
+  @Test func clipResizeCommitBlockedDuringExport() {
+    let clipID = Fixtures.uuid(1)
+    let model = editor(slices: [clip(clipID, wordIDs: [1, 2])])
+    let before = model.slices
+
+    model.transcriptResizeBegan(.clip(clipID), .end)
+    model.exportPhase = .exporting(current: 0, total: 1)
+    model.transcriptResizeDragged(toWord: 4)
+    model.transcriptResizeEnded()
+
+    expectNoDifference(model.slices, before)
+    expectNoDifference(model.transcriptResizeDraft, nil)
+  }
+
+  /// Regression for Codex phase-3 P2 #2: cancel must restore the EXACT pre-drag `audioSelection`,
+  /// not a whole-word-snapped approximation. A freeform range 60_000..<80_000 spans partially
+  /// into word 1 (54772..<64474) and word 3 (77704..<98916) and fully covers word 2
+  /// (70648..<74176), so it selects words [1, 2, 3] without being aligned to any word boundary.
+  /// The live drag legitimately snaps the selection to whole-word bounds (product decision D1),
+  /// but an ABORT must leave the user's original freeform selection untouched.
+  @Test func selectionResizeCancelRestoresExactFreeformRange() {
+    let model = editor()
+    model.selectSourceRange(60_000..<80_000, snapPlayhead: false)
+    expectNoDifference(model.selectedWordIDs, [1, 2, 3])
+    let original = model.audioSelection
+
+    model.transcriptResizeBegan(.selection, .end)
+    model.transcriptResizeDragged(toWord: 5)
+    expectNoDifference(model.audioSelection != original, true)
+
+    model.transcriptResizeCancelled()
+    expectNoDifference(model.audioSelection, original)
+    expectNoDifference(model.transcriptResizeDraft, nil)
+  }
 }

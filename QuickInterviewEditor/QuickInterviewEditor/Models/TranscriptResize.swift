@@ -45,6 +45,9 @@ struct TranscriptResizeDraft: Equatable, Sendable {
   var edge: TranscriptResizeEdge
   var originalWordIDs: [Word.ID]
   var draftedWordIDs: [Word.ID]
+  /// The exact `audioSelection` at grab time, captured only for `.selection` drafts so cancel
+  /// restores it precisely instead of expanding a freeform selection to whole-word bounds.
+  var originalSelectionRange: Range<Int>?
 }
 
 enum TranscriptResizeMath {

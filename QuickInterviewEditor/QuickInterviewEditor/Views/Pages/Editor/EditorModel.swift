@@ -868,7 +868,8 @@ final class EditorModel: ViewModel {
     guard let item = transcriptResizeItems.first(where: { $0.identity == identity }) else { return }
     transcriptResizeDraft = TranscriptResizeDraft(
       identity: identity, edge: edge,
-      originalWordIDs: item.wordIDs, draftedWordIDs: item.wordIDs)
+      originalWordIDs: item.wordIDs, draftedWordIDs: item.wordIDs,
+      originalSelectionRange: identity == .selection ? audioSelection : nil)
     switch identity {
     case .selection: selectionEditingEdge = selectionEdge(for: edge)
     case .clip: stopPlaybackForTimelineEdit()
@@ -910,13 +911,15 @@ final class EditorModel: ViewModel {
     case .selection:
       break
     case .clip(let id):
-      guard draft.draftedWordIDs != draft.originalWordIDs,
+      guard !isExporting,
+        draft.draftedWordIDs != draft.originalWordIDs,
         let range = sourceRange(coveringWordIDs: draft.draftedWordIDs),
         let current = slices[id: id]
       else { return }
       mutateSlices { $0[id: id] = updatedSlice(current, to: range) }
     case .suggestion(let id):
-      guard let current = documentCutSuggestions[id: id], current.isPending,
+      guard !isExporting,
+        let current = documentCutSuggestions[id: id], current.isPending,
         sourceRange(coveringWordIDs: draft.draftedWordIDs) != nil
       else { return }
       let updated = updatedSuggestion(current, toWordIDs: draft.draftedWordIDs)
@@ -933,10 +936,12 @@ final class EditorModel: ViewModel {
       selectionEditingEdge = nil
     }
     guard let draft = transcriptResizeDraft else { return }
-    if case .selection = draft.identity,
-      let range = sourceRange(coveringWordIDs: draft.originalWordIDs)
-    {
-      selectSourceRange(range, snapPlayhead: false, origin: .transcript)
+    if case .selection = draft.identity {
+      if let exact = draft.originalSelectionRange {
+        selectSourceRange(exact, snapPlayhead: false, origin: .transcript)
+      } else if let range = sourceRange(coveringWordIDs: draft.originalWordIDs) {
+        selectSourceRange(range, snapPlayhead: false, origin: .transcript)
+      }
     }
   }
 
