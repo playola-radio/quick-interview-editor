@@ -131,6 +131,17 @@ final class EditorModel: ViewModel {
       case .clear: self.clearSelection()
       }
     }
+    // Transcript edge-resize gestures are intents too: the overlay resolves the grabbed item/edge
+    // and the dragged-over word and hands them here, and THIS model runs the resize state machine
+    // (live selection repaint, clip container preview, single commit on release).
+    transcript.onTranscriptResizeBegan = { [weak self] id, edge in
+      self?.transcriptResizeBegan(id, edge)
+    }
+    transcript.onTranscriptResizeDragged = { [weak self] wordID in
+      self?.transcriptResizeDragged(toWord: wordID)
+    }
+    transcript.onTranscriptResizeEnded = { [weak self] in self?.transcriptResizeEnded() }
+    transcript.onTranscriptResizeCancelled = { [weak self] in self?.transcriptResizeCancelled() }
   }
 
   /// Wires the cut-suggestions panel's intents to the document. The document owns the candidates
@@ -721,7 +732,9 @@ final class EditorModel: ViewModel {
   /// suggestion fully covered by slices contributes no band.
   var clipBands: [TranscriptClipBand] {
     let approved = slices.map { slice in
-      TranscriptClipBand(id: slice.id, wordIDs: slice.wordIDs, kind: .approved)
+      TranscriptClipBand(
+        id: slice.id, wordIDs: draftedWordIDs(forClip: slice.id) ?? slice.wordIDs,
+        kind: .approved)
     }
     // The Suggestions panel's show/hide toggle mutes the suggestion overlay without touching the
     // ranked list: when it's off, no suggested bands are drawn (accepted slices stay put).
@@ -776,6 +789,14 @@ final class EditorModel: ViewModel {
 
   private func transcriptOrder() -> [Word.ID] { editPlan.words.map(\.id) }
 
+  /// The in-flight drafted word run for clip `id`, or nil when no `.clip` resize of that clip is
+  /// active. Substituted into the clip's approved band (before `claimed` is computed) so both the
+  /// drawn container AND the occlusion of any overlapping suggestions preview the drag.
+  private func draftedWordIDs(forClip id: Slice.ID) -> [Word.ID]? {
+    guard let draft = transcriptResizeDraft, draft.identity == .clip(id) else { return nil }
+    return draft.draftedWordIDs
+  }
+
   private func sourceRange(coveringWordIDs ids: [Word.ID]) -> Range<Int>? {
     let set = Set(ids)
     let words = editPlan.words.filter { set.contains($0.id) }
@@ -786,9 +807,100 @@ final class EditorModel: ViewModel {
     return lo..<hi
   }
 
-  /// Identity pass-through until Task 5 substitutes the in-flight draft's item.
+  /// Substitutes the in-flight draft's drafted words for the matching clip/suggestion item so the
+  /// overlay's semantic span previews the drag. A `.selection` draft never rewrites items here — its
+  /// live preview flows through `audioSelection`/`selectedWordIDs`, not this list.
   private func applyingResizeDraft(to items: [TranscriptResizeItem]) -> [TranscriptResizeItem] {
-    items
+    guard let draft = transcriptResizeDraft, draft.identity != .selection else { return items }
+    return items.map { item in
+      guard item.identity == draft.identity else { return item }
+      return TranscriptResizeItem(identity: item.identity, wordIDs: draft.draftedWordIDs)
+    }
+  }
+
+  // MARK: - Transcript resize state machine
+  /// In-flight transcript edge resize. Non-nil only for the duration of a drag; the document is
+  /// untouched while it lives (a `.clip` commit happens once, on `ended`). Observable so the
+  /// draft-aware `transcriptResizeItems`/`clipBands` recompute and the transcript re-renders the
+  /// preview — a container repaint, never a text reflow.
+  var transcriptResizeDraft: TranscriptResizeDraft?
+
+  private func selectionEdge(for edge: TranscriptResizeEdge) -> SelectionEdge {
+    switch edge {
+    case .start: .start
+    case .end: .end
+    }
+  }
+
+  /// A resize handle grab began: seed the draft from the item's committed word run. For a selection
+  /// mark which edge is live (so transport-snap backs off, mirroring `selectionEdgeDragBegan`); a
+  /// clip stops the transport before the edit, mirroring `crossfadeStretchBegan`.
+  func transcriptResizeBegan(_ identity: TranscriptResizeItemIdentity, _ edge: TranscriptResizeEdge)
+  {
+    guard let item = transcriptResizeItems.first(where: { $0.identity == identity }) else { return }
+    transcriptResizeDraft = TranscriptResizeDraft(
+      identity: identity, edge: edge,
+      originalWordIDs: item.wordIDs, draftedWordIDs: item.wordIDs)
+    switch identity {
+    case .selection: selectionEditingEdge = selectionEdge(for: edge)
+    case .clip: stopPlaybackForTimelineEdit()
+    case .suggestion: break
+    }
+  }
+
+  /// A resize drag to a word: whole-word-snap the draft's run to the target. For a selection, apply
+  /// it live through the freeform selection funnel (`origin: .transcript` keeps the transcript's own
+  /// anchor); for a clip/suggestion the preview flows through the draft-aware computed spans, and the
+  /// document is committed only on release.
+  func transcriptResizeDragged(toWord id: Word.ID) {
+    guard var draft = transcriptResizeDraft,
+      let newWords = TranscriptResizeMath.resized(
+        itemWordIDs: draft.originalWordIDs, edge: draft.edge,
+        toTargetWord: id, transcriptOrder: transcriptOrder())
+    else { return }
+    draft.draftedWordIDs = newWords
+    transcriptResizeDraft = draft
+    if case .selection = draft.identity, let range = sourceRange(coveringWordIDs: newWords) {
+      selectSourceRange(range, snapPlayhead: false, origin: .transcript)
+    }
+  }
+
+  /// Release: a selection was already applied live, so nothing to commit; a clip commits its drafted
+  /// span once, in a single undoable document transaction (skipped when unchanged so a click-through
+  /// resize records no undo entry). Always clears the draft and the live selection edge.
+  func transcriptResizeEnded() {
+    defer {
+      transcriptResizeDraft = nil
+      selectionEditingEdge = nil
+    }
+    guard let draft = transcriptResizeDraft else { return }
+    switch draft.identity {
+    case .selection:
+      break
+    case .clip(let id):
+      guard draft.draftedWordIDs != draft.originalWordIDs,
+        let range = sourceRange(coveringWordIDs: draft.draftedWordIDs),
+        let current = slices[id: id]
+      else { return }
+      mutateSlices { $0[id: id] = updatedSlice(current, to: range) }
+    case .suggestion:
+      break
+    }
+  }
+
+  /// Escape/abort: a clip/suggestion draft was never committed, so dropping it restores the drawn
+  /// span; a selection was applied live, so restore `audioSelection` to the pre-drag word run.
+  func transcriptResizeCancelled() {
+    defer {
+      transcriptResizeDraft = nil
+      selectionEditingEdge = nil
+    }
+    guard let draft = transcriptResizeDraft else { return }
+    if case .selection = draft.identity,
+      let range = sourceRange(coveringWordIDs: draft.originalWordIDs)
+    {
+      selectSourceRange(range, snapPlayhead: false, origin: .transcript)
+    }
   }
 
   // MARK: - Seam overlays
