@@ -436,4 +436,159 @@ struct CutSuggestionAcceptTests {
     expectNoDifference(slice.startSample, 0)
     expectNoDifference(slice.endSample, 200)
   }
+
+  // MARK: - Adjusted range (resized suggestion)
+
+  /// "This is an audiotape, Bob" — the suggestion covers the first four words; "Bob" sits
+  /// after a gap so the ranges below can add or drop it deliberately.
+  private func audiotapePlan() -> EditPlan {
+    plan(
+      words: [
+        WordSpec(1, "This", 0, 100),
+        WordSpec(2, "is", 100, 200),
+        WordSpec(3, "an", 200, 300),
+        WordSpec(4, "audiotape", 300, 400),
+        WordSpec(5, "Bob", 500, 600),
+      ],
+      durationSamples: 700)
+  }
+
+  @Test func adjustedRangeExtendingToNextWordIncludesIt() {
+    // Suggestion is "This is an audiotape"; the user drags the end past "Bob". Accepting must
+    // include "Bob" in the clip.
+    let editPlan = audiotapePlan()
+    let sug = suggestion(wordIDs: [1, 2, 3, 4])
+    let state = ProjectState(cutSuggestions: [sug])
+
+    guard
+      case .accepted(let slice, _) = acceptCutSuggestion(
+        sug.id, in: state, plan: editPlan, sourceFingerprint: "fp", transcriptHash: "t",
+        adjustedRange: 0..<650)
+    else {
+      Issue.record("expected .accepted")
+      return
+    }
+    expectNoDifference(slice.wordIDs, [1, 2, 3, 4, 5])
+    expectNoDifference(slice.startSample, 0)
+    expectNoDifference(slice.endSample, 650)
+    expectNoDifference(slice.id, sug.id)
+  }
+
+  @Test func adjustedRangeShrinkingDropsAWord() {
+    // The user pulls the end in so "audiotape" is no longer covered.
+    let editPlan = audiotapePlan()
+    let sug = suggestion(wordIDs: [1, 2, 3, 4])
+    let state = ProjectState(cutSuggestions: [sug])
+
+    guard
+      case .accepted(let slice, _) = acceptCutSuggestion(
+        sug.id, in: state, plan: editPlan, sourceFingerprint: "fp", transcriptHash: "t",
+        adjustedRange: 0..<250)
+    else {
+      Issue.record("expected .accepted")
+      return
+    }
+    expectNoDifference(slice.wordIDs, [1, 2, 3])
+  }
+
+  @Test func nilAdjustedRangeIsTheWordDerivedAccept() {
+    // Passing nil is identical to the default accept: membership comes from the words.
+    let editPlan = audiotapePlan()
+    let sug = suggestion(wordIDs: [1, 2, 3, 4])
+    let state = ProjectState(cutSuggestions: [sug])
+
+    guard
+      case .accepted(let slice, _) = acceptCutSuggestion(
+        sug.id, in: state, plan: editPlan, sourceFingerprint: "fp", transcriptHash: "t",
+        adjustedRange: nil)
+    else {
+      Issue.record("expected .accepted")
+      return
+    }
+    expectNoDifference(slice.wordIDs, [1, 2, 3, 4])
+    expectNoDifference(slice.startSample, 0)
+    expectNoDifference(slice.endSample, 400)
+  }
+
+  @Test func adjustedRangeStillFailsOnSourceFingerprint() {
+    let editPlan = audiotapePlan()
+    let sug = suggestion(wordIDs: [1, 2, 3, 4], sourceFingerprint: "old")
+    let state = ProjectState(cutSuggestions: [sug])
+
+    let result = acceptCutSuggestion(
+      sug.id, in: state, plan: editPlan, sourceFingerprint: "new", transcriptHash: "t",
+      adjustedRange: 0..<650)
+    expectNoDifference(result, .stale(.sourceFingerprintChanged))
+  }
+
+  @Test func adjustedRangeStillFailsOnTranscriptHash() {
+    let editPlan = audiotapePlan()
+    let sug = suggestion(wordIDs: [1, 2, 3, 4])
+    let state = ProjectState(cutSuggestions: [sug])
+
+    let result = acceptCutSuggestion(
+      sug.id, in: state, plan: editPlan, sourceFingerprint: "fp", transcriptHash: "changed",
+      adjustedRange: 0..<650)
+    expectNoDifference(result, .stale(.transcriptChanged))
+  }
+
+  @Test func adjustedRangeStillFailsWhenSuggestionWordsMissing() {
+    // The drift check runs even on the resize path: if the suggestion's own words vanished,
+    // it's stale regardless of the adjusted extent.
+    let editPlan = audiotapePlan()
+    let sug = suggestion(wordIDs: [1, 2, 9999])
+    let state = ProjectState(cutSuggestions: [sug])
+
+    let result = acceptCutSuggestion(
+      sug.id, in: state, plan: editPlan, sourceFingerprint: "fp", transcriptHash: "t",
+      adjustedRange: 0..<650)
+    expectNoDifference(result, .stale(.missingWords([9999])))
+  }
+
+  @Test func adjustedRangeCoveringNoWordsIsInvalid() {
+    // A range in the gap between "audiotape" (…400) and "Bob" (500…) overlaps nothing.
+    let editPlan = audiotapePlan()
+    let sug = suggestion(wordIDs: [1, 2, 3, 4])
+    let state = ProjectState(cutSuggestions: [sug])
+
+    let result = acceptCutSuggestion(
+      sug.id, in: state, plan: editPlan, sourceFingerprint: "fp", transcriptHash: "t",
+      adjustedRange: 410..<490)
+    expectNoDifference(result, .invalid(.noWords))
+  }
+
+  @Test func adjustedRangeIsClampedToFileBounds() {
+    // A range running past both file edges is clamped to 0..<durationSamples.
+    let editPlan = audiotapePlan()
+    let sug = suggestion(wordIDs: [1, 2, 3, 4])
+    let state = ProjectState(cutSuggestions: [sug])
+
+    guard
+      case .accepted(let slice, _) = acceptCutSuggestion(
+        sug.id, in: state, plan: editPlan, sourceFingerprint: "fp", transcriptHash: "t",
+        adjustedRange: -100..<10_000)
+    else {
+      Issue.record("expected .accepted")
+      return
+    }
+    expectNoDifference(slice.startSample, 0)
+    expectNoDifference(slice.endSample, 700)
+    expectNoDifference(slice.wordIDs, [1, 2, 3, 4, 5])
+  }
+
+  @Test func adjustedRangeDoesNotTripMembershipMismatchGuard() {
+    // The midpoint-mismatch guard that protects the word-derived path must NOT fire on the
+    // adjusted path: adding "Bob" (a word the suggestion didn't list) is the intended result.
+    let editPlan = audiotapePlan()
+    let sug = suggestion(wordIDs: [1, 2, 3, 4])
+    let state = ProjectState(cutSuggestions: [sug])
+
+    let result = acceptCutSuggestion(
+      sug.id, in: state, plan: editPlan, sourceFingerprint: "fp", transcriptHash: "t",
+      adjustedRange: 0..<650)
+    guard case .accepted = result else {
+      Issue.record("expected .accepted, got \(result)")
+      return
+    }
+  }
 }

@@ -28,6 +28,11 @@ targets:
     platform: macOS
     sources:
       - path: QuickInterviewEditor
+        excludes:
+          # Local codex/gstack session metadata (gitignored). XcodeGen ignores
+          # .gitignore, so exclude it here or the source scan sweeps it into the
+          # tracked pbxproj as a stray file reference.
+          - "**/.context"
       - path: Resources/PieDocument.icns
         buildPhase: resources
       - path: Resources/Fixtures/edit-plan.json
