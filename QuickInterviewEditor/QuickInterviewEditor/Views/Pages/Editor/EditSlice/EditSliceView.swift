@@ -83,6 +83,9 @@ private struct SliceWaveformLane: View {
         // its edges here; leaving this off also keeps the no-op edge layer from shadowing the seam
         // stretch handles below.
         supportsEdgeDrag: false,
+        // Cut points are edited in the editor lane, not this read-only sheet; leaving this off keeps the
+        // no-op cut-point layer from swallowing ⌥-hits over the outside zones flanking each bowtie.
+        supportsCutPointDrag: false,
         onSeamStretchBegan: { model.crossfadeStretchBegan(id: $0) },
         onSeamStretched: { model.crossfadeStretched($0, toX: $1) },
         onSeamStretchEnded: { model.crossfadeStretchEnded() },

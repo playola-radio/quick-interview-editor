@@ -405,6 +405,22 @@ final class EditorModel: ViewModel {
       self.crossfadeStretchDraft = nil
     }
     let newTimeline = editedTimeline
+    // Same guard for a live cut-point draft: drop it when its baseline no longer matches the document —
+    // its removal is gone (restore/undo/redo), its committed range moved (an undo/redo or nudge of the
+    // very cut being dragged), OR its seam's EFFECTIVE fade length changed underneath it (a neighbor edit
+    // reflowed the clamp). Its drafted range was measured against that baseline, so releasing would write
+    // it over the newer state. (Our own commit clears the draft before mutating, so this never fires on
+    // the normal drag reflow.) Read the effective length from the freshly rebuilt `newTimeline`, and undo
+    // the preview's viewport compensation first so the rebuild below re-clamps from the pre-drag scroll.
+    if let crossfadeCutPointDraft,
+      timelineRemovals[id: crossfadeCutPointDraft.id]?.removedRange
+        != crossfadeCutPointDraft.committedRange
+        || newTimeline.seams.first(where: { $0.id == crossfadeCutPointDraft.id })?.crossfadeLength
+          != crossfadeCutPointDraft.frozenCrossfadeLength
+    {
+      editedWaveform.visibleStartSample = crossfadeCutPointDraft.frozenVisibleStart
+      self.crossfadeCutPointDraft = nil
+    }
     guard newTimeline != editedWaveform.timeline else { return }
     // Captured BEFORE `resetTransportState` clears `transportContext` to `.free` below — it's the
     // only way to know, after the reset, whether the session we just killed belonged to the sheet.
@@ -1582,10 +1598,18 @@ final class EditorModel: ViewModel {
     let edge: RemovalBoundary
     let ms: Double
     switch key {
-    case .nudgeLeftCutEarlier: edge = .lower; ms = -fineTune.nudgeMs
-    case .nudgeLeftCutLater: edge = .lower; ms = fineTune.nudgeMs
-    case .nudgeRightCutEarlier: edge = .upper; ms = -fineTune.nudgeMs
-    case .nudgeRightCutLater: edge = .upper; ms = fineTune.nudgeMs
+    case .nudgeLeftCutEarlier:
+      edge = .lower
+      ms = -fineTune.nudgeMs
+    case .nudgeLeftCutLater:
+      edge = .lower
+      ms = fineTune.nudgeMs
+    case .nudgeRightCutEarlier:
+      edge = .upper
+      ms = -fineTune.nudgeMs
+    case .nudgeRightCutLater:
+      edge = .upper
+      ms = fineTune.nudgeMs
     default: return false
     }
     let delta = Int((ms / 1000 * Double(editPlan.source.sampleRate)).rounded())

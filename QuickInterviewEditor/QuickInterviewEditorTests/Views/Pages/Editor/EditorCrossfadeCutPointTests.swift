@@ -48,15 +48,15 @@ struct EditorCrossfadeCutPointTests {
   // MARK: - Draft value type
 
   @Test func draftIsEquatableByValue() {
-    let a = CrossfadeCutPointDraft(
+    let original = CrossfadeCutPointDraft(
       id: Fixtures.uuid(1), edge: .lower, committedRange: 48_000..<96_000,
       draftedRange: 46_000..<96_000, frozenCrossfadeLength: 600,
       dragStartEditedSample: 20_000, frozenVisibleStart: 0, frozenSamplesPerPixel: 200)
-    var b = a
-    b.draftedRange = 46_000..<96_000
-    expectNoDifference(a, b)
-    b.edge = .upper
-    #expect(a != b)
+    var copy = original
+    copy.draftedRange = 46_000..<96_000
+    expectNoDifference(original, copy)
+    copy.edge = .upper
+    #expect(original != copy)
   }
 
   // MARK: - Helpers
@@ -300,6 +300,34 @@ struct EditorCrossfadeCutPointTests {
       expectNoDifference(model.timelineRemovals[id: id]?.crossfade.lengthSamples, 1_000)
       // The rendered seam's crossfade length is unchanged by the move.
       expectNoDifference(effectiveLength(), 1_000)
+    }
+  }
+
+  // MARK: - Stale-draft invalidation (mid-drag document mutation)
+
+  @Test func midDragDocumentMutationInvalidatesDraftAndBlocksStaleCommit() {
+    withStorage {
+      let model = editor(fingerprint: "fp-cut-stale-draft")
+      primeGeometry(model)
+      let id = addRemoval(model, range: 48_000..<96_000, length: 600)
+      model.selectSeam(id)
+
+      // Begin dragging the LEFT cut inward; the draft's committed baseline is 48_000..<96_000.
+      model.crossfadeCutPointDragBegan(id: id, edge: .lower, atX: 100)
+      model.crossfadeCutPointDragged(toX: 110)  // draft → 46_000..<96_000
+      expectNoDifference(model.crossfadeCutPointDraft?.draftedRange, 46_000..<96_000)
+
+      // Mid-drag the document changes under the drag (here a right-cut nudge; undo/redo is the same
+      // class — all mutations funnel through `syncEditedTimeline`). Its guard must drop the now-stale
+      // cut-point draft: the committed baseline (…96_000) no longer matches the document (…96_441).
+      _ = model.editorKeyDown(.nudgeRightCutLater)  // cR + 441
+      expectNoDifference(model.timelineRemovals[id: id]?.removedRange, 48_000..<96_441)
+      expectNoDifference(model.crossfadeCutPointDraft, nil)  // draft invalidated
+
+      // Mouse-up now commits nothing: the newer (nudged) state survives instead of being clobbered
+      // by the stale drafted 46_000..<96_000.
+      model.crossfadeCutPointDragEnded()
+      expectNoDifference(model.timelineRemovals[id: id]?.removedRange, 48_000..<96_441)
     }
   }
 

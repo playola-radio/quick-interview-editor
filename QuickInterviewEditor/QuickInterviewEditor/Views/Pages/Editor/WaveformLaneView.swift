@@ -73,6 +73,10 @@ struct WaveformLaneView<Overlay: View>: View {
   /// boundary is draggable); the slice-edit sheet leaves it off so its no-op edge layer is never
   /// mounted and never shadows the seam-stretch handles beneath at the highlight's boundary.
   var supportsEdgeDrag = true
+  /// Whether ⌥-dragging a cut point into the crossfade is wired here (the editor lane supports it).
+  /// The slice-edit sheet leaves it off so its no-op cut-point layer is never mounted and never
+  /// swallows ⌥-hits in the outside zones flanking each bowtie (where a plain hit still stretches).
+  var supportsCutPointDrag = true
   /// Stretch handles on each crossfade bowtie's two edges. A grab within a few points of a bowtie's
   /// leading/trailing edge fires these to lengthen/shorten that seam's fade; a mouse-down elsewhere
   /// falls through to the marquee below. Default no-ops so call sites without seam stretching
@@ -133,17 +137,20 @@ struct WaveformLaneView<Overlay: View>: View {
       )
       // Sits ABOVE the seam-stretch handles: claims ONLY ⌥-modified hits in the outside zones flanking
       // each bowtie, so ⌥-drag moves a cut point while a plain drag on the bowtie edge still stretches
-      // length and every non-⌥ mouse-down falls through.
-      .overlay(
-        SeamCutPointHandleLayer(
-          seams: seams,
-          waveform: waveform,
-          onDragBegan: onCutPointDragBegan,
-          onDragged: onCutPointDragged,
-          onDragEnded: onCutPointDragEnded,
-          onDragCancelled: onCutPointDragCancelled,
-          onSelect: onCutPointSelect)
-      )
+      // length and every non-⌥ mouse-down falls through. Only mounted where cut-point drag is supported,
+      // so a no-op layer never swallows ⌥-hits (the slice-edit sheet shows seams it can't cut-drag).
+      .overlay {
+        if supportsCutPointDrag {
+          SeamCutPointHandleLayer(
+            seams: seams,
+            waveform: waveform,
+            onDragBegan: onCutPointDragBegan,
+            onDragged: onCutPointDragged,
+            onDragEnded: onCutPointDragEnded,
+            onDragCancelled: onCutPointDragCancelled,
+            onSelect: onCutPointSelect)
+        }
+      }
       // Sits ABOVE the marquee layer: it claims only the few points at each edge of the highlight, so
       // an edge grab starts a boundary drag while every other mouse-down falls through to the marquee.
       // Only mounted where edge drag is supported, so a no-op edge layer never shadows the seam-stretch

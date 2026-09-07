@@ -125,7 +125,8 @@ struct EditorKeyMonitor: NSViewRepresentable {
       case []: return isLeft ? .nudgeCutInEarlier : .nudgeCutInLater  // ←/→
       case .shift: return isLeft ? .nudgeCutOutEarlier : .nudgeCutOutLater  // ⇧←/⇧→
       case .option: return isLeft ? .nudgeLeftCutEarlier : .nudgeLeftCutLater  // ⌥←/⌥→
-      case [.option, .shift]: return isLeft ? .nudgeRightCutEarlier : .nudgeRightCutLater  // ⌥⇧←/⌥⇧→
+      // ⌥⇧←/⌥⇧→
+      case [.option, .shift]: return isLeft ? .nudgeRightCutEarlier : .nudgeRightCutLater
       default: return nil
       }
     }
