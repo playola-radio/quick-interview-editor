@@ -15,6 +15,9 @@ from .models import DEFAULT_SPECS, ProductSpec, ProductType
 TUNED_IDS = frozenset(("spotlight", "intro"))
 IMAGING_IDS = frozenset(("image-id", "image-pre-commercial", "image-post-commercial", "image-promo"))
 _GROUPS = frozenset(("spotlights", "songIntros", "audioImages"))
+_FOUNDATION_WHITESPACE = frozenset(
+    "\u0009\u000a\u000b\u000c\u000d\u0020\u0085\u00a0\u1680\u2028\u2029\u202f\u205f\u3000"
+).union(chr(value) for value in range(0x2000, 0x200C))
 
 
 class ConfigurationError(ValueError):
@@ -26,7 +29,16 @@ def _is_int(value: object) -> bool:
 
 
 def _blank(value: object) -> bool:
-    return not isinstance(value, str) or not value.strip()
+    return not isinstance(value, str) or not _trim_foundation_whitespace(value)
+
+
+def _trim_foundation_whitespace(value: str) -> str:
+    start, end = 0, len(value)
+    while start < end and value[start] in _FOUNDATION_WHITESPACE:
+        start += 1
+    while end > start and value[end - 1] in _FOUNDATION_WHITESPACE:
+        end -= 1
+    return value[start:end]
 
 
 def normalize_configuration_name(value: str) -> str:
@@ -37,11 +49,32 @@ def normalize_configuration_name(value: str) -> str:
         for char in value
         for decomposition in (unicodedata.decomposition(char),)
     )
-    without_marks = "".join(
-        char for char in unicodedata.normalize("NFD", width_folded)
-        if not unicodedata.combining(char)
-    )
-    return " ".join(without_marks.split()).casefold()
+    # CoreFoundation's diacritic folding only removes following marks when the
+    # decomposed base is below U+0510; preserving later-script marks matches
+    # Foundation's `folding` behavior. See CFString.c L2258 and L2334:
+    # https://github.com/swiftlang/swift-corelibs-foundation/blob/main/Sources/CoreFoundation/CFString.c
+    without_latin_marks: list[str] = []
+    base: str | None = None
+    for char in unicodedata.normalize("NFD", width_folded):
+        if unicodedata.combining(char):
+            if base is not None and ord(base) < 0x0510:
+                continue
+        else:
+            base = char
+        without_latin_marks.append(char)
+    folded = unicodedata.normalize("NFC", "".join(without_latin_marks)).casefold()
+    tokens: list[str] = []
+    current: list[str] = []
+    for char in unicodedata.normalize("NFC", folded):
+        if char in _FOUNDATION_WHITESPACE:
+            if current:
+                tokens.append("".join(current))
+                current = []
+        else:
+            current.append(char)
+    if current:
+        tokens.append("".join(current))
+    return " ".join(tokens)
 
 
 def validate_configuration(config: object) -> None:
@@ -107,7 +140,7 @@ def validate_configuration(config: object) -> None:
             if kind == "literal":
                 if not isinstance(value, str) or value == "":
                     raise ConfigurationError(f"type {type_id!r} has empty literal")
-                meaningful = meaningful or bool(value.strip())
+                meaningful = meaningful or not _blank(value)
             elif kind == "field":
                 if _blank(value) or value not in field_ids:
                     raise ConfigurationError(f"type {type_id!r} references unknown field {value!r}")

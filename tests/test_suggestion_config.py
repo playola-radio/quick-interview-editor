@@ -67,6 +67,34 @@ def test_configuration_name_normalization_matches_foundation_width_and_folding_r
     assert normalize_configuration_name("①") == "①"
     assert normalize_configuration_name("㎒") == "㎒"
     assert normalize_configuration_name("ǅ") == "ǆ"
+    assert normalize_configuration_name("A\u200bB") == "a b"
+    assert normalize_configuration_name("A B") == "a b"
+    assert normalize_configuration_name("A\u001cB") == "a\u001cb"
+
+
+@pytest.mark.parametrize("base, marked", [("क", "क़"), ("ก", "ก้")])
+def test_configuration_accepts_distinct_non_latin_marked_names(base, marked):
+    config = _config()
+    config["types"][0]["name"] = base
+    duplicate_type = copy.deepcopy(config["types"][0])
+    duplicate_type["id"] = "other-type"
+    duplicate_type["name"] = marked
+    config["types"].append(duplicate_type)
+    config["fields"][0]["name"] = base
+    duplicate_field = copy.deepcopy(config["fields"][0])
+    duplicate_field["id"] = "other-field"
+    duplicate_field["name"] = marked
+    config["fields"].append(duplicate_field)
+
+    validate_configuration(config)
+
+
+def test_foundation_zero_width_space_is_blank_in_configuration_values():
+    config = _config()
+    config["types"][0]["guidelines"] = "\u200b"
+
+    with pytest.raises(ConfigurationError):
+        validate_configuration(config)
 
 
 @pytest.mark.parametrize("mutate", [
