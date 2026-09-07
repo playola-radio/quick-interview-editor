@@ -120,4 +120,91 @@ struct EditorCrossfadeCutPointTests {
       expectNoDifference(clamped, 48_000..<149_000)
     }
   }
+
+  // MARK: - Drag lifecycle
+
+  @Test func draggingLeftCutInwardMovesLowerBoundWithoutTouchingDocument() {
+    withStorage {
+      let model = editor(fingerprint: "fp-cut-drag-left-preview")
+      primeGeometry(model)  // spp 200 → 10px = 2000 samples
+      let id = addRemoval(model, range: 48_000..<96_000, length: 600)
+
+      model.crossfadeCutPointDragBegan(id: id, edge: .lower, atX: 100)
+      model.crossfadeCutPointDragged(toX: 110)  // +10px rightward → delta +2000
+
+      // Draft reflects cL - delta = 46_000; document still committed.
+      expectNoDifference(model.crossfadeCutPointDraft?.draftedRange, 46_000..<96_000)
+      expectNoDifference(model.timelineRemovals[id: id]?.removedRange, 48_000..<96_000)
+    }
+  }
+
+  @Test func endingLeftDragCommitsMovedCutUndoably() async {
+    await withDependencies {
+      $0.defaultFileStorage = FileStorage.inMemory(fileSystem: LockIsolated([:]))
+    } operation: {
+      let model = editor(fingerprint: "fp-cut-drag-left-commit")
+      model.editedWaveform.viewportWidth = 1000
+      model.editedWaveform.samplesPerPixel = 200
+      model.editedWaveform.visibleStartSample = 0
+      model.mutateDocument { doc in
+        doc.timelineRemovals.append(
+          TimelineRemoval(
+            id: Fixtures.uuid(1), removedRange: 48_000..<96_000,
+            crossfade: Crossfade(lengthSamples: 600, curve: .equalPower)))
+      }
+
+      model.crossfadeCutPointDragBegan(id: Fixtures.uuid(1), edge: .lower, atX: 100)
+      model.crossfadeCutPointDragged(toX: 110)
+      model.crossfadeCutPointDragEnded()
+
+      expectNoDifference(model.crossfadeCutPointDraft, nil)
+      expectNoDifference(model.timelineRemovals[id: Fixtures.uuid(1)]?.removedRange, 46_000..<96_000)
+      expectNoDifference(
+        model.timelineRemovals[id: Fixtures.uuid(1)]?.crossfade.lengthSamples, 600)  // length fixed
+      #expect(model.canUndo)
+
+      await model.undoTapped()
+      expectNoDifference(model.timelineRemovals[id: Fixtures.uuid(1)]?.removedRange, 48_000..<96_000)
+    }
+  }
+
+  @Test func draggingRightCutInwardMovesUpperBound() {
+    withStorage {
+      let model = editor(fingerprint: "fp-cut-drag-right")
+      primeGeometry(model)
+      let id = addRemoval(model, range: 48_000..<96_000, length: 600)
+
+      model.crossfadeCutPointDragBegan(id: id, edge: .upper, atX: 300)
+      model.crossfadeCutPointDragged(toX: 290)  // -10px leftward → delta -2000 → cR + 2000
+
+      expectNoDifference(model.crossfadeCutPointDraft?.draftedRange, 48_000..<98_000)
+    }
+  }
+
+  @Test func cancellingDragRestoresCommittedTimelineAndDropsDraft() {
+    withStorage {
+      let model = editor(fingerprint: "fp-cut-drag-cancel")
+      primeGeometry(model)
+      let id = addRemoval(model, range: 48_000..<96_000, length: 600)
+
+      model.crossfadeCutPointDragBegan(id: id, edge: .lower, atX: 100)
+      model.crossfadeCutPointDragged(toX: 110)
+      model.crossfadeCutPointDragCancelled()
+
+      expectNoDifference(model.crossfadeCutPointDraft, nil)
+      expectNoDifference(model.timelineRemovals[id: id]?.removedRange, 48_000..<96_000)
+    }
+  }
+
+  @Test func draggingSelectsTheSeam() {
+    withStorage {
+      let model = editor(fingerprint: "fp-cut-drag-selects")
+      primeGeometry(model)
+      let id = addRemoval(model, range: 48_000..<96_000, length: 600)
+
+      model.crossfadeCutPointDragBegan(id: id, edge: .lower, atX: 100)
+
+      expectNoDifference(model.selectedSeamID, id)
+    }
+  }
 }
