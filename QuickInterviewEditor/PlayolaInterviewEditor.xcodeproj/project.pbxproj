@@ -83,6 +83,7 @@
 		55091DB79655F5777996C449 /* ModelSetupModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34829E32B89E7F2CCC35587B /* ModelSetupModel.swift */; };
 		5544EFA958C30EE4CBC3F786 /* InstallLocation.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBD0DA622B239A3EAD03E156 /* InstallLocation.swift */; };
 		55C82C41FC00575BE9BD8475 /* QuickInterviewEditorApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD1502557C3DB411F1AA78A0 /* QuickInterviewEditorApp.swift */; };
+		591083330F3C359245EAF809 /* TranscriptResizeItemsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BCC93CDA21FC0A8462142DEB /* TranscriptResizeItemsTests.swift */; };
 		5AD78010BFE9DAF8771EFC8C /* TranscriptSensitivityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC85E8C0536F747BE16672A8 /* TranscriptSensitivityTests.swift */; };
 		5B666D45855847345505BB35 /* WaveformModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60FB6C1B6D2AB3650A48E8D7 /* WaveformModel.swift */; };
 		5C750F171637C25D14D04385 /* WaveformView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F34AB9F388E5178DD8C9404F /* WaveformView.swift */; };
@@ -446,6 +447,7 @@
 		BABDE4918F5703465EDDDF61 /* EditorDocumentMutationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorDocumentMutationTests.swift; sourceTree = "<group>"; };
 		BBDE8EFCC51F23D22523B0DB /* EditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorView.swift; sourceTree = "<group>"; };
 		BC85E8C0536F747BE16672A8 /* TranscriptSensitivityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptSensitivityTests.swift; sourceTree = "<group>"; };
+		BCC93CDA21FC0A8462142DEB /* TranscriptResizeItemsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptResizeItemsTests.swift; sourceTree = "<group>"; };
 		BEB5A263095D05939503280A /* EditorEditedCursorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorEditedCursorTests.swift; sourceTree = "<group>"; };
 		BF5337215804929FAB516664 /* EditSliceModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditSliceModel.swift; sourceTree = "<group>"; };
 		BF901632B77811C861AD9067 /* TranscriptSpeedTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptSpeedTests.swift; sourceTree = "<group>"; };
@@ -970,6 +972,7 @@
 				170E47236A3D221D816CD4D8 /* EditorTests.swift */,
 				54EA92B84DB7AC6596B49781 /* EditorTransportTests.swift */,
 				915D4C836A78231F1BB490BB /* FineTuneTests.swift */,
+				BCC93CDA21FC0A8462142DEB /* TranscriptResizeItemsTests.swift */,
 				B0168E220B9A40AAC4C804A5 /* WaveformScrollTests.swift */,
 				52201EC420BDDCA276D6BFF8 /* WaveformTests.swift */,
 				FD0AAAC5B730BE46C1526074 /* EditSlice */,
@@ -1450,6 +1453,7 @@
 				2A3411BECC192F8C8D4C813C /* TranscriptFollowTests.swift in Sources */,
 				DEF34D538C39BC31E17A8DAE /* TranscriptHashTests.swift in Sources */,
 				C01C318A2A9E3FA8B4EEBC0C /* TranscriptPageTests.swift in Sources */,
+				591083330F3C359245EAF809 /* TranscriptResizeItemsTests.swift in Sources */,
 				34F4B48B1E198BEF7E73B7D6 /* TranscriptResizeMathTests.swift in Sources */,
 				8B9C8796FC4B43CDEB09A1DB /* TranscriptRevealTests.swift in Sources */,
 				9CD6FF67A74D574DC90174A5 /* TranscriptRunTogetherRangesTests.swift in Sources */,

@@ -748,6 +748,49 @@ final class EditorModel: ViewModel {
   /// the view stays logic-free.
   var playheadX: CGFloat? { editedWaveform.playheadX(forEdited: playheadEditedSample) }
 
+  // MARK: - Transcript resize items
+  /// Semantic (non-occluded) resizable spans for the transcript overlay: the selection (if any)
+  /// first, then one item per clip, then one per pending suggestion. Suggestion items carry
+  /// their FULL word IDs — never the `clipBands` version with clip-claimed words filtered out —
+  /// so a suggestion's resize handles always reflect its own semantic range. Draft-aware
+  /// substitution is added in the clip/suggestion resize tasks.
+  var transcriptResizeItems: [TranscriptResizeItem] {
+    let order = transcriptOrder()
+    func ordered(_ ids: some Sequence<Word.ID>) -> [Word.ID] {
+      let set = Set(ids)
+      return order.filter(set.contains)
+    }
+    var items: [TranscriptResizeItem] = []
+    if !selectedWordIDs.isEmpty {
+      items.append(.init(identity: .selection, wordIDs: ordered(selectedWordIDs)))
+    }
+    for slice in slices {
+      items.append(.init(identity: .clip(slice.id), wordIDs: ordered(slice.wordIDs)))
+    }
+    for suggestion in documentCutSuggestions.pending {
+      items.append(
+        .init(identity: .suggestion(suggestion.id), wordIDs: ordered(suggestion.wordIDs)))
+    }
+    return applyingResizeDraft(to: items)
+  }
+
+  private func transcriptOrder() -> [Word.ID] { editPlan.words.map(\.id) }
+
+  private func sourceRange(coveringWordIDs ids: [Word.ID]) -> Range<Int>? {
+    let set = Set(ids)
+    let words = editPlan.words.filter { set.contains($0.id) }
+    guard !words.isEmpty else { return nil }
+    let starts = words.compactMap(\.startSample)
+    let ends = words.compactMap(\.endSample)
+    guard let lo = starts.min(), let hi = ends.max(), lo < hi else { return nil }
+    return lo..<hi
+  }
+
+  /// Identity pass-through until Task 5 substitutes the in-flight draft's item.
+  private func applyingResizeDraft(to items: [TranscriptResizeItem]) -> [TranscriptResizeItem] {
+    items
+  }
+
   // MARK: - Seam overlays
   /// The bowtie spans the lane draws at each seam, mapped to edited view coordinates by the
   /// adapter (nil, and so dropped, only for an off-screen seam; a fully-clamped hard cut still
