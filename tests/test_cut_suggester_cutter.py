@@ -116,12 +116,14 @@ def test_suggest_cuts_with_no_requested_tuned_types_makes_no_model_calls():
     assert result.partitions == []
 
 
-def test_strict_configured_stage_rejects_nonempty_all_invalid_output():
+@pytest.mark.parametrize("invalid_type", [False, [], {}])
+def test_strict_configured_stage_rejects_nonempty_all_invalid_output(invalid_type):
     sents = _sents(3, sec_per=20.0)
+    clips = json.dumps({"clips": [{"type": invalid_type, "start": 0, "end": 2, "label": "bad"}]})
     with pytest.raises(CutSuggesterOutputError, match="no valid requested clips"):
         suggest_cuts(
             sents,
-            _FakeLLM('{"paragraphs":[{"start":0,"end":2,"label":"all"}]}', '{"clips":[false]}'),
+            _FakeLLM('{"paragraphs":[{"start":0,"end":2,"label":"all"}]}', clips),
             specs={ProductType.SPOTLIGHT: DEFAULT_SPECS[ProductType.SPOTLIGHT]},
             strict=True,
         )

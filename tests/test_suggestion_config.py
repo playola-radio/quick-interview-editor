@@ -39,6 +39,18 @@ def test_fixture_configuration_is_valid_and_images_are_generic():
     }
 
 
+def test_restoring_exact_builtin_id_returns_type_to_tuned_route():
+    config = _config()
+    spotlight = next(item for item in config["types"] if item["id"] == "spotlight")
+    spotlight["id"] = "custom-story"
+    tuned, _ = split_discovery_types(config)
+    assert [item["id"] for item in tuned] == ["intro"]
+
+    spotlight["id"] = "spotlight"
+    tuned, _ = split_discovery_types(config)
+    assert [item["id"] for item in tuned] == ["intro", "spotlight"]
+
+
 def test_configured_tuned_specs_use_only_present_exact_ids_and_edited_guidance():
     config = _config()
     config["types"] = [item for item in config["types"] if item["id"] != "intro"]
@@ -59,9 +71,12 @@ def test_configuration_name_normalization_matches_foundation_width_and_folding_r
 
 @pytest.mark.parametrize("mutate", [
     lambda c: c.__setitem__("schemaVersion", 2),
+    lambda c: c.__setitem__("schemaVersion", True),
+    lambda c: c.__setitem__("schemaVersion", "1"),
     lambda c: c.pop("schemaVersion"),
     lambda c: c.pop("revision"),
     lambda c: c.__setitem__("revision", True),
+    lambda c: c.__setitem__("revision", 1.5),
     lambda c: c["types"].append(copy.deepcopy(c["types"][0])),
     lambda c: c["types"][0]["template"].__setitem__(0, {"kind": "field", "value": "missing"}),
     lambda c: c["types"][0]["template"].__setitem__(0, {"kind": "sequence", "value": "bad"}),
@@ -74,4 +89,22 @@ def test_invalid_configuration_is_rejected(mutate):
     mutate(config)
 
     with pytest.raises(ConfigurationError):
+        validate_configuration(config)
+
+
+def test_configuration_rejects_duplicate_normalized_type_and_field_names():
+    config = _config()
+    duplicate_type = copy.deepcopy(config["types"][0])
+    duplicate_type["id"] = "other-intro"
+    duplicate_type["name"] = "  song  intro  "
+    config["types"].append(duplicate_type)
+    with pytest.raises(ConfigurationError, match="duplicate type name"):
+        validate_configuration(config)
+
+    config = _config()
+    duplicate_field = copy.deepcopy(config["fields"][0])
+    duplicate_field["id"] = "other-song"
+    duplicate_field["name"] = "  SÓNG  TITLE "
+    config["fields"].append(duplicate_field)
+    with pytest.raises(ConfigurationError, match="duplicate field name"):
         validate_configuration(config)

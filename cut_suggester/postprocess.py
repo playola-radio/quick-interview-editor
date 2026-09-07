@@ -23,7 +23,7 @@ _SONG_STOPWORDS = {"the", "a", "an", "of", "to", "and", "in", "on", "for", "my",
 def validate_clip(raw: dict) -> tuple[bool, str]:
     """Strict validation of a raw stage-2 clip dict. Returns (ok, reason)."""
     ptype = raw.get("type")
-    if ptype not in _VALID_TYPES:
+    if not isinstance(ptype, str) or ptype not in _VALID_TYPES:
         return False, f"unknown type {ptype!r}"
     start, end = raw.get("start"), raw.get("end")
     if not isinstance(start, int) or isinstance(start, bool):
