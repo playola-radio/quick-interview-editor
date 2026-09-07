@@ -292,6 +292,8 @@ actor SuggestionRecoveryStore {
   private func mergeLineage(_ local: SuggestionRecoveryArchive, _ saved: SuggestionRecoveryArchive)
     throws -> SuggestionRecoveryArchive
   {
+    try local.validateLineageShape()
+    try saved.validateLineageShape()
     let localID = local.manifest.snapshot.runID
     let savedID = saved.manifest.snapshot.runID
     let currentID: UUID
@@ -441,15 +443,9 @@ actor SuggestionRecoveryStore {
       try removeIndex(current.owner)
       return
     }
-    var next: SuggestionRecoveryManifest?
-    for (index, id) in remaining.enumerated() {
-      var manifest = try manifestForRun(current.owner.id, runID: id)
-      manifest.retainedAppliedRunIDs = Array(remaining.prefix(index))
-      try writeRunManifest(manifest)
-      if id == nextID { next = manifest }
-    }
-    guard let next else { throw SuggestionRecoveryError.missingRun }
-    try writeManifest(next)
+    var next = try manifestForRun(current.owner.id, runID: nextID)
+    next.retainedAppliedRunIDs = Array(remaining.dropLast())
+    try publishCurrentManifest(next)
     for id in removed {
       let run = runDirectory(current.owner.id, id)
       if files.fileExists(atPath: run.path) { try files.removeItem(at: run) }
@@ -494,7 +490,7 @@ actor SuggestionRecoveryStore {
   private func manifestForRun(_ id: UUID, runID: UUID) throws -> SuggestionRecoveryManifest {
     let current = try requireManifest(id)
     if current.snapshot.runID == runID { return current }
-    guard current.retainedAppliedRunIDs.contains(runID),
+    guard let position = current.retainedAppliedRunIDs.firstIndex(of: runID),
       let data = try optionalData(runManifestURL(id, runID: runID))
     else {
       throw SuggestionRecoveryError.missingRun
@@ -505,6 +501,7 @@ actor SuggestionRecoveryStore {
       throw SuggestionRecoveryError.missingRun
     }
     manifest.owner = current.owner
+    manifest.retainedAppliedRunIDs = Array(current.retainedAppliedRunIDs.prefix(position))
     return manifest
   }
   private func writeRunManifest(_ manifest: SuggestionRecoveryManifest) throws {
@@ -530,6 +527,9 @@ actor SuggestionRecoveryStore {
   }
   private func writeManifest(_ manifest: SuggestionRecoveryManifest) throws {
     try writeRunManifest(manifest)
+    try publishCurrentManifest(manifest)
+  }
+  private func publishCurrentManifest(_ manifest: SuggestionRecoveryManifest) throws {
     try write(
       JSONEncoder().encode(manifest),
       ownerDirectory(manifest.owner.id).appending(component: "manifest.json"))

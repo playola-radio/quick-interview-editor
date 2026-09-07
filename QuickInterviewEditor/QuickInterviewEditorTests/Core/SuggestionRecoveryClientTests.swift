@@ -1,3 +1,4 @@
+import ConcurrencyExtras
 import CustomDump
 import Foundation
 import Testing
@@ -563,9 +564,11 @@ extension SuggestionRecoveryClientTests {
     expectNoDifference(untouched?.snapshot, fixture.snapshot)
   }
 
-  private func successor(of first: RecoveryFixture) throws -> RecoveryFixture {
+  private func successor(of first: RecoveryFixture, runID: UUID = Fixtures.uuid(88)) throws
+    -> RecoveryFixture
+  {
     var second = first
-    second.snapshot.runID = Fixtures.uuid(88)
+    second.snapshot.runID = runID
     second.preparation.snapshot = second.snapshot
     var request = try #require(
       JSONSerialization.jsonObject(with: first.preparation.originalRequest) as? [String: Any])
@@ -683,5 +686,92 @@ extension SuggestionRecoveryClientTests {
     let preserved = try await store.load(first.owner)
     expectNoDifference(preserved?.snapshot, first.snapshot)
     expectNoDifference(preserved?.phase, .ready)
+  }
+}
+
+extension SuggestionRecoveryClientTests {
+  @Test(arguments: [false, true])
+  func cleanupFailureKeepsCurrentSearchRecoverable(afterPublication: Bool) async throws {
+    let root = FileManager.default.temporaryDirectory.appending(component: UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    var (first, python) = try RecoveryFixture.python()
+    first.owner.documentURL = root.appending(component: "project.pie")
+    let store = SuggestionRecoveryStore(root: root.appending(component: "store"), uuid: { UUID() })
+    let firstDirectory = try await store.prepare(first.owner, preparation: first.preparation)
+    try first.writePython(python, directory: firstDirectory)
+    var second = try successor(of: first)
+    second.preparation.lastAppliedRunID = first.snapshot.runID
+    let secondDirectory = try await store.prepare(first.owner, preparation: second.preparation)
+    try second.writePython(RecoveryFixture.python(matching: second), directory: secondDirectory)
+    var third = try successor(of: second, runID: Fixtures.uuid(89))
+    third.preparation.lastAppliedRunID = second.snapshot.runID
+    let thirdDirectory = try await store.prepare(first.owner, preparation: third.preparation)
+    let thirdPython = try RecoveryFixture.python(matching: third)
+    try third.writePython(thirdPython, directory: thirdDirectory)
+    let before = try await store.capture(
+      first.owner, runID: third.snapshot.runID, minimumPythonRevision: 1)
+    var file = Fixtures.projectFile()
+    file.content.suggestionRecoveryOwnerID = first.owner.id
+    file.content.lastAppliedSuggestionRunID = first.snapshot.runID
+    let package = try #require(first.owner.documentURL)
+    try FileManager.default.createDirectory(at: package, withIntermediateDirectories: true)
+    try ProjectPackage.projectEncoder().encode(file).write(
+      to: package.appending(component: "project.json"))
+    let writes = LockIsolated<[String]>([])
+    let failing = SuggestionRecoveryStore(
+      root: root.appending(component: "store"),
+      write: { data, url in
+        writes.withValue { $0.append(url.lastPathComponent) }
+        if url.lastPathComponent == "manifest.json" {
+          if afterPublication { try data.write(to: url, options: .atomic) }
+          throw CocoaError(.fileWriteNoPermission)
+        }
+        try data.write(to: url, options: .atomic)
+      }, uuid: { UUID() })
+    await #expect(throws: (any Error).self) {
+      try await failing.confirmSaved(first.owner, runID: first.snapshot.runID)
+    }
+    let reopened = SuggestionRecoveryStore(
+      root: root.appending(component: "store"), uuid: { UUID() })
+    let recovered = try await reopened.capture(
+      first.owner, runID: third.snapshot.runID, minimumPythonRevision: 1)
+    expectNoDifference(recovered.checkpoint, before.checkpoint)
+    let archive = try SuggestionRecoveryArchive.decode(recovered.archive)
+    expectNoDifference(archive.records, thirdPython.records)
+    expectNoDifference(
+      archive.manifest.retainedAppliedRunIDs,
+      afterPublication ? [second.snapshot.runID] : [first.snapshot.runID, second.snapshot.runID])
+    expectNoDifference(writes.value, ["manifest.json"])
+  }
+
+  @Test func corruptLocalDuplicateLineageThrowsBeforeRestoreWrites() async throws {
+    let root = FileManager.default.temporaryDirectory.appending(component: UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let (first, python) = try RecoveryFixture.python()
+    let store = SuggestionRecoveryStore(root: root, uuid: { UUID() })
+    let directory = try await store.prepare(first.owner, preparation: first.preparation)
+    try first.writePython(python, directory: directory)
+    var second = try successor(of: first)
+    second.preparation.lastAppliedRunID = first.snapshot.runID
+    _ = try await store.prepare(first.owner, preparation: second.preparation)
+    let valid = try await store.capture(
+      first.owner, runID: second.snapshot.runID, minimumPythonRevision: nil)
+    let manifestURL = root.appending(component: first.owner.id.uuidString).appending(
+      component: "manifest.json")
+    var corrupted = try #require(
+      JSONSerialization.jsonObject(with: Data(contentsOf: manifestURL)) as? [String: Any])
+    corrupted["retainedAppliedRunIDs"] = [
+      first.snapshot.runID.uuidString, first.snapshot.runID.uuidString,
+    ]
+    let malformed = try JSONSerialization.data(withJSONObject: corrupted)
+    try malformed.write(to: manifestURL)
+    let writes = LockIsolated(0)
+    let restoring = SuggestionRecoveryStore(
+      root: root, write: { _, _ in writes.withValue { $0 += 1 } }, uuid: { UUID() })
+    await #expect(throws: SuggestionRecoveryError.self) {
+      try await restoring.restore(first.owner, archive: valid.archive)
+    }
+    expectNoDifference(writes.value, 0)
+    expectNoDifference(try Data(contentsOf: manifestURL), malformed)
   }
 }

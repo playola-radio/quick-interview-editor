@@ -46,6 +46,15 @@ struct SuggestionRecoveryArchive: Codable, Equatable, Sendable {
   }
 
   func validateRetainedRuns() throws {
+    try validateLineageShape()
+    for run in retainedAppliedRuns {
+      guard try run.archive.validatedCheckpoint().phase == .ready else {
+        throw SuggestionRecoveryError.invalid("Invalid retained applied search.")
+      }
+    }
+  }
+
+  func validateLineageShape() throws {
     let ids = retainedAppliedRuns.map { $0.manifest.snapshot.runID }
     guard ids == manifest.retainedAppliedRunIDs, Set(ids).count == ids.count,
       !ids.contains(manifest.snapshot.runID)
@@ -54,8 +63,7 @@ struct SuggestionRecoveryArchive: Codable, Equatable, Sendable {
       guard run.manifest.owner.id == manifest.owner.id,
         run.manifest.owner.sourceFingerprint == manifest.owner.sourceFingerprint,
         run.manifest.owner.transcriptHash == manifest.owner.transcriptHash,
-        run.manifest.retainedAppliedRunIDs == Array(ids.prefix(index)),
-        try run.archive.validatedCheckpoint().phase == .ready
+        run.manifest.retainedAppliedRunIDs == Array(ids.prefix(index))
       else {
         throw SuggestionRecoveryError.invalid("Invalid retained applied search.")
       }
@@ -159,6 +167,11 @@ struct SuggestionRecoveryArchive: Codable, Equatable, Sendable {
   }
 
   func validateManifest() throws {
+    guard Set(manifest.retainedAppliedRunIDs).count == manifest.retainedAppliedRunIDs.count,
+      !manifest.retainedAppliedRunIDs.contains(manifest.snapshot.runID)
+    else {
+      throw SuggestionRecoveryError.invalid("Invalid applied recovery lineage.")
+    }
     guard schemaVersion == 1, manifest.schemaVersion == 1, manifest.control.revision >= 0,
       manifest.owner.sourceFingerprint == manifest.snapshot.sourceFingerprint,
       manifest.owner.transcriptHash == manifest.snapshot.transcriptHash,
