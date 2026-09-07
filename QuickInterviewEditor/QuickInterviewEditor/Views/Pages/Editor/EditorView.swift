@@ -68,6 +68,11 @@ struct EditorView: View {
     .onChange(of: model.clipBands, initial: true) { _, bands in
       model.transcript.clipBands = bands
     }
+    // The resizable-edge items (selection/clip/suggestion) the transcript overlay draws grab
+    // handles for — pushed in like `clipBands`, so the transcript stays layout-local.
+    .onChange(of: model.transcriptResizeItems, initial: true) { _, items in
+      model.transcript.resizeItems = items
+    }
     // Words fully inside a removed section get struck through — same pushed-in pattern as
     // `clipBands`, so the transcript doesn't know about removals.
     .onChange(of: model.removedWordIDs, initial: true) { _, ids in

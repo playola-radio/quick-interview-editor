@@ -143,6 +143,11 @@ class TranscriptPageModel: ViewModel {
   /// predicate) and pushed in by the view — mirrors `removedWordIDs`/`clipBands`. This is what the
   /// renderer draws; the transcript's own `selectedWordIDSet` shadow is retired in a later task.
   var highlightedWordIDs: Set<Word.ID> = []
+  /// The resizable items (selection/clip/suggestion) whose edges the transcript overlay draws
+  /// grab handles for, derived by `EditorModel` and pushed in by the view — mirrors
+  /// `clipBands`/`highlightedWordIDs`. The transcript stays layout-local and only renders
+  /// what it's handed.
+  var resizeItems: [TranscriptResizeItem] = []
   /// The latest explicit reveal request (from clicking a suggestion or clip). The view scrolls
   /// to it regardless of `followMode`; nil until the first reveal.
   var reveal: TranscriptReveal?

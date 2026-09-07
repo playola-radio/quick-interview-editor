@@ -1,5 +1,12 @@
 import Foundation
 
+/// Tuning constants for the resize-handle overlay: how close a click/drag needs to be to an
+/// edge to grab it, and how far a drag must travel before it counts as a resize gesture.
+enum TranscriptResizeMetrics {
+  static let grabTolerance: CGFloat = 6
+  static let dragThreshold: CGFloat = 6
+}
+
 enum TranscriptResizeEdge: Equatable, Sendable { case start, end }
 
 enum TranscriptResizeItemIdentity: Equatable, Hashable, Sendable {

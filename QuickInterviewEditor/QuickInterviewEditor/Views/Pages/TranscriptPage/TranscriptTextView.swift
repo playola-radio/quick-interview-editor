@@ -18,6 +18,7 @@ struct TranscriptTextView: NSViewRepresentable {
   let scrollTarget: Word.ID?
   let followMode: TranscriptFollowMode
   let reveal: TranscriptReveal?
+  let resizeItems: [TranscriptResizeItem]
 
   func makeCoordinator() -> Coordinator { Coordinator(model: model) }
 
@@ -75,7 +76,7 @@ struct TranscriptTextView: NSViewRepresentable {
     context.coordinator.apply(
       text: text, fontSize: fontSize, selected: selected, clipContainers: clipContainers,
       removedWordIDs: removedWordIDs, currentWordID: currentWordID, scrollTarget: scrollTarget,
-      followMode: followMode, reveal: reveal)
+      followMode: followMode, reveal: reveal, resizeItems: resizeItems)
   }
 
   @MainActor
@@ -94,6 +95,7 @@ struct TranscriptTextView: NSViewRepresentable {
     private var lastScrollTarget: Word.ID?
     private var lastFollowMode: TranscriptFollowMode = .following
     private var lastReveal: TranscriptReveal?
+    private var resizeItems: [TranscriptResizeItem] = []
     private var scrollTimer: Timer?
     private var scrollFromY: CGFloat = 0
     private var scrollToY: CGFloat = 0
@@ -162,9 +164,11 @@ struct TranscriptTextView: NSViewRepresentable {
       text: String, fontSize: Double, selected: Set<Word.ID>,
       clipContainers: [TranscriptClipContainer], removedWordIDs: Set<Word.ID>,
       currentWordID: Word.ID?, scrollTarget: Word.ID?,
-      followMode: TranscriptFollowMode, reveal: TranscriptReveal?
+      followMode: TranscriptFollowMode, reveal: TranscriptReveal?,
+      resizeItems: [TranscriptResizeItem]
     ) {
       guard let storage = textView?.textStorage, let textView else { return }
+      self.resizeItems = resizeItems
 
       let didRebuild = text != lastText
       if didRebuild {
@@ -428,6 +432,77 @@ struct TranscriptTextView: NSViewRepresentable {
       let lineRect = lm.lineFragmentUsedRect(forGlyphAt: glyph, effectiveRange: nil)
       guard lineRect.contains(local) else { return nil }
       return lm.characterIndexForGlyph(at: glyph)
+    }
+
+    // MARK: Resize handle geometry (Task 3 — cursor/geometry only, no mutation)
+
+    /// Start/end grab rects for every resizable item's true first/last word, in
+    /// document-view coordinates (text-container coords plus `textContainerInset`, matching
+    /// `utf16Offset(at:)`'s inset handling so zones and the lenient hit-test agree).
+    func resizeZones() -> [TranscriptResizeHandleZone] {
+      guard let layoutManager = textView?.layoutManager,
+        let textContainer = textView?.textContainer
+      else { return [] }
+      let inset = textView?.textContainerInset ?? .zero
+      var zones: [TranscriptResizeHandleZone] = []
+      for item in resizeItems {
+        guard let first = item.wordIDs.first, let last = item.wordIDs.last,
+          let firstRange = range(for: first), let lastRange = range(for: last)
+        else { continue }
+        func zone(_ nsRange: NSRange, _ edge: TranscriptResizeEdge) -> TranscriptResizeHandleZone? {
+          let glyphRange = layoutManager.glyphRange(forCharacterRange: nsRange, actualCharacterRange: nil)
+          var rect = layoutManager.boundingRect(forGlyphRange: glyphRange, in: textContainer)
+          rect.origin.x += inset.width
+          rect.origin.y += inset.height
+          let edgeX = edge == .start ? rect.minX : rect.maxX
+          let grab = CGRect(
+            x: edgeX - TranscriptResizeMetrics.grabTolerance, y: rect.minY,
+            width: TranscriptResizeMetrics.grabTolerance * 2, height: rect.height)
+          return TranscriptResizeHandleZone(
+            identity: item.identity, edge: edge, rect: grab, priority: item.identity.priority)
+        }
+        if let z = zone(firstRange, .start) { zones.append(z) }
+        if let z = zone(lastRange, .end) { zones.append(z) }
+      }
+      return zones
+    }
+
+    /// D2 priority resolution among the zones containing `point`: highest `priority` wins,
+    /// ties break by nearest edge-x, remaining ties break by a deterministic identity/edge
+    /// ordering so hit-testing never flickers between equally-eligible zones.
+    func resizeHandle(at point: NSPoint) -> (TranscriptResizeItemIdentity, TranscriptResizeEdge)? {
+      let hits = resizeZones().filter { $0.rect.contains(point) }
+      guard !hits.isEmpty else { return nil }
+      let best = hits.sorted { a, b in
+        if a.priority != b.priority { return a.priority > b.priority }
+        func dx(_ z: TranscriptResizeHandleZone) -> CGFloat { abs(point.x - z.rect.midX) }
+        if dx(a) != dx(b) { return dx(a) < dx(b) }
+        return "\(a.identity)\(a.edge)" < "\(b.identity)\(b.edge)"
+      }.first!
+      return (best.identity, best.edge)
+    }
+
+    /// Lenient word hit-test for resize dragging: like `utf16Offset(at:)` but drops the
+    /// "point inside the used line rect" rejection, clamping x into the resolved line
+    /// fragment before resolving the character index. This lets a drag that strays above/
+    /// below/beyond the exact glyph bounds still resolve to the nearest word on that line.
+    func wordIDForResize(at point: NSPoint) -> Word.ID? {
+      guard let textView, let layoutManager = textView.layoutManager,
+        let textContainer = textView.textContainer
+      else { return nil }
+      layoutManager.ensureLayout(for: textContainer)
+      guard layoutManager.numberOfGlyphs > 0 else { return nil }
+      let inset = textView.textContainerInset
+      let local = NSPoint(x: point.x - inset.width, y: point.y - inset.height)
+      let glyphIndex = layoutManager.glyphIndex(for: local, in: textContainer)
+      var lineRange = NSRange()
+      let lineRect = layoutManager.lineFragmentUsedRect(
+        forGlyphAt: glyphIndex, effectiveRange: &lineRange)
+      let clampedX = min(max(local.x, lineRect.minX), lineRect.maxX - 0.5)
+      let clamped = NSPoint(x: clampedX, y: lineRect.midY)
+      let idx = layoutManager.glyphIndex(for: clamped, in: textContainer)
+      let charIndex = layoutManager.characterIndexForGlyph(at: idx)
+      return model.document.wordID(atUTF16Offset: charIndex)
     }
   }
 }
