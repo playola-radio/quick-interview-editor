@@ -1496,4 +1496,18 @@ struct EditorTests {
     _ = model.editorKeyDown(.zoomOut)
     #expect(model.editedWaveform.samplesPerPixel > zoomedIn)
   }
+
+  @Test func editorKeyDownSwitchesRightPanel() {
+    let model = editor()
+
+    model.rightPanelTab = .both
+    #expect(model.editorKeyDown(.showClipsPanel))
+    expectNoDifference(model.rightPanelTab, .slices)
+
+    #expect(model.editorKeyDown(.showSuggestionsPanel))
+    expectNoDifference(model.rightPanelTab, .suggestions)
+
+    #expect(model.editorKeyDown(.showBothPanels))
+    expectNoDifference(model.rightPanelTab, .both)
+  }
 }

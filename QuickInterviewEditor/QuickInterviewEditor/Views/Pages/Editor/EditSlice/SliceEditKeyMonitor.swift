@@ -179,7 +179,8 @@ struct SliceEditKeyMonitor: NSViewRepresentable {
         if !isARepeat { Task { await model.removeSectionKeyPressed() } }
         return true
       case .speedUp, .speedDown, .escape, .nudgeCutInEarlier, .nudgeCutInLater,
-        .nudgeCutOutEarlier, .nudgeCutOutLater:
+        .nudgeCutOutEarlier, .nudgeCutOutLater, .showClipsPanel, .showSuggestionsPanel,
+        .showBothPanels:
         return false
       }
     }

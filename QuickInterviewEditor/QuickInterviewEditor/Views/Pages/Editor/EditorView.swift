@@ -23,6 +23,7 @@ struct EditorView: View {
         Picker(model.rightPanelPickerLabel, selection: $model.rightPanelTab) {
           Text(model.slicesTabLabel).tag(RightPanelTab.slices)
           Text(model.suggestionsTabLabel).tag(RightPanelTab.suggestions)
+          Text(model.bothTabLabel).tag(RightPanelTab.both)
         }
         .pickerStyle(.segmented)
         .labelsHidden()
@@ -30,7 +31,7 @@ struct EditorView: View {
         Divider()
         rightPanel
       }
-      .frame(width: 302)
+      .frame(width: model.rightPanelWidth)
     }
     .background(Color.black)
     .background(
@@ -93,6 +94,12 @@ struct EditorView: View {
       SlicesPanelView(model: model)
     case .suggestions:
       CutSuggestionsPageView(model: model.cutSuggestions)
+    case .both:
+      HStack(spacing: 0) {
+        SlicesPanelView(model: model)
+        Divider()
+        CutSuggestionsPageView(model: model.cutSuggestions)
+      }
     }
   }
 }

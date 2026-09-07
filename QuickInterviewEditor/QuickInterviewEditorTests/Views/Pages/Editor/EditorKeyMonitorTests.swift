@@ -58,4 +58,22 @@ struct EditorKeyMonitorTests {
     expectNoDifference(key(123, .shift), .nudgeCutOutEarlier)  // ⇧←
     expectNoDifference(key(124, .shift), .nudgeCutOutLater)  // ⇧→
   }
+
+  @Test func commandDigitsSwitchRightPanel() {
+    expectNoDifference(key(18, .command, characters: "1"), .showClipsPanel)  // ⌘1
+    expectNoDifference(key(19, .command, characters: "2"), .showSuggestionsPanel)  // ⌘2
+    expectNoDifference(key(20, .command, characters: "3"), .showBothPanels)  // ⌘3
+  }
+
+  @Test func unmodifiedDigitsFallThrough() {
+    expectNoDifference(key(18, characters: "1"), nil)
+    expectNoDifference(key(19, characters: "2"), nil)
+    expectNoDifference(key(20, characters: "3"), nil)
+  }
+
+  @Test func differentlyModifiedDigitsFallThrough() {
+    expectNoDifference(key(18, .shift, characters: "1"), nil)
+    expectNoDifference(key(19, .option, characters: "2"), nil)
+    expectNoDifference(key(20, [.command, .shift], characters: "3"), nil)
+  }
 }

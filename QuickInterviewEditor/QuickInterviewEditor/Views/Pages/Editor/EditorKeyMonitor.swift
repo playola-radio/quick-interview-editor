@@ -81,7 +81,21 @@ struct EditorKeyMonitor: NSViewRepresentable {
       default: break
       }
       if modifiers.isEmpty, characters?.lowercased() == "z" { return .zoomFit }
+      if modifiers == .command, let digitKey = Self.digitKey(forCharacters: characters) {
+        return digitKey
+      }
       return nil
+    }
+
+    /// ⌘1/⌘2/⌘3 switch the editor's right panel — split out of `editorKey` to keep its
+    /// cyclomatic complexity in check.
+    private static func digitKey(forCharacters characters: String?) -> EditorKey? {
+      switch characters {
+      case "1": return .showClipsPanel
+      case "2": return .showSuggestionsPanel
+      case "3": return .showBothPanels
+      default: return nil
+      }
     }
 
     /// Left/Right arrow keys only, split out of `editorKey` to keep its cyclomatic complexity in
