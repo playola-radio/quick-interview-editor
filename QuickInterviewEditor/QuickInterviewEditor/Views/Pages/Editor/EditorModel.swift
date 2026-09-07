@@ -29,6 +29,13 @@ enum EditorKey {
   /// Seeks the playhead to where free transport last started (the cursor if nothing has played
   /// yet) and plays from there, superseding any live/paused playback. Bound to plain `R`.
   case returnToLastPlayStart
+  /// Nudge a SELECTED crossfade seam's cut points by `FineTuneModel.nudgeMs`: ⌥←/→ move the left
+  /// cut (`cL`) earlier/later, ⌥⇧←/→ move the right cut (`cR`). Consumed only when a seam is
+  /// selected, so they fall through otherwise.
+  case nudgeLeftCutEarlier
+  case nudgeLeftCutLater
+  case nudgeRightCutEarlier
+  case nudgeRightCutLater
 }
 
 @MainActor
@@ -1507,6 +1514,8 @@ final class EditorModel: ViewModel {
       switchRightPanel(key)
     case .returnToLastPlayStart:
       Task { await returnToLastPlayStartTapped() }
+    case .nudgeLeftCutEarlier, .nudgeLeftCutLater, .nudgeRightCutEarlier, .nudgeRightCutLater:
+      return nudgeSeamCut(key)
     }
     return true
   }
@@ -1557,6 +1566,46 @@ final class EditorModel: ViewModel {
     case .nudgeCutOutLater: selectionNudged(.end, byMs: fineTune.nudgeMs)
     default: return false
     }
+    return true
+  }
+
+  /// Nudges one cut of the SELECTED crossfade seam (⌥←/→ = left cut, ⌥⇧←/→ = right cut) by
+  /// `FineTuneModel.nudgeMs`, freezing the fade length and clamping like a drag. Split out of
+  /// `editorKeyDown`'s switch (as one combined case delegating here) to keep its cyclomatic
+  /// complexity in check. Falls through unconsumed (`false`) when no seam is selected, so the key
+  /// still reaches whatever else might handle it. A clamped no-op still consumes the key (a
+  /// selected seam owns the ⌥-arrow).
+  private func nudgeSeamCut(_ key: EditorKey) -> Bool {
+    guard let id = selectedSeamID, let removal = timelineRemovals[id: id],
+      let seam = editedWaveform.timeline.seams.first(where: { $0.id == id })
+    else { return false }
+    let edge: RemovalBoundary
+    let ms: Double
+    switch key {
+    case .nudgeLeftCutEarlier: edge = .lower; ms = -fineTune.nudgeMs
+    case .nudgeLeftCutLater: edge = .lower; ms = fineTune.nudgeMs
+    case .nudgeRightCutEarlier: edge = .upper; ms = -fineTune.nudgeMs
+    case .nudgeRightCutLater: edge = .upper; ms = fineTune.nudgeMs
+    default: return false
+    }
+    let delta = Int((ms / 1000 * Double(editPlan.source.sampleRate)).rounded())
+    // Constructible range (see Task 3): a nudge on a removal shorter than the nudge distance could
+    // otherwise invert the `Range` literal and trap. Cap the moving bound against the opposite one;
+    // `clampedRemovalRange` applies the real clamp.
+    let proposed: Range<Int>
+    switch edge {
+    case .lower:
+      let proposedCL = min(removal.removedRange.lowerBound + delta, removal.removedRange.upperBound)
+      proposed = proposedCL..<removal.removedRange.upperBound
+    case .upper:
+      let proposedCR = max(removal.removedRange.upperBound + delta, removal.removedRange.lowerBound)
+      proposed = removal.removedRange.lowerBound..<proposedCR
+    }
+    let clamped = clampedRemovalRange(
+      id: id, proposed: proposed, frozenLength: seam.crossfadeLength)
+    guard clamped != removal.removedRange else { return true }
+    updateRemovalRange(
+      id: id, removedRange: clamped, freezingCrossfadeLength: seam.crossfadeLength)
     return true
   }
 

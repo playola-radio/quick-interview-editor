@@ -104,17 +104,28 @@ struct EditorKeyMonitor: NSViewRepresentable {
 
     /// Left/Right arrow keys only, split out of `editorKey` to keep its cyclomatic complexity in
     /// check: ⌘←/⌘→ zoom, plain ←/→ nudge the pending removal's start (cut-in), Shift-←/→ nudge
-    /// its end (cut-out) — Task 9.
+    /// its end (cut-out), ⌥←/→ nudge a selected seam's left cut, ⌥⇧←/→ nudge its right cut.
     private static func arrowKey(
       forKeyCode keyCode: UInt16, modifiers: NSEvent.ModifierFlags
     ) -> EditorKey? {
       switch keyCode {
-      case 123 where modifiers == .command: return .zoomOut  // ⌘←
-      case 124 where modifiers == .command: return .zoomIn  // ⌘→
-      case 123 where modifiers.isEmpty: return .nudgeCutInEarlier  // ←
-      case 124 where modifiers.isEmpty: return .nudgeCutInLater  // →
-      case 123 where modifiers == .shift: return .nudgeCutOutEarlier  // ⇧←
-      case 124 where modifiers == .shift: return .nudgeCutOutLater  // ⇧→
+      case 123: return arrowKey(forModifiers: modifiers, whenLeft: true)
+      case 124: return arrowKey(forModifiers: modifiers, whenLeft: false)
+      default: return nil
+      }
+    }
+
+    /// The modifier → `EditorKey` mapping shared by ← and →, split out of `arrowKey` to keep its
+    /// cyclomatic complexity in check.
+    private static func arrowKey(
+      forModifiers modifiers: NSEvent.ModifierFlags, whenLeft isLeft: Bool
+    ) -> EditorKey? {
+      switch modifiers {
+      case .command: return isLeft ? .zoomOut : .zoomIn  // ⌘←/⌘→
+      case []: return isLeft ? .nudgeCutInEarlier : .nudgeCutInLater  // ←/→
+      case .shift: return isLeft ? .nudgeCutOutEarlier : .nudgeCutOutLater  // ⇧←/⇧→
+      case .option: return isLeft ? .nudgeLeftCutEarlier : .nudgeLeftCutLater  // ⌥←/⌥→
+      case [.option, .shift]: return isLeft ? .nudgeRightCutEarlier : .nudgeRightCutLater  // ⌥⇧←/⌥⇧→
       default: return nil
       }
     }

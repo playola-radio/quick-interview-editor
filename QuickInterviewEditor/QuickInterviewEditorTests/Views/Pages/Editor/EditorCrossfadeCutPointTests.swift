@@ -207,4 +207,42 @@ struct EditorCrossfadeCutPointTests {
       expectNoDifference(model.selectedSeamID, id)
     }
   }
+
+  // MARK: - Keyboard nudge
+
+  @Test func nudgeMovesLeftCutBy10msWhenSeamSelected() {
+    withStorage {
+      let model = editor(fingerprint: "fp-cut-nudge-left")
+      let id = addRemoval(model, range: 48_000..<96_000, length: 600)
+      model.selectSeam(id)
+
+      _ = model.editorKeyDown(.nudgeLeftCutEarlier)  // 10ms @ 44100 = 441 samples earlier
+
+      expectNoDifference(model.timelineRemovals[id: id]?.removedRange, 47_559..<96_000)
+    }
+  }
+
+  @Test func nudgeMovesRightCutBy10msWhenSeamSelected() {
+    withStorage {
+      let model = editor(fingerprint: "fp-cut-nudge-right")
+      let id = addRemoval(model, range: 48_000..<96_000, length: 600)
+      model.selectSeam(id)
+
+      _ = model.editorKeyDown(.nudgeRightCutLater)  // cR + 441
+
+      expectNoDifference(model.timelineRemovals[id: id]?.removedRange, 48_000..<96_441)
+    }
+  }
+
+  @Test func nudgeIsANoOpWithNoSeamSelected() {
+    withStorage {
+      let model = editor(fingerprint: "fp-cut-nudge-noseam")
+      let id = addRemoval(model, range: 48_000..<96_000, length: 600)
+
+      let consumed = model.editorKeyDown(.nudgeLeftCutEarlier)
+
+      #expect(consumed == false)
+      expectNoDifference(model.timelineRemovals[id: id]?.removedRange, 48_000..<96_000)
+    }
+  }
 }
