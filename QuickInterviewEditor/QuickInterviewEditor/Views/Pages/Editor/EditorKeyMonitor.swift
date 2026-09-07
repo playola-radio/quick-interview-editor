@@ -81,6 +81,7 @@ struct EditorKeyMonitor: NSViewRepresentable {
       default: break
       }
       if modifiers.isEmpty, characters?.lowercased() == "z" { return .zoomFit }
+      if modifiers.isEmpty, characters?.lowercased() == "r" { return .returnToLastPlayStart }
       if modifiers == .command, let digitKey = Self.digitKey(forKeyCode: keyCode) {
         return digitKey
       }
@@ -126,11 +127,13 @@ struct EditorKeyMonitor: NSViewRepresentable {
       guard let window = host?.window, window.isKeyWindow else { return false }
       // Stand down while a text field is being edited (e.g. renaming a slice).
       if let responder = window.firstResponder as? NSText, responder.isEditable { return false }
-      // Z is a toggle, the speed keys step discrete presets, and ⌫ removes a section; swallow
-      // auto-repeat on all three so holding one doesn't flicker fit↔restore, blow through every
-      // speed, or fire multiple removals (and doesn't beep). The arrow zoom keys intentionally
-      // keep repeating.
-      if isARepeat, key == .zoomFit || key == .speedUp || key == .speedDown || key == .removeSection
+      // Z is a toggle, the speed keys step discrete presets, ⌫ removes a section, and R restarts
+      // playback from the last start; swallow auto-repeat on all of them so holding one doesn't
+      // flicker fit↔restore, blow through every speed, fire multiple removals, or machine-gun
+      // restart (and doesn't beep). The arrow zoom keys intentionally keep repeating.
+      if isARepeat,
+        key == .zoomFit || key == .speedUp || key == .speedDown || key == .removeSection
+          || key == .returnToLastPlayStart
       {
         return true
       }

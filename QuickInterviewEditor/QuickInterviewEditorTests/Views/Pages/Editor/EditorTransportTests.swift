@@ -96,6 +96,16 @@ struct EditorTransportTests {
     for _ in 0..<1000 where !condition() { await Task.yield() }
   }
 
+  /// One removal [lower, upper) with crossfade `length`, well inside the fixture file.
+  private func addRemoval(_ model: EditorModel, _ lower: Int, _ upper: Int, length: Int) {
+    model.mutateDocument { doc in
+      doc.timelineRemovals.append(
+        TimelineRemoval(
+          id: UUID(), removedRange: lower..<upper,
+          crossfade: Crossfade(lengthSamples: length, curve: .equalPower)))
+    }
+  }
+
   private func recordingPlay(
     _ recorded: LockIsolated<(URL, Range<Int>, Int)?>, _ gate: TransportGate
   ) -> @Sendable (URL, Range<Int>, Int, Double, PlaybackSessionID) async throws -> PlaybackEnd {
@@ -446,6 +456,143 @@ struct EditorTransportTests {
       // Stop → origin (slice start)
       expectNoDifference(model.playheadEditedSample, slice.startSample)
     }
+  }
+
+  // MARK: - R (replay from last play-start)
+
+  @Test func returnToLastPlayStartReplaysFromLastFreeStartWhenStopped() async {
+    let gate = TransportGate()
+    let recorded = LockIsolated<(URL, AudioEditRenderPlan, Int)?>(nil)
+    let model = editor()
+    model.playheadEditedSample = 1000
+    await withDependencies {
+      $0.audioPlayer.playEdited = recordingPlayEdited(recorded, gate)
+      $0.audioPlayer.stop = { _ in gate.release() }
+    } operation: {
+      let first = Task { await model.transportPlayTapped() }
+      await gate.awaitStarted()
+      expectNoDifference(model.lastFreePlayStartEditedSample, 1000)
+      await model.transportStopTapped()
+      await first.value
+      model.playheadEditedSample = 8000  // cursor wanders after stopping
+      let replay = Task { await model.returnToLastPlayStartTapped() }
+      await gate.awaitStarted()
+      #expect(model.isTransportPlaying)
+      expectNoDifference(model.playheadEditedSample, 1000)  // seeked back to the last start
+      expectNoDifference(recorded.value?.1.items.first?.editedSpan.lowerBound, 1000)
+      await model.transportStopTapped()
+      await replay.value
+    }
+  }
+
+  @Test func returnToLastPlayStartWhilePlayingRestartsFromLastFreeStart() async {
+    let gate = TransportGate()
+    let recorded = LockIsolated<(URL, AudioEditRenderPlan, Int)?>(nil)
+    let model = editor()
+    model.playheadEditedSample = 1000
+    await withDependencies {
+      $0.audioPlayer.playEdited = recordingPlayEdited(recorded, gate)
+      $0.audioPlayer.stop = { _ in gate.release() }
+    } operation: {
+      let play = Task { await model.transportPlayTapped() }
+      await gate.awaitStarted()
+      let firstSession = model.transportPhase.session
+      model.playheadEditedSample = 8000  // cursor advanced during playback
+      let replay = Task { await model.returnToLastPlayStartTapped() }
+      await gate.awaitStarted()
+      #expect(model.isTransportPlaying)  // still playing — it jumped back, didn't stop
+      #expect(model.transportPhase.session != firstSession)  // a fresh, superseding session
+      expectNoDifference(model.playheadEditedSample, 1000)  // snapped back to the last start
+      expectNoDifference(recorded.value?.1.items.first?.editedSpan.lowerBound, 1000)
+      await model.transportStopTapped()
+      await replay.value
+      await play.value
+    }
+  }
+
+  @Test func returnToLastPlayStartFallsBackToCursorWhenNothingPlayedYet() async {
+    let gate = TransportGate()
+    let recorded = LockIsolated<(URL, AudioEditRenderPlan, Int)?>(nil)
+    let model = editor()
+    model.playheadEditedSample = 5000
+    #expect(model.lastFreePlayStartEditedSample == nil)
+    await withDependencies {
+      $0.audioPlayer.playEdited = recordingPlayEdited(recorded, gate)
+      $0.audioPlayer.stop = { _ in gate.release() }
+    } operation: {
+      let replay = Task { await model.returnToLastPlayStartTapped() }
+      await gate.awaitStarted()
+      #expect(model.isTransportPlaying)
+      expectNoDifference(model.playheadEditedSample, 5000)  // plays from the current cursor
+      expectNoDifference(recorded.value?.1.items.first?.editedSpan.lowerBound, 5000)
+      expectNoDifference(model.lastFreePlayStartEditedSample, 5000)  // now remembered
+      await model.transportStopTapped()
+      await replay.value
+    }
+  }
+
+  @Test func slicePlaybackDoesNotUpdateReplayTarget() async {
+    let gate = TransportGate()
+    let model = editor()
+    selectWords(model.transcript, 0, 2)
+    model.addSliceTapped()
+    let slice = model.slices[0]
+    #expect(slice.startSample != 1000)  // so the invariance assertion below can actually fail
+    await withDependencies {
+      $0.audioPlayer.playEdited = { _, _, _, _, _ in
+        EditedPlaybackEnd(end: await gate.play(), finishedEditedSample: nil)
+      }
+      $0.audioPlayer.play = { _, _, _, _, _ in await gate.play() }
+      $0.audioPlayer.stop = { _ in gate.release() }
+    } operation: {
+      model.playheadEditedSample = 1000  // after addSlice, which snaps the cursor to the new clip
+      let free = Task { await model.transportPlayTapped() }
+      await gate.awaitStarted()
+      expectNoDifference(model.lastFreePlayStartEditedSample, 1000)
+      await model.transportStopTapped()
+      await free.value
+      let slicePlay = Task { await model.playSliceTapped(slice.id) }
+      await gate.awaitStarted()
+      expectNoDifference(model.transportContext.sliceID, slice.id)  // the slice really is playing
+      // Auditioning a saved clip must NOT move where R returns to.
+      expectNoDifference(model.lastFreePlayStartEditedSample, 1000)
+      await model.transportStopTapped()
+      await slicePlay.value
+    }
+  }
+
+  @Test func returnToLastPlayStartFallsBackToCursorWhenRememberedTargetUnplayable() async {
+    let gate = TransportGate()
+    let recorded = LockIsolated<(URL, AudioEditRenderPlan, Int)?>(nil)
+    let model = editor()
+    // The remembered start was remapped to the edited end (its source moment removed through EOF),
+    // so it is no longer playable; R must fall back to the current cursor rather than silently
+    // no-op (which would also fail to supersede live playback).
+    model.lastFreePlayStartEditedSample = model.editPlan.source.durationSamples
+    model.playheadEditedSample = 5000
+    await withDependencies {
+      $0.audioPlayer.playEdited = recordingPlayEdited(recorded, gate)
+      $0.audioPlayer.stop = { _ in gate.release() }
+    } operation: {
+      let replay = Task { await model.returnToLastPlayStartTapped() }
+      await gate.awaitStarted()
+      #expect(model.isTransportPlaying)
+      expectNoDifference(model.playheadEditedSample, 5000)  // played from the cursor, not the end
+      expectNoDifference(recorded.value?.1.items.first?.editedSpan.lowerBound, 5000)
+      await model.transportStopTapped()
+      await replay.value
+    }
+  }
+
+  @Test func lastPlayStartRemapsToSameSourceMomentAcrossTimelineEdits() {
+    // The remembered free-play start is STORED in edited samples, so a timeline change ahead of it
+    // must remap it — otherwise R would replay from a different source moment after an edit. This
+    // mirrors how `syncEditedTimeline` remaps the cursor and the transport origin.
+    let model = editor()
+    model.lastFreePlayStartEditedSample = 70_000
+    addRemoval(model, 40_000, 60_000, length: 4_800)
+    // Same source moment (70_000) collapses to edited 45_200, matching the cursor remap.
+    expectNoDifference(model.lastFreePlayStartEditedSample, 45_200)
   }
 
   // MARK: - Space (Play/Stop)

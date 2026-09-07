@@ -32,6 +32,16 @@ struct EditorKeyMonitorTests {
     expectNoDifference(key(6, [], characters: "z"), .zoomFit)
   }
 
+  @Test func plainRReturnsToLastPlayStart() {
+    expectNoDifference(key(15, [], characters: "r"), .returnToLastPlayStart)  // R
+  }
+
+  @Test func modifiedRFallsThrough() {
+    expectNoDifference(key(15, .command, characters: "r"), nil)  // ⌘R
+    expectNoDifference(key(15, [.command, .shift], characters: "r"), nil)  // ⌘⇧R (re-import)
+    expectNoDifference(key(15, .shift, characters: "r"), nil)  // ⇧R
+  }
+
   @Test func plainDeleteMapsToRemoveSection() {
     expectNoDifference(key(51), .removeSection)  // ⌫
   }

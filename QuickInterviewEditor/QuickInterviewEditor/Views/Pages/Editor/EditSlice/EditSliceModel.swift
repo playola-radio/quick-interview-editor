@@ -342,14 +342,34 @@ final class EditSliceModel: ViewModel, Identifiable {
       guard generation == transportActionGeneration else { return }
       isPlaying = false
     } else {
-      guard let range = playFromCursorRange else { return }
-      // Reflect "playing" NOW, not after `onPlay` returns: the parent's play await stays suspended
-      // until playback truly ends (stop/finish/supersede), so toggling after the await would lag the
-      // whole playback. Live ticks and the parent's stop-publish keep `isPlaying` honest from here (a
-      // natural finish is published back via `updatePlayback`).
-      isPlaying = true
-      await onPlay(range)
+      await startPlaybackFromCursor()
     }
+  }
+
+  /// Space in the sheet — unified with the main window's transport toggle: Play when stopped, Stop
+  /// (which returns the playhead to where playback began, via the parent's `onStop`) when playing.
+  /// Unlike ``playPauseTapped`` it never pauses in place, so the sheet's spacebar matches the main
+  /// editor rather than leaving the cursor mid-clip. An active audition counts as playing, so Space
+  /// stops it too.
+  func playStopTapped() async {
+    if isPlaying {
+      await stopTapped()
+    } else {
+      transportActionGeneration += 1
+      activeAudition = nil
+      await startPlaybackFromCursor()
+    }
+  }
+
+  /// Starts a fresh play from the playhead to the slice's cut-out. Reflects "playing" NOW, not after
+  /// `onPlay` returns: the parent's play await stays suspended until playback truly ends
+  /// (stop/finish/supersede), so toggling after the await would lag the whole playback. Live ticks
+  /// and the parent's stop-publish keep `isPlaying` honest from here (a natural finish is published
+  /// back via `updatePlayback`).
+  private func startPlaybackFromCursor() async {
+    guard let range = playFromCursorRange else { return }
+    isPlaying = true
+    await onPlay(range)
   }
 
   func stopTapped() async {
@@ -407,8 +427,8 @@ final class EditSliceModel: ViewModel, Identifiable {
   var isAuditioningOut: Bool { activeAudition == .cutOut }
   var auditionStatusText: String? {
     switch activeAudition {
-    case .cutIn: return "Auditioning in-cut — Space to pause"
-    case .cutOut: return "Auditioning out-cut — Space to pause"
+    case .cutIn: return "Auditioning in-cut — Space to stop"
+    case .cutOut: return "Auditioning out-cut — Space to stop"
     case nil: return nil
     }
   }
