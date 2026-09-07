@@ -877,9 +877,10 @@ final class EditorModel: ViewModel {
   }
 
   /// A resize drag to a word: whole-word-snap the draft's run to the target. For a selection, apply
-  /// it live through the freeform selection funnel (`origin: .transcript` keeps the transcript's own
-  /// anchor); for a clip/suggestion the preview flows through the draft-aware computed spans, and the
-  /// document is committed only on release.
+  /// it live through `applyEdgeEdit` (the same edge-edit path the waveform handle uses) so
+  /// `selectionAnchorSample` stays pinned to the fixed edge and the transcript's private anchor is
+  /// invalidated, exactly as a waveform edge drag behaves; for a clip/suggestion the preview flows
+  /// through the draft-aware computed spans, and the document is committed only on release.
   func transcriptResizeDragged(toWord id: Word.ID) {
     guard var draft = transcriptResizeDraft,
       let newWords = TranscriptResizeMath.resized(
@@ -888,8 +889,11 @@ final class EditorModel: ViewModel {
     else { return }
     draft.draftedWordIDs = newWords
     transcriptResizeDraft = draft
-    if case .selection = draft.identity, let range = sourceRange(coveringWordIDs: newWords) {
-      selectSourceRange(range, snapPlayhead: false, origin: .transcript)
+    if case .selection = draft.identity,
+      let old = audioSelection,
+      let updated = sourceRange(coveringWordIDs: newWords)
+    {
+      applyEdgeEdit(selectionEdge(for: draft.edge), of: old, to: updated)
     }
   }
 

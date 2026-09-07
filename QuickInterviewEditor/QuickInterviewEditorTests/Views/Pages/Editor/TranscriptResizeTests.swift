@@ -78,4 +78,33 @@ struct TranscriptResizeTests {
     expectNoDifference(model.slices, before)
     expectNoDifference(model.transcriptResizeDraft, nil)
   }
+
+  @Test func selectionResizeEndPinsAnchorToFixedStartEdge() {
+    let model = editor()
+    model.selectWords(anchorID: 3, focusID: 4)
+    expectNoDifference(model.selectedWordIDs, [3, 4])
+    let originalStartBound = model.selectionAnchorSample
+
+    model.transcriptResizeBegan(.selection, .end)
+    model.transcriptResizeDragged(toWord: 5)
+
+    expectNoDifference(model.selectedWordIDs, [3, 4, 5])
+    expectNoDifference(model.audioSelection, 77704..<135960)
+    expectNoDifference(model.selectionAnchorSample, originalStartBound)
+    expectNoDifference(model.selectionAnchorSample, 77704)
+  }
+
+  @Test func selectionResizeStartFollowsEditedEdgeAnchor() {
+    let model = editor()
+    model.selectWords(anchorID: 3, focusID: 4)
+    expectNoDifference(model.selectedWordIDs, [3, 4])
+    expectNoDifference(model.selectionAnchorSample, 77704)
+
+    model.transcriptResizeBegan(.selection, .start)
+    model.transcriptResizeDragged(toWord: 1)
+
+    expectNoDifference(model.selectedWordIDs, [1, 2, 3, 4])
+    expectNoDifference(model.audioSelection, 54772..<119202)
+    expectNoDifference(model.selectionAnchorSample, 54772)
+  }
 }

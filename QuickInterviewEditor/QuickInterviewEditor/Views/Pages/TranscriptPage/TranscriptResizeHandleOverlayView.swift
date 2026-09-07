@@ -2,7 +2,12 @@ import AppKit
 
 /// Transparent overlay inside the transcript document view. Owns the resize
 /// cursor and edge hit-testing; forwards drags to the model. Returns nil from
-/// `hitTest` outside a grab zone so word-select underneath keeps working.
+/// `hitTest` outside a grab zone so word-select underneath keeps working. Since
+/// `hitTest` claims points inside a grab zone even before a drag threshold is
+/// crossed, a plain (or Shift-)click there never reaches `HitTestingTextView` —
+/// `mouseUp` forwards a no-drag click through the same
+/// `utf16Offset(at:)` → `transcriptClicked(atUTF16Offset:extending:)` path the
+/// text view uses, so clicking near an edge still selects/extends normally.
 final class TranscriptResizeHandleOverlayView: NSView {
   weak var coordinator: TranscriptTextView.Coordinator?
 
@@ -65,7 +70,14 @@ final class TranscriptResizeHandleOverlayView: NSView {
   }
 
   override func mouseUp(with event: NSEvent) {
-    if didBeginResize { coordinator?.model.transcriptResizeEnded() }
+    if didBeginResize {
+      coordinator?.model.transcriptResizeEnded()
+    } else if let coordinator, let down = downPoint,
+      let offset = coordinator.utf16Offset(at: down)
+    {
+      coordinator.model.transcriptClicked(
+        atUTF16Offset: offset, extending: event.modifierFlags.contains(.shift))
+    }
     activeHandle = nil
     downPoint = nil
     didBeginResize = false
