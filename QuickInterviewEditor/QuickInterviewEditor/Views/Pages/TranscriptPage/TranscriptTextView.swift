@@ -493,21 +493,11 @@ struct TranscriptTextView: NSViewRepresentable {
       return zones
     }
 
-    /// D2 priority resolution among the zones containing `point`: highest `priority` wins,
-    /// ties break by nearest edge-x, remaining ties break by a deterministic identity/edge
-    /// ordering so hit-testing never flickers between equally-eligible zones.
+    /// D2 priority resolution among the zones containing `point` (highest `priority` wins,
+    /// ties by nearest edge-x, then a deterministic key). Pure logic lives in
+    /// `TranscriptResizeMath.resolveHandle`; the coordinator only supplies the live zone geometry.
     func resizeHandle(at point: NSPoint) -> (TranscriptResizeItemIdentity, TranscriptResizeEdge)? {
-      let hits = resizeZones().filter { $0.rect.contains(point) }
-      guard !hits.isEmpty else { return nil }
-      let best = hits.sorted { lhs, rhs in
-        if lhs.priority != rhs.priority { return lhs.priority > rhs.priority }
-        func dx(_ handleZone: TranscriptResizeHandleZone) -> CGFloat {
-          abs(point.x - handleZone.rect.midX)
-        }
-        if dx(lhs) != dx(rhs) { return dx(lhs) < dx(rhs) }
-        return "\(lhs.identity)\(lhs.edge)" < "\(rhs.identity)\(rhs.edge)"
-      }.first!
-      return (best.identity, best.edge)
+      TranscriptResizeMath.resolveHandle(hitting: point, in: resizeZones())
     }
 
     /// Lenient word hit-test for resize dragging: like `utf16Offset(at:)` but drops the

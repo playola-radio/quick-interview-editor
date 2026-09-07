@@ -7,7 +7,12 @@ enum TranscriptResizeMetrics {
   static let dragThreshold: CGFloat = 6
 }
 
-enum TranscriptResizeEdge: Equatable, Sendable { case start, end }
+enum TranscriptResizeEdge: Equatable, Sendable {
+  case start, end
+
+  /// Stable ordinal for the deterministic hit-resolution tie-break.
+  fileprivate var tieBreakOrdinal: Int { self == .start ? 0 : 1 }
+}
 
 enum TranscriptResizeItemIdentity: Equatable, Hashable, Sendable {
   case selection
@@ -20,6 +25,16 @@ enum TranscriptResizeItemIdentity: Equatable, Hashable, Sendable {
     case .selection: 3
     case .clip: 2
     case .suggestion: 1
+    }
+  }
+
+  /// Stable descriptor for the deterministic hit-resolution tie-break among zones that share
+  /// both priority and edge-distance, so hit-testing resolves the same handle every time.
+  fileprivate var tieBreakDescriptor: String {
+    switch self {
+    case .selection: "selection"
+    case .clip(let id): "clip:\(id)"
+    case .suggestion(let id): "suggestion:\(id)"
     }
   }
 }
@@ -85,5 +100,27 @@ enum TranscriptResizeMath {
       hi = max(min(targetIndex, transcriptOrder.count - 1), first)
     }
     return Array(transcriptOrder[lo...hi])
+  }
+
+  /// D2 hit resolution: among the zones whose `rect` contains `point`, the highest `priority`
+  /// wins (Selection > Clip > Suggestion); ties break by nearest edge-x, then by a stable
+  /// identity/edge key so hit-testing never flickers between equally-eligible zones. `nil` when
+  /// no zone contains the point. The zone geometry lives in the coordinator; this is the pure
+  /// resolution over it.
+  static func resolveHandle(
+    hitting point: CGPoint, in zones: [TranscriptResizeHandleZone]
+  ) -> (TranscriptResizeItemIdentity, TranscriptResizeEdge)? {
+    let hits = zones.filter { $0.rect.contains(point) }
+    guard
+      let best = hits.max(by: { lhs, rhs in
+        if lhs.priority != rhs.priority { return lhs.priority < rhs.priority }
+        let ldx = abs(point.x - lhs.rect.midX)
+        let rdx = abs(point.x - rhs.rect.midX)
+        if ldx != rdx { return ldx > rdx }
+        return (lhs.identity.tieBreakDescriptor, lhs.edge.tieBreakOrdinal)
+          > (rhs.identity.tieBreakDescriptor, rhs.edge.tieBreakOrdinal)
+      })
+    else { return nil }
+    return (best.identity, best.edge)
   }
 }
