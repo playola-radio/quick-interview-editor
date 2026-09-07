@@ -43,15 +43,31 @@ actor SuggestionRecoveryStore {
     -> URL
   {
     let owner = standardized(owner)
-    let archive = SuggestionRecoveryArchive(
+    var archive = SuggestionRecoveryArchive(
       manifest: .init(
         owner: owner, snapshot: preparation.snapshot,
         originalRequest: preparation.originalRequest, control: preparation.control), records: [:])
     _ = try archive.validatedCheckpoint()
     if let existing = try manifestIfPresent(owner.id) {
-      try verify(existing, owner: owner, runID: preparation.snapshot.runID)
-      guard existing == archive.manifest else {
-        throw SuggestionRecoveryError.conflict("Preparation changed an existing run.")
+      try verify(existing, owner: owner, runID: existing.snapshot.runID)
+      if existing.snapshot.runID == preparation.snapshot.runID {
+        archive.manifest.retainedAppliedRunIDs = existing.retainedAppliedRunIDs
+        guard existing == archive.manifest else {
+          throw SuggestionRecoveryError.conflict("Preparation changed an existing run.")
+        }
+      } else {
+        let predecessor = try collect(existing)
+        guard preparation.lastAppliedRunID == existing.snapshot.runID,
+          try predecessor.validatedCheckpoint().phase == .ready
+        else {
+          throw SuggestionRecoveryError.conflict(
+            "Apply or discard the unfinished search before starting another.")
+        }
+        archive.manifest.retainedAppliedRunIDs =
+          existing.retainedAppliedRunIDs + [existing.snapshot.runID]
+        archive.retainedAppliedRuns = predecessor.retainedAppliedRuns + [predecessor.singleRun]
+        try archive.validateRetainedRuns()
+        try install(archive, owner: owner)
       }
     } else {
       try install(archive, owner: owner)
@@ -84,7 +100,7 @@ actor SuggestionRecoveryStore {
   func capture(_ owner: SuggestionRecoveryOwner, runID: UUID, minimumPythonRevision: Int?) throws
     -> SuggestionRecoveryCapture
   {
-    let manifest = try requireManifest(owner.id)
+    let manifest = try manifestForRun(owner.id, runID: runID)
     try verify(manifest, owner: owner, runID: runID)
     let archive = try collect(manifest)
     let checkpoint = try archive.validatedCheckpoint()
@@ -92,7 +108,8 @@ actor SuggestionRecoveryStore {
       throw SuggestionRecoveryError.invalid("Checkpoint is older than the reported event.")
     }
     return SuggestionRecoveryCapture(
-      checkpoint: checkpoint, archive: try JSONEncoder().encode(archive))
+      checkpoint: checkpoint, archive: try JSONEncoder().encode(archive),
+      journalDirectory: runDirectory(owner.id, runID))
   }
 
   func restore(_ owner: SuggestionRecoveryOwner, archive data: Data) throws {
@@ -101,22 +118,25 @@ actor SuggestionRecoveryStore {
       incoming.manifest, owner: owner, runID: incoming.manifest.snapshot.runID,
       requireOwnerID: false)
     incoming.manifest.owner = standardized(owner)
+    for index in incoming.retainedAppliedRuns.indices {
+      incoming.retainedAppliedRuns[index].manifest.owner = standardized(owner)
+    }
     if let existing = try manifestIfPresent(owner.id) {
-      try verify(existing, owner: owner, runID: incoming.manifest.snapshot.runID)
-      incoming = try merge(try collect(existing, requireReferencedRecords: false), incoming)
+      try verify(existing, owner: owner, runID: existing.snapshot.runID)
+      incoming = try mergeLineage(try collect(existing, requireReferencedRecords: false), incoming)
     }
     _ = try incoming.validatedCheckpoint()
+    try incoming.validateRetainedRuns()
     try install(incoming, owner: standardized(owner))
     try index(standardized(owner))
   }
 
   func discard(_ owner: SuggestionRecoveryOwner, runID: UUID) throws {
-    guard let manifest = try manifestIfPresent(owner.id) else { return }
-    guard manifest.owner.id == owner.id, manifest.snapshot.runID == runID else {
+    guard let current = try manifestIfPresent(owner.id) else { return }
+    guard current.snapshot.runID == runID || current.retainedAppliedRunIDs.contains(runID) else {
       throw SuggestionRecoveryError.missingRun
     }
-    try files.removeItem(at: ownerDirectory(owner.id))
-    try removeIndex(manifest.owner)
+    try removeRuns([runID], from: current)
   }
 
   func duplicate(_ oldOwner: SuggestionRecoveryOwner, newOwner: SuggestionRecoveryOwner) throws {
@@ -135,7 +155,9 @@ actor SuggestionRecoveryStore {
       project.content.suggestionRecoveryOwnerID == owner.id,
       project.content.lastAppliedSuggestionRunID == runID
     else { throw SuggestionRecoveryError.notSaved }
-    try discard(owner, runID: runID)
+    guard let current = try manifestIfPresent(owner.id) else { return }
+    let confirmed = try manifestForRun(owner.id, runID: runID)
+    try removeRuns(Set(confirmed.retainedAppliedRunIDs + [runID]), from: current)
   }
 
   func recoverableOrphans(sourceFingerprint: String, transcriptHash: String) throws
@@ -157,7 +179,7 @@ actor SuggestionRecoveryStore {
 
   func resolveOwner(
     persistedID: UUID?, documentURL: URL?, sourceFingerprint: String, transcriptHash: String,
-    archivedOwner: SuggestionRecoveryOwner? = nil
+    archivedOwner: SuggestionRecoveryOwner? = nil, instanceID: UUID? = nil
   ) throws -> SuggestionRecoveryOwner? {
     let location = documentURL.map {
       URL(fileURLWithPath: $0.standardizedFileURL.path, isDirectory: false)
@@ -171,9 +193,10 @@ actor SuggestionRecoveryStore {
     }
     guard let manifest = try manifestIfPresent(id) else {
       guard persistedID != nil else { return nil }
-      return try ownerWithoutManifest(
+      let owner = try ownerWithoutManifest(
         id: id, location: location, sourceFingerprint: sourceFingerprint,
         transcriptHash: transcriptHash, archivedOwner: archivedOwner)
+      return try instanceID.map { try claimOwner(owner, instanceID: $0) } ?? owner
     }
     var owner = manifest.owner
     let oldLocation = owner.documentURL.map {
@@ -193,6 +216,7 @@ actor SuggestionRecoveryStore {
         if oldLocation != nil { try removeIndex(manifest.owner) }
       }
     }
+    if let instanceID { owner = try claimOwner(owner, instanceID: instanceID) }
     guard owner.sourceFingerprint == sourceFingerprint, owner.transcriptHash == transcriptHash
     else {
       throw SuggestionRecoveryError.staleIdentity(owner: owner, runID: manifest.snapshot.runID)
@@ -221,6 +245,20 @@ actor SuggestionRecoveryStore {
   }
 
   private func collect(
+    _ manifest: SuggestionRecoveryManifest, requireReferencedRecords: Bool = true
+  ) throws -> SuggestionRecoveryArchive {
+    var archive = try collectRun(manifest, requireReferencedRecords: requireReferencedRecords)
+    archive.retainedAppliedRuns = try manifest.retainedAppliedRunIDs.map { runID in
+      try collectRun(
+        manifestForRun(manifest.owner.id, runID: runID),
+        requireReferencedRecords: requireReferencedRecords
+      ).singleRun
+    }
+    if requireReferencedRecords { try archive.validateRetainedRuns() }
+    return archive
+  }
+
+  private func collectRun(
     _ manifest: SuggestionRecoveryManifest, requireReferencedRecords: Bool = true
   )
     throws -> SuggestionRecoveryArchive
@@ -251,6 +289,42 @@ actor SuggestionRecoveryStore {
     return archive
   }
 
+  private func mergeLineage(_ local: SuggestionRecoveryArchive, _ saved: SuggestionRecoveryArchive)
+    throws -> SuggestionRecoveryArchive
+  {
+    let localID = local.manifest.snapshot.runID
+    let savedID = saved.manifest.snapshot.runID
+    let currentID: UUID
+    if localID == savedID || local.manifest.retainedAppliedRunIDs.contains(savedID) {
+      currentID = localID
+    } else if saved.manifest.retainedAppliedRunIDs.contains(localID) {
+      currentID = savedID
+    } else {
+      throw SuggestionRecoveryError.conflict("Unrelated current searches share an owner.")
+    }
+    var runs = Dictionary(
+      uniqueKeysWithValues: (local.retainedAppliedRuns + [local.singleRun]).map {
+        ($0.manifest.snapshot.runID, $0.archive)
+      })
+    for incoming in saved.retainedAppliedRuns + [saved.singleRun] {
+      let id = incoming.manifest.snapshot.runID
+      if let previous = runs[id] {
+        runs[id] = try merge(previous, incoming.archive)
+      } else {
+        runs[id] = incoming.archive
+      }
+    }
+    guard var result = runs[currentID] else { throw SuggestionRecoveryError.missingRun }
+    result.retainedAppliedRuns = try result.manifest.retainedAppliedRunIDs.enumerated().map {
+      index, id in
+      guard var retained = runs[id] else { throw SuggestionRecoveryError.missingRun }
+      retained.manifest.retainedAppliedRunIDs = Array(
+        result.manifest.retainedAppliedRunIDs.prefix(index))
+      return retained.singleRun
+    }
+    return result
+  }
+
   private func merge(_ local: SuggestionRecoveryArchive, _ saved: SuggestionRecoveryArchive) throws
     -> SuggestionRecoveryArchive
   {
@@ -260,6 +334,8 @@ actor SuggestionRecoveryStore {
       throw SuggestionRecoveryError.conflict("Immutable input changed.")
     }
     var merged = local
+    merged.manifest.retainedAppliedRunIDs = try mergedLineage(
+      local.manifest.retainedAppliedRunIDs, saved.manifest.retainedAppliedRunIDs)
     let left = local.manifest.control
     let right = saved.manifest.control
     if left.revision == right.revision, left != right {
@@ -289,6 +365,14 @@ actor SuggestionRecoveryStore {
     return merged
   }
 
+  private func mergedLineage(_ local: [UUID], _ saved: [UUID]) throws -> [UUID] {
+    let localSet = Set(local)
+    let savedSet = Set(saved)
+    if local.filter(savedSet.contains) == saved { return local }
+    if saved.filter(localSet.contains) == local { return saved }
+    throw SuggestionRecoveryError.conflict("Applied search histories differ.")
+  }
+
   private func mergeRecords(local: [String: Data], saved: [String: Data]) throws -> [String: Data] {
     var merged = local
     for (key, bytes) in saved {
@@ -316,25 +400,61 @@ actor SuggestionRecoveryStore {
     let target = isNew ? root.appending(component: ".pending-\(uuid().uuidString)") : destination
     try files.createDirectory(at: target, withIntermediateDirectories: true)
     do {
-      let run = target.appending(component: archive.manifest.snapshot.runID.uuidString)
-      let requests = run.appending(component: "requests")
-      try files.createDirectory(at: requests, withIntermediateDirectories: true)
-      if let identity = archive.identity {
-        try write(identity, run.appending(component: "identity.json"))
-      }
-      for (key, record) in archive.records {
-        try write(
-          record, requests.appending(component: SuggestionRecoveryArchive.recordFilename(key)))
-      }
-      if let checkpoint = archive.checkpoint {
-        try write(checkpoint, run.appending(component: "checkpoint.json"))
-      }
+      for retained in archive.retainedAppliedRuns { try installRun(retained, in: target) }
+      try installRun(archive.singleRun, in: target)
       try write(
         JSONEncoder().encode(archive.manifest), target.appending(component: "manifest.json"))
       if isNew { try files.moveItem(at: target, to: destination) }
     } catch {
       if isNew { try? files.removeItem(at: target) }
       throw error
+    }
+  }
+
+  private func installRun(_ archive: SuggestionRecoveryRunArchive, in ownerDirectory: URL) throws {
+    let run = ownerDirectory.appending(component: archive.manifest.snapshot.runID.uuidString)
+    let requests = run.appending(component: "requests")
+    try files.createDirectory(at: requests, withIntermediateDirectories: true)
+    if let identity = archive.identity {
+      try write(identity, run.appending(component: "identity.json"))
+    }
+    for (key, record) in archive.records {
+      try write(
+        record, requests.appending(component: SuggestionRecoveryArchive.recordFilename(key)))
+    }
+    if let checkpoint = archive.checkpoint {
+      try write(checkpoint, run.appending(component: "checkpoint.json"))
+    }
+    let manifests = ownerDirectory.appending(component: "manifests")
+    try files.createDirectory(at: manifests, withIntermediateDirectories: true)
+    try write(
+      JSONEncoder().encode(archive.manifest),
+      manifests.appending(component: archive.manifest.snapshot.runID.uuidString + ".json"))
+  }
+
+  private func removeRuns(_ removed: Set<UUID>, from current: SuggestionRecoveryManifest) throws {
+    let remaining = (current.retainedAppliedRunIDs + [current.snapshot.runID]).filter {
+      !removed.contains($0)
+    }
+    guard let nextID = remaining.last else {
+      try files.removeItem(at: ownerDirectory(current.owner.id))
+      try removeIndex(current.owner)
+      return
+    }
+    var next: SuggestionRecoveryManifest?
+    for (index, id) in remaining.enumerated() {
+      var manifest = try manifestForRun(current.owner.id, runID: id)
+      manifest.retainedAppliedRunIDs = Array(remaining.prefix(index))
+      try writeRunManifest(manifest)
+      if id == nextID { next = manifest }
+    }
+    guard let next else { throw SuggestionRecoveryError.missingRun }
+    try writeManifest(next)
+    for id in removed {
+      let run = runDirectory(current.owner.id, id)
+      if files.fileExists(atPath: run.path) { try files.removeItem(at: run) }
+      let manifest = runManifestURL(current.owner.id, runID: id)
+      if files.fileExists(atPath: manifest.path) { try files.removeItem(at: manifest) }
     }
   }
 
@@ -367,6 +487,32 @@ actor SuggestionRecoveryStore {
   private func runDirectory(_ ownerID: UUID, _ runID: UUID) -> URL {
     ownerDirectory(ownerID).appending(component: runID.uuidString)
   }
+  private func runManifestURL(_ id: UUID, runID: UUID) -> URL {
+    ownerDirectory(id).appending(component: "manifests").appending(
+      component: runID.uuidString + ".json")
+  }
+  private func manifestForRun(_ id: UUID, runID: UUID) throws -> SuggestionRecoveryManifest {
+    let current = try requireManifest(id)
+    if current.snapshot.runID == runID { return current }
+    guard current.retainedAppliedRunIDs.contains(runID),
+      let data = try optionalData(runManifestURL(id, runID: runID))
+    else {
+      throw SuggestionRecoveryError.missingRun
+    }
+    try SuggestionRecoveryArchive.validateManifestShape(RecoveryJSON.read(data))
+    var manifest = try JSONDecoder().decode(SuggestionRecoveryManifest.self, from: data)
+    guard manifest.owner.id == id, manifest.snapshot.runID == runID else {
+      throw SuggestionRecoveryError.missingRun
+    }
+    manifest.owner = current.owner
+    return manifest
+  }
+  private func writeRunManifest(_ manifest: SuggestionRecoveryManifest) throws {
+    let url = runManifestURL(manifest.owner.id, runID: manifest.snapshot.runID)
+    try files.createDirectory(
+      at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try write(JSONEncoder().encode(manifest), url)
+  }
   private func requireManifest(_ id: UUID) throws -> SuggestionRecoveryManifest {
     guard let manifest = try manifestIfPresent(id) else { throw SuggestionRecoveryError.missingRun }
     return manifest
@@ -383,6 +529,7 @@ actor SuggestionRecoveryStore {
     return manifest
   }
   private func writeManifest(_ manifest: SuggestionRecoveryManifest) throws {
+    try writeRunManifest(manifest)
     try write(
       JSONEncoder().encode(manifest),
       ownerDirectory(manifest.owner.id).appending(component: "manifest.json"))

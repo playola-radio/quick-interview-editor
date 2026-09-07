@@ -131,7 +131,8 @@ struct ProjectHydrationTests {
       checkpoint: .init(
         pythonRevision: 0, controlRevision: 0,
         snapshot: fixture.snapshot, phase: .discovering, candidates: [], completedRequestKeys: [],
-        failedRequestKeys: [], proposedStarts: .init()), archive: Data())
+        failedRequestKeys: [], proposedStarts: .init()), archive: Data(),
+      journalDirectory: URL(fileURLWithPath: "/journal/run"))
     let (sink, record) = ProjectDocumentSink.recorder()
     let model = withDependencies {
       $0.uuid = .incrementing
@@ -153,6 +154,45 @@ struct ProjectHydrationTests {
       await #expect(throws: CancellationError.self) { try await task.value }
     }
     expectNoDifference(record.recoveries.count, 0)
+  }
+
+  @Test func staleCopiedWindowCannotDiscardTheFirstWindowsRecovery() async throws {
+    let root = FileManager.default.temporaryDirectory.appending(component: UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    var file = Fixtures.projectFile()
+    let plan = Fixtures.editPlan()
+    let fixture = try RecoveryFixture.matching(file: file, plan: plan)
+    file.content.suggestionRecoveryOwnerID = fixture.owner.id
+    let store = SuggestionRecoveryStore(root: root, uuid: { UUID() })
+    _ = try await store.prepare(fixture.owner, preparation: fixture.preparation)
+    var changedPlan = plan
+    changedPlan.words[0].text += " changed"
+    let first = withDependencies {
+      $0.uuid = .incrementing
+      $0.suggestionRecovery = .store(store)
+    } operation: {
+      ProjectModel(
+        file: file, plan: plan, audio: .sessionFile(root.appending(component: "audio.aiff")),
+        sink: ProjectDocumentSink.recorder().sink)
+    }
+    let second = withDependencies {
+      $0.uuid = .incrementing
+      $0.suggestionRecovery = .store(store)
+    } operation: {
+      ProjectModel(
+        file: file, plan: changedPlan, audio: .sessionFile(root.appending(component: "audio.aiff")),
+        sink: ProjectDocumentSink.recorder().sink)
+    }
+    await first.viewAppeared()
+    await second.viewAppeared()
+    guard case .staleIdentity(let staleOwner, _) = second.staleRecovery else {
+      Issue.record("Expected a stale copied-window recovery")
+      return
+    }
+    #expect(staleOwner.id != first.recoveryOwner?.id)
+    try await second.discardSuggestionRecovery()
+    let preserved = try await store.load(fixture.owner)
+    expectNoDifference(preserved?.snapshot, fixture.snapshot)
   }
 
   private let audioBytes = 4096
@@ -421,5 +461,63 @@ extension ProjectHydrationTests {
     expectNoDifference(record.recoveries.last?.archive, nil)
     let afterSave = try await store.load(fixture.owner)
     expectNoDifference(afterSave, nil)
+  }
+}
+
+extension ProjectHydrationTests {
+  @Test(arguments: [false, true])
+  func appliedArchiveRemainsCoherentWhenSuccessorIsDiscardedOrPredecessorIsConfirmed(
+    confirmPredecessor: Bool
+  ) async throws {
+    let root = FileManager.default.temporaryDirectory.appending(component: UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let package = root.appending(component: "project.pie")
+    var file = Fixtures.projectFile()
+    let plan = Fixtures.editPlan()
+    var first = try RecoveryFixture.matching(file: file, plan: plan)
+    first.owner.documentURL = package
+    let store = SuggestionRecoveryStore(root: root.appending(component: "store"), uuid: { UUID() })
+    let firstDirectory = try await store.prepare(first.owner, preparation: first.preparation)
+    try first.writePython(RecoveryFixture.python(matching: first), directory: firstDirectory)
+    let firstCapture = try await store.capture(
+      first.owner, runID: first.snapshot.runID, minimumPythonRevision: 1)
+    file.content.suggestionRecoveryOwnerID = first.owner.id
+    file.content.lastAppliedSuggestionRunID = first.snapshot.runID
+    let (sink, record) = ProjectDocumentSink.recorder()
+    let model = withDependencies {
+      $0.uuid = .incrementing
+      $0.suggestionRecovery = .store(store)
+    } operation: {
+      ProjectModel(
+        file: file, plan: plan, audio: .sessionFile(root.appending(component: "audio.aiff")),
+        packageURL: package,
+        sink: sink, recoveryArchive: firstCapture.archive)
+    }
+    await model.viewAppeared()
+    var second = first.preparation
+    second.snapshot.runID = Fixtures.uuid(88)
+    var request = try #require(
+      JSONSerialization.jsonObject(with: second.originalRequest) as? [String: Any])
+    request["run_id"] = second.snapshot.runID.uuidString
+    second.originalRequest = try JSONSerialization.data(
+      withJSONObject: request, options: [.sortedKeys, .withoutEscapingSlashes])
+    _ = try await model.prepareSuggestionRecovery(second)
+    if confirmPredecessor {
+      file.content.unfinishedSuggestionRun = model.editor?.unfinishedSuggestionRun
+      try FileManager.default.createDirectory(at: package, withIntermediateDirectories: true)
+      try ProjectPackage.projectEncoder().encode(file).write(
+        to: package.appending(component: "project.json"))
+      await model.savedProjectObserved()
+    } else {
+      try await model.discardSuggestionRecovery()
+    }
+    let published = try #require(record.recoveries.last)
+    let archive = try SuggestionRecoveryArchive.decode(#require(published.archive))
+    let expectedRunID = confirmPredecessor ? second.snapshot.runID : first.snapshot.runID
+    expectNoDifference(archive.manifest.snapshot.runID, expectedRunID)
+    expectNoDifference(
+      published.file.content.unfinishedSuggestionRun?.snapshot.runID,
+      confirmPredecessor ? second.snapshot.runID : nil)
+    expectNoDifference(archive.retainedAppliedRuns, [])
   }
 }

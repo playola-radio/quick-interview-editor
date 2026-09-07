@@ -7,6 +7,7 @@ struct SuggestionRecoveryManifest: Codable, Equatable, Sendable {
   var snapshot: SuggestionRunSnapshot
   var originalRequest: Data
   var control: SuggestionRecoveryControl
+  var retainedAppliedRunIDs: [UUID] = []
 }
 
 struct SuggestionRecoveryArchive: Codable, Equatable, Sendable {
@@ -15,21 +16,59 @@ struct SuggestionRecoveryArchive: Codable, Equatable, Sendable {
   var identity: Data?
   var checkpoint: Data?
   var records: [String: Data]
+  var retainedAppliedRuns: [SuggestionRecoveryRunArchive] = []
 
   static func decode(_ data: Data) throws -> Self {
     let json = try RecoveryJSON.read(data)
     try json.keys(
-      allowed: ["schemaVersion", "manifest", "identity", "checkpoint", "records"],
+      allowed: [
+        "schemaVersion", "manifest", "identity", "checkpoint", "records", "retainedAppliedRuns",
+      ],
       required: ["schemaVersion", "manifest", "records"])
     try validateManifestShape(json["manifest"])
+    if case .array(let retained)? = json["retainedAppliedRuns"] {
+      for run in retained {
+        try run.keys(
+          allowed: ["manifest", "identity", "checkpoint", "records"],
+          required: ["manifest", "records"])
+        try validateManifestShape(run["manifest"])
+      }
+    }
     let result = try JSONDecoder().decode(Self.self, from: data)
     _ = try result.validatedCheckpoint()
+    try result.validateRetainedRuns()
     return result
+  }
+
+  var singleRun: SuggestionRecoveryRunArchive {
+    SuggestionRecoveryRunArchive(
+      manifest: manifest, identity: identity, checkpoint: checkpoint, records: records)
+  }
+
+  func validateRetainedRuns() throws {
+    let ids = retainedAppliedRuns.map { $0.manifest.snapshot.runID }
+    guard ids == manifest.retainedAppliedRunIDs, Set(ids).count == ids.count,
+      !ids.contains(manifest.snapshot.runID)
+    else { throw SuggestionRecoveryError.invalid("Invalid applied recovery lineage.") }
+    for (index, run) in retainedAppliedRuns.enumerated() {
+      guard run.manifest.owner.id == manifest.owner.id,
+        run.manifest.owner.sourceFingerprint == manifest.owner.sourceFingerprint,
+        run.manifest.owner.transcriptHash == manifest.owner.transcriptHash,
+        run.manifest.retainedAppliedRunIDs == Array(ids.prefix(index)),
+        try run.archive.validatedCheckpoint().phase == .ready
+      else {
+        throw SuggestionRecoveryError.invalid("Invalid retained applied search.")
+      }
+    }
   }
 
   static func validateManifestShape(_ json: RecoveryJSON?) throws {
     guard let json else { throw SuggestionRecoveryError.invalid("Missing manifest.") }
-    try json.keys(allowed: ["schemaVersion", "owner", "snapshot", "originalRequest", "control"])
+    try json.keys(
+      allowed: [
+        "schemaVersion", "owner", "snapshot", "originalRequest", "control", "retainedAppliedRunIDs",
+      ],
+      required: ["schemaVersion", "owner", "snapshot", "originalRequest", "control"])
     try json["owner"]?.keys(
       allowed: ["id", "documentURL", "sourceFingerprint", "transcriptHash"],
       required: ["id", "sourceFingerprint", "transcriptHash"])
@@ -260,5 +299,44 @@ indirect enum RecoveryJSON: Decodable, Equatable {
     else {
       throw SuggestionRecoveryError.invalid("Unexpected or missing archive fields.")
     }
+  }
+}
+
+struct SuggestionRecoveryRunArchive: Codable, Equatable, Sendable {
+  var manifest: SuggestionRecoveryManifest
+  var identity: Data?
+  var checkpoint: Data?
+  var records: [String: Data]
+
+  var archive: SuggestionRecoveryArchive {
+    SuggestionRecoveryArchive(
+      manifest: manifest, identity: identity, checkpoint: checkpoint, records: records)
+  }
+}
+
+extension SuggestionRecoveryManifest {
+  init(from decoder: any Decoder) throws {
+    let values = try decoder.container(keyedBy: CodingKeys.self)
+    schemaVersion = try values.decode(Int.self, forKey: .schemaVersion)
+    owner = try values.decode(SuggestionRecoveryOwner.self, forKey: .owner)
+    snapshot = try values.decode(SuggestionRunSnapshot.self, forKey: .snapshot)
+    originalRequest = try values.decode(Data.self, forKey: .originalRequest)
+    control = try values.decode(SuggestionRecoveryControl.self, forKey: .control)
+    retainedAppliedRunIDs =
+      try values.decodeIfPresent([UUID].self, forKey: .retainedAppliedRunIDs) ?? []
+  }
+}
+
+extension SuggestionRecoveryArchive {
+  init(from decoder: any Decoder) throws {
+    let values = try decoder.container(keyedBy: CodingKeys.self)
+    schemaVersion = try values.decode(Int.self, forKey: .schemaVersion)
+    manifest = try values.decode(SuggestionRecoveryManifest.self, forKey: .manifest)
+    identity = try values.decodeIfPresent(Data.self, forKey: .identity)
+    checkpoint = try values.decodeIfPresent(Data.self, forKey: .checkpoint)
+    records = try values.decode([String: Data].self, forKey: .records)
+    retainedAppliedRuns =
+      try values.decodeIfPresent([SuggestionRecoveryRunArchive].self, forKey: .retainedAppliedRuns)
+      ?? []
   }
 }

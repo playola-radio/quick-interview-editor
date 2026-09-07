@@ -39,7 +39,7 @@ final class ProjectModel: ViewModel {
   /// `nil` for an untitled window.
   @ObservationIgnored private(set) var packageURL: URL?
   @ObservationIgnored private var recoveryArchive: Data?
-  @ObservationIgnored private var recoveryInstanceID: UUID?
+  @ObservationIgnored private let recoveryInstanceID: UUID
   @ObservationIgnored private var recoveryGeneration = 0
   @ObservationIgnored var invalidateSuggestionAttempt: () -> Void = {}
   @ObservationIgnored var cancelSuggestionAttempt: () async -> Void = {}
@@ -53,7 +53,8 @@ final class ProjectModel: ViewModel {
 
   init(
     file: ProjectFile?, plan: EditPlan?, audio: CanonicalAudioSource?, packageURL: URL? = nil,
-    sink: ProjectDocumentSink, saveStatus: SaveStatus = SaveStatus(), recoveryArchive: Data? = nil
+    sink: ProjectDocumentSink, saveStatus: SaveStatus = SaveStatus(), recoveryArchive: Data? = nil,
+    recoveryInstanceID: UUID = UUID()
   ) {
     self.sink = sink
     self.file = file
@@ -62,6 +63,7 @@ final class ProjectModel: ViewModel {
     self.packageURL = packageURL
     self.saveStatus = saveStatus
     self.recoveryArchive = recoveryArchive
+    self.recoveryInstanceID = recoveryInstanceID
     self.phase = file == nil ? .empty : .queued
     super.init()
   }
@@ -276,7 +278,7 @@ final class ProjectModel: ViewModel {
     stopTicking()
     await transcriptionTask?.value
     await tearDownEditor()
-    if let recoveryInstanceID { await suggestionRecovery.releaseOwner(recoveryInstanceID) }
+    await suggestionRecovery.releaseOwner(recoveryInstanceID)
     releaseSessionAudio()
   }
 
@@ -513,9 +515,15 @@ final class ProjectModel: ViewModel {
         file?.content.lastAppliedSuggestionRunID == runID,
         let file
       else { return }
-      recoveryArchive = nil
-      sink.commitRecovery(file, nil)
-      sink.registerChange()
+      if let unfinished = file.content.unfinishedSuggestionRun, unfinished.snapshot.runID != runID {
+        let capture = try await suggestionRecovery.capture(owner, unfinished.snapshot.runID, nil)
+        guard generation == recoveryGeneration else { return }
+        try acceptSuggestionRecovery(capture, owner: owner)
+      } else {
+        recoveryArchive = nil
+        sink.commitRecovery(file, nil)
+        sink.registerChange()
+      }
     } catch { return }
   }
 
@@ -524,13 +532,16 @@ final class ProjectModel: ViewModel {
       throw SuggestionRecoveryError.invalid("Recovery ownership is not ready.")
     }
     let generation = recoveryGeneration
+    var preparation = preparation
+    preparation.lastAppliedRunID = file.content.lastAppliedSuggestionRunID
+    await savedProjectObserved()
+    guard generation == recoveryGeneration else { throw CancellationError() }
     var owner =
       recoveryOwner
       ?? SuggestionRecoveryOwner(
         id: file.content.suggestionRecoveryOwnerID ?? uuid(), documentURL: packageURL,
         sourceFingerprint: file.source.originalFingerprint, transcriptHash: plan.transcriptHash)
-    if recoveryInstanceID == nil { recoveryInstanceID = uuid() }
-    owner = try await suggestionRecovery.claimOwner(owner, recoveryInstanceID!)
+    owner = try await suggestionRecovery.claimOwner(owner, recoveryInstanceID)
     guard generation == recoveryGeneration else { throw CancellationError() }
     let directory = try await suggestionRecovery.prepare(owner, preparation)
     let capture = try await suggestionRecovery.capture(owner, preparation.snapshot.runID, nil)
@@ -594,19 +605,29 @@ final class ProjectModel: ViewModel {
       recoveryFailed(error)
       throw error
     }
+    let remaining = try await loadRecoveryCapture(owner, required: false)
     guard generation == recoveryGeneration, var file else { throw CancellationError() }
-    file.content.unfinishedSuggestionRun = nil
-    recoveryArchive = nil
-    staleRecovery = nil
-    recoveryErrorMessage = nil
-    recoveryActionsBlocked = false
+    let stale =
+      remaining.map {
+        $0.checkpoint.snapshot.transcriptHash != loadedPlan?.transcriptHash
+          || $0.checkpoint.snapshot.sourceFingerprint != file.source.originalFingerprint
+      } ?? false
+    file.content.unfinishedSuggestionRun =
+      stale || remaining?.checkpoint.snapshot.runID == file.content.lastAppliedSuggestionRunID
+      ? nil : remaining?.checkpoint
+    recoveryArchive = remaining?.archive
+    staleRecovery =
+      stale
+      ? remaining.map { .staleIdentity(owner: owner, runID: $0.checkpoint.snapshot.runID) } : nil
+    recoveryErrorMessage = staleRecovery?.localizedDescription
+    recoveryActionsBlocked = stale
     recoveryOwner = SuggestionRecoveryOwner(
       id: owner.id, documentURL: packageURL,
       sourceFingerprint: file.source.originalFingerprint,
       transcriptHash: loadedPlan?.transcriptHash ?? "")
     file.content.suggestionRecoveryOwnerID = owner.id
     self.file = file
-    sink.commitRecovery(file, nil)
+    sink.commitRecovery(file, recoveryArchive)
     sink.registerChange()
     synchronizeRecoveryEditor()
   }
@@ -621,15 +642,12 @@ final class ProjectModel: ViewModel {
           persistedID: initialFile.content.suggestionRecoveryOwnerID, documentURL: packageURL,
           sourceFingerprint: initialFile.source.originalFingerprint,
           transcriptHash: plan.transcriptHash,
-          archivedOwner: portable?.manifest.owner))
+          archivedOwner: portable?.manifest.owner, instanceID: recoveryInstanceID))
       guard generation == recoveryGeneration else { return }
-      guard var owner else {
+      guard let owner else {
         recoveryActionsBlocked = false
         return
       }
-      if recoveryInstanceID == nil { recoveryInstanceID = uuid() }
-      owner = try await suggestionRecovery.claimOwner(owner, recoveryInstanceID!)
-      guard generation == recoveryGeneration else { return }
       if let recoveryArchive { try await suggestionRecovery.restore(owner, recoveryArchive) }
       let capture = try await loadRecoveryCapture(
         owner, required: initialFile.content.unfinishedSuggestionRun != nil)

@@ -19,11 +19,13 @@ struct SuggestionRecoveryPreparation: Sendable {
   var snapshot: SuggestionRunSnapshot
   var originalRequest: Data
   var control: SuggestionRecoveryControl
+  var lastAppliedRunID: UUID?
 }
 
 struct SuggestionRecoveryCapture: Equatable, Sendable {
   var checkpoint: SuggestionRunCheckpoint
   var archive: Data
+  var journalDirectory: URL
 }
 
 enum SuggestionRecoveryError: Error, Equatable, LocalizedError {
@@ -55,6 +57,7 @@ struct SuggestionRecoveryOwnerResolution: Sendable {
   var sourceFingerprint: String
   var transcriptHash: String
   var archivedOwner: SuggestionRecoveryOwner?
+  var instanceID: UUID?
 }
 
 struct SuggestionRecoveryClient: Sendable {
@@ -101,7 +104,7 @@ struct SuggestionRecoveryClient: Sendable {
         try await store.resolveOwner(
           persistedID: $0.persistedID, documentURL: $0.documentURL,
           sourceFingerprint: $0.sourceFingerprint, transcriptHash: $0.transcriptHash,
-          archivedOwner: $0.archivedOwner)
+          archivedOwner: $0.archivedOwner, instanceID: $0.instanceID)
       },
       claimOwner: { try await store.claimOwner($0, instanceID: $1) },
       releaseOwner: { await store.releaseOwner(instanceID: $0) })
