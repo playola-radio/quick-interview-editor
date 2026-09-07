@@ -29,6 +29,11 @@ struct WaveformView: View {
         onSeamStretched: { model.crossfadeStretched($0, toX: $1) },
         onSeamStretchEnded: { model.crossfadeStretchEnded() },
         onSeamStretchCancelled: { model.crossfadeStretchCancelled() },
+        onCutPointDragBegan: { model.crossfadeCutPointDragBegan(id: $0, edge: $1, atX: $2) },
+        onCutPointDragged: { model.crossfadeCutPointDragged(toX: $0) },
+        onCutPointDragEnded: { model.crossfadeCutPointDragEnded() },
+        onCutPointDragCancelled: { model.crossfadeCutPointDragCancelled() },
+        onCutPointSelect: { model.selectSeam($0) },
         auditionOverlay: { span in
           if model.canAudition {
             AuditionEdgeButtons(

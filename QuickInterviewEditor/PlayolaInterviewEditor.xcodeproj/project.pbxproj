@@ -199,6 +199,7 @@
 		C0C5B50F187C6555F311B77B /* TranscriptHash.swift in Sources */ = {isa = PBXBuildFile; fileRef = D12530DBE1CBE40F86C7F8AB /* TranscriptHash.swift */; };
 		C0DE8B83CAF912D297A18A7F /* EditorDocumentState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 398663131949EFDA6F785204 /* EditorDocumentState.swift */; };
 		C0E06E4982D610AD7BC8B87E /* InstallLocationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79226245453784704957B376 /* InstallLocationTests.swift */; };
+		C30E8626435983AFECC4B631 /* SeamCutPointHandleLayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = FFEF0E04EF6DFBEA0BC9BD9D /* SeamCutPointHandleLayer.swift */; };
 		C37A25A93D1A9EB50F78B912 /* EditorClipBandsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57696F0153E81F76F157B979 /* EditorClipBandsTests.swift */; };
 		C4FDA356AE6646BA68DD867F /* EditorKeyMonitorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 596802732F75F6D8016A8BD5 /* EditorKeyMonitorTests.swift */; };
 		C5C77F552CFA0F673C3684F3 /* Fixtures.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D1FEDCB97A032CEEDE50E2D /* Fixtures.swift */; };
@@ -514,6 +515,7 @@
 		FDB14EB3B82E5C36EE274651 /* ProjectProgressTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectProgressTests.swift; sourceTree = "<group>"; };
 		FE2F8D7555D9E16BB2C72B39 /* WordRangePredicatesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WordRangePredicatesTests.swift; sourceTree = "<group>"; };
 		FEB88CCE607D4755B2D1CF5A /* EditedWaveformAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditedWaveformAdapter.swift; sourceTree = "<group>"; };
+		FFEF0E04EF6DFBEA0BC9BD9D /* SeamCutPointHandleLayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeamCutPointHandleLayer.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -696,6 +698,7 @@
 				42FDC5127D4F87D92B9DD311 /* FineTuneModel.swift */,
 				3E112DAB8D928502DC603DDB /* FineTuneView.swift */,
 				51DEE5814B51A11B234A5892 /* MarkClipBarView.swift */,
+				FFEF0E04EF6DFBEA0BC9BD9D /* SeamCutPointHandleLayer.swift */,
 				CEC371A7146EEE4C2398478C /* SlicesPanelView.swift */,
 				5DA66EE7707E50147CB301E2 /* TransportPanelView.swift */,
 				7AC1C8CE159C64CC9E2AFE49 /* WaveformLaneView.swift */,
@@ -1306,6 +1309,7 @@
 				F59959FCC427C7D66B81E29A /* RenderTypes.swift in Sources */,
 				90EE8E69230053AE1EC4A5DD /* RunTogether.swift in Sources */,
 				4B7D9A32F4E381EE0BD797CA /* SaveStatus.swift in Sources */,
+				C30E8626435983AFECC4B631 /* SeamCutPointHandleLayer.swift in Sources */,
 				B840CA0050C2A9237A981AF3 /* SelectionEdge.swift in Sources */,
 				15E65E4F38E1F40AC95990CC /* SettingsModel.swift in Sources */,
 				A43AEBA1F2067FE819BBBFA1 /* SettingsView.swift in Sources */,

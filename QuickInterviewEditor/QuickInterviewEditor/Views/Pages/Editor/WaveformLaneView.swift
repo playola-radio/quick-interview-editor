@@ -84,6 +84,14 @@ struct WaveformLaneView<Overlay: View>: View {
   /// draft and restores the committed preview rather than stranding it. Default no-op so call sites
   /// without seam stretching compile unchanged.
   var onSeamStretchCancelled: () -> Void = {}
+  /// Cut-point ⌥-drag on the outside audio flanking a bowtie: moves the left/right cut without
+  /// changing fade length. Default no-ops so call sites without cut-point editing (the slice-edit
+  /// sheet) compile unchanged.
+  var onCutPointDragBegan: (UUID, RemovalBoundary, CGFloat) -> Void = { _, _, _ in }
+  var onCutPointDragged: (CGFloat) -> Void = { _ in }
+  var onCutPointDragEnded: () -> Void = {}
+  var onCutPointDragCancelled: () -> Void = {}
+  var onCutPointSelect: (UUID) -> Void = { _ in }
   @ViewBuilder let auditionOverlay: (WaveformSpan) -> Overlay
 
   private let bandHeight: CGFloat = 148
@@ -122,6 +130,19 @@ struct WaveformLaneView<Overlay: View>: View {
           onStretchCancelled: onSeamStretchCancelled,
           onBodyClick: onBodyClick,
           onContextMenu: onContextMenu)
+      )
+      // Sits ABOVE the seam-stretch handles: claims ONLY ⌥-modified hits in the outside zones flanking
+      // each bowtie, so ⌥-drag moves a cut point while a plain drag on the bowtie edge still stretches
+      // length and every non-⌥ mouse-down falls through.
+      .overlay(
+        SeamCutPointHandleLayer(
+          seams: seams,
+          waveform: waveform,
+          onDragBegan: onCutPointDragBegan,
+          onDragged: onCutPointDragged,
+          onDragEnded: onCutPointDragEnded,
+          onDragCancelled: onCutPointDragCancelled,
+          onSelect: onCutPointSelect)
       )
       // Sits ABOVE the marquee layer: it claims only the few points at each edge of the highlight, so
       // an edge grab starts a boundary drag while every other mouse-down falls through to the marquee.
