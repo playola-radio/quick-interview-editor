@@ -251,4 +251,29 @@ struct TranscriptResizeTests {
     model.transcript.wordClicked(6, extending: true)
     expectNoDifference(model.selectedWordIDs, [3, 4, 5, 6])
   }
+
+  // MARK: - Perf: intra-word drag dedup
+
+  /// The drag path dedups consecutive ticks that resolve to the same word (the overlay fires one per
+  /// mouse-move, but resizes snap to whole words, so intra-word ticks are wasted re-renders). The
+  /// dedup key must reset at `began`, or a fresh drag whose FIRST target equals the previous drag's
+  /// LAST target would be silently swallowed and the resize would do nothing.
+  @Test func resizeDragDedupResetsBetweenDrags() {
+    let model = editor()
+    model.selectWords(anchorID: 3, focusID: 4)
+
+    model.transcriptResizeBegan(.selection, .end)
+    model.transcriptResizeDragged(toWord: 5)
+    expectNoDifference(model.selectedWordIDs, [3, 4, 5])
+    model.transcriptResizeEnded()
+
+    // A new drag whose first tick targets word 5 again — the same word the prior drag ended on.
+    model.selectWords(anchorID: 3, focusID: 4)
+    expectNoDifference(model.selectedWordIDs, [3, 4])
+    model.transcriptResizeBegan(.selection, .end)
+    model.transcriptResizeDragged(toWord: 5)
+
+    // Not swallowed by stale dedup state: the resize applies.
+    expectNoDifference(model.selectedWordIDs, [3, 4, 5])
+  }
 }

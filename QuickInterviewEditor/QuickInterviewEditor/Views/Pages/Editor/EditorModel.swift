@@ -857,6 +857,13 @@ final class EditorModel: ViewModel {
   /// preview — a container repaint, never a text reflow.
   var transcriptResizeDraft: TranscriptResizeDraft?
 
+  /// The word the last `transcriptResizeDragged` tick resolved to. The overlay fires a drag tick per
+  /// mouse-move (60-120 Hz), but resizes snap to whole words (D1), so every tick between two word
+  /// boundaries maps to the same word and would otherwise re-run `resized()` + reassign the
+  /// `@Observable` draft (re-rendering the whole transcript preview) for zero visible change.
+  /// Deduping on it makes intra-word ticks a no-op; nil between drags so the first tick always runs.
+  @ObservationIgnored private var lastResizeTargetWord: Word.ID?
+
   private func selectionEdge(for edge: TranscriptResizeEdge) -> SelectionEdge {
     switch edge {
     case .start: .start
@@ -875,6 +882,7 @@ final class EditorModel: ViewModel {
     case .suggestion: guard !isExporting else { return }
     }
     guard let item = transcriptResizeItems.first(where: { $0.identity == identity }) else { return }
+    lastResizeTargetWord = nil
     transcriptResizeDraft = TranscriptResizeDraft(
       identity: identity, edge: edge,
       originalWordIDs: item.wordIDs, draftedWordIDs: item.wordIDs,
@@ -894,10 +902,14 @@ final class EditorModel: ViewModel {
   /// invalidated, exactly as a waveform edge drag behaves; for a clip/suggestion the preview flows
   /// through the draft-aware computed spans, and the document is committed only on release.
   func transcriptResizeDragged(toWord id: Word.ID) {
-    guard var draft = transcriptResizeDraft,
+    guard var draft = transcriptResizeDraft else { return }
+    guard id != lastResizeTargetWord else { return }
+    lastResizeTargetWord = id
+    guard
       let newWords = TranscriptResizeMath.resized(
         itemWordIDs: draft.originalWordIDs, edge: draft.edge,
-        toTargetWord: id, transcriptOrder: transcriptOrder())
+        toTargetWord: id, transcriptOrder: transcriptOrder()),
+      newWords != draft.draftedWordIDs
     else { return }
     draft.draftedWordIDs = newWords
     transcriptResizeDraft = draft
@@ -916,6 +928,7 @@ final class EditorModel: ViewModel {
     defer {
       transcriptResizeDraft = nil
       selectionEditingEdge = nil
+      lastResizeTargetWord = nil
     }
     guard let draft = transcriptResizeDraft else { return }
     switch draft.identity {
@@ -945,6 +958,7 @@ final class EditorModel: ViewModel {
     defer {
       transcriptResizeDraft = nil
       selectionEditingEdge = nil
+      lastResizeTargetWord = nil
     }
     guard let draft = transcriptResizeDraft else { return }
     if case .selection = draft.identity {
