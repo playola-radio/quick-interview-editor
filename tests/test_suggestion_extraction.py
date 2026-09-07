@@ -25,6 +25,18 @@ def test_parser_rejects_missing_expected_candidate():
 
 
 @pytest.mark.parametrize("response", [
+    '{"results":[{"candidate_id":"c1","fields":[]}]}',
+    '{"results":[{"candidate_id":"other","fields":[{"field_id":"artist-name","value":"x"}]}]}',
+    '{"results":[{"candidate_id":"c1","fields":[{"field_id":"other","value":"x"}]}]}',
+    '{"results":[{"candidate_id":"c1","fields":[{"field_id":"artist-name","value":4}]}]}',
+    '[]',
+])
+def test_parser_rejects_incomplete_foreign_wrong_typed_and_malformed_responses(response):
+    with pytest.raises(ValueError):
+        parse_extraction_response(response, {"c1": {"artist-name"}})
+
+
+@pytest.mark.parametrize("response", [
     '{"results":[{"candidate_id":"c1","fields":[{"field_id":"artist-name","value":"x"},{"field_id":"artist-name","value":"y"}]}]}',
     '{"results":[{"candidate_id":"c1","fields":[{"field_id":"artist-name","value":"x"}]},{"candidate_id":"c1","fields":[{"field_id":"artist-name","value":"x"}]}]}',
     '{"results":[{"candidate_id":"c1","fields":[{"field_id":"artist-name","value":"x"}],"fields":[]}]}',
@@ -40,6 +52,10 @@ def test_parser_trims_foundation_whitespace_and_treats_empty_as_missing():
     assert parse_extraction_response(response, {"c1": {"artist-name"}}) == {
         "c1": {"artist-name": "American Aquarium"}
     }
+    assert parse_extraction_response(
+        '{"results":[{"candidate_id":"c1","fields":[{"field_id":"artist-name","value":"\\u200b \\u200b"}]}]}',
+        {"c1": {"artist-name"}},
+    ) == {"c1": {"artist-name": None}}
 
 
 def test_required_field_ids_include_template_and_grouping_fields_only():
@@ -134,3 +150,62 @@ def test_batch_plan_reports_oversize_mandatory_candidate_evidence_without_a_batc
 
     assert plan.batches == ()
     assert plan.input_size_diagnostics[0].candidate_id == "c1"
+
+
+def test_batch_plan_splits_at_the_hard_twenty_candidate_limit():
+    candidates = [
+        {"candidate_id": f"c{i}", "product_type": "intro", "start_index": 2, "end_index": 2}
+        for i in range(21)
+    ]
+
+    plan = plan_extraction_batches(candidates, [_type()], _fields(), _sentences())
+
+    assert [len(batch.candidate_ids) for batch in plan.batches] == [20, 1]
+    assert plan.batches[0].candidate_ids[0] == "c0"
+    assert plan.batches[-1].candidate_ids == ("c20",)
+
+
+def test_mandatory_limit_splits_valid_candidates_without_truncating_candidate_evidence():
+    candidates = [
+        {"candidate_id": "c1", "product_type": "intro", "start_index": 2, "end_index": 2},
+        {"candidate_id": "c2", "product_type": "intro", "start_index": 2, "end_index": 2},
+    ]
+    one = plan_extraction_batches(candidates[:1], [_type()], _fields(), _sentences()).batches[0]
+    both = plan_extraction_batches(candidates, [_type()], _fields(), _sentences(), max_input_characters=one.mandatory_characters + 2)
+
+    assert [batch.candidate_ids for batch in both.batches] == [("c1",), ("c2",)]
+    assert all("Song Nobody Wins by American Aquarium" in batch.prompt for batch in both.batches)
+
+
+def test_oversize_candidate_does_not_discard_valid_neighbors():
+    sentences = _sentences()
+    sentences[2] = Sentence(2, 102, "x" * 500, (2,), 2, 3, 2000, 3000)
+    candidates = [
+        {"candidate_id": "first", "product_type": "intro", "start_index": 0, "end_index": 0},
+        {"candidate_id": "oversize", "product_type": "intro", "start_index": 2, "end_index": 2},
+        {"candidate_id": "last", "product_type": "intro", "start_index": 1, "end_index": 1},
+    ]
+
+    plan = plan_extraction_batches(candidates, [_type()], _fields(), sentences, max_input_characters=900)
+
+    assert [batch.candidate_ids for batch in plan.batches] == [("first",), ("last",)]
+    assert [diagnostic.candidate_id for diagnostic in plan.input_size_diagnostics] == ["oversize"]
+
+
+def test_mixed_types_keep_distinct_required_field_sets_per_candidate():
+    types = [
+        _type(),
+        {"id": "custom", "template": [{"kind": "field", "value": "descriptive-title"}], "sequenceFieldIDs": []},
+    ]
+    plan = plan_extraction_batches([
+        {"candidate_id": "intro", "product_type": "intro", "start_index": 2, "end_index": 2},
+        {"candidate_id": "custom", "product_type": "custom", "start_index": 3, "end_index": 3},
+    ], types, _fields(), _sentences())
+
+    batch = plan.batches[0]
+    assert batch.expected == {
+        "intro": frozenset({"artist-name", "song-title"}),
+        "custom": frozenset({"descriptive-title"}),
+    }
+    assert "For candidate intro, return exactly these field IDs: artist-name, song-title." in batch.prompt
+    assert "For candidate custom, return exactly these field IDs: descriptive-title." in batch.prompt
