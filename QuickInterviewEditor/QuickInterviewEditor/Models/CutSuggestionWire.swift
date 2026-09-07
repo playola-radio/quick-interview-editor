@@ -84,8 +84,16 @@ extension CutSuggestion {
   /// UUID live; a deterministic value in tests). `status` starts `.pending`; provenance
   /// is stamped by the caller from the request. An unknown `product_type` throws so a
   /// malformed candidate never becomes a silently-wrong suggestion.
-  init(wire: Wire, id: UUID, provenance: Provenance) throws {
-    guard let productType = ProductType(rawValue: wire.productType) else {
+  init(
+    wire: Wire, id: UUID, provenance: Provenance,
+    allowedProductTypeIDs: Set<String> = [
+      ProductType.intro.rawValue, ProductType.spotlight.rawValue,
+    ]
+  ) throws {
+    guard
+      let productType = ProductType(rawValue: wire.productType),
+      allowedProductTypeIDs.contains(wire.productType)
+    else {
       throw CutSuggestClientError.decodeFailed(
         "unknown product_type '\(wire.productType)' in suggestion '\(wire.title)'")
     }
@@ -113,14 +121,22 @@ extension CutSuggestion {
   /// `CutSuggestClientError.decodeFailed`, failing the whole batch rather than
   /// returning partial garbage.
   static func decodeSuggestions(
-    from data: Data, provenance: Provenance, makeID: () -> UUID
+    from data: Data, provenance: Provenance, makeID: () -> UUID,
+    allowedProductTypeIDs: Set<String> = [
+      ProductType.intro.rawValue, ProductType.spotlight.rawValue,
+    ]
   ) throws -> [CutSuggestion] {
-    let payload = try decodeSuggestionPayload(from: data, provenance: provenance, makeID: makeID)
+    let payload = try decodeSuggestionPayload(
+      from: data, provenance: provenance, makeID: makeID,
+      allowedProductTypeIDs: allowedProductTypeIDs)
     return payload.suggestions
   }
 
   static func decodeSuggestionPayload(
-    from data: Data, provenance: Provenance, makeID: () -> UUID
+    from data: Data, provenance: Provenance, makeID: () -> UUID,
+    allowedProductTypeIDs: Set<String> = [
+      ProductType.intro.rawValue, ProductType.spotlight.rawValue,
+    ]
   ) throws -> (suggestions: [CutSuggestion], meta: WireMeta?) {
     let response: WireResponse
     do {
@@ -132,7 +148,9 @@ extension CutSuggestion {
         "\(error)\n\nOutput was not valid suggestion JSON. It began with:\n\(preview)")
     }
     let suggestions = try response.suggestions.map {
-      try CutSuggestion(wire: $0, id: makeID(), provenance: provenance)
+      try CutSuggestion(
+        wire: $0, id: makeID(), provenance: provenance,
+        allowedProductTypeIDs: allowedProductTypeIDs)
     }
     return (suggestions, response.meta)
   }

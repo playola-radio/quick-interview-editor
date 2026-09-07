@@ -75,6 +75,20 @@ struct CutSuggestionWireTests {
     }
   }
 
+  @Test func configuredFutureProductTypeIsAllowedByRequestMembership() throws {
+    let future = Data(
+      """
+      {"suggestions": [{"product_type": "future-v2", "label": "x", "song": null,
+        "song_verified": false, "word_ids": [1], "start_sample": 0, "end_sample": 1,
+        "start_sec": 0, "end_sec": 1, "duration_sec": 1, "rank": 1, "score": 1}]}
+      """.utf8)
+
+    let suggestions = try CutSuggestion.decodeSuggestions(
+      from: future, provenance: Self.provenance, makeID: UUID.init,
+      allowedProductTypeIDs: ["future-v2"])
+    expectNoDifference(suggestions.map(\.productType), [ProductType(rawValue: "future-v2")!])
+  }
+
   @Test func missingRequiredFieldFailsDecode() {
     // `word_ids` omitted — a partial candidate must not silently map.
     let bad = Data(
