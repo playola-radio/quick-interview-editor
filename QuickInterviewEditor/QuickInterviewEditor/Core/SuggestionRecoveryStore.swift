@@ -103,7 +103,7 @@ actor SuggestionRecoveryStore {
     incoming.manifest.owner = standardized(owner)
     if let existing = try manifestIfPresent(owner.id) {
       try verify(existing, owner: owner, runID: incoming.manifest.snapshot.runID)
-      incoming = try merge(try collect(existing, requireCompletedRecords: false), incoming)
+      incoming = try merge(try collect(existing, requireReferencedRecords: false), incoming)
     }
     _ = try incoming.validatedCheckpoint()
     try install(incoming, owner: standardized(owner))
@@ -220,7 +220,9 @@ actor SuggestionRecoveryStore {
       sourceFingerprint: sourceFingerprint, transcriptHash: transcriptHash)
   }
 
-  private func collect(_ manifest: SuggestionRecoveryManifest, requireCompletedRecords: Bool = true)
+  private func collect(
+    _ manifest: SuggestionRecoveryManifest, requireReferencedRecords: Bool = true
+  )
     throws -> SuggestionRecoveryArchive
   {
     let directory = runDirectory(manifest.owner.id, manifest.snapshot.runID)
@@ -245,7 +247,7 @@ actor SuggestionRecoveryStore {
     }
     let archive = SuggestionRecoveryArchive(
       manifest: manifest, identity: identity, checkpoint: checkpoint, records: records)
-    if requireCompletedRecords { _ = try archive.validatedCheckpoint() }
+    if requireReferencedRecords { _ = try archive.validatedCheckpoint() }
     return archive
   }
 
@@ -272,7 +274,7 @@ actor SuggestionRecoveryStore {
     if merged.identity == nil { merged.identity = saved.identity }
     var recoverableLocal = local
     recoverableLocal.identity = recoverableLocal.identity ?? saved.identity
-    let localCheckpoint = try recoverableLocal.validatedCheckpoint(requireCompletedRecords: false)
+    let localCheckpoint = try recoverableLocal.validatedCheckpoint(requireReferencedRecords: false)
     let savedCheckpoint = try saved.validatedCheckpoint()
     if localCheckpoint.pythonRevision == savedCheckpoint.pythonRevision,
       let lhs = local.checkpoint, let rhs = saved.checkpoint,

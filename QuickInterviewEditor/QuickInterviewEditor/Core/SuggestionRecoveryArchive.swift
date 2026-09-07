@@ -45,7 +45,8 @@ struct SuggestionRecoveryArchive: Codable, Equatable, Sendable {
       allowed: snapshotFields, required: snapshotFields.subtracting(["stage1Window", "stage1Step"]))
   }
 
-  func validatedCheckpoint(requireCompletedRecords: Bool = true) throws -> SuggestionRunCheckpoint {
+  func validatedCheckpoint(requireReferencedRecords: Bool = true) throws -> SuggestionRunCheckpoint
+  {
     try validateManifest()
     let control = manifest.control
     let base = SuggestionRunCheckpoint(
@@ -78,8 +79,12 @@ struct SuggestionRecoveryArchive: Codable, Equatable, Sendable {
         throw SuggestionRecoveryError.invalid("Invalid checkpoint request keys.")
       }
     }
-    guard !requireCompletedRecords || Set(wire.completedRequestKeys).isSubset(of: completed) else {
+    guard !requireReferencedRecords || Set(wire.completedRequestKeys).isSubset(of: completed) else {
       throw SuggestionRecoveryError.invalid("Missing completed provider response.")
+    }
+    guard !requireReferencedRecords || Set(wire.failedRequestKeys).isSubset(of: Set(records.keys))
+    else {
+      throw SuggestionRecoveryError.invalid("Missing failed provider request record.")
     }
     return try wire.checkpoint(
       snapshot: manifest.snapshot, proposedStarts: control.proposedStarts,

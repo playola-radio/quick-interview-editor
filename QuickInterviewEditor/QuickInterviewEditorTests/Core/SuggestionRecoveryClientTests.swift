@@ -417,6 +417,60 @@ extension SuggestionRecoveryClientTests {
     expectNoDifference(recovered.checkpoint.pythonRevision, 1)
   }
 
+  @Test(arguments: [false, true])
+  func failedCheckpointKeysRequireRecordsButAllowCompletedRecordsAhead(hasCompletedRecord: Bool)
+    async throws
+  {
+    let root = FileManager.default.temporaryDirectory.appending(component: UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let (fixture, originalPython) = try RecoveryFixture.python()
+    var python = originalPython
+    let checkpoint = try JSONDecoder().decode(
+      SuggestionRunWireCheckpoint.self, from: python.checkpoint)
+    let failedKey = try #require(
+      python.records.keys.first { !checkpoint.completedRequestKeys.contains($0) })
+    var object = try #require(
+      JSONSerialization.jsonObject(with: python.checkpoint) as? [String: Any])
+    object["phase"] = "needs_retry"
+    object["failed_request_keys"] = [failedKey]
+    object["failed_batches"] = [["kind": "provider", "request_key": failedKey, "retryable": true]]
+    python.checkpoint = try signedPythonObject(object)
+    if !hasCompletedRecord { python.records.removeValue(forKey: failedKey) }
+    let store = SuggestionRecoveryStore(root: root, uuid: { UUID() })
+    let directory = try await store.prepare(fixture.owner, preparation: fixture.preparation)
+    try fixture.writePython(python, directory: directory)
+    let archive = SuggestionRecoveryArchive(
+      manifest: .init(
+        owner: fixture.owner, snapshot: fixture.snapshot,
+        originalRequest: python.originalRequest, control: fixture.preparation.control),
+      identity: python.identity, checkpoint: python.checkpoint, records: python.records)
+    let archiveBytes = try JSONEncoder().encode(archive)
+    let restoreRoot = root.appending(component: "restore")
+    let restored = SuggestionRecoveryStore(root: restoreRoot, uuid: { UUID() })
+    if hasCompletedRecord {
+      let capture = try await store.capture(
+        fixture.owner, runID: fixture.snapshot.runID, minimumPythonRevision: 1)
+      expectNoDifference(capture.checkpoint.phase, .needsRetry)
+      expectNoDifference(capture.checkpoint.failedRequestKeys, [failedKey])
+      try await restored.restore(fixture.owner, archive: archiveBytes)
+      let recovered = try await restored.capture(
+        fixture.owner, runID: fixture.snapshot.runID, minimumPythonRevision: 1)
+      expectNoDifference(recovered.checkpoint, capture.checkpoint)
+      expectNoDifference(
+        try SuggestionRecoveryArchive.decode(recovered.archive).records[failedKey],
+        python.records[failedKey])
+    } else {
+      await #expect(throws: SuggestionRecoveryError.self) {
+        try await store.capture(
+          fixture.owner, runID: fixture.snapshot.runID, minimumPythonRevision: 1)
+      }
+      await #expect(throws: SuggestionRecoveryError.self) {
+        try await restored.restore(fixture.owner, archive: archiveBytes)
+      }
+      #expect(!FileManager.default.fileExists(atPath: restoreRoot.path))
+    }
+  }
+
   private func signedPythonObject(_ object: [String: Any]) throws -> Data {
     var object = object
     object.removeValue(forKey: "integrity")
