@@ -8,6 +8,40 @@ import Testing
 
 @testable import PlayolaInterviewEditor
 
+/// Suspends a play call until released, reporting when it started. A minimal local mirror of
+/// `EditorTransportTests`' `TransportGate`, scoped to the one playback-interruption test below.
+private final class PlaybackGate: @unchecked Sendable {
+  private let lock = NSLock()
+  private var continuations: [CheckedContinuation<Void, Never>] = []
+  private let startedContinuation: AsyncStream<Void>.Continuation
+  let started: AsyncStream<Void>
+  init() {
+    var continuation: AsyncStream<Void>.Continuation!
+    started = AsyncStream { continuation = $0 }
+    startedContinuation = continuation
+  }
+  func play() async -> PlaybackEnd {
+    startedContinuation.yield(())
+    await withCheckedContinuation { cont in
+      lock.lock()
+      continuations.append(cont)
+      lock.unlock()
+    }
+    return .finished
+  }
+  func release() {
+    lock.lock()
+    let conts = continuations
+    continuations = []
+    lock.unlock()
+    for cont in conts { cont.resume() }
+  }
+  func awaitStarted() async {
+    var it = started.makeAsyncIterator()
+    _ = await it.next()
+  }
+}
+
 @MainActor
 struct EditorCrossfadeCutPointTests {
 
@@ -121,6 +155,36 @@ struct EditorCrossfadeCutPointTests {
     }
   }
 
+  @Test func clampLowerRespectsNeighborRemovalAndItsFade() {
+    withStorage {
+      let model = editor(fingerprint: "fp-cut-clamp-lower-neighbor")
+      addRemoval(model, id: Fixtures.uuid(1), range: 48_000..<96_000, length: 400)
+      let id = addRemoval(model, id: Fixtures.uuid(2), range: 150_000..<200_000, length: 600)
+
+      // Neighbor removal to the left, fade 400: cL lower bound = 96_000 + 400 + 600 = 97_000.
+      let clamped = model.clampedRemovalRange(
+        id: id, proposed: 0..<200_000, frozenLength: 600)
+
+      expectNoDifference(clamped, 97_000..<200_000)
+    }
+  }
+
+  @Test func clampUpperCannotCrossTheLeftCut() {
+    withStorage {
+      let model = editor(fingerprint: "fp-cut-clamp-upper-cross")
+      let id = addRemoval(model, range: 48_000..<96_000, length: 600)
+
+      // Propose cR before cL: pinned to cL + 1 (removal stays non-empty). `48_000..<48_000` (not
+      // `0..<48_000`) because Swift's `Range` enforces lowerBound <= upperBound, and the
+      // moving-upper-edge branch of clampedRemovalRange is selected by `proposed.lowerBound == cL` —
+      // it then only reads `proposed.upperBound`, so the paired lowerBound must equal cL to route here.
+      let clamped = model.clampedRemovalRange(
+        id: id, proposed: 48_000..<48_000, frozenLength: 600)
+
+      expectNoDifference(clamped, 48_000..<48_001)
+    }
+  }
+
   // MARK: - Drag lifecycle
 
   @Test func draggingLeftCutInwardMovesLowerBoundWithoutTouchingDocument() {
@@ -158,13 +222,16 @@ struct EditorCrossfadeCutPointTests {
       model.crossfadeCutPointDragEnded()
 
       expectNoDifference(model.crossfadeCutPointDraft, nil)
-      expectNoDifference(model.timelineRemovals[id: Fixtures.uuid(1)]?.removedRange, 46_000..<96_000)
+      expectNoDifference(
+        model.timelineRemovals[id: Fixtures.uuid(1)]?.removedRange, 46_000..<96_000)
       expectNoDifference(
         model.timelineRemovals[id: Fixtures.uuid(1)]?.crossfade.lengthSamples, 600)  // length fixed
       #expect(model.canUndo)
 
       await model.undoTapped()
-      expectNoDifference(model.timelineRemovals[id: Fixtures.uuid(1)]?.removedRange, 48_000..<96_000)
+      expectNoDifference(
+        model.timelineRemovals[id: Fixtures.uuid(1)]?.removedRange, 48_000..<96_000)
+      expectNoDifference(model.selectedSeamID, Fixtures.uuid(1))  // seam stays selected across undo
     }
   }
 
@@ -208,6 +275,34 @@ struct EditorCrossfadeCutPointTests {
     }
   }
 
+  // MARK: - Effective length freeze
+
+  @Test func movingCutFreezesEffectiveLengthNotStoredLength() {
+    withStorage {
+      let model = editor(fingerprint: "fp-cut-freeze-effective")
+      primeGeometry(model)
+      // Left handle (1_000 samples) is smaller than the stored fade (2_000), so `EditedTimeline`
+      // clamps the seam's EFFECTIVE `crossfadeLength` down to 1_000 — every other fixture in this
+      // file uses a fade small enough that stored == effective, which would let a regression that
+      // freezes the STORED length (2_000) instead of the effective one pass unnoticed.
+      let id = addRemoval(model, range: 1_000..<5_000, length: 2_000)
+      let effectiveLength = {
+        model.editedWaveform.timeline.seams.first(where: { $0.id == id })?.crossfadeLength
+      }
+      expectNoDifference(effectiveLength(), 1_000)
+
+      model.crossfadeCutPointDragBegan(id: id, edge: .upper, atX: 300)
+      model.crossfadeCutPointDragged(toX: 290)  // -10px leftward → delta -2000 → cR + 2000
+      model.crossfadeCutPointDragEnded()
+
+      // Committed fade is pinned to the EFFECTIVE length (1_000) that was frozen at drag begin, not
+      // the original stored length (2_000).
+      expectNoDifference(model.timelineRemovals[id: id]?.crossfade.lengthSamples, 1_000)
+      // The rendered seam's crossfade length is unchanged by the move.
+      expectNoDifference(effectiveLength(), 1_000)
+    }
+  }
+
   // MARK: - Keyboard nudge
 
   @Test func nudgeMovesLeftCutBy10msWhenSeamSelected() {
@@ -243,6 +338,34 @@ struct EditorCrossfadeCutPointTests {
 
       #expect(consumed == false)
       expectNoDifference(model.timelineRemovals[id: id]?.removedRange, 48_000..<96_000)
+    }
+  }
+
+  // MARK: - Playback interruption
+
+  @Test func nudgeStopsActiveTransportPlayback() async {
+    let gate = PlaybackGate()
+    await withDependencies {
+      $0.defaultFileStorage = FileStorage.inMemory(fileSystem: LockIsolated([:]))
+      $0.audioPlayer.playEdited = { _, _, _, _, _ in
+        EditedPlaybackEnd(end: await gate.play(), finishedEditedSample: nil)
+      }
+      $0.audioPlayer.stop = { _ in gate.release() }
+    } operation: {
+      let model = editor(fingerprint: "fp-cut-nudge-playback-stop")
+      let id = addRemoval(model, range: 48_000..<96_000, length: 600)
+      model.selectSeam(id)
+      let task = Task { await model.transportPlayTapped() }
+      await gate.awaitStarted()
+      #expect(model.isTransportPlaying)
+
+      _ = model.editorKeyDown(.nudgeLeftCutEarlier)
+
+      // Synchronous: a committing nudge stops transport before returning, the same as a cut-point
+      // drag — without waiting on the fire-and-forget audio-node stop below.
+      #expect(!model.isTransportPlaying)
+
+      await task.value
     }
   }
 }

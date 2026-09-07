@@ -1604,6 +1604,11 @@ final class EditorModel: ViewModel {
     let clamped = clampedRemovalRange(
       id: id, proposed: proposed, frozenLength: seam.crossfadeLength)
     guard clamped != removal.removedRange else { return true }
+    // Reflows the edited axis under the transport exactly like a cut-point drag, so stop playback
+    // before committing (only when the range is actually moving — `syncEditedTimeline` also stops it
+    // on the resulting document change, but making it explicit here keeps the two commit paths in
+    // sync with `crossfadeCutPointDragBegan`'s intent).
+    stopPlaybackForTimelineEdit()
     updateRemovalRange(
       id: id, removedRange: clamped, freezingCrossfadeLength: seam.crossfadeLength)
     return true
@@ -2088,6 +2093,11 @@ final class EditorModel: ViewModel {
     let nextF = index + 1 < seams.count ? seams[index + 1].crossfadeLength : 0
 
     if proposed.lowerBound != cL {
+      // When `prevUpper + prevF + frozenLength > cR - 1` (no room for both a full handle and a
+      // non-empty removal), the `min` with `cR - 1` wins: the clamp under-serves the fade rather than
+      // refusing the move. That's the safer choice — validation drops empty removals outright, so
+      // preferring a still-nonempty, tightened removal over a hard refusal (or an inverted range) is
+      // the least-bad outcome.
       let newCL = min(max(proposed.lowerBound, prevUpper + prevF + frozenLength), cR - 1)
       return newCL..<cR
     }
