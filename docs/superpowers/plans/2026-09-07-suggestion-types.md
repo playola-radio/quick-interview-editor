@@ -12,7 +12,7 @@
 
 ## Authority and execution boundaries
 
-The approved contract is [the revised design](../specs/2026-09-07-suggestion-types-design.md). This plan implements that contract, including the adversarial-review decisions approved on September 7. This is one integrated feature: the helper, project state, and naming UI must agree on the same versioned contract. Tasks are incremental commits, not independently published products.
+The approved contract is [the revised design](../specs/2026-09-07-suggestion-types-design.md). This plan implements that contract, including both adversarial-review rounds approved on September 7. This is one integrated feature: the helper, project state, and naming UI must agree on the same versioned contract. Tasks are incremental commits, not independently published products.
 
 Work in `/Users/brian/conductor/workspaces/logic-utils/georgetown`. This Conductor workspace is already isolated. Keep its current branch name. Compare against `origin/main`. Do not merge, push, release, or restore the archived implementation as part of execution. The archive `temp/suggestion-types-unplanned-draft` at `558cda121e8ffcd3e6abc74534690783d2bb99bc` is read-only reference; several of its choices are incompatible with the approved design.
 
@@ -176,11 +176,19 @@ struct SuggestionSequenceKey: Codable, Hashable, Sendable {
   var fields: [SequenceFieldValue]
   var provisionalCandidateID: UUID?
 }
+struct SequenceReservationIdentity: Codable, Hashable, Sendable {
+  var candidateID: UUID
+  var key: SuggestionSequenceKey
+  var number: Int
+}
 struct SequenceReservation: Codable, Equatable, Sendable {
   var candidateID: UUID
   var key: SuggestionSequenceKey
   var number: Int
   var canonicalValues: [String: String]
+  var identity: SequenceReservationIdentity {
+    SequenceReservationIdentity(candidateID: candidateID, key: key, number: number)
+  }
 }
 struct SuggestionStart: Codable, Equatable, Sendable {
   var number: Int
@@ -288,7 +296,9 @@ struct SuggestionRunSnapshot: Codable, Equatable, Sendable {
 }
 struct SuggestionNamingRecord: Codable, Equatable, Sendable {
   var runID: UUID
-  var type: SuggestionTypeDefinition
+  var typeID: String
+  var typeName: String
+  var typeGroup: SuggestionGroup
   var discoveryLabel: String
   var extractedValues: [String: String]
   var missingFieldIDs: [String]
@@ -306,7 +316,9 @@ struct SuggestionBatch: Codable, Equatable, Sendable {
 }
 struct SuggestionRunCheckpoint: Codable, Equatable, Sendable {
   var schemaVersion: Int = 1
-  var revision: Int
+  var pythonRevision: Int
+  var controlRevision: Int
+  var originalBatchFingerprint: String?
   var snapshot: SuggestionRunSnapshot
   var phase: Phase
   var candidates: [CutSuggestion]
@@ -319,17 +331,17 @@ struct SuggestionRunCheckpoint: Codable, Equatable, Sendable {
 }
 ```
 
-`CutSuggestion.naming: SuggestionNamingRecord?` stores its original discovery label separately from `title` (the generated display name). `Slice.suggestionNaming: SuggestionNamingRecord?` opts into exact-name export; `Slice.suggestionTypeID: String?` allows legacy known type association without changing export behavior. Full field instructions and template/grouping definitions live in the owning `SuggestionBatch.snapshot` and unfinished snapshot, not a lookup against current settings. A record with a run ID but no owning snapshot fails a new-run apply; legacy nil metadata remains valid.
+`CutSuggestion.naming: SuggestionNamingRecord?` stores its original discovery label separately from `title` (the generated display name). `Slice.suggestionNaming: SuggestionNamingRecord?` opts into exact-name export; `Slice.suggestionTypeID: String?` allows legacy known type association without changing export behavior. Full field instructions and template/grouping definitions live in the owning `SuggestionBatch.snapshot` and unfinished snapshot, not a lookup against current settings. The owning batch snapshot is canonical for every pending correction/renumber; per-record type ID/name/group are display provenance only. Saved clips require no template lookup to export their stored name after the originating batch is replaced. Validate new record labels/IDs against that snapshot when applying a run. A record with a run ID but no owning snapshot fails a new-run apply; legacy nil metadata remains valid.
 
 - [ ] Implement `numberSuggestions(_ candidates: [CutSuggestion], snapshot: SuggestionRunSnapshot, starts: SuggestionStarts, issued: [SequenceReservation], retained: [SequenceReservation]) throws -> (candidates: [CutSuggestion], batch: SuggestionBatch)` as a pure all-or-nothing transformation using Task 3's primitives. Sort by start sample, end sample, type ID, then candidate UUID string. Resolve a group override before the type start. Fresh automatic starts advance beyond the issued maximum; explicit starts at/below it fail with the minimum safe start. For an explicit pending renumber, exclude only selected pending reservations from retained occupancy; rejected and all issued numbers stay occupied. Maximum+1 and every skip use checked arithmetic. Set each candidate's naming record and title; retain extraction source values, resolve corrections first, and assign canonical rendering by group. A missing grouping field receives its own provisional key; missing template fields use the descriptive fallback. Only a template containing Sequence allocates a number. Test independent image counters, same song/different performers, rank/filter independence, rejection gaps, two case-variant takes sharing canonical display values, group correction with occupied numbers, and idempotent same-owner reservations. Preserve an existing candidate's reservation during single-row correction when its key is unchanged.
-- [ ] Write the snapshot regression: create an intro batch, change the app-wide template to a different prefix, correct the artist in the old batch, and assert its original template still renders. Also round-trip missing vs empty fields, custom historical type labels, canonical values, and checkpoint revision. Ensure malformed new metadata does not silently decode as legacy.
+- [ ] Write the snapshot regression: create an intro batch, change the app-wide template to a different prefix, correct the artist in the old batch, and assert its original template still renders. Also round-trip missing vs empty fields, custom historical type labels, canonical values, and the separate Python/control checkpoint revisions. Ensure malformed new metadata does not silently decode as legacy.
 - [ ] Run `SuggestionRunTests`, `SuggestionNamingTests`, `SuggestionNumberingTests`, and existing suggestion/slice Codable tests. Commit: `feat: persist immutable suggestion naming snapshots`.
 
 ## Task 5: App-wide configuration persistence and shared publication
 
 **Files:** Create `Core/SuggestionConfigurationClient.swift`, `State/SuggestionConfigurationKey.swift`; create `QuickInterviewEditor/QuickInterviewEditorTests/Core/SuggestionConfigurationClientTests.swift`.
 
-- [ ] Test load from missing storage returns the six defaults, invalid JSON/schema returns a visible load error without overwriting bytes, and two saves based on the same revision cannot both succeed.
+- [ ] Test load from missing storage returns the six defaults, invalid JSON/schema (including an existing file without schemaVersion) returns a visible load error without overwriting bytes, and two saves based on the same revision cannot both succeed.
 - [ ] Implement `SuggestionConfigurationStore` as an actor initialized with `fileURL: URL`, exposing `load()` and `save(_:expectedRevision:)`, and a `Sendable` dependency boundary with these operations:
 
 ```swift
@@ -343,7 +355,7 @@ enum SuggestionConfigurationStoreError: Error, Equatable {
 }
 ```
 
-The second save argument is `expectedRevision`. Within one serialized actor operation: load the current file, validate the draft, compare revisions, checked-increment the revision, encode, write atomically, then publish/return the saved value. File location: `Application Support/<AppDirectories.folderName>/SuggestionConfiguration.json`. Missing directory is created; a write error throws and leaves both disk and published value unchanged. This is one app process with multiple windows, not a cross-process settings synchronization service.
+The second save argument is `expectedRevision`. Within one serialized actor operation: load the current file, validate the draft, compare revisions, checked-increment the revision, encode, write atomically, then publish/return the saved value. File location: `Application Support/<AppDirectories.folderName>/SuggestionConfiguration.json`. Configuration schemaVersion/revision are required on disk for this first configuration format; initializer defaults seed newly created values, not missing stored keys. An absent file seeds defaults; missing required keys in an existing file fail without rewriting it. Missing directory is created; a write error throws and leaves both disk and published value unchanged. This is one app process with multiple windows, not a cross-process settings synchronization service.
 
 - [ ] Add the stale-save regression using an isolated temporary directory and run it red before adding revision comparison:
 
@@ -416,9 +428,19 @@ def same_take(a: dict, b: dict) -> bool:
     return overlap > 0 and overlap / shorter >= 0.5
 ```
 
-Within a type, keep the longer span, then earlier start/end. For the four built-in image IDs, priorities are pre/post=2, promo=1, ID=0. Resolve overlapping candidates by descending priority, descending span length, type ID, start/end; discard lower-priority duplicates. Pre/post disagreement adds an ambiguity warning to the survivor. Custom cross-type overlaps survive regardless of display group. This algorithm does not merge disjoint takes or allow image clips into story merging.
+Within a type, keep the existing 50%-of-shorter rule, longer span, then earlier start/end. Across the four built-in image types use mutual coverage instead:
 
-- [ ] Add positive fixtures: a complete ~8-second intro; two complete short repeated IDs; a ~38-second subscription promo; an explicit return from ads; a speaker introducing another performer's recording; and a Spotlight with a passing station/song mention. Add negative labels for “yeah,” isolated song titles, false starts, unfinished handoffs, and a URL mention embedded in a story. Use synthetic text, clearly labeled as synthetic, not copied database transcripts.
+```python
+def duplicate_imaging_classification(a: dict, b: dict) -> bool:
+    overlap = max(0, min(a["end_index"], b["end_index"]) - max(a["start_index"], b["start_index"]) + 1)
+    lengths = (a["end_index"] - a["start_index"] + 1,
+               b["end_index"] - b["start_index"] + 1)
+    return overlap > 0 and all(overlap / length >= 0.8 for length in lengths)
+```
+
+For the four built-in image IDs, priorities are pre/post=2, promo=1, ID=0. Resolve overlapping candidates by descending priority, descending span length, type ID, start/end; discard lower-priority duplicates. Pre/post disagreement adds an ambiguity warning to the survivor. Custom cross-type overlaps survive regardless of display group. This algorithm does not merge disjoint takes or allow image clips into story merging.
+
+- [ ] Add positive fixtures: a complete ~8-second intro; two complete short repeated IDs; a ~38-second subscription promo; an explicit return from ads; a speaker introducing another performer's recording; and a Spotlight with a passing station/song mention. Add nested fixtures: a complete standalone two-sentence ID within a fifteen-sentence promo retains both; an incidental self-identification within a promo is not separately suggested; two substantially matching subtype classifications collapse by precedence. The geometric test only prevents suppression of distinct spans; the prompt/evaluation establishes editorial completeness. Add negative labels for “yeah,” isolated song titles, false starts, unfinished handoffs, and a URL mention embedded in a story. Use synthetic text, clearly labeled as synthetic, not copied database transcripts.
 - [ ] Set only the configured Intro acceptance minimum to 1 second, retaining its target/upper bound and leaving the legacy pinned eval specs intact. New types use 1–240 seconds. Test structural duration enforcement with fake candidates separately from semantic quality evaluation: a unit test cannot prove an LLM will reject a plausible-looking fragment. Keep `FRAGMENT_SECONDS` and the old cached baseline unchanged. Task 17 runs the labeled editorial evaluation and blocks a quality-complete claim if short-fragment behavior is poor.
 - [ ] Run `python3 -m pytest tests/test_configured_discovery.py tests/test_cut_suggester_postprocess.py tests/test_suggestion_prompt_regression.py -q`. Commit: `feat: discover imaging and custom suggestion types`.
 
@@ -532,9 +554,9 @@ case checkpoint(runID: UUID, revision: Int)
 case recoverableFailure(runID: UUID, failedRequestKeys: [String], message: String)
 ```
 
-Define `SuggestionRunWireCheckpoint` in `SuggestionRunWire.swift` for the Python envelope; its converter takes the original Swift snapshot and proposed starts from the owner manifest. Python stores candidate evidence and snake_case phase values, while Swift owns final names/numbering and its camelCase document records. Decode phase `needs_retry` explicitly to `.needsRetry`; map candidate evidence through `CutSuggestion.Wire`, then attach fields and the supplied snapshot. Do not ask Python to emit a full Swift `CutSuggestion` or directly decode its journal as `SuggestionRunCheckpoint`. Retain `.progress(String)` and `.completed([CutSuggestion])`; V2 result decoding validates its run ID and stamps the snapshot onto returned records. Candidate UUIDs come from the V2 wire; only the legacy path injects new UUIDs. New responses reject duplicate candidate IDs and type IDs absent from the request snapshot, even if a historical document decoder accepts them.
+Define `SuggestionRunWireCheckpoint` in `SuggestionRunWire.swift` for the Python envelope; its converter takes the original Swift snapshot and proposed starts from the durable Swift control manifest defined in Task 12. The checkpoint's Python revision comes from the Python journal, its control revision comes from that manifest; neither is an ordering substitute for the other. Python stores candidate evidence and snake_case phase values, while Swift owns final names/numbering and its camelCase document records. Decode phase `needs_retry` explicitly to `.needsRetry`; map candidate evidence through `CutSuggestion.Wire`, then attach fields and the supplied snapshot. Do not ask Python to emit a full Swift `CutSuggestion` or directly decode its journal as `SuggestionRunCheckpoint`. Retain `.progress(String)` and `.completed([CutSuggestion])`; V2 result decoding validates its run ID and stamps the snapshot onto returned records. Candidate UUIDs come from the V2 wire; only the legacy path injects new UUIDs. New responses reject duplicate candidate IDs and type IDs absent from the request snapshot, even if a historical document decoder accepts them.
 
-- [ ] Write the cross-language fixture test: Swift encodes the shared V2 request including all field/type definitions; Python's validator reads those exact bytes. Swift decodes `suggestion-result-v2.json` and a checkpoint built from the same fixture with a custom ID, explicit missing field, and preserved discovery label. Copy `configurationHash` as supplied snapshot provenance; Python independently fingerprints the complete actual immutable request, so correctness does not rely on identical JSON hash implementations in both languages. Test wrong run ID/schema, duplicate IDs, missing fields, and malformed UTF-8/JSON output fail the whole result.
+- [ ] Write the cross-language fixture test: Swift encodes the shared V2 request including all field/type definitions, decodes it to a JSON value, and compares it to the fixture at value level; Python validates that same fixture. Do not assert raw JSONEncoder byte order, whitespace, floating-point spelling, or URL escape choices. A separate subprocess integration test can feed Swift-produced bytes to Python without comparing those bytes to golden formatting. Swift decodes `suggestion-result-v2.json` and a checkpoint built from the same fixture with a custom ID, explicit missing field, and preserved discovery label. Copy `configurationHash` as supplied snapshot provenance; Python independently fingerprints the complete actual immutable request, so correctness does not rely on identical JSON hash implementations in both languages. Test wrong run ID/schema, duplicate IDs, missing fields, and malformed UTF-8/JSON output fail the whole result.
 - [ ] Update `LiveCutSuggester.encodedRequest`, argv construction, progress decoder, and `completedEvent`. A fresh V2 run adds refresh policy; resume adds the same journal directory without refreshing successful journal requests. Keep scratch request-file cleanup and process-group cancellation. Separate persistent journal lifetime from scratch/cache cleanup; “Clear Cache” must not delete unfinished searches.
 - [ ] Remove the valid-empty rejection in **both** `LiveCutSuggester.completedEvent` and the page model's completion path (the latter is fully replaced in Task 13). A well-formed completed empty list is success; malformed/all-invalid provider data must be distinguished upstream and remain an error. Preserve diagnostic metadata for explaining empty results without treating zero length alone as failure.
 - [ ] Add deterministic live-adapter tests using the existing process seams: checkpoint line recognition; stale revision ignored; cancellation terminates the child and doesn't emit completion; stderr without progress doesn't misclassify auth; credential stays out of encoded request, checkpoint, and argv. Avoid launching the actual provider helper in unit tests.
@@ -561,7 +583,7 @@ Define `SuggestionRunWireCheckpoint` in `SuggestionRunWire.swift` for the Python
     key: SuggestionSequenceKey(typeID: type.id, fields: [], provisionalCandidateID: nil),
     number: 3, canonicalValues: [:])
   candidate.title = "Spotlight 3"
-  candidate.naming = SuggestionNamingRecord(runID: Fixtures.uuid(2), type: type,
+  candidate.naming = SuggestionNamingRecord(runID: Fixtures.uuid(2), typeID: type.id, typeName: type.name, typeGroup: type.group,
     discoveryLabel: "Writing on the road", extractedValues: [:], missingFieldIDs: [],
     correctedValues: [:], reservation: reservation)
   let snapshot = SuggestionRunSnapshot(runID: Fixtures.uuid(2),
@@ -588,16 +610,16 @@ Define `SuggestionRunWireCheckpoint` in `SuggestionRunWire.swift` for the Python
 // History transform used after recording the ordinary acceptance mutation:
 let issued = reservation
 documentUndo.rebase { state in
-  if !state.issuedSuggestionNumbers.contains(issued) {
+  if !state.issuedSuggestionNumbers.contains(where: { $0.identity == issued.identity }) {
     state.issuedSuggestionNumbers.append(issued)
   }
 }
 ```
 
-This block runs inside `EditorModel` against its existing `documentUndo`; `reservation` is the validated new entry. Ledger equality includes owner/key/number, not the editable clip name. Restoring a previously issued reservation to its same owner is valid; a different owner produces a visible conflict. Deleting or renaming a slice never edits the ledger.
+This block runs inside `EditorModel` against its existing `documentUndo`; `reservation` is the validated new entry. Ledger deduplication uses `SequenceReservation.identity` (candidate/key/number), while synthesized value equality includes canonicalValues. Never override whole-record equality to ignore metadata: document change detection must still notice spelling edits. An existing issued identity retains its original ledger metadata; a corrected pending display name does not add a second ledger entry. Restoring a previously issued reservation to its same owner is valid; a different owner produces a visible conflict. Deleting or renaming a slice never edits the ledger.
 
-- [ ] Add cases for delete/reopen/rerun after acceptance; undo/redo/reaccept; changing a restored candidate's group/number leaves old issued entry; ordinary clip creation and offset behavior unchanged; non-undoable batch replacement rebases batch metadata and candidates together; next-start Undo leaves current actual starts unchanged; explicit pending renumber is undoable and preserves rejected/issued reservations. Validate conflicts again in the editor's final acceptance closure, not only in a child model.
-- [ ] Set `ProjectFile.currentSchemaVersion = 2`; preserve the existing `1...current` read gate. Upgrade a loaded V1 file on its next write through `ProjectModel.wireEditor`/document save paths, not only new imports. Default-decode new state, retain unknown historical types with snapshot labels, and infer only known legacy slice type association by matching accepted suggestion UUIDs. Do not parse old clip titles into reservations or opt those clips into exact-name export.
+- [ ] Add cases for delete/reopen/rerun after acceptance; undo/redo/reaccept; accept → undo → group-spelling correction → reaccept with exactly one ledger identity; changing a restored candidate's group/number leaves old issued entry; ordinary clip creation and offset behavior unchanged; non-undoable batch replacement rebases batch metadata and candidates together; next-start Undo leaves current actual starts unchanged; explicit pending renumber is undoable and preserves rejected/issued reservations. Validate conflicts again in the editor's final acceptance closure, not only in a child model.
+- [ ] Set `ProjectFile.currentSchemaVersion = 2`; preserve the existing `1...current` read gate. Track whether the opened V1 project remains untouched. Skip background auto-suggest and persisted owner allocation in that state; opening/closing alone emits no sink commit/registerChange and leaves on-disk bytes/schema unchanged. Explicit Suggest Cuts, a document edit, or explicit Save permits upgrade. New/V2 projects keep auto-suggest. Upgrade a loaded V1 file on its next authorized write through `ProjectModel.wireEditor`/document save paths, not only new imports. Default-decode new state, retain unknown historical types with snapshot labels, and infer only known legacy slice type association by matching accepted suggestion UUIDs. Do not parse old clip titles into reservations or opt those clips into exact-name export.
 - [ ] On `EditorDocumentState.rekeyed(to:)`, clear stale candidates, applied batch, and unfinished run while retaining issued numbers, future starts, and clips. Recovery manifests with the old transcript remain stale and cannot resume. Revert explicitly restores saved ledger/version state; duplication copies issued numbers with independent recovery ownership in Task 12.
 - [ ] Run the listed model/document/editor suites and `EditorClipOffsetTests`. Round-trip the unchanged V1 fixture and an in-memory V2 package, including Unicode/custom fields and historical deleted definitions. Commit: `feat: persist suggestion numbering without reusing issued counts`.
 
@@ -614,8 +636,20 @@ struct SuggestionRecoveryOwner: Codable, Equatable, Sendable {
   var sourceFingerprint: String
   var transcriptHash: String
 }
+struct SuggestionRecoveryControl: Codable, Equatable, Sendable {
+  var revision: Int
+  var proposedStarts: SuggestionStarts
+  var originalBatchFingerprint: String?
+  var isPaused: Bool
+}
+struct SuggestionRecoveryPreparation: Sendable {
+  var snapshot: SuggestionRunSnapshot
+  var originalRequest: Data
+  var control: SuggestionRecoveryControl
+}
 struct SuggestionRecoveryClient: Sendable {
-  var prepare: @Sendable (SuggestionRecoveryOwner, SuggestionRunSnapshot) async throws -> URL
+  var prepare: @Sendable (SuggestionRecoveryOwner, SuggestionRecoveryPreparation) async throws -> URL
+  var updateControl: @Sendable (SuggestionRecoveryOwner, UUID, SuggestionRecoveryControl, Int) async throws -> Void
   var load: @Sendable (SuggestionRecoveryOwner) async throws -> SuggestionRunCheckpoint?
   var checkpoint: @Sendable (SuggestionRecoveryOwner, UUID, Int) async throws -> SuggestionRunCheckpoint
   var discard: @Sendable (SuggestionRecoveryOwner, UUID) async throws -> Void
@@ -626,9 +660,9 @@ struct SuggestionRecoveryClient: Sendable {
 ```
 
 - [ ] Write a reopen test with two independently constructed store instances: prepare a run, write a fixture Python checkpoint, load with the second instance, and assert original snapshot/candidate UUIDs survive. Use a temporary directory injected into the store; no app-wide real data or sleeps.
-- [ ] Store under `Application Support/<AppDirectories.folderName>/SuggestionRecovery/<owner UUID>/<run UUID>/`. `prepare` atomically writes an owner manifest with current document URL, source/transcript hashes, immutable snapshot, original request, and current run ID **before** any provider call. Journal records survive cache pruning. `checkpoint` validates run ID and increasing revision, reads the actual disk checkpoint, then returns a document-storable value. An unreadable/corrupt/write-failed recovery state is visible and prevents advancing the search.
-- [ ] Persist the owner UUID and latest structured checkpoint in `.pie` state. Also index the manifest by standardized document URL to recover a first search that crashed before autosave persisted the UUID. Verify source/transcript before using that index; mismatches are never auto-attached. Untitled documents keep their owner manifest and native document recovery identity; if native recovery fails, source/transcript matching only offers an explicit orphan-recovery choice. Use `recoverableOrphans(sourceFingerprint, transcriptHash)` to return owner manifests for that chooser; do not silently pick one of multiple matches.
-- [ ] Document window teardown cancels the running process/task but leaves checkpoints. On hydrate, load the current owner's checkpoint before auto-suggest; show Resume/Discard and don't issue a paid request. If a run ID equals the saved `lastAppliedSuggestionRunID`, don't present/reapply it.
+- [ ] Store under `Application Support/<AppDirectories.folderName>/SuggestionRecovery/<owner UUID>/<run UUID>/`. `prepare` atomically writes an owner manifest with current document URL, source/transcript hashes, immutable snapshot, original request, current run ID, and Swift control (proposedStarts, originalBatchFingerprint, isPaused, revision) **before** any provider call. `updateControl` checks expected control revision, increments with checked arithmetic, and atomically persists proposed-start edits, pause/resume, or a newly confirmed old-batch fingerprint before exposing the change as recoverable. Journal records survive cache pruning. `checkpoint` validates run/input identity, reads the latest Python disk checkpoint and Swift control manifest, and returns a combined document-storable value. Python owns validated provider work and pythonRevision; Swift owns controlRevision/proposed starts/pause/batch fingerprint. Compare each counter only with its own last observed or archived revision. Reopening starts from validated durable records, not a zeroed in-memory revision assumption. The `.pie` archive is a portable saved copy: restore missing local files from it, merge a newer same-identity archive component only against that component's revision, and fail on equal-revision different-content or conflicting input identities. Never infer Swift control state from Python's terminal ready phase; recompute numbering conflicts against current issued reservations after loading. An unreadable/corrupt/write-failed recovery state is visible and prevents advancing the search.
+- [ ] Persist the owner UUID and latest structured checkpoint in `.pie` state. Save a portable recovery archive containing the manifest and validated request records as an optional `suggestion-recovery.json` package child; add it to `ProjectPackage` decode/encode/rewrite and `ProjectDocument` snapshot without touching the audio wrapper. JSON values/encoded bytes are data, never executable paths; accept only known archive keys and restore through the owner store. Add read/write/duplicate tests for this optional package child. Removing a completed/discarded run removes the child on the next save. A structured checkpoint containing only request-key strings is insufficient to preserve successful requests when moving a project to another machine. Also index the manifest by standardized document URL to recover a first search that crashed before autosave persisted the UUID. Verify source/transcript before using that index; mismatches are never auto-attached. Untitled documents keep their owner manifest and native document recovery identity; if native recovery fails, source/transcript matching only offers an explicit orphan-recovery choice. Use `recoverableOrphans(sourceFingerprint, transcriptHash)` to return owner manifests for that chooser; do not silently pick one of multiple matches.
+- [ ] Document window teardown cancels the running process/task but leaves checkpoints. On hydrate, load the current owner's checkpoint before auto-suggest (which remains disabled for untouched V1 projects); show Resume/Discard and don't issue a paid request. If a run ID equals the saved `lastAppliedSuggestionRunID`, don't present/reapply it.
 - [ ] After applying a batch, retain an applied journal until durable saved content proves that `lastAppliedSuggestionRunID` is on disk. `confirmSaved` reads the saved `project.json` at the document URL and compares owner/run IDs before cleanup; `FileWrapper` construction or the in-memory save indicator alone is not proof that disk committed. If not yet saved or still untitled, leave the journal. On next hydrate/save observation, repeat this cheap check. A crash before save retains the ready result for explicit recovery; a crash after save skips duplicate application.
 - [ ] On Save As/Duplicate, create a fresh owner ID and atomically copy the recovery journal before pointing the new document at it; a copied checkpoint retains the immutable run ID, while storage ownership differs. Use `ProjectHostView`'s document identity/fileURL updates and the existing document replacement path, not source fingerprint alone. A moved project whose persisted owner matches may update its location only when the previous location no longer exists; a simultaneous copied project receives a new owner. Test that discarding one copy cannot delete another copy's work.
 - [ ] Test checkpoint write failure stops requests, malformed checkpoint is reported, close/reopen and crash-before/after-apply cases, save-as isolation, unsaved matching-orphan selection, stale-source refusal, and cache clearing preservation. Run recovery/hydration/document suites. Commit: `feat: preserve unfinished suggestion searches across document recovery`.
@@ -651,7 +685,7 @@ enum SuggestionRunPhase: Equatable {
 }
 ```
 
-The child reads `currentDocument: @MainActor () -> EditorDocumentState`, receives `makeRequest: @MainActor (SuggestionRunSnapshot, SuggestionSearchMode, URL) -> CutSuggestRequest`, and emits `onCheckpoint: @MainActor (SuggestionRunCheckpoint) -> Void` and `onApply: @MainActor ([CutSuggestion], SuggestionBatch) throws -> Void`. The editor owns those mutations; `onApply` revalidates source and reservations synchronously on the main actor immediately before atomically replacing the batch. The run model has `suggestTapped()`, `replaceConfirmed() async`, `cancelReplacementTapped()`, `cancelSearchTapped()`, `resumeTapped() async`, `discardSearchTapped() async`, and `applyNumberingTapped(_ starts: SuggestionStarts) async` actions. The page delegates existing onboarding/key resolution to its current `SettingsModel` seam; keys never enter persisted model properties.
+The child reads `currentDocument: @MainActor () -> EditorDocumentState`, receives `makeRequest: @MainActor (SuggestionRunSnapshot, SuggestionSearchMode, URL?) -> CutSuggestRequest`, and emits `onCheckpoint: @MainActor (SuggestionRunCheckpoint) -> Void` and `onApply: @MainActor ([CutSuggestion], SuggestionBatch) throws -> Void`. The editor owns those mutations; `onApply` revalidates source and reservations synchronously on the main actor immediately before atomically replacing the batch. The run model has `suggestTapped()`, `replaceConfirmed() async`, `cancelReplacementTapped()`, `cancelSearchTapped()`, `resumeTapped() async`, `discardSearchTapped() async`, and `applyNumberingTapped(_ starts: SuggestionStarts) async` actions. The page delegates existing onboarding/key resolution to its current `SettingsModel` seam; keys never enter persisted model properties.
 
 - [ ] Write the first behavioral test before implementation: an existing batch + `suggestTapped` enters confirmation and invokes neither client nor recovery prepare; Cancel leaves exact document equality. Use a `LockIsolated<Int>` call counter and an injected empty stream. Include the exact copy in model constants:
 
@@ -662,7 +696,7 @@ let replaceButtonTitle = "Replace Suggestions"
 let cancelButtonTitle = "Cancel"
 ```
 
-- [ ] Implement launch ordering: resolve valid configuration/key; obtain explicit confirmation when needed; capture immutable snapshot, old-batch identity/content revision, and future starts; prepare recovery successfully; then start the stream. Guard all candidate mutations while requests are running or numbering correction is active, including callbacks invoked directly by keyboard actions. Saved clip actions remain enabled. A second search is unavailable until the pending run is explicitly discarded.
+- [ ] Implement launch ordering: resolve valid configuration/key; obtain explicit confirmation when needed; capture immutable snapshot, an original-batch content fingerprint, and future starts; build and encode the original request with nil journal URL; prepare recovery with that data and its initial control manifest; build the launch request with the returned URL; then start the stream. The old-batch fingerprint includes IDs/status/naming values so edits after a pause are detected across relaunch, rather than relying on an in-memory revision counter. Guard all candidate mutations while requests are running or numbering correction is active, including callbacks invoked directly by keyboard actions. Saved clip actions remain enabled. A second search is unavailable until the pending run is explicitly discarded.
 - [ ] Track active run ID **and a per-attempt generation UUID**: Resume retains the run ID but creates a new attempt ID. A cancelled attempt must not update phase after a newer attempt resumes the same run. Every progress/checkpoint/completion/error handler checks both tokens; cancellation synchronously invalidates the attempt before terminating its task.
 
 ```swift
@@ -673,7 +707,7 @@ try Task.checkCancellation()
 
 Declare `activeRunID: UUID?` and `activeAttemptID: UUID?` on the model; inject UUID creation through Dependencies. Clear attempt ownership on stop. A stream that ends without completion/recoverable status becomes a visible error, never an endless spinner.
 
-- [ ] Read validated disk checkpoints on events and persist them non-undoably through `onCheckpoint`. On recoverable failure or Cancel, retain old suggestions and checkpoint; enable old-batch edits. Resume compares the captured old-batch content revision with current content and repeats replacement confirmation if changed. Global config edits leave the old snapshot intact; transcript/source changes refuse resume/apply. Background auto-suggest requires no active/unfinished run and an empty batch at both start and apply, and never opens a key-entry sheet.
+- [ ] Read validated disk checkpoints on events and persist them non-undoably through `onCheckpoint`. On recoverable failure or Cancel, retain old suggestions and checkpoint; enable old-batch edits. Resume compares the durable originalBatchFingerprint with current batch content and repeats replacement confirmation if changed. If the baseline is missing and current suggestions exist, require confirmation. Persist the newly confirmed baseline through updateControl. Checkpoint/control writes precede document mirrors; a crash before autosave must retain paused state and proposed starts in the control manifest. Global config edits leave the old snapshot intact; transcript/source changes refuse resume/apply. Background auto-suggest additionally refuses an untouched opened V1 project; for eligible new/V2 projects it requires no active/unfinished run and an empty batch at both start and apply, and never opens a key-entry sheet.
 - [ ] On ready completion, run pure numbering against current issued ledger, then call the final synchronous editor apply. A start conflict stores the completed checkpoint as needsNumbering and displays the current minimum; correction reruns only pure numbering. An explicit failed correction changes neither current starts nor current batch. On success install candidates, batch actual starts, applied run ID, and clear unfinished state in one non-undoable rebased mutation. Zero candidates is a successful clearing transaction. Start preferences stay future-facing; the batch stores its own actual starts.
 - [ ] Add each lifecycle regression with controlled stream continuations: no-results success clears, malformed/provider failure preserves, 4-of-5 naming failure retries only missing work, cancellation late completion ignored, same-run old-attempt ignored, saved reservation changes during search and numbering dialog, two Apply attempts with changed minima, close/reopen paused run, background/manual race, configuration edit during run, and discarded checkpoint late event. Assert clips and future starts are unchanged on every unsuccessful path. Do not sleep; explicitly finish/yield the controlled streams.
 - [ ] Connect `.confirmationDialog`/`.alert` presentation to model state, progress/cancel/resume/discard controls to model actions, and no-matches/error copy to computed model values. Keep only layout and bindings in the view. Run `SuggestionRunTests`, `CutSuggestionsPageTests`, and `EditorSuggestionFlowTests`. Commit: `feat: replace and resume suggestion searches safely`.
@@ -736,7 +770,7 @@ Place this pure helper in `CutSuggestionPresentation.swift`. The page's ranked l
 - [ ] Write a filter regression using two fixture candidates with different types; toggle to one ID and assert both visible rows and pending bands select that ID while document equality, generated names, ranking, and slices remain unchanged. Cover All Types, none, partially selected Audio Images, removed historical custom type, and no-matches copy distinct from no results.
 - [ ] Define `SuggestionReviewModel` with a supplied current document snapshot, candidate ID or sequence key, draft fields/start/canonical spelling, computed preview names/errors, and an `onApply` callback carrying the validated proposed change. Actions `fieldChanged(_ id:String,value:String)`, `applyFieldsTapped()`, `startChanged(_ value:String)`, `renumberTapped()`, `canonicalValueChanged(_ id:String,value:String)`, `applyGroupSpellingTapped()`, and `cancelTapped()`. No draft keystroke mutates the actual document. Apply re-reads the current document and validates again.
 - [ ] Field correction overlays manually corrected values over extraction. An unchanged sequence key retains its reservation. A changed key allocates in the new group beyond issued/retained occupancy; old issued reservations remain permanently recorded. Use the owning run snapshot's template/instructions and destination canonical values. Pending group-spelling changes show a list of affected before/after names and update pending names in one undoable mutation; accepted/rejected names remain unchanged. No implicit batch renumber follows a field edit.
-- [ ] Future controls say “Start next search at”; applied metadata says “This search started at.” Per-song overrides appear after extraction. The review renumber action is visibly separate and previews changed pending names. Positive integer parsing rejects decimals/sign-only/zero/overflow; treat “minimum safe value exceeds Int.max” as exhausted instead of displaying a wrapped number. Never allow an edit that partially renumbers before a later allocation fails.
+- [ ] Future controls say “Start next search at”; applied metadata says “This search started at.” Per-song overrides appear after extraction. Add a **Song Starts** list that includes every saved group override, including keys with no current candidates, displaying their canonical song/artist labels and **Reset to Type Start**. Field correction leaves old overrides visible rather than transferring/deleting them implicitly. Reset deletes only that future override and is undoable; it never renumbers current suggestions. Test orphaned override visibility/reset, correction to a new title, and later reappearance of the old key. The review renumber action is visibly separate and previews changed pending names. Positive integer parsing rejects decimals/sign-only/zero/overflow; treat “minimum safe value exceeds Int.max” as exhausted instead of displaying a wrapped number. Never allow an edit that partially renumbers before a later allocation fails.
 - [ ] Add tests for artist correction against an older template, missing fields/fallback acceptance, two takes with case-variant performers, explicit group spelling edit, group change with occupied numbers, pending-only renumber skipping rejected/issued slots, starts preserved across reopen, and Undo of future start vs Undo of explicit renumber. UI-enabled state reflects run locks, but action methods enforce them independently.
 - [ ] Build the menu with All Types, group toggles, and child checkmarks; show mixed selection through model-provided state/icon. Bind the correction/renumber sheets to review-model values. Use the repository's existing alert presentation conventions. Run `SuggestionReviewTests`, `CutSuggestionsPageTests`, `EditorClipBandsTests`, and `EditorDocumentMutationTests`. Commit: `feat: filter and review suggestions by editable type and sequence`.
 
@@ -823,4 +857,4 @@ Use `make -C QuickInterviewEditor test` for pre-push/CI parity if proceeding to 
 
 Execution checkpoints: after Task 5, review the configuration/naming contracts; after Task 10, review helper recovery and cross-language fixtures; after Task 13, review document/undo/recovery behavior; after Task 16, review the actual user flow; Task 17 supplies completion evidence. These are review checkpoints during execution, not permission requests for each reversible code edit.
 
-Plan review completed against every spec section and all ten adversarial findings. Execution has not started. The remaining editorial uncertainty is measured explicitly in Task 17; no live discovery-quality claim is made by this plan.
+Plan review completed against every spec section, all ten original adversarial findings, and all seven implementation-plan review findings. The latter are covered by Tasks 3/11 (reservation identity), 9/10/12/13 (recovery authority), 11/13 (untouched V1 protection), 7/17 (nested imaging), 10 (JSON value comparison), 4/15 (canonical rule ownership), and 15 (visible/resettable song overrides). Execution has not started. The remaining editorial uncertainty is measured explicitly in Task 17; no live discovery-quality claim is made by this plan.
