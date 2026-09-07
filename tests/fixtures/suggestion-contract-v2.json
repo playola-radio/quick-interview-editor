@@ -1,4 +1,31 @@
 {
+  "schema_version": 2,
+  "run_id": "00000000-0000-0000-0000-000000000001",
+  "mode": "fresh",
+  "transcript_hash": "fixture-transcript",
+  "source_fingerprint": "fixture-source",
+  "transcript_units": [
+    {
+      "id": 0,
+      "text": "You're listening to Playola.",
+      "word_ids": [
+        0
+      ],
+      "start_sample": 0,
+      "end_sample": 88200,
+      "start_sec": 0,
+      "end_sec": 2
+    }
+  ],
+  "options": {
+    "model": "fixture-model",
+    "sample_rate": 44100,
+    "stage1_window": 130,
+    "stage1_step": 110,
+    "discovery_prompt_version": "configured-v1",
+    "extraction_prompt_version": "fields-v1",
+    "product_spec_version": "configured-v1"
+  },
   "configuration": {
     "schemaVersion": 1,
     "revision": 0,

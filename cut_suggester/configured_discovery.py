@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 
 from .llm import LLMClient
 from .models import Sentence
@@ -172,6 +172,7 @@ def _candidate_id(run_id: uuid.UUID, candidate: Mapping) -> str:
 def discover_configured(
     sentences: list[Sentence], types: Sequence[Mapping], llm: LLMClient, *, run_id: uuid.UUID | str,
     sample_rate: int, window: int = 130, step: int = 110,
+    validated_request: Callable | None = None,
 ) -> list[dict]:
     """Discover configured types over globally-indexed overlapping windows."""
     if not _is_int(sample_rate) or sample_rate <= 0:
@@ -190,16 +191,22 @@ def discover_configured(
     candidates: list[dict] = []
     for start in range(0, len(sentences), step):
         end = min(len(sentences) - 1, start + window - 1)
-        response = llm.complete(_prompt(sentences, declared, start, end), purpose="configured-discovery")
-        try:
-            decoded = json.loads(response.text)
-        except (TypeError, json.JSONDecodeError) as exc:
-            raise DiscoveryError("configured discovery response is not JSON") from exc
-        clips = decoded.get("clips") if isinstance(decoded, Mapping) else None
-        if not isinstance(clips, list):
-            raise DiscoveryError("configured discovery response must contain a clips array")
+        prompt = _prompt(sentences, declared, start, end)
+        def validate(text):
+            try:
+                decoded = json.loads(text)
+            except (TypeError, json.JSONDecodeError) as exc:
+                raise DiscoveryError("configured discovery response is not JSON") from exc
+            clips = decoded.get("clips") if isinstance(decoded, Mapping) else None
+            if not isinstance(clips, list):
+                raise DiscoveryError("configured discovery response must contain a clips array")
+            return [_validate_clip(raw, set(declared), len(sentences), start, end) for raw in clips]
+        if validated_request is None:
+            clips = validate(llm.complete(prompt, purpose="configured-discovery").text)
+        else:
+            clips = validated_request("configured-discovery", prompt, validate)
         for raw in clips:
-            candidate = _candidate(sentences, _validate_clip(raw, set(declared), len(sentences), start, end), sample_rate)
+            candidate = _candidate(sentences, raw, sample_rate)
             if not 1 <= candidate["duration_sec"] <= 240:
                 continue
             candidates.append(candidate)
