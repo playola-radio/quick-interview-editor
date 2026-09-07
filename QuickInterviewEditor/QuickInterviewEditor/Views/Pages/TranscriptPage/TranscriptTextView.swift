@@ -440,6 +440,7 @@ final class HitTestingTextView: NSTextView {
   private var didDrag = false
 
   override func mouseDown(with event: NSEvent) {
+    endActiveTextEditing()
     let point = convert(event.locationInWindow, from: nil)
     anchorOffset = coordinator?.utf16Offset(at: point)
     didDrag = false
