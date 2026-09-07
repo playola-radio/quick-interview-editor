@@ -95,9 +95,18 @@ enum SuggestionBatchNumberingError: Error, Equatable {
   case duplicateGroupStart(SuggestionSequenceKey)
 }
 
-enum SuggestionRunValidationError: Error, Equatable {
+enum SuggestionRunValidationError: Error, Equatable, LocalizedError {
   case missingOwningSnapshot(UUID)
   case invalidNaming(candidateID: UUID)
+
+  var errorDescription: String? {
+    switch self {
+    case .missingOwningSnapshot:
+      "This suggestion's saved naming rules are missing. Suggest cuts again before accepting."
+    case .invalidNaming:
+      "This suggestion's saved name or number is invalid. Renumber it or suggest cuts again."
+    }
+  }
 }
 
 func validateSuggestionRunApplication(
@@ -110,7 +119,8 @@ func validateSuggestionRunApplication(
       let type = batch.snapshot.configuration.types.first(where: { $0.id == naming.typeID }),
       naming.typeName == type.name,
       naming.typeGroup == type.group,
-      candidate.productType.rawValue == type.id
+      candidate.productType.rawValue == type.id,
+      type.template.contains(where: { $0.kind == .sequence }) == (naming.reservation != nil)
     else { throw SuggestionRunValidationError.invalidNaming(candidateID: candidate.id) }
     if let reservation = naming.reservation {
       let values = naming.extractedValues.merging(naming.correctedValues) { _, corrected in

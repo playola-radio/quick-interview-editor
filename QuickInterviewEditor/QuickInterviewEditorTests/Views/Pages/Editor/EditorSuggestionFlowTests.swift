@@ -86,6 +86,62 @@ struct EditorSuggestionFlowTests {
     expectNoDifference(model.documentState.issuedSuggestionNumbers, [reservation])
   }
 
+  @Test func missingNumberCannotBeAcceptedOrAppliedAndShowsActionableMessage() throws {
+    let model = editor()
+    var (candidate, batch) = try numberedSuggestion(plan: model.editPlan)
+    candidate.naming?.reservation = nil
+    let empty = model.documentState
+    #expect(throws: SuggestionRunValidationError.invalidNaming(candidateID: candidate.id)) {
+      try model.replaceSuggestionBatch(candidates: [candidate], batch: batch)
+    }
+    expectNoDifference(model.documentState, empty)
+    model.mutateDocument(recordUndo: false) {
+      $0.cutSuggestions = [candidate]
+      $0.suggestionBatch = batch
+    }
+    var changes: [EditorDocumentState] = []
+    model.onDocumentStateChanged = { changes.append($0) }
+    let before = model.documentState
+    model.cutSuggestions.acceptTapped(candidate.id)
+    expectNoDifference(model.documentState, before)
+    expectNoDifference(changes, [])
+    #expect(!model.canUndo)
+    #expect(!model.canRedo)
+    expectNoDifference(
+      model.cutSuggestions.actionMessage,
+      "This suggestion's saved name or number is invalid. Renumber it or suggest cuts again.")
+  }
+
+  @Test func sequenceFreeNamedCandidateCanBeAppliedAndAcceptedWithoutReservation() throws {
+    let model = editor()
+    var (candidate, batch) = try numberedSuggestion(plan: model.editPlan)
+    let typeIndex = try #require(
+      batch.snapshot.configuration.types.firstIndex { $0.id == "spotlight" })
+    batch.snapshot.configuration.types[typeIndex].template = [
+      .init(kind: .literal, value: "A story")
+    ]
+    candidate.naming?.reservation = nil
+    candidate.title = "A story"
+    try model.replaceSuggestionBatch(candidates: [candidate], batch: batch)
+    model.cutSuggestions.acceptTapped(candidate.id)
+    expectNoDifference(model.slices.first?.name, "A story")
+    expectNoDifference(model.documentCutSuggestions[id: candidate.id]?.status, .accepted)
+    expectNoDifference(model.documentState.issuedSuggestionNumbers, [])
+    expectNoDifference(model.cutSuggestions.actionMessage, nil)
+  }
+
+  @Test func missingOwningSnapshotShowsActionableMessageAtAcceptance() throws {
+    let model = editor()
+    let (candidate, _) = try numberedSuggestion(plan: model.editPlan)
+    model.mutateDocument(recordUndo: false) { $0.cutSuggestions = [candidate] }
+    let before = model.documentState
+    model.cutSuggestions.acceptTapped(candidate.id)
+    expectNoDifference(model.documentState, before)
+    expectNoDifference(
+      model.cutSuggestions.actionMessage,
+      "This suggestion's saved naming rules are missing. Suggest cuts again before accepting.")
+  }
+
   @Test func reservationConflictIsVisibleThroughThePageAndDoesNotMutateDocument() throws {
     let model = editor()
     let (candidate, batch) = try numberedSuggestion(plan: model.editPlan)

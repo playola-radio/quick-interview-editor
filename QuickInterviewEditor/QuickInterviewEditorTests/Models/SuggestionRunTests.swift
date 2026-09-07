@@ -218,6 +218,36 @@ struct SuggestionRunTests {
       forward.batch.canonicalGroups.map { $0.key.provisionalCandidateID }, [first.id, second.id])
   }
 
+  @Test(arguments: [false, true], [false, true])
+  func applicationRequiresReservationExactlyWhenTemplateHasSequence(
+    hasSequence: Bool, hasReservation: Bool
+  ) throws {
+    let snapshot = introSnapshot()
+    let original = candidate(
+      id: Fixtures.uuid(1), startSample: 100,
+      values: ["song-title": "Song", "artist-name": "Artist"])
+    let numbered = try numberSuggestions(
+      [original], snapshot: snapshot, starts: .init(), issued: [], retained: [])
+    var candidate = numbered.candidates[0]
+    var batch = numbered.batch
+    if !hasReservation { candidate.naming?.reservation = nil }
+    if !hasSequence {
+      batch.snapshot.configuration.types[0].template = [.init(kind: .literal, value: "Song")]
+    }
+    if hasSequence == hasReservation {
+      try validateSuggestionRunApplication(candidates: [candidate], batch: batch)
+    } else {
+      #expect(throws: SuggestionRunValidationError.invalidNaming(candidateID: candidate.id)) {
+        try validateSuggestionRunApplication(candidates: [candidate], batch: batch)
+      }
+    }
+  }
+
+  @Test func applicationStillAcceptsLegacyCandidateWithoutNamingOrBatch() throws {
+    try validateSuggestionRunApplication(
+      candidates: [Fixtures.cutSuggestion(id: Fixtures.uuid(1))], batch: nil)
+  }
+
   @Test func oldBatchSnapshotRemainsCanonicalForCorrectionAndRunValidation() throws {
     let snapshot = introSnapshot()
     var candidate = candidate(
