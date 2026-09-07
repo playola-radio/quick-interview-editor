@@ -62,12 +62,12 @@ struct EditorEditingCompleteTests {
     let completeRow = model.sliceRows[id: completeID]
     expectNoDifference(completeRow?.editingComplete, true)
     expectNoDifference(completeRow?.completionSystemImage, "checkmark.circle.fill")
-    expectNoDifference(completeRow?.completionLabel, "Mark as still editing")
+    expectNoDifference(completeRow?.completionLabel, "Editing Complete")
 
     let inProgressRow = model.sliceRows[id: inProgressID]
     expectNoDifference(inProgressRow?.editingComplete, false)
     expectNoDifference(inProgressRow?.completionSystemImage, "circle")
-    expectNoDifference(inProgressRow?.completionLabel, "Mark editing complete")
+    expectNoDifference(inProgressRow?.completionLabel, "Editing Complete")
   }
 
   @Test func visibleSliceRowsFilterByCompletion() {

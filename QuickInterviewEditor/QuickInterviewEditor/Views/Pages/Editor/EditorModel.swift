@@ -474,8 +474,7 @@ final class EditorModel: ViewModel {
   let slicesTabLabel = "Clips"
   let noFilteredSlicesMessage = "No clips match this filter."
   let sliceFilterPickerLabel = "Filter clips"
-  let markEditingCompleteLabel = "Mark editing complete"
-  let markStillEditingLabel = "Mark as still editing"
+  let editingCompleteLabel = "Editing Complete"
   let suggestionsTabLabel = "Suggestions"
   let bothTabLabel = "Both"
   let rightPanelPickerLabel = "Right panel"
@@ -928,8 +927,8 @@ final class EditorModel: ViewModel {
           removedHelp: canExport ? "" : removedBadgeHelp,
           editingComplete: slice.editingComplete,
           completionSystemImage: slice.editingComplete ? "checkmark.circle.fill" : "circle",
-          completionLabel: slice.editingComplete ? markStillEditingLabel : markEditingCompleteLabel,
-          completionHelp: slice.editingComplete ? markStillEditingLabel : markEditingCompleteLabel
+          completionLabel: editingCompleteLabel,
+          completionHelp: editingCompleteLabel
         )
       })
   }

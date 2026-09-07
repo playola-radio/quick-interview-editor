@@ -119,9 +119,7 @@ final class EditSliceModel: ViewModel, Identifiable {
   var canSave: Bool { fineTune.hasUnsavedChange }
   var playPauseLabel: String { isPlaying ? "Pause" : "Play" }
   var playButtonSystemImage: String { isPlaying ? "pause.fill" : "play.fill" }
-  var editingCompleteLabel: String {
-    editingComplete ? "Mark as still editing" : "Mark editing complete"
-  }
+  let editingCompleteLabel = "Editing Complete"
   var editingCompleteSystemImage: String { editingComplete ? "checkmark.circle.fill" : "circle" }
 
   /// What the lane highlights: the live marquee removal selection when the user is picking an interior

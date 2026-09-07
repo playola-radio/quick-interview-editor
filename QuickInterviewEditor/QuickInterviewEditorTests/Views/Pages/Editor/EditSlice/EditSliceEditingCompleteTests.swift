@@ -15,12 +15,16 @@ struct EditSliceEditingCompleteTests {
     return (EditSliceModel(slice: slice, editPlan: plan), slice)
   }
 
-  @Test func seedsEditingCompleteFromSlice() {
-    let (model, _) = makeModel(editingComplete: true)
+  @Test func editingCompleteLabelDoesNotChangeWithState() {
+    let (completeModel, _) = makeModel(editingComplete: true)
+    let (inProgressModel, _) = makeModel(editingComplete: false)
 
-    expectNoDifference(model.editingComplete, true)
-    expectNoDifference(model.editingCompleteLabel, "Mark as still editing")
-    expectNoDifference(model.editingCompleteSystemImage, "checkmark.circle.fill")
+    expectNoDifference(completeModel.editingComplete, true)
+    expectNoDifference(completeModel.editingCompleteLabel, "Editing Complete")
+    expectNoDifference(completeModel.editingCompleteSystemImage, "checkmark.circle.fill")
+    expectNoDifference(inProgressModel.editingComplete, false)
+    expectNoDifference(inProgressModel.editingCompleteLabel, "Editing Complete")
+    expectNoDifference(inProgressModel.editingCompleteSystemImage, "circle")
   }
 
   @Test func togglingAppliesImmediatelyViaCallback() {
