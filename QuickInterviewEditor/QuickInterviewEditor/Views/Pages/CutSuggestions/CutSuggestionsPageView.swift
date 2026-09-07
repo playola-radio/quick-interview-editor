@@ -70,7 +70,7 @@ struct CutSuggestionsPageView: View {
           VStack(alignment: .leading, spacing: 8) {
             Text(section.title).font(.headline)
             ForEach(section.rows) { row in
-              rowView(row)
+              SuggestionCard(model: model, row: row)
             }
           }
         }
@@ -78,25 +78,36 @@ struct CutSuggestionsPageView: View {
     }
   }
 
-  private func rowView(_ row: SuggestionRow) -> some View {
+}
+
+/// One ranked candidate. The title is an inline rename field while the suggestion is pending
+/// (mirroring the clip-name field in the slices sidebar); the accepted clip inherits it. Kept a
+/// dedicated view so each row owns its own focus/hover state.
+private struct SuggestionCard: View {
+  @Bindable var model: CutSuggestionsPageModel
+  let row: SuggestionRow
+  @FocusState private var titleFocused: Bool
+  @State private var titleHovering = false
+
+  var body: some View {
     VStack(alignment: .leading, spacing: 4) {
+      HStack(alignment: .firstTextBaseline) {
+        Text(row.rankLabel)
+          .font(.caption)
+          .foregroundStyle(.secondary)
+        titleView
+        Spacer()
+        Text(row.statusLabel)
+          .font(.caption)
+          .foregroundStyle(.secondary)
+      }
       // The descriptive lines are a plain-style button so the reveal is keyboard- and
-      // VoiceOver-accessible; the Accept/Reject buttons stay outside it so a tap on them never
-      // doubles as a reveal.
+      // VoiceOver-accessible. The title field and Accept/Reject buttons stay outside it so a
+      // tap on them never doubles as a reveal.
       Button {
         model.rowTapped(row.id)
       } label: {
         VStack(alignment: .leading, spacing: 4) {
-          HStack(alignment: .firstTextBaseline) {
-            Text(row.rankLabel)
-              .font(.caption)
-              .foregroundStyle(.secondary)
-            Text(row.title)
-            Spacer()
-            Text(row.statusLabel)
-              .font(.caption)
-              .foregroundStyle(.secondary)
-          }
           if let songLine = row.songLine {
             Text(songLine)
               .font(.caption)
@@ -131,5 +142,28 @@ struct CutSuggestionsPageView: View {
     .frame(maxWidth: .infinity, alignment: .leading)
     .background(Color(white: 0.1))
     .clipShape(RoundedRectangle(cornerRadius: 6))
+  }
+
+  @ViewBuilder private var titleView: some View {
+    if row.showsEditableTitle {
+      TextField(
+        row.titlePlaceholder,
+        text: Binding(
+          get: { model.editableTitle(for: row.id) },
+          set: { model.titleChanged(row.id, to: $0) })
+      )
+      .textFieldStyle(.plain)
+      .focused($titleFocused)
+      .padding(.horizontal, 6).padding(.vertical, 3)
+      .background(
+        RoundedRectangle(cornerRadius: 5)
+          .fill(Color.white.opacity(titleFocused ? 0.14 : (titleHovering ? 0.07 : 0)))
+      )
+      .onHover { titleHovering = $0 }
+      .help(model.suggestionTitleHelp)
+      .accessibilityLabel(model.suggestionTitleLabel)
+    } else {
+      Text(row.title)
+    }
   }
 }

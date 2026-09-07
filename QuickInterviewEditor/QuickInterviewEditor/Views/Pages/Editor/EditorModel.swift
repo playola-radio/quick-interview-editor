@@ -140,6 +140,9 @@ final class EditorModel: ViewModel {
     cutSuggestions.onReject = { [weak self] id in
       self?.mutateDocument { $0.cutSuggestions[id: id]?.reject() }
     }
+    cutSuggestions.onTitleChanged = { [weak self] id, newTitle in
+      self?.mutateDocument { $0.cutSuggestions[id: id]?.title = newTitle }
+    }
     cutSuggestions.onSuggestionsProduced = { [weak self] produced in
       self?.mutateDocument(recordUndo: false) {
         $0.cutSuggestions = IdentifiedArray(produced, uniquingIDsWith: { first, _ in first })

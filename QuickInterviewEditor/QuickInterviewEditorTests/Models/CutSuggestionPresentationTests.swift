@@ -47,6 +47,27 @@ struct CutSuggestionPresentationTests {
     expectNoDifference(row.statusLabel, "Accepted")
   }
 
+  @Test func onlyPendingRowsAreTitleEditable() {
+    let pending = Fixtures.cutSuggestion(id: Fixtures.uuid(1), status: .pending)
+    let accepted = Fixtures.cutSuggestion(id: Fixtures.uuid(2), status: .accepted)
+    let rejected = Fixtures.cutSuggestion(id: Fixtures.uuid(3), status: .rejected)
+    expectNoDifference(
+      suggestionRow(pending, currentTranscriptHash: "t", currentFingerprint: "fp")
+        .showsEditableTitle, true)
+    expectNoDifference(
+      suggestionRow(accepted, currentTranscriptHash: "t", currentFingerprint: "fp")
+        .showsEditableTitle, false)
+    expectNoDifference(
+      suggestionRow(rejected, currentTranscriptHash: "t", currentFingerprint: "fp")
+        .showsEditableTitle, false)
+  }
+
+  @Test func titlePlaceholderIsTheProductTypeLabelSoBlankTitlesStillShowAName() {
+    let suggestion = Fixtures.cutSuggestion(id: Fixtures.uuid(1), productType: .intro, title: "")
+    let row = suggestionRow(suggestion, currentTranscriptHash: "t", currentFingerprint: "fp")
+    expectNoDifference(row.titlePlaceholder, ProductType.intro.displayLabel)
+  }
+
   @Test func songLineMarksUnverifiedSongs() {
     let verified = Fixtures.cutSuggestion(
       id: Fixtures.uuid(1), song: "Hit", songVerified: true)

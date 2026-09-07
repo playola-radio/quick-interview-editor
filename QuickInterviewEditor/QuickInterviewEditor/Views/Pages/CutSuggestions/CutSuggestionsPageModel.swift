@@ -10,7 +10,7 @@ import Observation
 ///
 /// Owns no persisted state: the candidates it displays are read through
 /// `currentSuggestions` (the editor's document is the source of truth), and every edit is
-/// emitted as an intent (`onAccept`/`onReject`/`onSuggestionsProduced`/
+/// emitted as an intent (`onAccept`/`onReject`/`onTitleChanged`/`onSuggestionsProduced`/
 /// `onSpeakerOverridesChanged`) that the editor funnels through `mutateDocument`.
 @MainActor
 @Observable
@@ -37,6 +37,9 @@ final class CutSuggestionsPageModel: ViewModel {
   @ObservationIgnored var onAccept: (@MainActor (Slice, CutSuggestion.ID) -> Void)?
   /// Asks the editor to flip a suggestion to `.rejected` in the document (undoably).
   @ObservationIgnored var onReject: (@MainActor (CutSuggestion.ID) -> Void)?
+  /// Asks the editor to rename a suggestion in the document (undoably). The accepted clip
+  /// inherits this title, so editing here before accepting names the slice.
+  @ObservationIgnored var onTitleChanged: (@MainActor (CutSuggestion.ID, String) -> Void)?
   /// Hands a completed run's stamped candidates to the editor to store in the document
   /// (non-undoably — a background analysis pass must not pollute the undo stack).
   @ObservationIgnored var onSuggestionsProduced: (@MainActor ([CutSuggestion]) -> Void)?
@@ -97,6 +100,8 @@ final class CutSuggestionsPageModel: ViewModel {
   let rejectLabel = "Reject"
   let revealSuggestionLabel = "Reveal suggestion in transcript and waveform"
   let showSuggestionsToggleLabel = "Show suggestions in transcript"
+  let suggestionTitleLabel = "Suggestion title"
+  let suggestionTitleHelp = "Click to rename — the accepted clip keeps this title"
 
   var suggestButtonLabel: String {
     hasAPIKey ? "Suggest Cuts" : addKeyButtonLabel
@@ -121,6 +126,13 @@ final class CutSuggestionsPageModel: ViewModel {
     suggestionSections(
       from: suggestions, currentTranscriptHash: editPlan.transcriptHash,
       currentFingerprint: sourceFingerprint)
+  }
+
+  /// The current (untrimmed) title of a suggestion, read live from the document so a rename
+  /// `TextField` round-trips through `titleChanged` on every keystroke rather than editing a
+  /// stale row snapshot. Empty string for an unknown ID.
+  func editableTitle(for id: CutSuggestion.ID) -> String {
+    currentSuggestions()[id: id]?.title ?? ""
   }
 
   var isSuggesting: Bool {
@@ -252,6 +264,13 @@ final class CutSuggestionsPageModel: ViewModel {
   func rejectTapped(_ id: CutSuggestion.ID) {
     onReject?(id)
     actionMessage = nil
+  }
+
+  /// Renames a suggestion as the user types in its title field. Routed to the editor
+  /// (`onTitleChanged`) so the change lands undoably in the document; accepting afterwards
+  /// names the derived slice from this title.
+  func titleChanged(_ id: CutSuggestion.ID, to newTitle: String) {
+    onTitleChanged?(id, newTitle)
   }
 
   /// Presents the key-entry sheet; on save/clear it refreshes the resolved-key state and

@@ -107,6 +107,38 @@ struct EditorSuggestionFlowTests {
     expectNoDifference(model.documentCutSuggestions[id: suggestion.id]?.status, .pending)
   }
 
+  @Test func editingASuggestionTitleFlowsThroughTheDocumentAndIsUndoable() async {
+    let plan = Fixtures.editPlan()
+    let model = editor(plan)
+    let suggestion = freshSuggestion(Fixtures.uuid(1), plan: plan)
+    model.cutSuggestions.onSuggestionsProduced?([suggestion])
+
+    var seen: [EditorDocumentState] = []
+    model.onDocumentStateChanged = { seen.append($0) }
+
+    model.cutSuggestions.titleChanged(suggestion.id, to: "Renamed cut")
+
+    expectNoDifference(model.documentCutSuggestions[id: suggestion.id]?.title, "Renamed cut")
+    expectNoDifference(seen.count, 1)
+    #expect(model.canUndo)
+
+    await model.undoTapped()
+    expectNoDifference(
+      model.documentCutSuggestions[id: suggestion.id]?.title, suggestion.title)
+  }
+
+  @Test func acceptingAfterEditingTheTitleNamesTheSliceFromTheEditedTitle() {
+    let plan = Fixtures.editPlan()
+    let model = editor(plan)
+    let suggestion = freshSuggestion(Fixtures.uuid(1), plan: plan)
+    model.cutSuggestions.onSuggestionsProduced?([suggestion])
+
+    model.cutSuggestions.titleChanged(suggestion.id, to: "My custom clip name")
+    model.cutSuggestions.acceptTapped(suggestion.id)
+
+    expectNoDifference(model.slices[id: suggestion.id]?.name, "My custom clip name")
+  }
+
   @Test func speakerOverridesFlowThroughTheDocumentAndAreUndoable() async {
     let model = editor()
     var seen: [EditorDocumentState] = []
