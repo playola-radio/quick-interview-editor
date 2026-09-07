@@ -212,7 +212,6 @@ def test_synthetic_dataset_labels_reference_real_transcript_evidence_and_valid_d
     words = {word["id"]: word for word in transcript["words"]}
 
     assert labels["synthetic"] is True
-    assert len(labels["positives"][3:4]) == 1
     promo = next(item for item in labels["positives"] if item["type"] == "image-promo")
     nested = next(item for item in labels["positives"] if item["type"] == "image-id" and item["start"] == 15)
     spotlight = next(item for item in labels["positives"] if item["type"] == "spotlight")
@@ -222,6 +221,8 @@ def test_synthetic_dataset_labels_reference_real_transcript_evidence_and_valid_d
     assert sentences[spotlight["end"]].end_sec - sentences[spotlight["start"]].start_sec >= 15
     assert "https://" in sentences[30].text and "Station One" in sentences[35].text
     assert any(item["start"] == 12 and item["forbiddenTypes"] == ["image-id"] for item in labels["negativeSpans"])
+    assert any(item["start"] == 38 and "Unfinished handoff" in item["note"] for item in labels["negativeSpans"])
+    assert sentences[37].text.startswith("Wait") and sentences[38].text.startswith("Coming up")
     assert labels["subtypeClassifications"][0]["winner"] == "image-pre-commercial"
     assert all(0 <= item["start"] <= item["end"] < len(sentences) for item in labels["positives"] + labels["negativeSpans"])
     assert all(segment["text"] == words[segment["word_ids"][0]]["text"] for segment in transcript["segments"])

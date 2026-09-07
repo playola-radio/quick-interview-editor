@@ -26,8 +26,9 @@
     {"start": 26, "end": 26, "forbiddenTypes": ["intro"], "note": "Yeah is an acknowledgement, not an intro."},
     {"start": 27, "end": 27, "forbiddenTypes": ["intro"], "note": "An isolated song title is not a complete handoff."},
     {"start": 37, "end": 37, "forbiddenTypes": ["intro"], "note": "False start is not an intro."},
+    {"start": 38, "end": 38, "forbiddenTypes": ["intro"], "note": "Unfinished handoff is not an intro."},
     {"start": 30, "end": 30, "forbiddenTypes": ["image-id", "image-promo"], "note": "Actual URL in a Spotlight story is not imaging."},
     {"start": 35, "end": 35, "forbiddenTypes": ["image-id"], "note": "Passing station and song mention in the Spotlight is incidental."}
   ],
-  "notes": "All text and labels are synthetic. This fixture documents Task 17 runner input; unit fixtures validate structural behavior only and do not prove live-model editorial quality. An incidental self-ID sentence within the promo is deliberately unlabeled."
+  "notes": "All text and labels are synthetic. This fixture documents Task 17 runner input; unit fixtures validate structural behavior only and do not prove live-model editorial quality."
 }
