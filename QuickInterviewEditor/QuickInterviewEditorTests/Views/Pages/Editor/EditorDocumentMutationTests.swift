@@ -19,7 +19,7 @@ struct EditorDocumentMutationTests {
     model.cutSuggestions.applyTypeStartTapped("intro")
     expectNoDifference(
       model.cutSuggestions.futureStartRows.first { $0.id == "intro" }?.preferenceLabel,
-      "Explicit start: 7")
+      "Starting count: 7")
     model.cutSuggestions.resetTypeStartTapped("intro")
     expectNoDifference(model.suggestionStarts.types["intro"], nil)
     await model.undoTapped()
@@ -31,7 +31,9 @@ struct EditorDocumentMutationTests {
   @Test func futureStartsResetUndoAndReopenNeverRenumberCurrentBatch() async throws {
     let model = try SuggestionReviewTests().fixture()
     let before = model.documentState
-    let key = try #require(model.documentCutSuggestions[0].naming?.reservation?.key)
+    let batch = try #require(model.suggestionBatch)
+    let key = try #require(reviewSequenceKey(model.documentCutSuggestions[0], batch: batch))
+    expectNoDifference(model.documentCutSuggestions[0].naming?.reservation, nil)
     model.cutSuggestions[futureStart: "intro"] = "7"
     model.cutSuggestions.applyTypeStartTapped("intro")
     expectNoDifference(model.documentCutSuggestions, before.cutSuggestions)
