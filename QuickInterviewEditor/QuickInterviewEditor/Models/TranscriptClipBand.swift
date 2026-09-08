@@ -164,4 +164,24 @@ struct TranscriptClipContainer: Equatable {
   let range: NSRange
   let kind: TranscriptClipKind
   let colorIndex: Int
+
+  /// The containers whose word membership changed between two renders: those in `old` but not
+  /// `new` (their words may need to fall back to another container or the body colour) plus
+  /// those in `new` but not `old` (their words need the new colour). Containers unchanged across
+  /// both renders are omitted — their words already carry the right attributes, so a resize drag
+  /// repaints only the handful of containers it actually moved instead of every clip and
+  /// suggestion on screen.
+  ///
+  /// Precondition: containers are NON-OVERLAPPING (each word maps to exactly one) and emitted in
+  /// transcript-position order — the invariant `TranscriptPageModel.clipContainers` guarantees.
+  /// The diff keys on `(range, kind, colorIndex)` equality alone, so it would MISS a word whose
+  /// winning container changed only by array reordering of two overlapping same-range runs. That
+  /// state is unreachable under the non-overlap invariant (two runs can't share a range, and
+  /// equal ranges can't reorder), so the omission is safe; if that invariant is ever relaxed,
+  /// this helper must be revisited.
+  static func changed(
+    from old: [TranscriptClipContainer], to new: [TranscriptClipContainer]
+  ) -> [TranscriptClipContainer] {
+    old.filter { !new.contains($0) } + new.filter { !old.contains($0) }
+  }
 }
