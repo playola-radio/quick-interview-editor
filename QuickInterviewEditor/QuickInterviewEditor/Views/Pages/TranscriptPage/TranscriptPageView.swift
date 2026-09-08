@@ -19,7 +19,8 @@ struct TranscriptPageView: View {
         scrollTarget: model.scrollTargetWordID,
         followMode: model.followMode,
         reveal: model.reveal,
-        overlapPresentation: model.overlap.presentationToken
+        overlapPresentation: model.overlap.presentationToken,
+        resizeItems: model.resizeItems
       )
       .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -129,7 +130,8 @@ struct TranscriptPageView: View {
     currentWordID: 30,
     scrollTarget: nil,
     followMode: .following,
-    reveal: nil
+    reveal: nil,
+    resizeItems: []
   )
   .frame(width: 480, height: 340)
   .background(Color.black)

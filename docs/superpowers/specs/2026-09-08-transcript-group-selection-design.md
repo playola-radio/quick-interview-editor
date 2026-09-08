@@ -61,7 +61,8 @@ Escape, and background deselection do not add history entries.
 | Single-click unmarked text | Select that word |
 | Double-click a saved clip | Open the existing clip editor once |
 | Double-click a suggestion or freeform range | Open the draft editor described below |
-| Drag from any transcript word | Replace object selection with a freeform word range |
+| Drag a transcript group body | Replace object selection with a freeform word range |
+| Drag a transcript edge handle | Resize that selection, clip, or suggestion; commit object edits in one undo step |
 | Shift-click a word | Extend the range from its existing anchor; transition an object to freeform selection |
 | Click true empty transcript background | Clear the selection |
 | Escape | Close an open overlap chooser first; otherwise clear the selection |
@@ -111,8 +112,13 @@ selected crossfade seam keeps its existing Delete-to-restore behavior.
 
 Arrow and Shift-arrow keys do not trim selected objects. Range adjustment first
 requires a freeform selection (drag or Shift-click) or opening the editor.
-Main waveform edge handles are available for freeform ranges only. Existing
-zoom shortcuts and seam-specific Option-arrow commands retain their meanings.
+Main waveform edge handles are available for freeform ranges only. Transcript
+edge handles remain available for freeform selections, saved clips, and pending
+suggestions. They use the full visible word geometry and preview changes during
+the drag; Escape cancels and release commits one undoable object edit. At coincident
+edges, the freeform selection wins, then the selected foreground object, then the
+remaining groups in drawing order. Existing zoom shortcuts and seam-specific
+Option-arrow commands retain their meanings.
 
 Editing fields own their usual text deletion, selection, and undo keys. An open
 chooser owns its navigation keys and consumes Delete without affecting the

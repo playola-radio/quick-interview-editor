@@ -113,10 +113,12 @@ struct EditorRevealTests {
   @Test func clickingASavedClipRevealsItTheSameWay() {
     let model = editor()
     let id = Fixtures.uuid(2)
-    model.acceptCutSuggestion(
-      Slice(
-        id: id, name: "A clip", startSample: 150_000, endSample: 250_000,
-        wordIDs: [2, 3], snippet: "two three"), id: id)
+    model.mutateSlices {
+      $0.append(
+        Slice(
+          id: id, name: "A clip", startSample: 150_000, endSample: 250_000,
+          wordIDs: [2, 3], snippet: "two three"))
+    }
 
     model.sliceRevealTapped(id)
 

@@ -197,6 +197,16 @@ def test_merge_leaves_different_types_labels_and_distant_fragments_alone():
     assert len(out) == 3
 
 
+def test_merge_keeps_repeated_nonoverlapping_intros_with_same_song_label_separate():
+    sents = _sents(["s"] * 20, sec_per=10.0)
+    first = build_candidate(sents, _labelled(0, 2, "Same Song", "intro"), DEFAULT_SPECS, SR)
+    second = build_candidate(sents, _labelled(3, 5, "same song", "intro"), DEFAULT_SPECS, SR)
+
+    out = merge_adjacent_same_label([first, second], sents, DEFAULT_SPECS, SR)
+
+    assert [(item.start_index, item.end_index) for item in out] == [(0, 2), (3, 5)]
+
+
 def test_merge_stops_at_interleaved_other_type():
     # spotlight, intro, spotlight in adjacent order: the intro breaks the run so
     # the two spotlight fragments stay separate (no cross-type grouping).

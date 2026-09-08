@@ -1,5 +1,6 @@
 import CustomDump
 import Foundation
+import IdentifiedCollections
 import Testing
 
 @testable import PlayolaInterviewEditor
@@ -8,9 +9,19 @@ import Testing
 struct EditorCutSuggestionTests {
 
   private func editor() -> EditorModel {
-    EditorModel(
+    let plan = Fixtures.editPlan()
+    let fingerprint = "fp-accept"
+    let candidates = [Fixtures.uuid(1), Fixtures.uuid(7)].map { id in
+      var candidate = Fixtures.cutSuggestion(id: id, title: "A story", wordIDs: [10, 11, 12])
+      candidate.provenance.transcriptHash = plan.transcriptHash
+      candidate.provenance.sourceFingerprint = fingerprint
+      return candidate
+    }
+    return EditorModel(
       sourceURL: URL(fileURLWithPath: "/clip.m4a"),
-      canonicalAudioURL: Fixtures.canonicalAudioURL, editPlan: Fixtures.editPlan())
+      canonicalAudioURL: Fixtures.canonicalAudioURL, editPlan: plan, sourceFingerprint: fingerprint,
+      initialDocument: EditorDocumentState(
+        cutSuggestions: IdentifiedArray(uniqueElements: candidates)))
   }
 
   private func slice(_ id: UUID) -> Slice {

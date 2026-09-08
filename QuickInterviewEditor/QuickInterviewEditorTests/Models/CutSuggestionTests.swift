@@ -33,6 +33,21 @@ struct CutSuggestionTests {
     expectNoDifference(reloaded, original)
   }
 
+  @Test func legacyNamingFreeRecordsRoundTripWithoutGeneratedNaming() throws {
+    let suggestion = Fixtures.cutSuggestion(id: Fixtures.uuid(1), title: "Original discovery label")
+    let slice = Fixtures.slice()
+
+    let decodedSuggestion = try JSONDecoder().decode(
+      CutSuggestion.self, from: JSONEncoder().encode(suggestion))
+    let decodedSlice = try JSONDecoder().decode(Slice.self, from: JSONEncoder().encode(slice))
+
+    expectNoDifference(decodedSuggestion.title, "Original discovery label")
+    expectNoDifference(decodedSuggestion.naming, nil)
+    expectNoDifference(decodedSlice.name, "Slice")
+    expectNoDifference(decodedSlice.suggestionNaming, nil)
+    expectNoDifference(decodedSlice.suggestionTypeID, nil)
+  }
+
   // MARK: - Lifecycle transitions
 
   @Test func acceptTransitionsPendingToAccepted() {

@@ -1,3 +1,4 @@
+import AppKit
 import CustomDump
 import Foundation
 import Testing
@@ -141,4 +142,127 @@ struct TranscriptClipContainersTests {
     expectNoDifference(containers[0].style.ringWidth, 2)
     expectNoDifference(containers[1].style.ringWidth, 1)
   }
+
+  // MARK: - changed(from:to:) — the resize-drag repaint diff
+
+  private func container(_ location: Int, _ length: Int, _ kind: TranscriptClipKind = .approved)
+    -> TranscriptClipContainer
+  {
+    TranscriptClipContainer(
+      range: NSRange(location: location, length: length), kind: kind,
+      colorIndex: 0)
+  }
+
+  /// Nothing moved between two renders, so no container needs repainting — the fast path a
+  /// steady (non-drag) frame takes.
+  @Test func changedIsEmptyWhenRendersMatch() {
+    let same = [container(0, 11), container(16, 7, .suggested)]
+    expectNoDifference(TranscriptClipContainer.changed(from: same, to: same), [])
+  }
+
+  /// A resize that grows one clip changes only that clip's container: the old span leaves and
+  /// the new span enters, while every untouched clip/suggestion is omitted. This is the whole
+  /// point — a drag over a 37-container transcript repaints 2 containers, not 37.
+  @Test func changedReturnsOnlyTheMovedContainerBothWays() {
+    let untouched = container(40, 5, .suggested)
+    let old = [container(0, 11), untouched]
+    let new = [container(0, 16), untouched]
+    expectNoDifference(
+      TranscriptClipContainer.changed(from: old, to: new),
+      [container(0, 11), container(0, 16)])
+  }
+
+  /// A newly-created container (none removed) enters; a deleted one (none added) leaves.
+  @Test func changedHandlesPureAddAndPureRemove() {
+    let base = [container(0, 11)]
+    expectNoDifference(
+      TranscriptClipContainer.changed(from: base, to: base + [container(16, 7, .suggested)]),
+      [container(16, 7, .suggested)])
+    expectNoDifference(
+      TranscriptClipContainer.changed(from: base + [container(16, 7, .suggested)], to: base),
+      [container(16, 7, .suggested)])
+  }
+
+  /// A container whose only change is kind (same range) still counts as changed — its words
+  /// need the new colour/strikethrough even though the span is identical.
+  @Test func changedDetectsKindOnlyChange() {
+    let old = [container(0, 11, .approved)]
+    let new = [container(0, 11, .rejected)]
+    expectNoDifference(
+      TranscriptClipContainer.changed(from: old, to: new),
+      [container(0, 11, .approved), container(0, 11, .rejected)])
+  }
+
+  @Test func changedRepaintsWhenOverlappingForegroundOrderChanges() {
+    let clip = container(0, 11, .approved)
+    let suggestion = container(0, 11, .suggested)
+    expectNoDifference(
+      TranscriptClipContainer.changed(from: [clip, suggestion], to: [suggestion, clip]),
+      [clip, suggestion, suggestion, clip])
+  }
+
+  @Test func changedDetectsPreviewOnlyChange() {
+    let original = container(0, 11, .suggested)
+    var previewed = original
+    previewed.isPreviewed = true
+    expectNoDifference(
+      TranscriptClipContainer.changed(from: [original], to: [previewed]),
+      [original, previewed])
+  }
+
+  private func applyResizeItems(
+    _ items: [TranscriptResizeItem], to coordinator: TranscriptTextView.Coordinator
+  ) {
+    coordinator.apply(
+      text: coordinator.model.plainTranscriptText, fontSize: 17, selected: [],
+      clipContainers: [], removedWordIDs: [], currentWordID: nil, scrollTarget: nil,
+      followMode: .following, reveal: nil, resizeItems: items)
+  }
+
+  @Test func coincidentResizeEdgesFollowForegroundObjectOrderAndFreeformWins() throws {
+    let model = model(clipBands: [])
+    let coordinator = TranscriptTextView.Coordinator(model: model)
+    let textView = NSTextView(frame: NSRect(x: 0, y: 0, width: 500, height: 300))
+    coordinator.textView = textView
+    let occurrences = [
+      TranscriptWordOccurrence(wordID: 1, transcriptIndex: 0),
+      TranscriptWordOccurrence(wordID: 2, transcriptIndex: 1),
+    ]
+    let suggestion = TranscriptResizeItem(
+      identity: .suggestion(Fixtures.uuid(1)), wordOccurrences: occurrences)
+    let clip = TranscriptResizeItem(
+      identity: .clip(Fixtures.uuid(2)), wordOccurrences: occurrences)
+    applyResizeItems([suggestion, clip], to: coordinator)
+    let zone = try #require(coordinator.resizeZones().first)
+    let point = NSPoint(x: zone.rect.midX, y: zone.rect.midY)
+    expectNoDifference(coordinator.resizeHandle(at: point)?.identity, suggestion.identity)
+    let endZone = try #require(coordinator.resizeZones().first { $0.edge == .end })
+    let bodyPoint = NSPoint(x: (zone.rect.midX + endZone.rect.midX) / 2, y: zone.rect.midY)
+    #expect(coordinator.resizeHandle(at: bodyPoint) == nil)
+
+    applyResizeItems([clip, suggestion], to: coordinator)
+    expectNoDifference(coordinator.resizeHandle(at: point)?.identity, clip.identity)
+
+    let selection = TranscriptResizeItem(identity: .selection, wordOccurrences: occurrences)
+    applyResizeItems([suggestion, clip, selection], to: coordinator)
+    expectNoDifference(coordinator.resizeHandle(at: point)?.identity, .selection)
+  }
+
+  @Test func rebuildingTextMovesCachedResizeEdgesWithoutChangingWordOccurrences() throws {
+    let model = model(clipBands: [])
+    let coordinator = TranscriptTextView.Coordinator(model: model)
+    let textView = NSTextView(frame: NSRect(x: 0, y: 0, width: 500, height: 300))
+    coordinator.textView = textView
+    let item = TranscriptResizeItem(
+      identity: .clip(Fixtures.uuid(1)),
+      wordOccurrences: [TranscriptWordOccurrence(wordID: 1, transcriptIndex: 0)])
+    applyResizeItems([item], to: coordinator)
+    let originalEnd = try #require(coordinator.resizeZones().last).rect.midX
+
+    model.document = TranscriptDocument(words: [word(1, "A significantly longer word")])
+    applyResizeItems([item], to: coordinator)
+    let rebuiltEnd = try #require(coordinator.resizeZones().last).rect.midX
+    #expect(rebuiltEnd > originalEnd)
+  }
+
 }

@@ -116,9 +116,12 @@ extension EditorModel {
   }
 
   var visibleTranscriptObjects: [TranscriptObject] {
-    foregroundObjects(
+    let visibleSuggestionIDs = Set(cutSuggestions.pendingSuggestions.map(\.id))
+    return foregroundObjects(
       transcriptObjects.filter { object in
-        if case .suggestion = object.id { return cutSuggestions.showsSuggestionBands }
+        if case .suggestion(let id) = object.id {
+          return cutSuggestions.showsSuggestionBands && visibleSuggestionIDs.contains(id)
+        }
         return true
       }, selected: selection.objectID)
   }
@@ -135,8 +138,17 @@ extension EditorModel {
         id = value
         kind = .suggested
       }
+      let draft = transcriptResizeDraft
+      let isResizing: Bool
+      switch (draft?.identity, object.id) {
+      case (.clip(let resizingID), .clip(let objectID)),
+        (.suggestion(let resizingID), .suggestion(let objectID)):
+        isResizing = resizingID == objectID
+      default: isResizing = false
+      }
+      let words = isResizing ? draft!.draftedWordIDs : object.wordIDs.sorted()
       return TranscriptClipBand(
-        id: id, wordIDs: object.wordIDs.sorted(), kind: kind,
+        id: id, wordIDs: words, kind: kind,
         colorIndex: object.colorIndex, isActive: object.id == selection.objectID,
         isPreviewed: object.id == transcript.overlap.previewID,
         isSubdued: selection.objectID != nil && object.id != selection.objectID)

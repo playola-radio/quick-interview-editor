@@ -166,7 +166,7 @@ struct DraftEditingTests {
   @Test func suggestionSaveAllowsEditedMembershipAndAcceptsAtomically() async throws {
     let model = editor()
     let candidate = suggestion(model)
-    model.cutSuggestions.onSuggestionsProduced?([candidate])
+    model.mutateDocument(recordUndo: false) { $0.cutSuggestions = [candidate] }
     model.selection = .object(.suggestion(candidate.id))
     model.openSelectionTapped()
     let child = try #require(model.editSlice)
@@ -178,6 +178,8 @@ struct DraftEditingTests {
     child.saveTapped()
     expectNoDifference(writes.count, 1)
     expectNoDifference(model.slices[id: candidate.id]?.wordIDs, [2, 3])
+    expectNoDifference(model.slices[id: candidate.id]?.suggestionTypeID, "spotlight")
+    expectNoDifference(model.slices[id: candidate.id]?.suggestionNaming, nil)
     expectNoDifference(model.documentCutSuggestions[id: candidate.id]?.status, .accepted)
     #expect(child.invalidationReason == nil)
     await model.undoTapped()
@@ -188,11 +190,143 @@ struct DraftEditingTests {
     expectNoDifference(model.documentCutSuggestions[id: candidate.id]?.status, .accepted)
   }
 
+  private func namedSuggestion(_ model: EditorModel) throws -> CutSuggestion {
+    var candidate = suggestion(model)
+    let type = try #require(SuggestionDefaults.types.first { $0.id == "intro" })
+    candidate.productType = ProductType(rawValue: type.id)!
+    candidate.title = "Writing on the road"
+    candidate.naming = SuggestionNamingRecord(
+      runID: UUID(8), typeID: type.id, typeName: type.name, typeGroup: type.group,
+      discoveryLabel: candidate.title,
+      extractedValues: ["song-title": "Cafe", "artist-name": "Björk"], missingFieldIDs: [],
+      correctedValues: ["song-title": "Café"], reservation: nil)
+    let snapshot = SuggestionRunSnapshot(
+      runID: UUID(8), configuration: SuggestionDefaults.configuration,
+      configurationHash: "fixture", model: "fixture-model", discoveryPromptVersion: "configured-v1",
+      extractionPromptVersion: "fields-v1", productSpecVersion: "configured-v1",
+      transcriptHash: model.editPlan.transcriptHash, sourceFingerprint: model.sourceFingerprint,
+      sampleRate: model.editPlan.source.sampleRate)
+    try model.replaceSuggestionBatch(
+      candidates: [candidate],
+      batch: SuggestionBatch(
+        snapshot: snapshot, actualStarts: SuggestionStarts(), canonicalGroups: []))
+    return candidate
+  }
+
+  @Test func namedSuggestionDraftSavesMetadataAndPermanentNumberInOneMutation() async throws {
+    let model = editor()
+    let candidate = try namedSuggestion(model)
+    let before = model.documentState
+    model.selection = .object(.suggestion(candidate.id))
+    model.openSelectionTapped()
+    let child = try #require(model.editSlice)
+    expectNoDifference(model.documentState, before)
+    child.fineTune.restoreDraftRange(70_648..<98_916)
+    var writes: [EditorDocumentState] = []
+    model.onDocumentStateChanged = { writes.append($0) }
+    child.saveTapped()
+    let slice = try #require(model.slices[id: candidate.id])
+    let reservation = try #require(slice.suggestionNaming?.reservation)
+    expectNoDifference(writes.count, 1)
+    expectNoDifference(slice.name, "Café 1, Björk")
+    expectNoDifference(slice.suggestionTypeID, "intro")
+    var naming = try #require(candidate.naming)
+    naming.reservation = reservation
+    expectNoDifference(slice.suggestionNaming, naming)
+    expectNoDifference(slice.startSample..<slice.endSample, 70_648..<98_916)
+    expectNoDifference(slice.wordIDs, [2, 3])
+    expectNoDifference(model.documentCutSuggestions[id: candidate.id]?.naming, naming)
+    expectNoDifference(model.documentCutSuggestions[id: candidate.id]?.status, .accepted)
+    expectNoDifference(model.issuedSuggestionNumbers, [reservation])
+    expectNoDifference(model.selection, .object(.clip(candidate.id)))
+    #expect(!model.suggestionBatch!.actualStarts.groups.isEmpty)
+    await model.undoTapped()
+    #expect(model.slices.isEmpty)
+    expectNoDifference(model.documentCutSuggestions[id: candidate.id]?.status, .pending)
+    expectNoDifference(model.issuedSuggestionNumbers, [reservation])
+    await model.redoTapped()
+    expectNoDifference(model.slices[id: candidate.id], slice)
+    expectNoDifference(model.issuedSuggestionNumbers, [reservation])
+    await model.undoTapped()
+    model.selection = .object(.suggestion(candidate.id))
+    model.openSelectionTapped()
+    let reopened = try #require(model.editSlice)
+    reopened.saveTapped()
+    expectNoDifference(model.slices[id: candidate.id]?.name, slice.name)
+    expectNoDifference(model.issuedSuggestionNumbers, [reservation])
+  }
+
+  @Test func suggestionDraftUsesCurrentNumberAndReviewedFieldsAtSave() throws {
+    let model = editor()
+    let candidate = try namedSuggestion(model)
+    model.selection = .object(.suggestion(candidate.id))
+    model.openSelectionTapped()
+    let child = try #require(model.editSlice)
+    try model.applySuggestionReviewIntent(
+      .fields(candidateID: candidate.id, runID: UUID(8), values: ["song-title": "New Song"]))
+    try model.applySuggestionReviewIntent(.futureType(typeID: "intro", start: 7))
+    child.saveTapped()
+    expectNoDifference(model.slices[id: candidate.id]?.name, "New Song 7, Björk")
+    expectNoDifference(
+      model.slices[id: candidate.id]?.suggestionNaming?.correctedValues,
+      ["song-title": "New Song"])
+    expectNoDifference(model.issuedSuggestionNumbers.map(\.number), [7])
+  }
+
+  @Test func suggestionLockBlocksOpeningAndSavingButDraftCanRetryAfterUnlock() throws {
+    let model = editor()
+    let candidate = try namedSuggestion(model)
+    model.selection = .object(.suggestion(candidate.id))
+    model.cutSuggestions.run.phase = .needsNumbering(runID: UUID(8), message: "Review")
+    let before = model.documentState
+    model.openSelectionTapped()
+    #expect(model.editSlice == nil)
+    expectNoDifference(model.documentState, before)
+    model.cutSuggestions.run.phase = .idle
+    model.openSelectionTapped()
+    let child = try #require(model.editSlice)
+    model.cutSuggestions.run.phase = .needsNumbering(runID: UUID(8), message: "Review")
+    child.saveTapped()
+    #expect(model.editSlice === child)
+    #expect(child.commitError != nil)
+    #expect(child.invalidationReason == nil)
+    expectNoDifference(model.documentState, before)
+    model.cutSuggestions.run.phase = .idle
+    child.saveTapped()
+    expectNoDifference(model.slices.count, 1)
+  }
+
+  @Test(arguments: ["missing", "run", "source", "transcript", "sampleRate"])
+  func changedNamingSnapshotInvalidatesOpenSuggestionDraft(reason: String) throws {
+    let model = editor()
+    let candidate = try namedSuggestion(model)
+    model.selection = .object(.suggestion(candidate.id))
+    model.openSelectionTapped()
+    let child = try #require(model.editSlice)
+    child.cutInNudgedForward()
+    model.mutateDocument {
+      switch reason {
+      case "missing": $0.suggestionBatch = nil
+      case "run": $0.suggestionBatch?.snapshot.runID = UUID(9)
+      case "source": $0.suggestionBatch?.snapshot.sourceFingerprint = "changed"
+      case "transcript": $0.suggestionBatch?.snapshot.transcriptHash = "changed"
+      default: $0.suggestionBatch?.snapshot.sampleRate = 48_000
+      }
+    }
+    let before = model.documentState
+    child.saveTapped()
+    #expect(model.editSlice === child)
+    #expect(child.invalidationReason != nil)
+    #expect(child.canUndoDraft)
+    expectNoDifference(model.documentState, before)
+    expectNoDifference(model.issuedSuggestionNumbers, [])
+  }
+
   @Test(arguments: ["missing", "rejected", "replaced", "source", "transcript"])
   func suggestionInvalidationRetainsDraftAndRefusesSave(reason: String) throws {
     let model = editor()
     let candidate = suggestion(model)
-    model.cutSuggestions.onSuggestionsProduced?([candidate])
+    model.mutateDocument(recordUndo: false) { $0.cutSuggestions = [candidate] }
     model.selection = .object(.suggestion(candidate.id))
     model.openSelectionTapped()
     let child = try #require(model.editSlice)

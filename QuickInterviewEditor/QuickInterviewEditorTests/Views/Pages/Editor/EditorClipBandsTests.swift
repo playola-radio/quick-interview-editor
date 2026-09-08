@@ -8,6 +8,40 @@ import Testing
 @MainActor
 struct EditorClipBandsTests {
 
+  @Test func typeFilterKeepsListAndBandsTogetherWithoutDocumentMutation() {
+    var intro = Fixtures.cutSuggestion(id: Fixtures.uuid(1), wordIDs: [7, 8])
+    intro.productType = .intro
+    var spotlight = Fixtures.cutSuggestion(id: Fixtures.uuid(2), wordIDs: [9, 10])
+    spotlight.productType = .spotlight
+    withEditor(suggestions: [intro, spotlight]) { model in
+      model.slices = [slice(Fixtures.uuid(3), wordIDs: [1, 2])]
+      let before = model.documentState
+      model.cutSuggestions.typeFilterTapped("intro")
+      expectNoDifference(model.cutSuggestions.suggestions.map(\.id), [spotlight.id])
+      expectNoDifference(model.clipBands.map(\.id), [Fixtures.uuid(3), spotlight.id])
+      expectNoDifference(model.documentState, before)
+      #expect(!model.canUndo)
+    }
+  }
+
+  @Test func typeFilterDismissesChooserWhenOnlyOneOverlapRemains() {
+    var intro = Fixtures.cutSuggestion(id: Fixtures.uuid(1), wordIDs: [1, 2])
+    intro.productType = .intro
+    var spotlight = Fixtures.cutSuggestion(id: Fixtures.uuid(2), wordIDs: [1, 2])
+    spotlight.productType = .spotlight
+    withEditor(suggestions: [intro, spotlight]) { model in
+      model.transcriptClicked(
+        .init(wordID: 1, extending: false, count: 1, timestamp: 1, doubleClickInterval: 0.5))
+      model.transcript.overlap.present()
+      #expect(model.transcript.overlap.isPresented)
+
+      model.cutSuggestions.typeFilterTapped("intro")
+
+      expectNoDifference(model.transcript.overlap.candidates.map(\.id), [.suggestion(spotlight.id)])
+      #expect(!model.transcript.overlap.isPresented)
+    }
+  }
+
   private func slice(_ id: UUID, wordIDs: [Word.ID]) -> Slice {
     let words = Fixtures.editPlan().words.filter { wordIDs.contains($0.id) }
     return Slice(

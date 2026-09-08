@@ -1,5 +1,48 @@
 import Foundation
 
+enum SuggestionFilterState: Equatable {
+  case all, some, none
+
+  var accessibilityValue: String {
+    switch self {
+    case .all: "All selected"
+    case .some: "Some selected"
+    case .none: "None selected"
+    }
+  }
+
+  var image: String {
+    switch self {
+    case .all: "checkmark.square"
+    case .some: "minus.square"
+    case .none: "square"
+    }
+  }
+}
+
+struct SuggestionTypeFilterRow: Identifiable {
+  var id: String
+  var title: String
+  var group: SuggestionGroup
+  var state: SuggestionFilterState
+}
+
+struct SuggestionFilterGroup: Identifiable {
+  var id: SuggestionGroup
+  var title: String
+  var types: [SuggestionTypeFilterRow]
+  var state: SuggestionFilterState {
+    if types.allSatisfy({ $0.state == .all }) { return .all }
+    if types.allSatisfy({ $0.state == .none }) { return .none }
+    return .some
+  }
+}
+
+func visibleSuggestions(_ suggestions: [CutSuggestion], selected: Set<String>?) -> [CutSuggestion] {
+  guard let selected else { return suggestions }
+  return suggestions.filter { selected.contains($0.productType.rawValue) }
+}
+
 /// One row in the ranked cut-suggestion list. Every string and flag is precomputed here so
 /// the view renders it directly (CLAUDE.md's "zero logic in views"). Built by
 /// ``suggestionSections(from:currentTranscriptHash:currentFingerprint:)``.
@@ -31,6 +74,8 @@ struct SuggestionRow: Identifiable, Equatable, Sendable {
   /// The product-type fallback shown as the title field's placeholder, so a pending suggestion
   /// whose generated title is blank still shows the name its clip would take.
   var titlePlaceholder: String
+  var showsReviewButton = false
+  var missingFieldsMessage: String?
 }
 
 /// A product-type group of rows (e.g. all "Artist Spotlight" candidates), in ranked order.
@@ -45,7 +90,8 @@ struct SuggestionSection: Identifiable, Equatable, Sendable {
 /// follows first appearance in the ranked list, so the group holding the best-ranked
 /// candidate comes first.
 func suggestionSections(
-  from suggestions: [CutSuggestion], currentTranscriptHash: String, currentFingerprint: String
+  from suggestions: [CutSuggestion], currentTranscriptHash: String, currentFingerprint: String,
+  fieldNames: [String: String] = [:]
 ) -> [SuggestionSection] {
   var order: [ProductType] = []
   var rowsByType: [ProductType: [SuggestionRow]] = [:]
@@ -54,17 +100,22 @@ func suggestionSections(
     rowsByType[suggestion.productType, default: []].append(
       suggestionRow(
         suggestion, currentTranscriptHash: currentTranscriptHash,
-        currentFingerprint: currentFingerprint))
+        currentFingerprint: currentFingerprint, fieldNames: fieldNames))
   }
   return order.map { type in
-    SuggestionSection(id: type.rawValue, title: type.displayLabel, rows: rowsByType[type] ?? [])
+    SuggestionSection(
+      id: type.rawValue,
+      title: suggestions.first(where: { $0.productType == type })?.naming?.typeName
+        ?? type.displayLabel,
+      rows: rowsByType[type] ?? [])
   }
 }
 
 /// Builds one display row, deriving freshness by comparing the suggestion's provenance
 /// against the current transcript hash and source fingerprint.
 func suggestionRow(
-  _ suggestion: CutSuggestion, currentTranscriptHash: String, currentFingerprint: String
+  _ suggestion: CutSuggestion, currentTranscriptHash: String, currentFingerprint: String,
+  fieldNames: [String: String] = [:]
 ) -> SuggestionRow {
   let stale =
     suggestion.provenance.transcriptHash != currentTranscriptHash
@@ -88,10 +139,24 @@ func suggestionRow(
     showsAcceptButton: pending,
     showsRejectButton: pending,
     showsFreshnessWarning: stale && pending,
-    showsEditableTitle: pending,
-    showsRevealableTitle: !pending,
-    titlePlaceholder: suggestion.productType.displayLabel
+    showsEditableTitle: pending && suggestion.naming == nil,
+    showsRevealableTitle: !pending || suggestion.naming != nil,
+    titlePlaceholder: suggestion.productType.displayLabel,
+    showsReviewButton: pending && suggestion.naming != nil,
+    missingFieldsMessage: missingSuggestionFields(suggestion.naming, fieldNames: fieldNames)
   )
+}
+
+private func missingSuggestionFields(
+  _ naming: SuggestionNamingRecord?, fieldNames: [String: String]
+) -> String? {
+  guard let naming else { return nil }
+  let values = naming.extractedValues.merging(naming.correctedValues) { _, value in value }
+  let missing = Set(naming.missingFieldIDs).union(values.keys).filter {
+    (values[$0] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+  }.sorted()
+  return missing.isEmpty
+    ? nil : "Missing fields: " + missing.map { fieldNames[$0] ?? $0 }.joined(separator: ", ")
 }
 
 // MARK: - Accept-failure messages

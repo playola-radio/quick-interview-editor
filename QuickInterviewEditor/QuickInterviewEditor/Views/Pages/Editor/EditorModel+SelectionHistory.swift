@@ -25,6 +25,7 @@ extension EditorModel {
       }
       await reconcilePlayback()
     case .object(.suggestion(let id)):
+      guard !cutSuggestions.candidateActionsDisabled else { return }
       mutateDocument(selectionAfter: EditorSelection.none, label: "Delete Suggestion") {
         $0.cutSuggestions[id: id] = nil
       }

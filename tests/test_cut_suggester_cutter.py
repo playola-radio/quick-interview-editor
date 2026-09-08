@@ -1,6 +1,8 @@
 """Two-stage cutter orchestration, driven by a fake LLM (no network)."""
 
 import pytest
+import json
+from pathlib import Path
 
 from cut_suggester.cutter import (
     CutSuggesterOutputError,
@@ -9,7 +11,7 @@ from cut_suggester.cutter import (
     suggest_cuts,
 )
 from cut_suggester.llm import LLMResponse
-from cut_suggester.models import ProductType, Sentence
+from cut_suggester.models import DEFAULT_SPECS, ProductType, Sentence
 
 SR = 1000
 
@@ -105,3 +107,57 @@ def test_suggest_cuts_skips_invalid_clips_and_drops_fragments():
     assert "bad type" not in labels          # invalid clip skipped before build
     assert "too short" not in labels and "too short" in dropped  # below hard_min -> dropped
     assert "good" in labels
+
+
+def test_suggest_cuts_with_no_requested_tuned_types_makes_no_model_calls():
+    result = suggest_cuts(_sents(3, sec_per=20.0), _FakeLLM("unused", "unused"), specs={})
+
+    assert result.candidates == []
+    assert result.partitions == []
+
+
+@pytest.mark.parametrize("invalid_type", [False, [], {}])
+def test_strict_configured_stage_rejects_nonempty_all_invalid_output(invalid_type):
+    sents = _sents(3, sec_per=20.0)
+    clips = json.dumps({"clips": [{"type": invalid_type, "start": 0, "end": 2, "label": "bad"}]})
+    with pytest.raises(CutSuggesterOutputError, match="no valid requested clips"):
+        suggest_cuts(
+            sents,
+            _FakeLLM('{"paragraphs":[{"start":0,"end":2,"label":"all"}]}', clips),
+            specs={ProductType.SPOTLIGHT: DEFAULT_SPECS[ProductType.SPOTLIGHT]},
+            strict=True,
+        )
+
+
+def test_strict_configured_stage_allows_explicit_empty_and_duration_filtered_empty():
+    sents = _sents(3, sec_per=5.0)
+    partitions = '{"paragraphs":[{"start":0,"end":2,"label":"all"}]}'
+    empty = suggest_cuts(sents, _FakeLLM(partitions, '{"clips":[]}'), strict=True)
+    dropped = suggest_cuts(
+        sents,
+        _FakeLLM(partitions, '{"clips":[{"type":"spotlight","start":0,"end":0,"label":"short"}]}'),
+        strict=True,
+    )
+
+    assert empty.candidates == []
+    assert dropped.candidates == [] and len(dropped.dropped) == 1
+
+
+def test_configuration_removing_both_tuned_types_skips_all_calls():
+    config = json.loads((Path(__file__).parent / "fixtures" / "suggestion-contract-v2.json").read_text())["configuration"]
+    config["types"] = [item for item in config["types"] if item["id"] not in {"intro", "spotlight"}]
+    llm = _FakeLLM("unused", "unused")
+
+    result = suggest_cuts(_sents(3), llm, configuration=config)
+
+    assert result.candidates == [] and llm.purposes == []
+
+
+def test_strict_stage_rejects_only_out_of_requested_type():
+    partitions = '{"paragraphs":[{"start":0,"end":2,"label":"all"}]}'
+    clips = '{"clips":[{"type":"intro","start":0,"end":2,"label":"wrong request"}]}'
+    with pytest.raises(CutSuggesterOutputError, match="no valid requested clips"):
+        suggest_cuts(
+            _sents(3), _FakeLLM(partitions, clips),
+            specs={ProductType.SPOTLIGHT: DEFAULT_SPECS[ProductType.SPOTLIGHT]}, strict=True,
+        )

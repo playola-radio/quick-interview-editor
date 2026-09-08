@@ -3,7 +3,7 @@ import Foundation
 /// The serialized payload of a `.pie` project package: everything JSON-encodable
 /// about a project except the audio and the engine's own `plan.json` (spec A2/A4).
 struct ProjectFile: Codable, Equatable, Sendable {
-  static let currentSchemaVersion = 1
+  static let currentSchemaVersion = 2
 
   var schemaVersion: Int
   var source: ProjectSource

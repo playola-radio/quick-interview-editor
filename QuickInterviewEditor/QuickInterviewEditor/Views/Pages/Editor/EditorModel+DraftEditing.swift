@@ -25,17 +25,18 @@ extension EditorModel {
       editSliceTapped(id)
       return
     case .object(.suggestion(let id)):
+      guard !cutSuggestions.candidateActionsDisabled else {
+        clipEditorMessage = SuggestionReviewError.locked.localizedDescription
+        return
+      }
       guard let suggestion = documentCutSuggestions[id: id], suggestion.isPending else { return }
-      switch validatedSuggestion(suggestion) {
-      case .accepted(let slice, _):
+      do {
+        let slice = try validatedSuggestion(suggestion).slice
         target = .suggestionDraft(suggestion)
         title = slice.name
         initialRange = slice.startSample..<slice.endSample
-      case .stale(let reason):
-        clipEditorMessage = cutSuggestionStaleMessage(reason)
-        return
-      case .invalid(let reason):
-        clipEditorMessage = cutSuggestionInvalidMessage(reason)
+      } catch {
+        clipEditorMessage = error.localizedDescription
         return
       }
     case .range(let range, _):
@@ -58,10 +59,9 @@ extension EditorModel {
       && !wordIDs(anyOverlap: range, words: editPlan.words).isEmpty
   }
 
-  private func validatedSuggestion(_ suggestion: CutSuggestion) -> AcceptResult {
-    PlayolaInterviewEditor.acceptCutSuggestion(
-      suggestion.id, in: ProjectState(cutSuggestions: documentCutSuggestions), plan: editPlan,
-      sourceFingerprint: sourceFingerprint, transcriptHash: editPlan.transcriptHash)
+  private func validatedSuggestion(_ suggestion: CutSuggestion) throws -> SuggestionAcceptance {
+    try suggestionSliceForAcceptance(
+      id: suggestion.id, state: documentState, plan: editPlan, sourceFingerprint: sourceFingerprint)
   }
 
   private func draftInvalidationReason(_ editing: EditSliceModel) -> String? {
@@ -72,10 +72,11 @@ extension EditorModel {
     guard live.wordIDs == snapshot.wordIDs, live.provenance == snapshot.provenance else {
       return "This suggestion changed. Cancel and open the current suggestion again."
     }
-    switch validatedSuggestion(snapshot) {
-    case .accepted: return nil
-    case .stale(let reason): return cutSuggestionStaleMessage(reason)
-    case .invalid(let reason): return cutSuggestionInvalidMessage(reason)
+    do {
+      _ = try validatedSuggestion(live)
+      return nil
+    } catch {
+      return error.localizedDescription
     }
   }
 
@@ -90,6 +91,9 @@ extension EditorModel {
     guard editSlice === editing, editing.target.isDraft else {
       return .failed("This draft is no longer available.")
     }
+    if case .suggestionDraft = editing.target, cutSuggestions.candidateActionsDisabled {
+      return .failed(SuggestionReviewError.locked.localizedDescription)
+    }
     if let reason = editing.invalidationReason ?? draftInvalidationReason(editing) {
       editing.invalidate(reason)
       return .failed(reason)
@@ -99,15 +103,36 @@ extension EditorModel {
     }
     let id = editing.target.resultingClipID
     guard slices[id: id] == nil else { return .failed("This clip has already been saved.") }
-    let slice = buildSlice(
+    let acceptance: SuggestionAcceptance?
+    do {
+      if case .suggestionDraft(let snapshot) = editing.target {
+        acceptance = try validatedSuggestion(snapshot)
+      } else {
+        acceptance = nil
+      }
+    } catch {
+      editing.invalidate(error.localizedDescription)
+      return .failed(error.localizedDescription)
+    }
+    var slice = buildSlice(
       id: id, name: editing.title, range: range,
       wordIDs: wordIDs(anyOverlap: range, words: editPlan.words), plan: editPlan)
+    if let acceptance {
+      slice.name = acceptance.slice.name
+      slice.suggestionNaming = acceptance.slice.suggestionNaming
+      slice.suggestionTypeID = acceptance.slice.suggestionTypeID
+    }
+    let reservations = slice.suggestionNaming?.reservation.map { [$0] } ?? []
     committingDraftID = id
     defer { committingDraftID = nil }
-    mutateDocument(selectionAfter: .object(.clip(id)), label: "Save Clip") {
+    mutateDocument(
+      selectionAfter: .object(.clip(id)), label: "Save Clip",
+      recordingPermanentReservations: reservations
+    ) {
       $0.slices.append(slice)
-      if case .suggestionDraft(let snapshot) = editing.target {
-        $0.cutSuggestions[id: snapshot.id]?.accept()
+      if let acceptance {
+        $0.cutSuggestions[id: acceptance.candidate.id] = acceptance.candidate
+        $0.suggestionBatch = acceptance.batch
       }
     }
     if case .freeformDraft = editing.target { advanceSliceNumber() }

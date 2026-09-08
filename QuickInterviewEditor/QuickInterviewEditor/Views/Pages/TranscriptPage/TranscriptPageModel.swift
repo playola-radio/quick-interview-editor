@@ -148,6 +148,11 @@ class TranscriptPageModel: ViewModel {
   /// predicate) and pushed in by the view — mirrors `removedWordIDs`/`clipBands`. This is what the
   /// renderer draws; the transcript's own `selectedWordIDSet` shadow is retired in a later task.
   var highlightedWordIDs: Set<Word.ID> = []
+  /// The resizable items (selection/clip/suggestion) whose edges the transcript overlay draws
+  /// grab handles for, derived by `EditorModel` and pushed in by the view — mirrors
+  /// `clipBands`/`highlightedWordIDs`. The transcript stays layout-local and only renders
+  /// what it's handed.
+  var resizeItems: [TranscriptResizeItem] = []
   /// The latest explicit reveal request (from clicking a suggestion or clip). The view scrolls
   /// to it regardless of `followMode`; nil until the first reveal.
   var reveal: TranscriptReveal?
@@ -289,6 +294,19 @@ class TranscriptPageModel: ViewModel {
     selectionFocusID = nil
   }
 
+  /// The current gesture anchor/focus, captured before a mutation that would invalidate them
+  /// (e.g. a resize's `applyEdgeEdit`) so the caller can restore Shift-extend on cancel.
+  var selectionAnchorSnapshot: (anchor: Word.ID?, focus: Word.ID?) {
+    (selectionAnchorID, selectionFocusID)
+  }
+
+  /// Restores a previously captured anchor/focus snapshot, undoing an `invalidateSelectionAnchor()`
+  /// caused by a since-cancelled gesture.
+  func restoreSelectionAnchor(anchor: Word.ID?, focus: Word.ID?) {
+    selectionAnchorID = anchor
+    selectionFocusID = focus
+  }
+
   /// Selects exactly one word (anchor == focus). Used by the waveform→transcript sync
   /// when the user clicks a point in the audio.
   func selectWord(_ id: Word.ID) {
@@ -395,6 +413,26 @@ class TranscriptPageModel: ViewModel {
   }
 
   func transcriptDragEnded() {}
+
+  /// Fired by the resize-handle overlay once a drag crosses `TranscriptResizeMetrics.dragThreshold`.
+  /// No-op until `EditorModel` wires the closure (a later task's resize state machine).
+  @ObservationIgnored var onTranscriptResizeBegan:
+    ((TranscriptResizeItemIdentity, TranscriptResizeEdge, TranscriptWordOccurrence) -> Bool)?
+  @ObservationIgnored var onTranscriptResizeDragged: ((TranscriptWordOccurrence) -> Void)?
+  @ObservationIgnored var onTranscriptResizeEnded: (() -> Void)?
+  @ObservationIgnored var onTranscriptResizeCancelled: (() -> Void)?
+
+  func transcriptResizeBegan(
+    _ id: TranscriptResizeItemIdentity, _ edge: TranscriptResizeEdge,
+    occurrence: TranscriptWordOccurrence
+  ) -> Bool {
+    onTranscriptResizeBegan?(id, edge, occurrence) ?? false
+  }
+  func transcriptResizeDragged(to occurrence: TranscriptWordOccurrence) {
+    onTranscriptResizeDragged?(occurrence)
+  }
+  func transcriptResizeEnded() { onTranscriptResizeEnded?() }
+  func transcriptResizeCancelled() { onTranscriptResizeCancelled?() }
 
   func zoomInTapped() { setFontSize(fontSize + fontStep) }
   func zoomOutTapped() { setFontSize(fontSize - fontStep) }

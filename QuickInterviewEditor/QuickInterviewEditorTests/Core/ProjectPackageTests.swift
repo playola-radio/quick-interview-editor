@@ -17,6 +17,18 @@ struct ProjectPackageTests {
       "Open this project with the version of the app that last saved it, or a newer version.")
   }
 
+  @Test func malformedRecoveryChildIsNotSilentlyDropped() throws {
+    let root = try ProjectPackage.encode(
+      file: Fixtures.projectFile(), plan: Fixtures.editPlan(),
+      audio: FileWrapper(regularFileWithContents: Data()))
+    let invalid = FileWrapper(directoryWithFileWrappers: [:])
+    invalid.preferredFilename = "suggestion-recovery.json"
+    root.addFileWrapper(invalid)
+    #expect(throws: ProjectPackageError.malformedRecoveryArchive) {
+      try ProjectPackage.decode(root)
+    }
+  }
+
   // MARK: - Helpers
 
   private func tree(projectJSON: Data, planJSON: Data, audio: Data?) -> FileWrapper {
@@ -117,13 +129,27 @@ struct ProjectPackageTests {
 
   // MARK: - Schema
 
+  @Test func decodeSupportsBothHistoricalAndCurrentSchema() throws {
+    for version in 1...ProjectFile.currentSchemaVersion {
+      var file = Fixtures.projectFile()
+      file.schemaVersion = version
+      let projectJSON = encodedProjectFile(file)
+      let root = tree(
+        projectJSON: projectJSON, planJSON: encodedPlan(Fixtures.editPlan()),
+        audio: Data("audio".utf8))
+      let decoded = try ProjectPackage.decode(root)
+      expectNoDifference(decoded.file, file)
+      expectNoDifference(root.fileWrappers?["project.json"]?.regularFileContents, projectJSON)
+    }
+  }
+
   @Test func decodeUnsupportedSchemaThrows() {
     var file = Fixtures.projectFile()
-    file.schemaVersion = 2
+    file.schemaVersion = ProjectFile.currentSchemaVersion + 1
     let root = tree(
       projectJSON: encodedProjectFile(file), planJSON: encodedPlan(Fixtures.editPlan()),
       audio: Data("audio".utf8))
-    #expect(throws: ProjectPackageError.unsupportedSchema(2)) {
+    #expect(throws: ProjectPackageError.unsupportedSchema(ProjectFile.currentSchemaVersion + 1)) {
       try ProjectPackage.decode(root)
     }
   }

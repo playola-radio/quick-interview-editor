@@ -192,4 +192,13 @@ struct TranscriptClipContainer: Equatable {
     }
     return style
   }
+
+  static func changed(
+    from old: [TranscriptClipContainer], to new: [TranscriptClipContainer]
+  ) -> [TranscriptClipContainer] {
+    let retainedOld = old.filter { new.contains($0) }
+    let retainedNew = new.filter { old.contains($0) }
+    if retainedOld != retainedNew { return old + new }
+    return old.filter { !new.contains($0) } + new.filter { !old.contains($0) }
+  }
 }

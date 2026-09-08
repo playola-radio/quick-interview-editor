@@ -13,6 +13,11 @@ final class ProjectDocumentSinkRecorder {
   }
   private(set) var commits: [Commit] = []
   private(set) var registerChangeCount = 0
+  private(set) var recoveries: [(file: ProjectFile, archive: Data?)] = []
+
+  fileprivate func recordRecovery(_ file: ProjectFile, _ archive: Data?) {
+    recoveries.append((file, archive))
+  }
 
   fileprivate func recordCommit(
     _ file: ProjectFile, _ plan: EditPlan?, _ audio: CanonicalAudioSource?
@@ -32,6 +37,7 @@ extension ProjectDocumentSink {
     let record = ProjectDocumentSinkRecorder()
     let sink = ProjectDocumentSink(
       commit: { file, plan, audio in record.recordCommit(file, plan, audio) },
+      commitRecovery: { file, archive in record.recordRecovery(file, archive) },
       registerChange: { record.recordRegisterChange() }
     )
     return (sink, record)

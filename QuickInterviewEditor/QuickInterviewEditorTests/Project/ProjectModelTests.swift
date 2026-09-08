@@ -11,11 +11,121 @@ import Testing
 
 @MainActor
 struct ProjectModelTests {
+  @Test(arguments: ["  Brandi Carlile \n", "  \n"])
+  func optionalInterviewArtistSeedsImportAndSurvivesRetranscription(text: String) async throws {
+    let canonical = try temporaryCanonicalAudio(bytes: 1234)
+    defer { try? FileManager.default.removeItem(at: canonical) }
+    let (sink, record) = ProjectDocumentSink.recorder()
+    let model = ProjectModel(file: nil, plan: nil, audio: nil, sink: sink)
+    model.interviewArtistText = text
+    await withDependencies {
+      $0.continuousClock = TestClock()
+      $0.date = .constant(importedAt)
+      $0.transcription.transcribe = { _, _, _ in
+        engineEvents([.completed(Fixtures.transcriptionResult(canonicalAudioURL: canonical))])
+      }
+    } operation: {
+      await model.importAudioTapped(URL(fileURLWithPath: "/artist-interview.m4a"))
+      let expected: String? = text.contains("Brandi") ? "Brandi Carlile" : nil
+      expectNoDifference(model.editor?.documentState.interviewArtist, expected)
+      expectNoDifference(record.commits.last?.file.content.interviewArtist, expected)
+      model.editor?.mutateDocument { $0.interviewArtist = "Saved project artist" }
+      model.interviewArtistText = "Stale import draft"
+      await model.reimportIgnoringCacheTapped()
+    }
+    expectNoDifference(model.editor?.documentState.interviewArtist, "Saved project artist")
+    expectNoDifference(record.commits.last?.file.content.interviewArtist, "Saved project artist")
+  }
 
   // `/clip.m4a` is unreadable, so `SourceFingerprint` falls back to the standardized path —
   // the same key the legacy sidecar was written under.
   private let fingerprint = "path:/clip.m4a"
   private let importedAt = Date(timeIntervalSince1970: 1_700_000_000)
+
+  @Test func untouchedV1DoesNotAutoSuggestOrDirtyAndNextEditUpgrades() async throws {
+    var file = Fixtures.projectFile(content: EditorDocumentState())
+    file.schemaVersion = 1
+    let (sink, record) = ProjectDocumentSink.recorder()
+    let requests = LockIsolated(0)
+    try await withDependencies {
+      $0.keychain = .inMemory("fixture-key")
+      $0.cutSuggest = CutSuggestClient { _, _ in
+        requests.withValue { $0 += 1 }
+        return AsyncThrowingStream {
+          $0.yield(.completed([]))
+          $0.finish()
+        }
+      }
+    } operation: {
+      let model = ProjectModel(
+        file: file, plan: Fixtures.editPlan(),
+        audio: .packageChild(sessionCopy: Fixtures.canonicalAudioURL),
+        sink: sink)
+      await model.viewAppeared()
+      let editor = try #require(model.editor)
+      await editor.cutSuggestions.autoSuggestCutsIfNeeded()
+      expectNoDifference(requests.value, 0)
+      expectNoDifference(editor.documentState, file.content)
+      expectNoDifference(record.registerChangeCount, 0)
+      expectNoDifference(record.commits.count, 0)
+
+      editor.mutateDocument { $0.speakerCountOverride = 3 }
+      expectNoDifference(record.commits.last?.file.schemaVersion, 2)
+      expectNoDifference(record.registerChangeCount, 1)
+      expectNoDifference(editor.documentState.suggestionRecoveryOwnerID, nil)
+    }
+  }
+
+  @Test func explicitSuggestUpgradesAnOpenedV1() async throws {
+    var file = Fixtures.projectFile(content: EditorDocumentState())
+    file.schemaVersion = 1
+    let (sink, record) = ProjectDocumentSink.recorder()
+    let fixture = SuggestionRunFixture()
+    try await withDependencies {
+      fixture.install(&$0)
+    } operation: {
+      let model = ProjectModel(
+        file: file, plan: Fixtures.editPlan(),
+        audio: .packageChild(sessionCopy: Fixtures.canonicalAudioURL), sink: sink)
+      await model.viewAppeared()
+      let editor = try #require(model.editor)
+      let task = Task { await editor.cutSuggestions.suggestCutsTapped() }
+      await fixture.waitForRequests()
+      expectNoDifference(record.commits.last?.file.schemaVersion, 2)
+      #expect(editor.unfinishedSuggestionRun != nil)
+      fixture.finish()
+      await task.value
+      expectNoDifference(editor.cutSuggestions.run.phase, .idle)
+      #expect(editor.lastAppliedSuggestionRunID != nil)
+      expectNoDifference(editor.unfinishedSuggestionRun, nil)
+    }
+  }
+
+  @Test func cancellingReplacementLeavesOpenedV1UntouchedAndDoesNotPrepareRecovery() async throws {
+    var file = Fixtures.projectFile()
+    file.schemaVersion = 1
+    let (sink, record) = ProjectDocumentSink.recorder()
+    let fixture = SuggestionRunFixture()
+    try await withDependencies {
+      fixture.install(&$0)
+    } operation: {
+      let model = ProjectModel(
+        file: file, plan: Fixtures.editPlan(),
+        audio: .packageChild(sessionCopy: Fixtures.canonicalAudioURL), sink: sink)
+      await model.viewAppeared()
+      let editor = try #require(model.editor)
+      let before = editor.documentState
+      await editor.cutSuggestions.suggestCutsTapped()
+      expectNoDifference(editor.cutSuggestions.run.phase, .confirmingReplacement)
+      editor.cutSuggestions.run.cancelReplacementTapped()
+      expectNoDifference(editor.documentState, before)
+      expectNoDifference(record.registerChangeCount, 0)
+      expectNoDifference(record.commits.count, 0)
+      expectNoDifference(fixture.state.value.requests.count, 0)
+      expectNoDifference(fixture.state.value.prepared.count, 0)
+      expectNoDifference(editor.cutSuggestions.automaticSuggestionsEnabled, false)
+    }
+  }
 
   @Test func freshModelIsEmpty() {
     let (sink, record) = ProjectDocumentSink.recorder()

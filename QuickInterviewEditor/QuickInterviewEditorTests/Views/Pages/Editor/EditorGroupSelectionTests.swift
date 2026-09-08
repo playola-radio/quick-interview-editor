@@ -27,6 +27,19 @@ struct EditorGroupSelectionTests {
       timestamp: time, doubleClickInterval: 0.5)
   }
 
+  @Test func deletingSuggestionRespectsSearchLock() async {
+    let model = editor()
+    let candidate = suggestion(model)
+    model.documentCutSuggestions = [candidate]
+    model.selectTranscriptObject(.suggestion(candidate.id))
+    model.cutSuggestions.run.phase = .needsNumbering(runID: Fixtures.uuid(8), message: "Review")
+    let before = model.documentState
+    await model.deleteSelectionTapped()
+    expectNoDifference(model.documentState, before)
+    expectNoDifference(model.selection, .object(.suggestion(candidate.id)))
+    #expect(!model.canUndo)
+  }
+
   @Test func externalRangeChangeReordersRetainedOverlapCandidates() {
     let model = editor()
     let first = Fixtures.slice(id: Fixtures.uuid(1), start: 70_648, end: 119_202)

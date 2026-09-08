@@ -46,6 +46,7 @@ final class EditorModel: ViewModel {
   // MARK: - Dependencies
   @ObservationIgnored @Dependency(\.audioPlayer) var audioPlayer
   @ObservationIgnored @Dependency(\.engine) var engine
+  @ObservationIgnored @Dependency(\.uuid) var uuid
   @ObservationIgnored @Dependency(\.exportRender) var exportRender
   @ObservationIgnored @Dependency(\.workspace) var workspace
   @ObservationIgnored @Dependency(\.continuousClock) var clock
@@ -111,6 +112,8 @@ final class EditorModel: ViewModel {
     // Seeded from the caller's initial document (the tab reads the sidecar and hands it in);
     // the editor no longer touches `@Shared` — persistence flows out through
     // `onDocumentStateChanged`, which the tab wires to the sidecar.
+    var initialDocument = initialDocument
+    initialDocument.normalizePendingSuggestionNaming()
     self.slices = initialDocument.slices
     // Seed the auto-name counter past whatever's already in the document. The editor is rebuilt
     // from the sidecar's slices every time the tab reloads, so a counter that always started at 1
@@ -119,8 +122,15 @@ final class EditorModel: ViewModel {
     self.timelineRemovals = Self.validatedRemovals(
       initialDocument.timelineRemovals, sourceDurationSamples: editPlan.source.durationSamples)
     self.documentCutSuggestions = initialDocument.cutSuggestions
+    self.suggestionStarts = initialDocument.suggestionStarts
+    self.suggestionBatch = initialDocument.suggestionBatch
+    self.issuedSuggestionNumbers = initialDocument.issuedSuggestionNumbers
+    self.unfinishedSuggestionRun = initialDocument.unfinishedSuggestionRun
+    self.lastAppliedSuggestionRunID = initialDocument.lastAppliedSuggestionRunID
+    self.suggestionRecoveryOwnerID = initialDocument.suggestionRecoveryOwnerID
     self.speakerCountOverride = initialDocument.speakerCountOverride
     self.speakerDisplayNames = initialDocument.speakerDisplayNames
+    self.interviewArtist = initialDocument.interviewArtist
     syncEditedTimeline()
     wireCutSuggestions()
     // The speed control lives in the transcript panel, but the transport owns the shared player, so
@@ -143,6 +153,21 @@ final class EditorModel: ViewModel {
       case .clear: self.clearSelection()
       }
     }
+    wireTranscriptResize()
+  }
+
+  private func wireTranscriptResize() {
+    // Transcript edge-resize gestures are intents too: the overlay resolves the grabbed item/edge
+    // and the dragged-over word and hands them here, and THIS model runs the resize state machine
+    // (live selection repaint, clip container preview, single commit on release).
+    transcript.onTranscriptResizeBegan = { [weak self] id, edge, occurrence in
+      self?.transcriptResizeBegan(id, edge, occurrence: occurrence) ?? false
+    }
+    transcript.onTranscriptResizeDragged = { [weak self] occurrence in
+      self?.transcriptResizeDragged(to: occurrence)
+    }
+    transcript.onTranscriptResizeEnded = { [weak self] in self?.transcriptResizeEnded() }
+    transcript.onTranscriptResizeCancelled = { [weak self] in self?.transcriptResizeCancelled() }
   }
 
   /// Wires the cut-suggestions panel's intents to the document. The document owns the candidates
@@ -151,12 +176,30 @@ final class EditorModel: ViewModel {
   /// analysis run stores its candidates non-undoably (a background pass must not fill the undo
   /// stack). Accepting also lands the derived slice, idempotently, through the same funnel.
   private func wireCutSuggestions() {
+    cutSuggestions.run.currentDocument = { [weak self] in self?.documentState ?? .init() }
+    cutSuggestions.run.onReplacementConfirmed = { [weak self] in
+      guard let self else { throw CancellationError() }
+      self.mutateDocument(recordUndo: false) {
+        $0.cutSuggestions = []
+        $0.suggestionBatch = nil
+      }
+    }
+    cutSuggestions.run.onApply = { [weak self] candidates, batch in
+      guard let self else { throw CancellationError() }
+      try self.applySuggestionRun(candidates: candidates, batch: batch)
+    }
+    cutSuggestions.run.synchronizeDocument()
+    cutSuggestions.onReviewApply = { [weak self] intent in
+      guard let self else { throw SuggestionReviewError.unavailable }
+      try self.applySuggestionReviewIntent(intent)
+    }
     cutSuggestions.currentSuggestions = { [weak self] in self?.documentCutSuggestions ?? [] }
     cutSuggestions.onAccept = { [weak self] slice, id in
       self?.acceptCutSuggestion(slice, id: id)
     }
     cutSuggestions.onReject = { [weak self] id in
-      self?.mutateDocument { $0.cutSuggestions[id: id]?.reject() }
+      guard let self, !self.cutSuggestions.candidateActionsDisabled else { return }
+      self.mutateDocument { $0.cutSuggestions[id: id]?.reject() }
     }
     cutSuggestions.onTitleEditingBegan = { [weak self] id in
       self?.cutSuggestionTitleEditingBegan(id)
@@ -167,10 +210,8 @@ final class EditorModel: ViewModel {
     cutSuggestions.onTitleEditingEnded = { [weak self] id in
       self?.cutSuggestionTitleEditingEnded(id)
     }
-    cutSuggestions.onSuggestionsProduced = { [weak self] produced in
-      self?.mutateDocument(recordUndo: false) {
-        $0.cutSuggestions = IdentifiedArray(produced, uniquingIDsWith: { first, _ in first })
-      }
+    cutSuggestions.onInterviewArtistChanged = { [weak self] artist in
+      self?.mutateDocument { $0.interviewArtist = artist }
     }
     cutSuggestions.onSpeakerOverridesChanged = { [weak self] count, names in
       self?.mutateDocument {
@@ -188,6 +229,7 @@ final class EditorModel: ViewModel {
   enum ExportPhase: Equatable {
     case idle
     case exporting(current: Int, total: Int)
+    case reviewing(current: Int, total: Int)
     case done(count: Int)
     case failed(String)
   }
@@ -214,6 +256,13 @@ final class EditorModel: ViewModel {
   var documentCutSuggestions: IdentifiedArrayOf<CutSuggestion> = [] {
     didSet { transcriptObjectCache = nil }
   }
+  var interviewArtist: String?
+  var suggestionStarts: SuggestionStarts = SuggestionStarts()
+  var suggestionBatch: SuggestionBatch?
+  var issuedSuggestionNumbers: [SequenceReservation] = []
+  var unfinishedSuggestionRun: SuggestionRunCheckpoint?
+  var lastAppliedSuggestionRunID: UUID?
+  var suggestionRecoveryOwnerID: UUID?
   /// Paragraph/speaker spec: per-file `override ?? auto_speaker_count`. Part of the
   /// document so it saves/undoes with everything else; unused by the editor UI yet.
   var speakerCountOverride: Int?
@@ -346,6 +395,8 @@ final class EditorModel: ViewModel {
   /// Bumped each time a marquee drag begins so a stale auto-scroll tick from a previous drag bails.
   @ObservationIgnored private var areaSelectGeneration = 0
   var exportPhase: ExportPhase = .idle
+  var exportReview: ExportReviewModel?
+  @ObservationIgnored private var exportSession: ExportReviewModel?
   var destinationURL: URL?
   /// Which pane the right column shows. The clips list and the cut-suggester share the
   /// column so accepting a suggestion visibly lands a clip in the Slices tab.
@@ -374,8 +425,15 @@ final class EditorModel: ViewModel {
   var documentState: EditorDocumentState {
     EditorDocumentState(
       slices: slices, timelineRemovals: timelineRemovals,
-      cutSuggestions: documentCutSuggestions, speakerCountOverride: speakerCountOverride,
-      speakerDisplayNames: speakerDisplayNames)
+      cutSuggestions: documentCutSuggestions,
+      suggestionStarts: suggestionStarts,
+      suggestionBatch: suggestionBatch,
+      issuedSuggestionNumbers: issuedSuggestionNumbers,
+      unfinishedSuggestionRun: unfinishedSuggestionRun,
+      lastAppliedSuggestionRunID: lastAppliedSuggestionRunID,
+      suggestionRecoveryOwnerID: suggestionRecoveryOwnerID,
+      speakerCountOverride: speakerCountOverride,
+      speakerDisplayNames: speakerDisplayNames, interviewArtist: interviewArtist)
   }
 
   /// Rebuilds the edited timeline the collapsed waveform renders on from the current removals,
@@ -800,6 +858,257 @@ final class EditorModel: ViewModel {
   /// the view stays logic-free.
   var playheadX: CGFloat? { editedWaveform.playheadX(forEdited: playheadEditedSample) }
 
+  // MARK: - Transcript resize items
+  /// Resize handles follow the same full geometry and foreground ordering as the text bands.
+  /// Freeform selection edges take priority, followed by the selected object.
+  var transcriptResizeItems: [TranscriptResizeItem] {
+    // Index every transcript position of each word ID ONCE, then order each item by gathering its
+    // IDs' positions + sort — O(n) once plus O(m log m) per item — instead of a full O(n)
+    // `order.filter` per item. On a long transcript with many clips/suggestions this per-item full
+    // scan was a dominant per-drag cost. All positions (not just the first) are indexed so the
+    // output stays identical to `order.filter(set.contains)` when word IDs repeat (IDs are not
+    // guaranteed unique): every occurrence of a matched ID is emitted, in transcript order.
+    let order = transcriptOrder()
+    var positions: [Word.ID: [Int]] = [:]
+    for (index, id) in order.enumerated() { positions[id, default: []].append(index) }
+    func ordered(_ ids: some Sequence<Word.ID>) -> [TranscriptWordOccurrence] {
+      Set(ids).flatMap { positions[$0] ?? [] }.sorted().map {
+        TranscriptWordOccurrence(wordID: order[$0], transcriptIndex: $0)
+      }
+    }
+    var items: [TranscriptResizeItem] = []
+    if !selectedWordIDs.isEmpty {
+      items.append(.init(identity: .selection, wordOccurrences: ordered(selectedWordIDs)))
+    }
+    for object in visibleTranscriptObjects {
+      let identity: TranscriptResizeItemIdentity
+      switch object.id {
+      case .clip(let id): identity = .clip(id)
+      case .suggestion(let id): identity = .suggestion(id)
+      }
+      items.append(.init(identity: identity, wordOccurrences: ordered(object.wordIDs)))
+    }
+    return applyingResizeDraft(to: items)
+  }
+
+  private func transcriptOrder() -> [Word.ID] { editPlan.words.map(\.id) }
+
+  private func sourceRange(coveringWordIDs ids: [Word.ID]) -> Range<Int>? {
+    let set = Set(ids)
+    let words = editPlan.words.filter { set.contains($0.id) }
+    guard !words.isEmpty else { return nil }
+    var lo: Int?
+    var hi: Int?
+    for word in words {
+      guard let start = word.startSample, let end = word.endSample, start < end else {
+        return nil
+      }
+      lo = min(lo ?? start, start)
+      hi = max(hi ?? end, end)
+    }
+    guard let lo, let hi else { return nil }
+    return lo..<hi
+  }
+
+  private func sourceRange(coveringWordOccurrences occurrences: [TranscriptWordOccurrence])
+    -> Range<Int>?
+  {
+    guard !occurrences.isEmpty else { return nil }
+    var lo: Int?
+    var hi: Int?
+    for occurrence in occurrences {
+      guard editPlan.words.indices.contains(occurrence.transcriptIndex) else { return nil }
+      let word = editPlan.words[occurrence.transcriptIndex]
+      guard word.id == occurrence.wordID,
+        let start = word.startSample, let end = word.endSample, start < end
+      else { return nil }
+      lo = min(lo ?? start, start)
+      hi = max(hi ?? end, end)
+    }
+    guard let lo, let hi else { return nil }
+    return lo..<hi
+  }
+
+  /// A copy of `suggestion` retargeted to `ids`: samples and seconds are derived from the EXACT
+  /// drafted words' bounds (never audio overlap), so a resize can only ever land on word
+  /// boundaries already present in the transcript.
+  private func updatedSuggestion(
+    _ suggestion: CutSuggestion, toWordOccurrences occurrences: [TranscriptWordOccurrence]
+  ) -> CutSuggestion {
+    var updated = suggestion
+    let ids = occurrences.map(\.wordID)
+    updated.wordIDs = ids
+    if let range = sourceRange(coveringWordOccurrences: occurrences) {
+      let rate = Double(editPlan.source.sampleRate)
+      updated.startSample = range.lowerBound
+      updated.endSample = range.upperBound
+      updated.startSec = Double(range.lowerBound) / rate
+      updated.endSec = Double(range.upperBound) / rate
+      updated.durationSec = Double(range.count) / rate
+    }
+    return updated
+  }
+
+  /// Substitutes the in-flight draft's drafted words for the matching clip/suggestion item so the
+  /// overlay's semantic span previews the drag. A `.selection` draft never rewrites items here — its
+  /// live preview flows through `audioSelection`/`selectedWordIDs`, not this list.
+  private func applyingResizeDraft(to items: [TranscriptResizeItem]) -> [TranscriptResizeItem] {
+    guard let draft = transcriptResizeDraft, draft.identity != .selection else { return items }
+    return items.map { item in
+      guard item.identity == draft.identity else { return item }
+      return TranscriptResizeItem(
+        identity: item.identity, wordOccurrences: draft.draftedWordOccurrences)
+    }
+  }
+
+  // MARK: - Transcript resize state machine
+  /// In-flight transcript edge resize. Non-nil only for the duration of a drag; the document is
+  /// untouched while it lives (a `.clip` commit happens once, on `ended`). Observable so the
+  /// draft-aware `transcriptResizeItems`/`clipBands` recompute and the transcript re-renders the
+  /// preview — a container repaint, never a text reflow.
+  var transcriptResizeDraft: TranscriptResizeDraft?
+
+  /// The word the last `transcriptResizeDragged` tick resolved to. The overlay fires a drag tick per
+  /// mouse-move (60-120 Hz), but resizes snap to whole words (D1), so every tick between two word
+  /// boundaries maps to the same occurrence and would otherwise re-run `resized()` + reassign the
+  /// `@Observable` draft (re-rendering the whole transcript preview) for zero visible change.
+  /// Deduping on it makes intra-word ticks a no-op; nil between drags so the first tick always runs.
+  @ObservationIgnored private var lastResizeTargetWord: TranscriptWordOccurrence?
+
+  private func selectionEdge(for edge: TranscriptResizeEdge) -> SelectionEdge {
+    switch edge {
+    case .start: .start
+    case .end: .end
+    }
+  }
+
+  /// A resize handle grab began: seed the draft from the item's committed word run. For a selection
+  /// mark which edge is live (so transport-snap backs off, mirroring `selectionEdgeDragBegan`); a
+  /// clip stops the transport before the edit, mirroring `crossfadeStretchBegan`.
+  @discardableResult
+  func transcriptResizeBegan(
+    _ identity: TranscriptResizeItemIdentity, _ edge: TranscriptResizeEdge,
+    occurrence: TranscriptWordOccurrence? = nil
+  ) -> Bool {
+    guard canBeginTranscriptResize(identity) else { return false }
+    guard let item = transcriptResizeItems.first(where: { $0.identity == identity }) else {
+      return false
+    }
+    if let occurrence {
+      guard item.wordOccurrences.contains(occurrence) else { return false }
+    }
+    lastResizeTargetWord = nil
+    transcriptResizeDraft = TranscriptResizeDraft(
+      identity: identity, edge: edge,
+      originalWordIDs: item.wordIDs, originalWordOccurrences: item.wordOccurrences,
+      draftedWordIDs: item.wordIDs, draftedWordOccurrences: item.wordOccurrences,
+      originalSelectionRange: identity == .selection ? audioSelection : nil,
+      originalAnchorID: identity == .selection ? transcript.selectionAnchorSnapshot.anchor : nil,
+      originalFocusID: identity == .selection ? transcript.selectionAnchorSnapshot.focus : nil)
+    switch identity {
+    case .selection: selectionEditingEdge = selectionEdge(for: edge)
+    case .clip: stopPlaybackForTimelineEdit()
+    case .suggestion: break
+    }
+    return true
+  }
+
+  private func canBeginTranscriptResize(_ identity: TranscriptResizeItemIdentity) -> Bool {
+    switch identity {
+    case .selection: true
+    case .clip: !isExporting && !hasUncommittedSliceEdit
+    case .suggestion: !isExporting && !cutSuggestions.candidateActionsDisabled
+    }
+  }
+
+  /// A resize drag to a word: whole-word-snap the draft's run to the target. For a selection, apply
+  /// it live through `applyEdgeEdit` (the same edge-edit path the waveform handle uses) so
+  /// `selectionAnchorSample` stays pinned to the fixed edge and the transcript's private anchor is
+  /// invalidated, exactly as a waveform edge drag behaves; for a clip/suggestion the preview flows
+  /// through the draft-aware computed spans, and the document is committed only on release.
+  func transcriptResizeDragged(toWord id: Word.ID) {
+    guard let index = transcriptOrder().firstIndex(of: id) else { return }
+    transcriptResizeDragged(to: TranscriptWordOccurrence(wordID: id, transcriptIndex: index))
+  }
+
+  func transcriptResizeDragged(to occurrence: TranscriptWordOccurrence) {
+    guard var draft = transcriptResizeDraft else { return }
+    // Dedup on the snapped target word only: resizes snap to whole words (D1), so ticks that stay
+    // inside the same word are pure re-renders. Do NOT also dedup on an unchanged word run — a
+    // freeform selection's edge must still snap to the word boundary via `applyEdgeEdit` even when
+    // the covered word run is unchanged (its sample range still moves).
+    guard occurrence != lastResizeTargetWord else { return }
+    lastResizeTargetWord = occurrence
+    guard
+      let newOccurrences = TranscriptResizeMath.resizedOccurrences(
+        item: TranscriptResizeItem(
+          identity: draft.identity, wordOccurrences: draft.originalWordOccurrences),
+        edge: draft.edge, toTarget: occurrence, transcriptOrder: transcriptOrder())
+    else { return }
+    let newWords = newOccurrences.map(\.wordID)
+    draft.draftedWordIDs = newWords
+    draft.draftedWordOccurrences = newOccurrences
+    transcriptResizeDraft = draft
+    if case .selection = draft.identity,
+      let old = audioSelection,
+      let updated = sourceRange(coveringWordOccurrences: newOccurrences)
+    {
+      applyEdgeEdit(selectionEdge(for: draft.edge), of: old, to: updated)
+    }
+  }
+
+  /// Release: a selection was already applied live, so nothing to commit; a clip commits its drafted
+  /// span once, in a single undoable document transaction (skipped when unchanged so a click-through
+  /// resize records no undo entry). Always clears the draft and the live selection edge.
+  func transcriptResizeEnded() {
+    defer {
+      transcriptResizeDraft = nil
+      selectionEditingEdge = nil
+      lastResizeTargetWord = nil
+    }
+    guard let draft = transcriptResizeDraft else { return }
+    switch draft.identity {
+    case .selection:
+      break
+    case .clip(let id):
+      guard !isExporting,
+        draft.draftedWordIDs != draft.originalWordIDs,
+        let range = sourceRange(coveringWordOccurrences: draft.draftedWordOccurrences),
+        let current = slices[id: id]
+      else { return }
+      mutateSlices { $0[id: id] = updatedSlice(current, to: range) }
+    case .suggestion(let id):
+      guard !isExporting, !cutSuggestions.candidateActionsDisabled,
+        let current = documentCutSuggestions[id: id], current.isPending,
+        sourceRange(coveringWordOccurrences: draft.draftedWordOccurrences) != nil
+      else { return }
+      let updated = updatedSuggestion(
+        current, toWordOccurrences: draft.draftedWordOccurrences)
+      guard updated != current else { return }
+      mutateDocument { $0.cutSuggestions[id: id] = updated }
+    }
+  }
+
+  /// Escape/abort: a clip/suggestion draft was never committed, so dropping it restores the drawn
+  /// span; a selection was applied live, so restore `audioSelection` to the pre-drag word run.
+  func transcriptResizeCancelled() {
+    defer {
+      transcriptResizeDraft = nil
+      selectionEditingEdge = nil
+      lastResizeTargetWord = nil
+    }
+    guard let draft = transcriptResizeDraft else { return }
+    if case .selection = draft.identity {
+      if let exact = draft.originalSelectionRange {
+        selectSourceRange(exact, snapPlayhead: false, origin: .transcript)
+      } else if let range = sourceRange(coveringWordIDs: draft.originalWordIDs) {
+        selectSourceRange(range, snapPlayhead: false, origin: .transcript)
+      }
+      transcript.restoreSelectionAnchor(
+        anchor: draft.originalAnchorID, focus: draft.originalFocusID)
+    }
+  }
+
   // MARK: - Seam overlays
   /// The bowtie spans the lane draws at each seam, mapped to edited view coordinates by the
   /// adapter (nil, and so dropped, only for an off-screen seam; a fully-clamped hard cut still
@@ -901,11 +1210,17 @@ final class EditorModel: ViewModel {
     if let editing = editSlice, editing.target.isDraft { return editing.canUndoDraft }
     return history.canUndo && cutSuggestionTitleEdit == nil && !hasUncommittedSliceEdit
       && !isExporting
+      && (!cutSuggestions.candidateActionsDisabled
+        || (history.undo.last?.document?.before.cutSuggestions ?? documentCutSuggestions)
+          == documentCutSuggestions)
   }
   var canRedo: Bool {
     if let editing = editSlice, editing.target.isDraft { return editing.canRedoDraft }
     return history.canRedo && cutSuggestionTitleEdit == nil && !hasUncommittedSliceEdit
       && !isExporting
+      && (!cutSuggestions.candidateActionsDisabled
+        || (history.redo.last?.document?.after.cutSuggestions ?? documentCutSuggestions)
+          == documentCutSuggestions)
   }
 
   var sliceCountLabel: String {
@@ -913,8 +1228,10 @@ final class EditorModel: ViewModel {
   }
 
   var isExporting: Bool {
-    if case .exporting = exportPhase { return true }
-    return false
+    switch exportPhase {
+    case .exporting, .reviewing: true
+    default: false
+    }
   }
   var canExportAll: Bool {
     !slices.isEmpty && !isExporting && !hasUncommittedSliceEdit && editedTimeline.isValid
@@ -942,6 +1259,8 @@ final class EditorModel: ViewModel {
       return ""
     case .exporting(let current, let total):
       return current <= 0 ? "Preparing export…" : "Exporting slice \(current) of \(total)…"
+    case .reviewing(let current, let total):
+      return "Review filenames — \(current) of \(total) exported."
     case .done(let count):
       let clips = count == 1 ? "clip" : "clips"
       let location = destinationURL.map { " to \($0.lastPathComponent)" } ?? ""
@@ -1589,6 +1908,10 @@ final class EditorModel: ViewModel {
 
   /// Escape clears the main selection and propagates when nothing is selected.
   private func handleEscapeKey() -> Bool {
+    if transcriptResizeDraft != nil {
+      transcriptResizeCancelled()
+      return true
+    }
     guard selection != .none else { return false }
     clearSelection()
     return true
@@ -1704,6 +2027,7 @@ final class EditorModel: ViewModel {
   /// entry.
   func mutateDocument(
     recordUndo: Bool = true, selectionAfter: EditorSelection? = nil, label: String = "",
+    recordingPermanentReservations reservations: [SequenceReservation] = [],
     _ body: (inout EditorDocumentState) -> Void
   ) {
     finishCutSuggestionTitleEdit()
@@ -1711,12 +2035,20 @@ final class EditorModel: ViewModel {
     let old = documentState
     var new = old
     body(&new)
+    new.recordPermanentReservations(reservations)
     guard new != old else { return }
     slices = new.slices
     timelineRemovals = new.timelineRemovals
     documentCutSuggestions = new.cutSuggestions
+    suggestionStarts = new.suggestionStarts
+    suggestionBatch = new.suggestionBatch
+    issuedSuggestionNumbers = new.issuedSuggestionNumbers
+    unfinishedSuggestionRun = new.unfinishedSuggestionRun
+    lastAppliedSuggestionRunID = new.lastAppliedSuggestionRunID
+    suggestionRecoveryOwnerID = new.suggestionRecoveryOwnerID
     speakerCountOverride = new.speakerCountOverride
     speakerDisplayNames = new.speakerDisplayNames
+    interviewArtist = new.interviewArtist
     if let selectionAfter { selection = selectionAfter }
     reconcileSelection()
     reconcileDraftEditing()
@@ -1732,17 +2064,23 @@ final class EditorModel: ViewModel {
       // earlier edit can't rewind to a snapshot that predates it and silently drop it.
       history.rebase(body)
     }
+    history.rebase { $0.recordPermanentReservations(reservations) }
     syncEditedTimeline()
     onDocumentStateChanged?(documentState)
   }
 
   private func cutSuggestionTitleEditingBegan(_ id: CutSuggestion.ID) {
     finishCutSuggestionTitleEdit()
-    guard documentCutSuggestions[id: id] != nil else { return }
+    guard !cutSuggestions.candidateActionsDisabled,
+      let candidate = documentCutSuggestions[id: id], candidate.isPending, candidate.naming == nil
+    else { return }
     cutSuggestionTitleEdit = (id, documentState)
   }
 
   private func cutSuggestionTitleChanged(_ id: CutSuggestion.ID, to newTitle: String) {
+    guard !cutSuggestions.candidateActionsDisabled,
+      let candidate = documentCutSuggestions[id: id], candidate.isPending, candidate.naming == nil
+    else { return }
     guard cutSuggestionTitleEdit?.id == id else {
       mutateDocument { $0.cutSuggestions[id: id]?.title = newTitle }
       return
@@ -1771,6 +2109,7 @@ final class EditorModel: ViewModel {
   /// `slices`-only convenience over `mutateDocument`, kept so every existing slice
   /// mutation site reads the same as before.
   func mutateSlices(_ body: (inout IdentifiedArrayOf<Slice>) -> Void) {
+    guard !isExporting else { return }
     mutateDocument { doc in body(&doc.slices) }
   }
 
@@ -1780,17 +2119,91 @@ final class EditorModel: ViewModel {
   /// half-accepted state (a green slice beside its own amber pending band) that two separate
   /// mutations would leave between undos. The derived slice shares the suggestion's id, so
   /// re-accepting is a no-op on the slice while still (re)confirming the status.
-  func acceptCutSuggestion(_ slice: Slice, id: CutSuggestion.ID) {
-    let firstAccept = slices[id: slice.id] == nil
-    let nudged = offsetNudgedClip(slice)
-    let acceptedSelection: EditorSelection? =
-      selection == .object(.suggestion(id)) ? .object(.clip(nudged.id)) : nil
-    mutateDocument(selectionAfter: acceptedSelection) {
-      if $0.slices[id: nudged.id] == nil { $0.slices.append(nudged) }
-      $0.cutSuggestions[id: id]?.accept()
+  func acceptCutSuggestion(_: Slice, id: CutSuggestion.ID) {
+    guard !cutSuggestions.candidateActionsDisabled else { return }
+    do {
+      let validated = try suggestionSliceForAcceptance(
+        id: id, state: documentState, plan: editPlan, sourceFingerprint: sourceFingerprint)
+      let firstAccept = slices[id: id] == nil
+      guard firstAccept else { return }
+      let nudged = offsetNudgedClip(validated.slice)
+      let reservations = validated.slice.suggestionNaming?.reservation.map { [$0] } ?? []
+      let acceptedSelection: EditorSelection? =
+        selection == .object(.suggestion(id)) ? .object(.clip(id)) : nil
+      mutateDocument(
+        selectionAfter: acceptedSelection, recordingPermanentReservations: reservations
+      ) {
+        if $0.slices[id: id] == nil { $0.slices.append(nudged) }
+        $0.cutSuggestions[id: id] = validated.candidate
+        $0.suggestionBatch = validated.batch
+      }
+      if firstAccept { sliceScrollTarget = id }
+      if acceptedSelection != nil { revealSelectedSidebarObject(.clip(id)) }
+    } catch {
+      cutSuggestions.actionMessage = error.localizedDescription
     }
-    if firstAccept { sliceScrollTarget = nudged.id }
-    if acceptedSelection != nil { revealSelectedSidebarObject(.clip(nudged.id)) }
+  }
+
+  @discardableResult
+  func ensureSuggestionRecoveryOwner() -> UUID {
+    if let suggestionRecoveryOwnerID { return suggestionRecoveryOwnerID }
+    let ownerID = uuid()
+    mutateDocument(recordUndo: false) { $0.suggestionRecoveryOwnerID = ownerID }
+    return ownerID
+  }
+
+  func replaceSuggestionBatch(
+    candidates: [CutSuggestion], batch: SuggestionBatch, recordUndo: Bool = false
+  ) throws {
+    guard !cutSuggestions.candidateActionsDisabled else { throw CancellationError() }
+    try validateSuggestionRunApplication(candidates: candidates, batch: batch)
+    mutateDocument(recordUndo: recordUndo) {
+      $0.cutSuggestions = IdentifiedArray(candidates, uniquingIDsWith: { first, _ in first })
+      $0.suggestionBatch = batch
+    }
+  }
+
+  func applySuggestionReviewIntent(_ intent: SuggestionReviewIntent) throws {
+    guard !cutSuggestions.candidateActionsDisabled else { throw SuggestionReviewError.locked }
+    switch try suggestionReviewChange(intent, document: documentState) {
+    case .batch(let candidates, let batch):
+      try replaceSuggestionBatch(candidates: candidates, batch: batch, recordUndo: true)
+    case .starts(let starts):
+      mutateDocument { $0.suggestionStarts = starts }
+    }
+  }
+
+  func applySuggestionRun(candidates: [CutSuggestion], batch: SuggestionBatch) throws {
+    let snapshot = batch.snapshot
+    guard !cutSuggestions.recoveryBlocksSuggestions,
+      snapshot.sourceFingerprint == sourceFingerprint,
+      snapshot.transcriptHash == editPlan.transcriptHash,
+      snapshot.sampleRate == editPlan.source.sampleRate,
+      let checkpoint = unfinishedSuggestionRun,
+      checkpoint.snapshot == snapshot,
+      checkpoint.snapshot.runID != lastAppliedSuggestionRunID,
+      try suggestionBaselineMatches(checkpoint, document: documentState)
+    else {
+      throw SuggestionRecoveryError.conflict(
+        "The source or current suggestions changed. Resume the search.")
+    }
+    try validateSuggestionRunApplication(candidates: candidates, batch: batch)
+    guard checkpoint.phase == .ready || checkpoint.phase == .needsNumbering else {
+      throw SuggestionRecoveryError.invalid("The search does not have complete saved results.")
+    }
+    let validated = try preparePendingSuggestions(
+      checkpoint.candidates, snapshot: snapshot, starts: checkpoint.proposedStarts,
+      issued: issuedSuggestionNumbers)
+    guard validated.candidates == candidates, validated.batch == batch else {
+      throw SuggestionRecoveryError.conflict(
+        "The saved suggestions changed. Resume the search again.")
+    }
+    mutateDocument(recordUndo: false) {
+      $0.cutSuggestions = IdentifiedArray(uniqueElements: candidates)
+      $0.suggestionBatch = batch
+      $0.lastAppliedSuggestionRunID = snapshot.runID
+      $0.unfinishedSuggestionRun = nil
+    }
   }
 
   /// The single funnel for every NEW clip (Mark as Clip, fine-tune commit): nudges its cut
@@ -2557,11 +2970,20 @@ final class EditorModel: ViewModel {
   /// stack — replaying history must never record a new entry), rebuilds the edited timeline,
   /// and fires the change callback so persistence stays in step with in-memory state.
   func restore(_ restored: EditorDocumentState) {
+    var restored = restored
+    restored.normalizePendingSuggestionNaming()
     slices = restored.slices
     timelineRemovals = restored.timelineRemovals
     documentCutSuggestions = restored.cutSuggestions
+    suggestionStarts = restored.suggestionStarts
+    suggestionBatch = restored.suggestionBatch
+    issuedSuggestionNumbers = restored.issuedSuggestionNumbers
+    unfinishedSuggestionRun = restored.unfinishedSuggestionRun
+    lastAppliedSuggestionRunID = restored.lastAppliedSuggestionRunID
+    suggestionRecoveryOwnerID = restored.suggestionRecoveryOwnerID
     speakerCountOverride = restored.speakerCountOverride
     speakerDisplayNames = restored.speakerDisplayNames
+    interviewArtist = restored.interviewArtist
     reconcileDraftEditing()
     syncEditedTimeline()
     onDocumentStateChanged?(documentState)
@@ -3361,6 +3783,20 @@ final class EditorModel: ViewModel {
 
   func cancelExportTapped() {
     exportTask?.cancel()
+    guard let session = exportSession, !session.isCopying else { return }
+    exportReview = nil
+    exportPhase = .exporting(current: session.copied.count, total: session.total)
+    exportTask = Task {
+      await session.cleanup()
+      guard exportSession === session else { return }
+      exportSession = nil
+      exportPhase = .failed(cancelMessage(copied: session.copied.count, total: session.total))
+    }
+  }
+
+  func exportReviewDismissed() {
+    guard exportReview == nil, case .reviewing = exportPhase else { return }
+    cancelExportTapped()
   }
 
   /// Waits for any in-flight export to finish unwinding. The engine subprocess reads the
@@ -3368,6 +3804,7 @@ final class EditorModel: ViewModel {
   /// this — after ``cancelExportTapped()`` — before releasing the session audio, or it could
   /// delete the file out from under a render still in flight.
   func awaitExportTeardown() async {
+    if case .reviewing = exportPhase { cancelExportTapped() }
     await exportTask?.value
   }
 
@@ -3493,6 +3930,10 @@ final class EditorModel: ViewModel {
   /// rendered out rather than silently shipped.
   private func performExport(_ targets: [Slice], removals: [TimelineRemoval]) async {
     guard let destination = await exportDestination() else { return }
+    guard !Task.isCancelled else {
+      exportPhase = .failed(cancelMessage(copied: 0, total: targets.count))
+      return
+    }
     exportPhase = .exporting(current: 0, total: targets.count)
 
     // Re-check right before touching audio — see `removalsInvalidNote`'s doc comment for
@@ -3594,25 +4035,45 @@ final class EditorModel: ViewModel {
     targets: [Slice], outputsByID: [Slice.ID: URL],
     scratchDir: URL, destination: URL
   ) async {
-    // Copy off the main actor — copying many/large AIFFs (or to a slow/network
-    // folder) must not freeze the UI or block the cancel control.
-    let stem = sourceURL.deletingPathExtension().lastPathComponent
-    let outcome = await Self.copyRenderedSlices(
-      stem: stem, targets: targets, renderedByID: outputsByID, destination: destination)
-    await removeWorkDir(scratchDir)
+    let session = ExportReviewModel(
+      request: .init(
+        targets: targets, sourceStem: sourceURL.deletingPathExtension().lastPathComponent,
+        renderedByID: outputsByID, destination: destination), scratchDirectory: scratchDir)
+    exportSession = session
+    session.onReviewNames = { [weak self, weak session] in
+      guard let self, let session, exportSession === session else { return }
+      cancelExportTapped()
+    }
+    session.onExport = { [weak self, weak session] mappings in
+      guard let self, let session, exportSession === session, exportReview === session,
+        case .reviewing = exportPhase, !session.isCopying
+      else { return }
+      exportPhase = .exporting(current: session.copied.count, total: session.total)
+      exportTask = Task { await self.continueExport(session, approved: mappings) }
+    }
+    await continueExport(session, approved: nil)
+  }
 
+  private func continueExport(_ session: ExportReviewModel, approved: [ExportNameMapping]?) async {
+    let outcome = await session.copy(approved: approved)
+    guard exportSession === session else { return }
+    if !outcome.cancelled, !Task.isCancelled, outcome.reviewMappings != nil {
+      exportPhase = .reviewing(current: outcome.copied.count, total: session.total)
+      exportReview = session
+      return
+    }
+    await session.cleanup()
+    guard exportSession === session else { return }
+    exportSession = nil
+    exportReview = nil
     if outcome.cancelled || Task.isCancelled {
-      // A cancel landing during the final copy also lands here, so the cancel
-      // button can never report success.
-      exportPhase = .failed(cancelMessage(copied: outcome.copied.count, total: targets.count))
+      exportPhase = .failed(cancelMessage(copied: outcome.copied.count, total: session.total))
     } else if let message = outcome.errorMessage {
       exportPhase = .failed(message)
-    } else if outcome.copied.count != targets.count {
-      // Defense-in-depth: `outputsByID` is built 1:1 with `targets` above, so this
-      // shouldn't be reachable — but report a short result rather than claim success.
-      exportPhase = .failed("Rendered \(outcome.copied.count) of \(targets.count) slices.")
+    } else if outcome.copied.count != session.total {
+      exportPhase = .failed("Rendered \(outcome.copied.count) of \(session.total) slices.")
     } else {
-      workspace.reveal(outcome.copied)
+      workspace.reveal(outcome.copied.map(\.url))
       exportPhase = .done(count: outcome.copied.count)
     }
   }
@@ -3622,44 +4083,6 @@ final class EditorModel: ViewModel {
     guard let chosen = await workspace.chooseDirectory() else { return nil }
     destinationURL = chosen
     return chosen
-  }
-
-  /// The result of copying rendered slices to the destination, computed off the main
-  /// actor. `cancelled` means the export task was cancelled mid-copy (partial state);
-  /// `errorMessage` means a copy failed; otherwise `copied` holds one URL per target.
-  struct CopyOutcome: Sendable {
-    var copied: [URL]
-    var cancelled: Bool
-    var errorMessage: String?
-  }
-
-  /// Copies each rendered temp AIFF to the destination under a unique, sanitized name.
-  /// `nonisolated` so the file IO runs off the main actor. Cancellation is honoured
-  /// between files so a mid-copy cancel reports how many actually landed.
-  private nonisolated static func copyRenderedSlices(
-    stem: String, targets: [Slice], renderedByID: [UUID: URL], destination: URL
-  ) async -> CopyOutcome {
-    var taken = Set(
-      ((try? FileManager.default.contentsOfDirectory(atPath: destination.path)) ?? [])
-        .map { $0.lowercased() })
-    var copied: [URL] = []
-    for (offset, slice) in targets.enumerated() {
-      if Task.isCancelled {
-        return CopyOutcome(copied: copied, cancelled: true, errorMessage: nil)
-      }
-      guard let source = renderedByID[slice.id] else { continue }
-      let name = exportFileName(
-        sourceStem: stem, sliceName: slice.name, index: offset + 1, taken: &taken)
-      let target = destination.appendingPathComponent(name)
-      do {
-        try FileManager.default.copyItem(at: source, to: target)
-        copied.append(target)
-      } catch {
-        return CopyOutcome(
-          copied: copied, cancelled: false, errorMessage: error.localizedDescription)
-      }
-    }
-    return CopyOutcome(copied: copied, cancelled: false, errorMessage: nil)
   }
 
   private nonisolated func removeWorkDir(_ workDir: URL?) async {

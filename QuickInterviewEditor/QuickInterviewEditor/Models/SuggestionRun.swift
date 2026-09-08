@@ -1,0 +1,477 @@
+import Foundation
+
+struct SuggestionRunSnapshot: Codable, Equatable, Sendable {
+  var runID: UUID
+  var configuration: SuggestionConfiguration
+  var configurationHash: String
+  var model: String
+  var discoveryPromptVersion: String
+  var extractionPromptVersion: String
+  var productSpecVersion: String
+  var transcriptHash: String
+  var sourceFingerprint: String
+  var sampleRate: Int
+  var stage1Window: Int = 130
+  var stage1Step: Int = 110
+  var interviewArtist: String?
+}
+
+extension SuggestionRunSnapshot {
+  init(from decoder: any Decoder) throws {
+    let values = try decoder.container(keyedBy: CodingKeys.self)
+    runID = try values.decode(UUID.self, forKey: .runID)
+    configuration = try values.decode(SuggestionConfiguration.self, forKey: .configuration)
+    configurationHash = try values.decode(String.self, forKey: .configurationHash)
+    model = try values.decode(String.self, forKey: .model)
+    discoveryPromptVersion = try values.decode(String.self, forKey: .discoveryPromptVersion)
+    extractionPromptVersion = try values.decode(String.self, forKey: .extractionPromptVersion)
+    productSpecVersion = try values.decode(String.self, forKey: .productSpecVersion)
+    transcriptHash = try values.decode(String.self, forKey: .transcriptHash)
+    sourceFingerprint = try values.decode(String.self, forKey: .sourceFingerprint)
+    sampleRate = try values.decode(Int.self, forKey: .sampleRate)
+    stage1Window = try values.decodeIfPresent(Int.self, forKey: .stage1Window) ?? 130
+    stage1Step = try values.decodeIfPresent(Int.self, forKey: .stage1Step) ?? 110
+    interviewArtist = try values.decodeIfPresent(String.self, forKey: .interviewArtist)
+  }
+}
+
+struct SuggestionNamingRecord: Codable, Equatable, Sendable {
+  var runID: UUID
+  var typeID: String
+  var typeName: String
+  var typeGroup: SuggestionGroup
+  var discoveryLabel: String
+  var extractedValues: [String: String]
+  var missingFieldIDs: [String]
+  var correctedValues: [String: String]
+  var reservation: SequenceReservation?
+}
+
+struct SuggestionBatch: Codable, Equatable, Sendable {
+  struct CanonicalGroup: Codable, Equatable, Sendable {
+    var key: SuggestionSequenceKey
+    var values: [String: String]
+  }
+
+  var snapshot: SuggestionRunSnapshot
+  var actualStarts: SuggestionStarts
+  var canonicalGroups: [CanonicalGroup]
+}
+
+struct SuggestionRunCheckpoint: Codable, Equatable, Sendable {
+  enum Phase: String, Codable, Equatable, Sendable {
+    case discovering
+    case extracting
+    case paused
+    case needsRetry
+    case needsNumbering
+    case ready
+  }
+
+  var schemaVersion: Int = 1
+  var pythonRevision: Int
+  var controlRevision: Int
+  var originalBatchFingerprint: String?
+  var snapshot: SuggestionRunSnapshot
+  var phase: Phase
+  var candidates: [CutSuggestion]
+  var completedRequestKeys: [String]
+  var failedRequestKeys: [String]
+  var proposedStarts: SuggestionStarts
+  var failureMessage: String?
+}
+
+enum SuggestionNumberingMode: Sendable {
+  case fresh
+  case pendingRenumber(selectedCandidateIDs: Set<UUID>)
+  case correction(candidateID: UUID)
+}
+
+enum SuggestionBatchNumberingError: Error, Equatable {
+  case invalidConfiguration([String])
+  case unknownType(String)
+  case invalidNaming(candidateID: UUID)
+  case conflictingReservation(SequenceReservationIdentity)
+  case duplicateCandidateID(UUID)
+  case duplicateTypeID(String)
+  case duplicateGroupStart(SuggestionSequenceKey)
+}
+
+enum SuggestionRunValidationError: Error, Equatable, LocalizedError {
+  case missingOwningSnapshot(UUID)
+  case invalidNaming(candidateID: UUID)
+
+  var errorDescription: String? {
+    switch self {
+    case .missingOwningSnapshot:
+      "This suggestion's saved naming rules are missing. Suggest cuts again before accepting."
+    case .invalidNaming:
+      "This suggestion's saved naming details are invalid. Review its fields or suggest cuts again."
+    }
+  }
+}
+
+func validateSuggestionRunApplication(
+  candidates: [CutSuggestion], batch: SuggestionBatch?
+) throws {
+  for candidate in candidates {
+    guard let naming = candidate.naming else { continue }
+    guard let batch else { throw SuggestionRunValidationError.missingOwningSnapshot(naming.runID) }
+    guard naming.runID == batch.snapshot.runID,
+      let type = batch.snapshot.configuration.types.first(where: { $0.id == naming.typeID }),
+      naming.typeName == type.name,
+      naming.typeGroup == type.group,
+      candidate.productType.rawValue == type.id,
+      naming.reservation == nil || type.template.contains(where: { $0.kind == .sequence }),
+      candidate.status != .accepted || naming.reservation != nil
+        || !type.template.contains(where: { $0.kind == .sequence })
+    else { throw SuggestionRunValidationError.invalidNaming(candidateID: candidate.id) }
+    if let reservation = naming.reservation {
+      let values = naming.extractedValues.merging(naming.correctedValues) { _, corrected in
+        corrected
+      }
+      guard reservation.candidateID == candidate.id,
+        reservation.number > 0,
+        reservation.key
+          == suggestionSequenceKey(type: type, values: values, candidateID: candidate.id)
+      else { throw SuggestionRunValidationError.invalidNaming(candidateID: candidate.id) }
+    }
+  }
+}
+
+func preparePendingSuggestions(
+  _ candidates: [CutSuggestion], snapshot: SuggestionRunSnapshot,
+  starts: SuggestionStarts, issued: [SequenceReservation]
+) throws -> (candidates: [CutSuggestion], batch: SuggestionBatch) {
+  try validateNumberingInput(candidates: candidates, snapshot: snapshot, starts: starts)
+  let prepared = try candidates.map { original in
+    guard
+      let type = snapshot.configuration.types.first(where: {
+        $0.id == original.productType.rawValue
+      })
+    else { throw SuggestionBatchNumberingError.unknownType(original.productType.rawValue) }
+    var candidate = original
+    var naming = try sourceNaming(for: original, type: type, snapshot: snapshot)
+    if let reservation = naming.reservation,
+      !issued.contains(where: { $0.identity == reservation.identity })
+    {
+      naming.reservation = nil
+    }
+    candidate.title = naming.discoveryLabel
+    candidate.naming = naming
+    return candidate
+  }
+  let batch = SuggestionBatch(snapshot: snapshot, actualStarts: .init(), canonicalGroups: [])
+  try validateSuggestionRunApplication(candidates: prepared, batch: batch)
+  return (prepared, batch)
+}
+
+func suggestionForAcceptance(
+  _ original: CutSuggestion, batch: SuggestionBatch, starts: SuggestionStarts,
+  issued: [SequenceReservation]
+) throws -> (candidate: CutSuggestion, batch: SuggestionBatch) {
+  try validateSuggestionRunApplication(candidates: [original], batch: batch)
+  guard let key = reviewSequenceKey(original, batch: batch) else {
+    return (original, batch)
+  }
+  var candidate = original
+  let existing = candidate.naming?.reservation
+  candidate.naming?.reservation =
+    issued.first(where: { $0.identity == existing?.identity })
+    ?? issued.last(where: { $0.candidateID == candidate.id && $0.key == key })
+  var floors = starts
+  floors.types = floors.types.mapValues { .init(number: $0.number, isExplicit: false) }
+  floors.groups = floors.groups.map {
+    .init(
+      key: $0.key, start: .init(number: $0.start.number, isExplicit: false), display: $0.display)
+  }
+  var result = try numberSuggestions(
+    [candidate], snapshot: batch.snapshot, starts: floors, issued: issued,
+    retained: [], existingBatch: batch)
+  for recorded in batch.actualStarts.groups {
+    result.batch.actualStarts.groups.removeAll { $0.key == recorded.key }
+    result.batch.actualStarts.groups.append(recorded)
+  }
+  return (result.candidates[0], result.batch)
+}
+
+// swiftlint:disable:next function_body_length cyclomatic_complexity
+func numberSuggestions(
+  _ candidates: [CutSuggestion],
+  snapshot: SuggestionRunSnapshot,
+  starts: SuggestionStarts,
+  issued: [SequenceReservation],
+  retained: [SequenceReservation],
+  mode: SuggestionNumberingMode = .fresh,
+  existingBatch: SuggestionBatch? = nil
+) throws -> (candidates: [CutSuggestion], batch: SuggestionBatch) {
+  let rulesSnapshot: SuggestionRunSnapshot
+  switch mode {
+  case .fresh:
+    rulesSnapshot = snapshot
+  case .pendingRenumber, .correction:
+    rulesSnapshot = existingBatch?.snapshot ?? snapshot
+  }
+  try validateNumberingInput(candidates: candidates, snapshot: rulesSnapshot, starts: starts)
+  let selectedIDs = selectedCandidateIDs(in: candidates, mode: mode)
+  let types = Dictionary(
+    uniqueKeysWithValues: rulesSnapshot.configuration.types.map { ($0.id, $0) })
+  let ordered = try candidates.sorted { lhs, rhs in
+    let left = try typeID(for: lhs)
+    let right = try typeID(for: rhs)
+    return (lhs.startSample, lhs.endSample, left, lhs.id.uuidString)
+      < (rhs.startSample, rhs.endSample, right, rhs.id.uuidString)
+  }
+
+  var occupied = [SuggestionSequenceKey: Set<Int>]()
+  var issuedMaximum = [SuggestionSequenceKey: Int]()
+  var owners = [SuggestionSequenceKey: [Int: Set<UUID>]]()
+  for reservation in issued {
+    insert(reservation, into: &occupied, owners: &owners)
+    issuedMaximum[reservation.key] = max(
+      issuedMaximum[reservation.key] ?? reservation.number, reservation.number)
+  }
+  for reservation in retained where !selectedIDs.contains(reservation.candidateID) {
+    insert(reservation, into: &occupied, owners: &owners)
+  }
+
+  var canonicalGroups = Dictionary(
+    (existingBatch?.canonicalGroups ?? []).map { ($0.key, $0.values) },
+    uniquingKeysWith: { first, _ in first })
+  let issuedCanonicalGroups = Dictionary(
+    issued.compactMap { reservation in
+      reservation.canonicalValues.isEmpty ? nil : (reservation.key, reservation.canonicalValues)
+    }, uniquingKeysWith: { first, _ in first })
+  var result = Dictionary(uniqueKeysWithValues: candidates.map { ($0.id, $0) })
+  var actualStarts = existingBatch?.actualStarts ?? starts
+
+  for original in ordered where selectedIDs.contains(original.id) {
+    let typeID = try typeID(for: original)
+    guard let type = types[typeID] else { throw SuggestionBatchNumberingError.unknownType(typeID) }
+    let source = try sourceNaming(for: original, type: type, snapshot: rulesSnapshot)
+    let values = source.extractedValues.merging(source.correctedValues) { _, corrected in corrected
+    }
+    let key = suggestionSequenceKey(type: type, values: values, candidateID: original.id)
+    let groupValues = Dictionary(
+      uniqueKeysWithValues: type.sequenceFieldIDs.compactMap { fieldID in
+        values[fieldID].map { (fieldID, $0) }
+      })
+    let canonicalValues: [String: String]
+    if let stored = canonicalGroups[key] {
+      canonicalValues = stored
+    } else if let issuedValues = issuedCanonicalGroups[key] {
+      let filtered = Dictionary(
+        uniqueKeysWithValues: type.sequenceFieldIDs.compactMap { fieldID in
+          issuedValues[fieldID].map { (fieldID, $0) }
+        })
+      canonicalGroups[key] = filtered
+      canonicalValues = filtered
+    } else {
+      canonicalGroups[key] = groupValues
+      canonicalValues = groupValues
+    }
+    let renderingValues = values.merging(canonicalValues) { _, canonical in canonical }
+    let hasSequence = type.template.contains { $0.kind == .sequence }
+    let reservation: SequenceReservation?
+    if hasSequence {
+      if shouldPreserveExistingReservation(source.reservation, mode: mode, owners: owners),
+        let existing = source.reservation, existing.key == key
+      {
+        if hasAnotherOwner(existing, in: owners) {
+          throw SuggestionBatchNumberingError.conflictingReservation(existing.identity)
+        }
+        reservation = SequenceReservation(
+          candidateID: original.id, key: key, number: existing.number,
+          canonicalValues: canonicalValues)
+        insert(reservation!, into: &occupied, owners: &owners)
+      } else {
+        let configured = configuredStart(for: key, typeID: type.id, starts: starts)
+        let start = try allocationStart(
+          configured, issuedMaximum: issuedMaximum[key], occupiedMaximum: occupied[key]?.max(),
+          mode: mode)
+        if modeRecordsActualStart(mode) {
+          actualStarts.groups.removeAll { $0.key == key }
+          actualStarts.groups.append(
+            .init(key: key, start: .init(number: start, isExplicit: configured.isExplicit)))
+        }
+        let number = try nextSuggestionNumber(start: start, occupied: occupied[key] ?? [])
+        reservation = SequenceReservation(
+          candidateID: original.id, key: key, number: number, canonicalValues: canonicalValues)
+        insert(reservation!, into: &occupied, owners: &owners)
+      }
+    } else {
+      reservation = nil
+    }
+
+    var candidate = original
+    candidate.title = renderSuggestionName(
+      template: type.template, values: renderingValues, sequence: reservation?.number,
+      fallback: source.discoveryLabel)
+    candidate.naming = SuggestionNamingRecord(
+      runID: rulesSnapshot.runID, typeID: type.id, typeName: type.name, typeGroup: type.group,
+      discoveryLabel: source.discoveryLabel, extractedValues: source.extractedValues,
+      missingFieldIDs: source.missingFieldIDs, correctedValues: source.correctedValues,
+      reservation: reservation)
+    result[candidate.id] = candidate
+  }
+
+  return (
+    candidates: candidates.compactMap { result[$0.id] },
+    batch: SuggestionBatch(
+      snapshot: rulesSnapshot, actualStarts: actualStarts,
+      canonicalGroups:
+        canonicalGroups
+        .map { .init(key: $0.key, values: $0.value) }
+        .sorted(by: canonicalGroupPrecedes))
+  )
+}
+
+private func canonicalGroupPrecedes(
+  _ lhs: SuggestionBatch.CanonicalGroup, _ rhs: SuggestionBatch.CanonicalGroup
+) -> Bool {
+  guard lhs.key.typeID == rhs.key.typeID else { return lhs.key.typeID < rhs.key.typeID }
+  let leftFields = lhs.key.fields.sorted { ($0.fieldID, $0.value) < ($1.fieldID, $1.value) }
+  let rightFields = rhs.key.fields.sorted { ($0.fieldID, $0.value) < ($1.fieldID, $1.value) }
+  for (left, right) in zip(leftFields, rightFields) {
+    guard left.fieldID == right.fieldID else { return left.fieldID < right.fieldID }
+    guard left.value == right.value else { return left.value < right.value }
+  }
+  guard leftFields.count == rightFields.count else { return leftFields.count < rightFields.count }
+  switch (lhs.key.provisionalCandidateID, rhs.key.provisionalCandidateID) {
+  case (let left?, let right?): return left.uuidString < right.uuidString
+  case (nil, .some): return true
+  case (.some, nil): return false
+  case (nil, nil): return false
+  }
+}
+
+private func modeRecordsActualStart(_ mode: SuggestionNumberingMode) -> Bool {
+  switch mode {
+  case .fresh, .pendingRenumber: true
+  case .correction: false
+  }
+}
+
+private func selectedCandidateIDs(
+  in candidates: [CutSuggestion], mode: SuggestionNumberingMode
+) -> Set<UUID> {
+  switch mode {
+  case .fresh: Set(candidates.map(\.id))
+  case .pendingRenumber(let selectedCandidateIDs):
+    Set(
+      candidates.filter { $0.status == .pending && selectedCandidateIDs.contains($0.id) }.map(\.id))
+  case .correction(let candidateID):
+    Set(candidates.filter { $0.status == .pending && $0.id == candidateID }.map(\.id))
+  }
+}
+
+private func validateNumberingInput(
+  candidates: [CutSuggestion], snapshot: SuggestionRunSnapshot, starts: SuggestionStarts
+) throws {
+  let configurationMessages = snapshot.configuration.validationMessages()
+  guard configurationMessages.isEmpty else {
+    throw SuggestionBatchNumberingError.invalidConfiguration(configurationMessages)
+  }
+  var candidateIDs = Set<UUID>()
+  for candidate in candidates where !candidateIDs.insert(candidate.id).inserted {
+    throw SuggestionBatchNumberingError.duplicateCandidateID(candidate.id)
+  }
+  var typeIDs = Set<String>()
+  for type in snapshot.configuration.types where !typeIDs.insert(type.id).inserted {
+    throw SuggestionBatchNumberingError.duplicateTypeID(type.id)
+  }
+  var groupKeys = Set<SuggestionSequenceKey>()
+  for group in starts.groups where !groupKeys.insert(group.key).inserted {
+    throw SuggestionBatchNumberingError.duplicateGroupStart(group.key)
+  }
+}
+
+private func shouldPreserveExistingReservation(
+  _ reservation: SequenceReservation?, mode: SuggestionNumberingMode,
+  owners: [SuggestionSequenceKey: [Int: Set<UUID>]]
+) -> Bool {
+  guard let reservation else { return false }
+  switch mode {
+  case .correction: return true
+  case .pendingRenumber: return false
+  case .fresh:
+    return owners[reservation.key]?[reservation.number, default: []].contains(
+      reservation.candidateID) == true
+  }
+}
+
+private func typeID(for candidate: CutSuggestion) throws -> String {
+  let id = candidate.naming?.typeID ?? candidate.productType.rawValue
+  guard !id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+    throw SuggestionBatchNumberingError.invalidNaming(candidateID: candidate.id)
+  }
+  return id
+}
+
+private func sourceNaming(
+  for candidate: CutSuggestion, type: SuggestionTypeDefinition, snapshot: SuggestionRunSnapshot
+) throws -> SuggestionNamingRecord {
+  guard let record = candidate.naming else {
+    return SuggestionNamingRecord(
+      runID: snapshot.runID, typeID: type.id, typeName: type.name, typeGroup: type.group,
+      discoveryLabel: candidate.title, extractedValues: [:], missingFieldIDs: [],
+      correctedValues: [:], reservation: nil)
+  }
+  guard record.runID == snapshot.runID,
+    record.typeID == type.id, record.typeName == type.name, record.typeGroup == type.group
+  else {
+    throw SuggestionBatchNumberingError.invalidNaming(candidateID: candidate.id)
+  }
+  if let reservation = record.reservation,
+    reservation.candidateID != candidate.id || reservation.number <= 0
+  {
+    throw SuggestionBatchNumberingError.invalidNaming(candidateID: candidate.id)
+  }
+  return record
+}
+
+private func configuredStart(
+  for key: SuggestionSequenceKey, typeID: String, starts: SuggestionStarts
+) -> SuggestionStart {
+  starts.groups.first(where: { $0.key == key })?.start
+    ?? starts.types[typeID]
+    ?? SuggestionStart(number: 1, isExplicit: false)
+}
+
+private func allocationStart(
+  _ configured: SuggestionStart, issuedMaximum: Int?, occupiedMaximum: Int?,
+  mode: SuggestionNumberingMode
+) throws -> Int {
+  if case .correction = mode {
+    guard let occupiedMaximum else { return 1 }
+    let next = occupiedMaximum.addingReportingOverflow(1)
+    guard !next.overflow else { throw SuggestionNumberingError.exhausted }
+    return next.partialValue
+  }
+  guard case .fresh = mode else { return configured.number }
+  guard let issuedMaximum else { return configured.number }
+  let next = issuedMaximum.addingReportingOverflow(1)
+  guard !next.overflow else { throw SuggestionNumberingError.exhausted }
+  if configured.isExplicit, configured.number <= issuedMaximum {
+    throw SuggestionNumberingError.minimumSafeStart(next.partialValue)
+  }
+  return configured.isExplicit ? configured.number : max(configured.number, next.partialValue)
+}
+
+private func insert(
+  _ reservation: SequenceReservation,
+  into occupied: inout [SuggestionSequenceKey: Set<Int>],
+  owners: inout [SuggestionSequenceKey: [Int: Set<UUID>]]
+) {
+  occupied[reservation.key, default: []].insert(reservation.number)
+  owners[reservation.key, default: [:]][reservation.number, default: []].insert(
+    reservation.candidateID)
+}
+
+private func hasAnotherOwner(
+  _ reservation: SequenceReservation, in owners: [SuggestionSequenceKey: [Int: Set<UUID>]]
+) -> Bool {
+  owners[reservation.key]?[reservation.number, default: []].contains {
+    $0 != reservation.candidateID
+  } ?? false
+}
