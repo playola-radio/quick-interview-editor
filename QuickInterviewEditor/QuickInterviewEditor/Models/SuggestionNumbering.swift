@@ -49,6 +49,14 @@ enum SuggestionNumberingError: Error, Equatable {
   case exhausted
 }
 
+func parseSuggestionStartingNumber(_ text: String) throws -> Int {
+  let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+  guard !trimmed.isEmpty, trimmed.utf8.allSatisfy({ (48...57).contains($0) }),
+    let number = Int(trimmed), number > 0
+  else { throw SuggestionNumberingError.invalidStart }
+  return number
+}
+
 func nextSuggestionNumber(start: Int, occupied: Set<Int>) throws -> Int {
   guard start > 0 else { throw SuggestionNumberingError.invalidStart }
   var number = start

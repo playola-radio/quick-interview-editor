@@ -612,6 +612,56 @@ extension ProjectHydrationTests {
     expectNoDifference(record.registerChangeCount, changes)
   }
 
+  @Test(arguments: ["duplicate", "claim", "capture"], [false, true])
+  func cancellingPendingOrphanSelectionCannotPublishOrClobberNewSelection(
+    suspendedOperation: String, selectsAgain: Bool
+  ) async throws {
+    let root = FileManager.default.temporaryDirectory.appending(component: UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let pending = try await PendingOrphanSelection.make(root: root, operation: suspendedOperation)
+    defer { pending.gate.release.continuation.finish() }
+    let model = pending.model
+    let record = pending.record
+    await model.viewAppeared()
+    let editor = try #require(model.editor)
+    let before = editor.documentState
+    let changes = record.registerChangeCount
+    let recoveries = record.recoveries.count
+    let selection = Task { await model.selectOrphanRecoveryTapped(pending.owner) }
+    await pending.gate.waitUntilSuspended()
+    model.cancelOrphanRecoveryTapped()
+    expectNoDifference(model.recoveryActionsBlocked, false)
+    expectNoDifference(editor.cutSuggestions.recoveryBlocksSuggestions, false)
+    expectNoDifference(editor.documentState, before)
+    expectNoDifference(model.recoveryOwner, nil)
+    if selectsAgain {
+      await model.documentLocationObserved()
+      await model.selectOrphanRecoveryTapped(pending.owner)
+      #expect(model.recoveryOwner != nil)
+      #expect(editor.cutSuggestions.run.canResume)
+    }
+    let expected = editor.documentState
+    let expectedOwner = model.recoveryOwner
+    let expectedPhase = editor.cutSuggestions.run.phase
+    let expectedChanges = record.registerChangeCount
+    let expectedRecoveries = record.recoveries.count
+    pending.gate.release.continuation.yield(())
+    await selection.value
+    expectNoDifference(editor.documentState, expected)
+    expectNoDifference(model.recoveryOwner, expectedOwner)
+    expectNoDifference(editor.cutSuggestions.run.phase, expectedPhase)
+    expectNoDifference(model.recoveryActionsBlocked, false)
+    expectNoDifference(record.registerChangeCount, expectedChanges)
+    expectNoDifference(record.recoveries.count, expectedRecoveries)
+    expectNoDifference(pending.calls.value, 0)
+    if !selectsAgain {
+      expectNoDifference(editor.documentState, before)
+      expectNoDifference(record.registerChangeCount, changes)
+      expectNoDifference(record.recoveries.count, recoveries)
+    }
+    try await pending.expectSourceUnchanged()
+  }
+
   @Test(arguments: [false, true])
   func orphanSelectionWaitsForExplicitResumeBeforeRequestingOrApplying(isReady: Bool) async throws {
     let root = FileManager.default.temporaryDirectory.appending(component: UUID().uuidString)
@@ -746,4 +796,99 @@ extension ProjectHydrationTests {
     #expect(editor.cutSuggestions.run.canResume)
   }
 
+}
+
+private struct OrphanSelectionGate: Sendable {
+  let operation: String
+  let entered = AsyncStream.makeStream(of: Void.self)
+  let release = AsyncStream.makeStream(of: Void.self)
+  let didSuspend = LockIsolated(false)
+
+  func suspend(_ operation: String) async {
+    guard operation == self.operation,
+      didSuspend.withValue({ value in
+        if value { return false }
+        value = true
+        return true
+      })
+    else { return }
+    entered.continuation.yield(())
+    var iterator = release.stream.makeAsyncIterator()
+    _ = await iterator.next()
+  }
+
+  func waitUntilSuspended() async {
+    var iterator = entered.stream.makeAsyncIterator()
+    _ = await iterator.next()
+  }
+
+  func client(store: SuggestionRecoveryStore) -> SuggestionRecoveryClient {
+    var client = SuggestionRecoveryClient.store(store)
+    client.duplicate = { source, target in
+      try await store.duplicate(source, newOwner: target)
+      await suspend("duplicate")
+    }
+    client.claimOwner = { owner, instance in
+      let claimed = try await store.claimOwner(owner, instanceID: instance)
+      await suspend("claim")
+      return claimed
+    }
+    client.capture = { owner, runID, revision in
+      let capture = try await store.capture(owner, runID: runID, minimumPythonRevision: revision)
+      await suspend("capture")
+      return capture
+    }
+    return client
+  }
+}
+
+@MainActor
+private struct PendingOrphanSelection {
+  let model: ProjectModel
+  let record: ProjectDocumentSinkRecorder
+  let store: SuggestionRecoveryStore
+  let owner: SuggestionRecoveryOwner
+  let original: SuggestionRecoveryCapture
+  let gate: OrphanSelectionGate
+  let calls: LockIsolated<Int>
+
+  static func make(root: URL, operation: String) async throws -> Self {
+    let file = Fixtures.projectFile()
+    let plan = Fixtures.editPlan()
+    let fixture = try RecoveryFixture.matching(file: file, plan: plan)
+    let store = SuggestionRecoveryStore(root: root, uuid: { UUID() })
+    let directory = try await store.prepare(fixture.owner, preparation: fixture.preparation)
+    try fixture.writePython(RecoveryFixture.python(matching: fixture), directory: directory)
+    let original = try await store.capture(
+      fixture.owner, runID: fixture.snapshot.runID, minimumPythonRevision: nil)
+    let gate = OrphanSelectionGate(operation: operation)
+    let calls = LockIsolated(0)
+    let (sink, record) = ProjectDocumentSink.recorder()
+    let model = withDependencies {
+      $0.uuid = .incrementing
+      $0.suggestionRecovery = gate.client(store: store)
+      $0.keychain = .inMemory("ephemeral-test-key")
+      $0.environment = .constant([:])
+      $0.cutSuggest.suggestCuts = { _, _ in
+        calls.withValue { $0 += 1 }
+        return AsyncThrowingStream { $0.finish() }
+      }
+    } operation: {
+      ProjectModel(
+        file: file, plan: plan, audio: .sessionFile(root.appending(component: "audio.aiff")),
+        sink: sink)
+    }
+    return Self(
+      model: model, record: record, store: store, owner: fixture.owner, original: original,
+      gate: gate, calls: calls)
+  }
+
+  func expectSourceUnchanged() async throws {
+    let retained = try await store.capture(
+      owner, runID: original.checkpoint.snapshot.runID, minimumPythonRevision: nil)
+    expectNoDifference(retained.checkpoint, original.checkpoint)
+    expectNoDifference(
+      try SuggestionRecoveryArchive.decode(retained.archive),
+      try SuggestionRecoveryArchive.decode(original.archive))
+  }
 }

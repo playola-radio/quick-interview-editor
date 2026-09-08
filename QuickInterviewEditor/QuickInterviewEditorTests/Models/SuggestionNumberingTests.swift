@@ -5,6 +5,19 @@ import Testing
 @testable import PlayolaInterviewEditor
 
 struct SuggestionNumberingTests {
+  @Test(arguments: ["1.2", "12abc", "+", "-", "+7", "0", "-1", "1 2", "１２", "", " ", "\(Int.max)0"])
+  func startingNumberRequiresTheEntireInputToBePositiveDigits(input: String) {
+    #expect(throws: SuggestionNumberingError.invalidStart) {
+      try parseSuggestionStartingNumber(input)
+    }
+  }
+
+  @Test(arguments: ["7", "007", " 7 ", "\t7\n", String(Int.max)])
+  func startingNumberAcceptsPositiveIntegersAndSurroundingWhitespace(input: String) throws {
+    expectNoDifference(
+      try parseSuggestionStartingNumber(input), input == String(Int.max) ? Int.max : 7)
+  }
+
   @Test func nextNumberSkipsOccupiedAndChecksOverflow() throws {
     expectNoDifference(try nextSuggestionNumber(start: 7, occupied: [8]), 7)
     expectNoDifference(try nextSuggestionNumber(start: Int.max, occupied: []), Int.max)

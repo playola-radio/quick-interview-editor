@@ -48,7 +48,7 @@ struct CutSuggestionsPageView: View {
       if model.run.showsNumbering {
         Text(model.run.numberingTitle).font(.headline)
         ForEach($run.numberingEntries) { $entry in
-          TextField(entry.title, value: $entry.number, format: .number)
+          TextField(entry.title, text: $entry.numberText)
         }
         Button(model.run.applyNumberingTitle) { Task { await model.run.numberingApplyTapped() } }
       }

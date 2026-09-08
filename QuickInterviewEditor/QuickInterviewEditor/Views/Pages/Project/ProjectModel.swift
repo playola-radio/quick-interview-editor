@@ -675,6 +675,10 @@ final class ProjectModel: ViewModel {
   }
 
   func cancelOrphanRecoveryTapped() {
+    guard !recoverableSuggestionOwners.isEmpty else { return }
+    recoveryGeneration += 1
+    recoveryActionsBlocked = false
+    recoveryErrorMessage = nil
     recoverableSuggestionOwners = []
     synchronizeRecoveryEditor()
   }

@@ -220,12 +220,19 @@ final class SuggestionRunModel: ViewModel {
   }
 
   func numberingApplyTapped() async {
-    var starts = currentDocument().unfinishedSuggestionRun?.proposedStarts ?? .init()
-    starts.groups = []
-    for entry in numberingEntries {
-      starts.types[entry.id] = .init(number: entry.number, isExplicit: true)
+    guard canResume, showsNumbering, let checkpoint = currentDocument().unfinishedSuggestionRun
+    else { return }
+    do {
+      var starts = checkpoint.proposedStarts
+      starts.groups = []
+      for entry in numberingEntries {
+        starts.types[entry.id] = .init(
+          number: try parseSuggestionStartingNumber(entry.numberText), isExplicit: true)
+      }
+      await applyNumberingTapped(starts)
+    } catch {
+      presentFailure(error, runID: checkpoint.snapshot.runID)
     }
-    await applyNumberingTapped(starts)
   }
 
   func synchronizeDocument() {
@@ -524,7 +531,7 @@ final class SuggestionRunModel: ViewModel {
     }.map { type in
       .init(
         id: type.id, title: type.name,
-        number: max(minimum, checkpoint.proposedStarts.types[type.id]?.number ?? 1))
+        numberText: String(max(minimum, checkpoint.proposedStarts.types[type.id]?.number ?? 1)))
     }
   }
 
@@ -595,7 +602,7 @@ enum SuggestionRunPhase: Equatable {
 struct SuggestionNumberingEntry: Identifiable {
   var id: String
   var title: String
-  var number: Int
+  var numberText: String
 }
 
 func suggestionBatchFingerprint(_ document: EditorDocumentState) throws -> String {

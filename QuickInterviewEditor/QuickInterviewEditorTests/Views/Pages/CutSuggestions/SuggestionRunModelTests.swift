@@ -411,6 +411,78 @@ struct SuggestionRunModelTests {
     }
   }
 
+  @Test(arguments: ["1.2", "12abc", "+", "-", "0", "-1", "9223372036854775808", "", "  "])
+  func malformedNumberingDraftPreservesDocumentAndControl(input: String) async throws {
+    let fixture = SuggestionRunFixture()
+    fixture.document.withValue {
+      $0.suggestionStarts.types["spotlight"] = .init(number: 1, isExplicit: true)
+    }
+    try await withDependencies {
+      fixture.install(&$0)
+    } operation: {
+      let model = fixture.model()
+      let task = Task { await model.suggestTapped() }
+      await fixture.waitForRequests()
+      let type = try #require(SuggestionDefaults.types.first { $0.id == "spotlight" })
+      fixture.document.withValue {
+        $0.issuedSuggestionNumbers.append(
+          .init(
+            candidateID: Fixtures.uuid(99),
+            key: suggestionSequenceKey(type: type, values: [:], candidateID: Fixtures.uuid(99)),
+            number: 4, canonicalValues: [:]))
+      }
+      fixture.finish([fixture.candidate()])
+      await task.value
+      let index = try #require(model.numberingEntries.firstIndex { $0.id == "spotlight" })
+      model.numberingEntries[index].numberText = input
+      let before = fixture.document.value
+      let checkpoint = fixture.state.value.checkpoint
+      let controls = fixture.state.value.controls
+      await model.numberingApplyTapped()
+      expectNoDifference(fixture.document.value, before)
+      expectNoDifference(fixture.state.value.checkpoint, checkpoint)
+      expectNoDifference(fixture.state.value.controls, controls)
+      expectNoDifference(model.message, "Starting numbers must be positive whole numbers.")
+      model.synchronizeDocument()
+      expectNoDifference(model.numberingEntries[index].numberText, input)
+      expectNoDifference(fixture.state.value.requests.count, 1)
+    }
+  }
+
+  @Test(arguments: ["7", "  7 ", "\t7\n"])
+  func positiveNumberingDraftAppliesWithoutChangingFutureStarts(input: String) async throws {
+    let fixture = SuggestionRunFixture()
+    fixture.document.withValue {
+      $0.suggestionStarts.types["spotlight"] = .init(number: 1, isExplicit: true)
+    }
+    try await withDependencies {
+      fixture.install(&$0)
+    } operation: {
+      let model = fixture.model()
+      let task = Task { await model.suggestTapped() }
+      await fixture.waitForRequests()
+      let type = try #require(SuggestionDefaults.types.first { $0.id == "spotlight" })
+      fixture.document.withValue {
+        $0.issuedSuggestionNumbers.append(
+          .init(
+            candidateID: Fixtures.uuid(99),
+            key: suggestionSequenceKey(type: type, values: [:], candidateID: Fixtures.uuid(99)),
+            number: 4, canonicalValues: [:]))
+      }
+      fixture.finish([fixture.candidate()])
+      await task.value
+      let index = try #require(model.numberingEntries.firstIndex { $0.id == "spotlight" })
+      model.numberingEntries[index].numberText = input
+      let before = fixture.document.value
+      await model.numberingApplyTapped()
+      expectNoDifference(
+        fixture.document.value.cutSuggestions.first?.naming?.reservation?.number, 7)
+      expectNoDifference(fixture.document.value.suggestionStarts, before.suggestionStarts)
+      expectNoDifference(fixture.document.value.unfinishedSuggestionRun, nil)
+      expectNoDifference(fixture.state.value.requests.count, 1)
+    }
+  }
+
   @Test func numberingRechecksCurrentLedgerOnEachApplyAndNeverChangesFutureStarts() async throws {
     try await withMainSerialExecutor {
       let fixture = SuggestionRunFixture()
