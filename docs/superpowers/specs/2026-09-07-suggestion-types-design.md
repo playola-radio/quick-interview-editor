@@ -109,6 +109,8 @@ Keep model, discovery-prompt, extraction-prompt, configuration, transcript, and 
 
 Separate passes add model requests and latency. This is the approved trade-off for keeping new classification and naming instructions out of the successful default Spotlight prompt.
 
+Live synthetic evaluation refinement: preserve the tuned partition and shared classification prompts verbatim, then refine only configured Song Intro proposals at sentence boundaries before candidate construction and deduplication. The refinement may trim, split into independently complete takes, or explicitly reject a proposal; it must remove unrelated break transitions and fragments without discarding complete short handoffs. Validate every proposal result and persist successful refinement responses through the same durable journal. Final candidate IDs and field extraction use the refined spans. Strengthen the separate imaging prompt to keep consecutive complete repeated performances separate. Version these new behaviors for fresh configured searches (a new configured discovery version); older captured versions retain their previous discovery path when resumed. A single merged prediction cannot satisfy multiple distinct expected takes in editorial evaluation.
+
 ## Rerun lifecycle and errors
 
 When existing suggestions are present, show:
