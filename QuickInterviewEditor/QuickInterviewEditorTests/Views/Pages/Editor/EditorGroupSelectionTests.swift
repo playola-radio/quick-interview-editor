@@ -20,6 +20,97 @@ struct EditorGroupSelectionTests {
     return value
   }
 
+  private func click(_ model: EditorModel, word: Int = 3, count: Int = 1, time: Double = 1) {
+    let offset = model.transcript.document.wordRanges.first { $0.wordID == word }!.range.location
+    model.transcript.transcriptClicked(
+      atUTF16Offset: offset, clickCount: count,
+      timestamp: time, doubleClickInterval: 0.5)
+  }
+
+  @Test func clickSelectsWholeClipAndRepeatedClickPreservesIt() {
+    let model = editor()
+    let clip = Fixtures.slice(start: 70_648, end: 119_202)
+    model.slices = [clip]
+    click(model)
+    expectNoDifference(model.selection, .object(.clip(clip.id)))
+    let firstReveal = model.sidebarReveal?.token
+    click(model, time: 2)
+    expectNoDifference(model.selection, .object(.clip(clip.id)))
+    #expect(model.sidebarReveal?.token != firstReveal)
+    expectNoDifference(model.editSlice, nil)
+  }
+
+  @Test func explicitlyChosenLowerClipKeepsOverlapAndDoubleClickOpensIt() {
+    let model = editor()
+    let first = Fixtures.slice(id: Fixtures.uuid(1), start: 70_648, end: 119_202)
+    let second = Fixtures.slice(id: Fixtures.uuid(2), start: 70_648, end: 119_202)
+    model.slices = [first, second]
+    model.selectTranscriptObject(.clip(second.id))
+    click(model)
+    click(model, count: 2, time: 1.1)
+    expectNoDifference(model.selection, .object(.clip(second.id)))
+    expectNoDifference(model.editSlice?.sliceID, second.id)
+  }
+
+  @Test func freeformHighlightWinsClickInsideOverlappingClip() {
+    let model = editor()
+    model.slices = [Fixtures.slice(start: 70_648, end: 119_202)]
+    model.selectSourceRange(78_000..<90_000, snapPlayhead: false)
+    let selected = model.selection
+    click(model)
+    expectNoDifference(model.selection, selected)
+    expectNoDifference(model.sidebarReveal, nil)
+  }
+
+  @Test func secondClickAfterBoundsChangeDoesNotOpenReplacementRange() {
+    let model = editor()
+    let clip = Fixtures.slice(start: 70_648, end: 119_202)
+    model.slices = [clip]
+    click(model)
+    model.mutateDocument { $0.slices[id: clip.id]?.endSample = 130_000 }
+    click(model, count: 2, time: 1.1)
+    expectNoDifference(model.editSlice, nil)
+  }
+
+  @Test func interveningDragCancelsCapturedDoubleClick() {
+    let model = editor()
+    let clip = Fixtures.slice(start: 70_648, end: 119_202)
+    model.slices = [clip]
+    click(model)
+    let offset = model.transcript.document.wordRanges.first { $0.wordID == 3 }!.range.location
+    model.transcript.transcriptDragBegan(atUTF16Offset: offset)
+    model.selectTranscriptObject(.clip(clip.id))
+    click(model, count: 2, time: 1.1)
+    expectNoDifference(model.editSlice, nil)
+  }
+
+  @Test func hiddenSuggestionIsNotAClickTargetAndFullOverlapsRemainVisible() {
+    let model = editor()
+    let candidate = suggestion(model)
+    model.documentCutSuggestions = [candidate]
+    model.cutSuggestions.showsSuggestionBands = false
+    click(model)
+    #expect(model.selection.freeformRange != nil)
+    model.clearSelection()
+    model.cutSuggestions.showsSuggestionBands = true
+    model.slices = [Fixtures.slice(start: 70_648, end: 119_202)]
+    expectNoDifference(model.clipBands.count, 2)
+    expectNoDifference(model.clipBands.last?.wordIDs, [2, 3, 4])
+  }
+
+  @Test func interiorSpaceSelectsGroupButTrailingSpaceDoesNot() {
+    let model = editor()
+    let clip = Fixtures.slice(start: 70_648, end: 119_202)
+    model.slices = [clip]
+    let words = model.transcript.document.wordRanges
+    let interior = NSMaxRange(words.first { $0.wordID == 2 }!.range)
+    model.transcript.transcriptClicked(atUTF16Offset: interior)
+    expectNoDifference(model.selection, .object(.clip(clip.id)))
+    let trailing = NSMaxRange(words.first { $0.wordID == 4 }!.range)
+    model.transcript.transcriptClicked(atUTF16Offset: trailing)
+    expectNoDifference(model.selection, .none)
+  }
+
   @Test func clipSelectionUsesActualPaddedBoundsAndOverlappingEdgeWord() throws {
     let model = editor()
     let clip = Fixtures.slice(start: 72_000, end: 120_000)
@@ -163,7 +254,8 @@ struct EditorGroupSelectionTests {
     model.selectTranscriptObject(.suggestion(Fixtures.uuid(2)))
     let object = try #require(model.selectedTranscriptObject)
     expectNoDifference(object.wordIDs, [2, 3, 4, 5])
-    expectNoDifference(model.selectedWordIDs, object.wordIDs)
+    expectNoDifference(model.selectedWordIDs, [])
+    expectNoDifference(Set(model.clipBands.first?.wordIDs ?? []), object.wordIDs)
     expectNoDifference(
       objectsCovering(5, objects: model.transcriptObjects, selected: object.id), [object])
   }

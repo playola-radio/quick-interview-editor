@@ -60,6 +60,9 @@ class TranscriptPageModel: ViewModel {
   /// writes the authoritative freeform `audioSelection`. One-directional — nothing writes back
   /// through here. Lives on the model (not a view `.onChange`) so headless tests apply intents.
   @ObservationIgnored var onSelectionIntent: ((SelectionIntent) -> Void)?
+  /// Installed only in the main transcript; scoped editor transcripts keep word gestures.
+  @ObservationIgnored var onGroupClick: ((TranscriptClick) -> Void)?
+  var clickCapture: TranscriptClickCapture?
 
   /// What a transcript selection gesture resolved to, in transcript terms (word IDs). `EditorModel`
   /// turns each into a source-sample range on the authoritative `audioSelection`.
@@ -183,80 +186,43 @@ class TranscriptPageModel: ViewModel {
     }
     return ranges
   }
-  /// The clip bands mapped to drawable UTF-16 runs, in transcript order. Walks
-  /// `document.wordRanges` (position order, so it's correct even for non-monotonic word IDs)
-  /// and merges each maximal stretch of consecutive words belonging to the SAME band into ONE
-  /// range that spans their interior separators — that's the continuous tinted container the
-  /// renderer strokes. Splitting by band identity (not just kind) keeps two back-to-back clips
-  /// of the same state as separate containers, each with its own caps; a non-clip word, a
-  /// green-over-amber precedence hole, or a paragraph break (the separator is a newline, and a
-  /// container can't span the vertical gap between paragraphs) also breaks the run. The range
-  /// ends at the last word (its trailing space is left untinted, so the fill caps at the words,
-  /// not the gap after them).
-  ///
-  /// A word ID maps to whichever band lists it first; a *duplicate* ID (the document allows
-  /// non-unique IDs) tints every occurrence, matching the transcript's existing tolerance for
-  /// duplicates elsewhere. Real aligner output uses unique IDs, so this is a theoretical edge.
-  ///
-  /// Cached: recomputed only when `clipBands` or `document` changes (see `recomputeClipContainers`),
-  /// never on the getter, so a playback tick that re-evaluates the view doesn't re-derive it.
+  /// Full per-object runs in foreground-first order. Overlapping objects retain
+  /// all their words; paragraph breaks and nonmember words split each object's runs.
   private(set) var clipContainers: [TranscriptClipContainer] = []
 
   private func recomputeClipContainers() {
-    clipContainers = Self.clipContainers(bands: clipBands, document: document)
+    clipContainers = clipBands.enumerated().flatMap { index, band in
+      Self.clipContainers(band: band, colorIndex: band.colorIndex ?? index, document: document)
+    }
   }
 
   private static func clipContainers(
-    bands: [TranscriptClipBand], document: TranscriptDocument
+    band: TranscriptClipBand, colorIndex: Int, document: TranscriptDocument
   ) -> [TranscriptClipContainer] {
-    guard !bands.isEmpty else { return [] }
-    var bandByWord: [Word.ID: (band: UUID, kind: TranscriptClipKind)] = [:]
-    for band in bands {
-      for id in band.wordIDs where bandByWord[id] == nil {
-        bandByWord[id] = (band.id, band.kind)
-      }
-    }
+    let words = Set(band.wordIDs)
     let text = document.text as NSString
     var containers: [TranscriptClipContainer] = []
     var runStart: Int?
     var runEnd = 0
-    var runBand: UUID?
-    var runKind: TranscriptClipKind?
-    // A stable colour index per clip (band), assigned in first-appearance order, so every run of
-    // one clip shares a colour and clips that appear next to each other get different colours.
-    var colorIndexByBand: [UUID: Int] = [:]
     func closeRun() {
-      defer {
-        runStart = nil
-        runBand = nil
-        runKind = nil
-      }
-      guard let start = runStart, let kind = runKind, let band = runBand else { return }
-      let colorIndex = colorIndexByBand[band] ?? colorIndexByBand.count
-      colorIndexByBand[band] = colorIndex
+      guard let start = runStart else { return }
       containers.append(
         TranscriptClipContainer(
-          range: NSRange(location: start, length: runEnd - start), kind: kind,
-          colorIndex: colorIndex))
+          range: NSRange(location: start, length: runEnd - start), kind: band.kind,
+          colorIndex: colorIndex, objectID: band.objectID, isActive: band.isActive,
+          isPreviewed: band.isPreviewed, isSubdued: band.isSubdued))
+      runStart = nil
     }
-    for wordRange in document.wordRanges {
-      let entry = bandByWord[wordRange.wordID]
-      // The separator between the run's last word and this one is the char at `runEnd`; a
-      // newline there is a paragraph break, which always ends the run.
-      let paragraphBreak =
-        runStart != nil && runEnd < text.length
-        && text.character(at: runEnd) == 0x0A
-      if let entry, entry.band == runBand, !paragraphBreak {
-        runEnd = NSMaxRange(wordRange.range)
-      } else {
+    for word in document.wordRanges {
+      guard words.contains(word.wordID) else {
         closeRun()
-        if let entry {
-          runStart = wordRange.range.location
-          runEnd = NSMaxRange(wordRange.range)
-          runBand = entry.band
-          runKind = entry.kind
-        }
+        continue
       }
+      if runStart != nil, runEnd < text.length, text.character(at: runEnd) == 0x0A {
+        closeRun()
+      }
+      if runStart == nil { runStart = word.range.location }
+      runEnd = NSMaxRange(word.range)
     }
     closeRun()
     return containers
@@ -316,6 +282,7 @@ class TranscriptPageModel: ViewModel {
   /// so a later transcript Shift-click starts a fresh single-word selection instead of
   /// extending from the stale anchor of a selection the user already cleared.
   func invalidateSelectionAnchor() {
+    clickCapture = nil
     selectionAnchorID = nil
     selectionFocusID = nil
   }
@@ -360,14 +327,35 @@ class TranscriptPageModel: ViewModel {
     reveal = TranscriptReveal(wordID: id, token: revealToken)
   }
 
-  func transcriptClicked(atUTF16Offset offset: Int, extending: Bool = false) {
-    guard let id = document.wordID(atUTF16Offset: offset) else { return }
+  func transcriptClicked(
+    atUTF16Offset offset: Int?, extending: Bool = false, clickCount: Int = 1,
+    timestamp: TimeInterval = 0, doubleClickInterval: TimeInterval = 0.5
+  ) {
+    let id = offset.flatMap { document.wordID(atUTF16Offset: $0) }
+    if let onGroupClick {
+      onGroupClick(
+        TranscriptClick(
+          wordID: id, extending: extending, count: clickCount,
+          timestamp: timestamp, doubleClickInterval: doubleClickInterval, utf16Offset: offset))
+      return
+    }
+    guard let id else {
+      clearSelectionTapped()
+      return
+    }
     wordClicked(id, extending: extending)
   }
 
   /// The single selection entry point for both the transcript and the waveform.
   /// `extending` = Shift held: keep the anchor and move the focus (contiguous run).
   func wordClicked(_ id: Word.ID, extending: Bool) {
+    if let onGroupClick {
+      onGroupClick(
+        TranscriptClick(
+          wordID: id, extending: extending, count: 1,
+          timestamp: 0, doubleClickInterval: 0.5))
+      return
+    }
     guard let plan = editPlan, plan.words.contains(where: { $0.id == id }) else { return }
     let anchorIsValid =
       selectionAnchorID.map { anchor in plan.words.contains { $0.id == anchor } } ?? false
@@ -383,11 +371,14 @@ class TranscriptPageModel: ViewModel {
     }
   }
 
-  func transcriptDragBegan(atUTF16Offset offset: Int) {
-    guard let id = document.wordID(atUTF16Offset: offset) else { return }
+  @discardableResult
+  func transcriptDragBegan(atUTF16Offset offset: Int?) -> Bool {
+    clickCapture = nil
+    guard let offset, let id = document.wordID(atUTF16Offset: offset) else { return false }
     selectionAnchorID = id
     selectionFocusID = id
     onSelectionIntent?(.word(id, extending: false))
+    return true
   }
 
   func transcriptDragged(toUTF16Offset offset: Int) {

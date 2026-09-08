@@ -131,6 +131,7 @@ final class EditorModel: ViewModel {
     // and hands them here, and THIS model writes the authoritative freeform `audioSelection`. Wired
     // on the model (not a view `.onChange`) so headless model tests apply intents without a view.
     // One-directional — the model never writes the transcript's selection back through this.
+    transcript.onGroupClick = { [weak self] click in self?.transcriptClicked(click) }
     transcript.onSelectionIntent = { [weak self] intent in
       guard let self else { return }
       switch intent {
@@ -547,7 +548,10 @@ final class EditorModel: ViewModel {
   // MARK: - Selection (source samples — the single source of truth)
   var selection: EditorSelection = .none {
     didSet {
-      if selection != oldValue { selectionPreservesTransport = false }
+      if selection != oldValue {
+        selectionPreservesTransport = false
+        transcript.clickCapture = nil
+      }
     }
   }
   /// Explicit clears and history restore selection without changing transport.
@@ -668,7 +672,7 @@ final class EditorModel: ViewModel {
   }
 
   /// The exact source range of one word, or nil if it has no monotonic sample bounds.
-  private func sourceRange(ofWord id: Word.ID) -> Range<Int>? {
+  func sourceRange(ofWord id: Word.ID) -> Range<Int>? {
     guard let word = editPlan.words.first(where: { $0.id == id }),
       let start = word.startSample, let end = word.endSample, start < end
     else { return nil }
@@ -773,33 +777,7 @@ final class EditorModel: ViewModel {
   /// (non-word-aligned) selection highlights the partially-covered words at its edges too. Empty
   /// when there's no selection.
   var selectedWordIDs: Set<Word.ID> {
-    audioSelection.map { Set(wordIDs(anyOverlap: $0, words: editPlan.words)) } ?? []
-  }
-
-  // MARK: - Clip containers (transcript)
-  /// The clip bands the transcript draws as tinted containers: real slices are `approved`
-  /// (green); still-pending cut suggestions are `suggested` (amber). Derived read-only from
-  /// the editor's own state and pushed into `transcript` by the view; the transcript stays
-  /// layout-local and only renders what it's handed.
-  ///
-  /// Precedence: an actual slice wins over a suggestion on any shared word, so a pending
-  /// suggestion is drawn only over the words no slice already claims (green over amber). A
-  /// suggestion fully covered by slices contributes no band.
-  var clipBands: [TranscriptClipBand] {
-    let approved = slices.map { slice in
-      TranscriptClipBand(id: slice.id, wordIDs: slice.wordIDs, kind: .approved)
-    }
-    // The Suggestions panel's show/hide toggle mutes the suggestion overlay without touching the
-    // ranked list: when it's off, no suggested bands are drawn (accepted slices stay put).
-    guard cutSuggestions.showsSuggestionBands else { return approved }
-    let claimed = Set(approved.flatMap(\.wordIDs))
-    let suggested = documentCutSuggestions.pending.compactMap {
-      suggestion -> TranscriptClipBand? in
-      let unclaimed = suggestion.wordIDs.filter { !claimed.contains($0) }
-      guard !unclaimed.isEmpty else { return nil }
-      return TranscriptClipBand(id: suggestion.id, wordIDs: unclaimed, kind: .suggested)
-    }
-    return approved + suggested
+    selection.freeformRange.map { Set(wordIDs(anyOverlap: $0, words: editPlan.words)) } ?? []
   }
 
   /// Waveform render data, geometry delegated to the edited adapter (the view reads these; it

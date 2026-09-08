@@ -62,7 +62,7 @@ test `QuickInterviewEditor/QuickInterviewEditorTests/Models/TranscriptObjectTest
 and `QuickInterviewEditor/QuickInterviewEditorTests/Views/Pages/Editor/EditorGroupSelectionTests.swift`.
 App file paths use the prefix in the responsibility map.
 
-- [ ] Add these foundation types, registering both source files and tests:
+- [x] Add these foundation types, registering both source files and tests:
 
 ```swift
 import Foundation
@@ -116,7 +116,7 @@ The input order to `foregroundObjects` is saved clips in document array order,
 then pending suggestions in document array order. Projection calculates colors
 before foreground promotion. IDs are type-tagged because acceptance reuses UUIDs.
 
-- [ ] Add this first failing behavior test, then run
+- [x] Add this first failing behavior test, then run
   `make test-fast ONLY=PlayolaInterviewEditorTests/TranscriptObjectTests`:
 
 ```swift
@@ -145,28 +145,28 @@ struct TranscriptObjectTests {
 
 Write the test before the helper implementation so the new API is initially red.
 
-- [ ] Make `EditorModel.selection` the stored value. Derive the existing
+- [x] Make `EditorModel.selection` the stored value. Derive the existing
   `audioSelection`/`selectedSourceRange` facade from `.range` or the current
   object's resolved range. Derive the anchor from the freeform anchor or object's
   start. Existing setters must go through the freeform/clear funnel rather than
   create a second store. Likewise route seam selection through `.seam`.
   Do not retain three independent writable selection representations.
-- [ ] Add `selectTranscriptObject(_ id: TranscriptObjectID)` to resolve the object
+- [x] Add `selectTranscriptObject(_ id: TranscriptObjectID)` to resolve the object
   against the live document, select its identity, invalidate stale word anchors,
   and issue reveal requests. Missing objects leave the selection unchanged.
   Clip ranges come from actual slice bounds, and their word sets from
   `wordIDs(anyOverlap:words:)`. Resolve every suggestion word; invalid partial
   matches cannot silently narrow the range. Reuse existing acceptance validation
   and `sourceRange(coveringWords:_:)` policy as appropriate without accepting.
-- [ ] Gate `fineTuneTarget` and pending `fineTuneSessionKey.selection` on
+- [x] Gate `fineTuneTarget` and pending `fineTuneSessionKey.selection` on
   `selection.freeformRange`. Selecting an object must not create a pending draft.
   Keep existing saved-clip edit sessions explicitly owned by their opening path.
   Drive row active state from `selection.objectID`, not ambient `activeSliceID`.
-- [ ] Add model tests for actual padded clip bounds, an overlapping edge word,
+- [x] Add model tests for actual padded clip bounds, an overlapping edge word,
   missing object IDs, same-ID clip/suggestion disambiguation, and selection
   surviving `syncEditSession()`. Keep existing re-click tests until Task 4 changes
   the corresponding gesture behavior.
-- [ ] Run `EditorGroupSelectionTests`, `EditorSelectionTests`,
+- [x] Run `EditorGroupSelectionTests`, `EditorSelectionTests`,
   `EditorSeamSelectionTests`, `EditorFineTuneTests`, and `TranscriptObjectTests`.
   Commit: `feat: model transcript object selection explicitly`.
 
@@ -180,7 +180,7 @@ Tests: `QuickInterviewEditor/QuickInterviewEditorTests/Models/EditorHistoryTests
 existing `EditorDocumentMutationTests.swift`, `EditorSuggestionFlowTests.swift`,
 and `Commands/EditUndoCommandsTests.swift`.
 
-- [ ] Add the generic entry history below. Preserve the 30-entry limit and do
+- [x] Add the generic entry history below. Preserve the 30-entry limit and do
   not persist it. A document entry may additionally carry the selection change
   associated with a deletion; an ordinary document edit carries no selection.
 
@@ -254,7 +254,7 @@ struct EditorHistory<Document: Equatable, Selection: Equatable> {
 }
 ```
 
-- [ ] Establish this red/green test before implementing that type:
+- [x] Establish this red/green test before implementing that type:
 
 ```swift
 import CustomDump
@@ -282,34 +282,38 @@ struct EditorHistoryTests {
 }
 ```
 
-- [ ] Replace the editor's `documentUndo` with
+- [x] Replace the editor's `documentUndo` with
   `history: EditorHistory<EditorDocumentState, EditorSelection>`. Update every
   record/rebase/undo/redo consumer, including suggestion-title coalescing and its
   tests. Do not change the document sink or serialized state.
-- [ ] Add a main-actor history application method accepting an entry and direction.
+- [x] Add a main-actor history application method accepting an entry and direction.
   Apply `document.before/after` through `restore` only if a document change exists
   and differs from live state; apply `selection.before/after` only when present.
   Reconcile missing object/seam identities and stale range bounds afterward.
   A pure selection entry never calls `restore`, document callbacks, or playback
   reconciliation; restoring its highlight does not seek or stop playback.
-- [ ] Introduce undoable explicit `clearSelectionTapped()` now, keeping the
+- [x] Introduce undoable explicit `clearSelectionTapped()` now, keeping the
   lower-level clear non-recording. Suppress selection-driven transport work for
   history-origin transitions, including the `EditorView` audio-selection observer.
   Test restoring a highlight while playback is active: no stop or cursor seek.
-- [ ] Coalesce object deletion + deselection inside one helper around
+- [x] Coalesce object deletion + deselection inside one helper around
   `mutateDocument`, adding an optional selection change to its recorded entry.
   Maintain background rebase on both before/after document snapshots. Keep
   existing save/export/unsaved-saved-clip guards on document Undo/Redo.
-- [ ] Route Edit menu labels/enabled state and keyboard actions through the editor
+- [x] Route Edit menu labels/enabled state and keyboard actions through the editor
   history methods. Task 7 adds the draft-local routing before document guards;
   editable text fields retain their native history. Keep keyboard and menu
   invocation consistent rather than patching the sheet key monitor alone.
-- [ ] Test limit eviction, no-op records, new-action Redo invalidation, background
+- [x] Test limit eviction, no-op records, new-action Redo invalidation, background
   rebase across clear entries, restoration of reversed anchors, and zero
   `onDocumentStateChanged` calls for highlight-only history. Include a sequence
   rename → clear highlight → undo clear → undo rename → redo rename → redo clear.
-- [ ] Run the new history suites and existing document/suggestion/menu suites.
+- [x] Run the new history suites and existing document/suggestion/menu suites.
   Commit: `feat: make highlight deletion undoable without changing the document`.
+
+Implementation notes: Task 1 committed as `93df3c6`; Task 2 as `448845c`.
+Both passed specification and code-quality review. Full suite after history:
+1,403 tests, 13 existing known issues; follow-up reconciliation tests also pass.
 
 ## Task 3: Apply Delete, arrow, Escape, and explicit Remove Section policies
 
@@ -321,27 +325,27 @@ Tests: `QuickInterviewEditor/QuickInterviewEditorTests/Views/Pages/Editor/Editor
 `EditorKeyMonitorTests.swift`, `EditorRemovalTests.swift`, `EditorSeamSelectionTests.swift`,
 and `EditSlice/SliceEditKeyMonitorTests.swift` (including its existing Delete mapping).
 
-- [ ] Add `deleteSelectionTapped() async`. Switch on `selection`: clip deletes its
+- [x] Add `deleteSelectionTapped() async`. Switch on `selection`: clip deletes its
   slice; suggestion removes its record from `documentCutSuggestions`; range records a pure
   clear entry; seam uses the current restore action; none does nothing. Capture
   identity before awaiting playback reconciliation so a newer selection cannot
   be deleted by a stale continuation.
-- [ ] Make `clearSelectionTapped()` record a pure selection clear for any active
+- [x] Make `clearSelectionTapped()` record a pure selection clear for any active
   selection. Keep lower-level `clearSelection()` non-recording for transitions,
   Escape, deletion internals, and background clicks. Never double-record Delete.
-- [ ] Separate physical Delete from the existing `.removeSection` command. Add
+- [x] Separate physical Delete from the existing `.removeSection` command. Add
   `.deleteSelection` to `EditorKey`; map key code 51 to it. The saved-sheet key
   monitor explicitly maps this to its current scoped removal/restore action.
   Main editor maps it to `deleteSelectionTapped`. Draft sheets consume it without
   mutating the parent document. Preserve explicit Remove Section and its guards.
-- [ ] Gate `nudgeSelection` and waveform edge-drag availability on a freeform
+- [x] Gate `nudgeSelection` and waveform edge-drag availability on a freeform
   selection. Consume object arrow nudges without mutating or falling through to
   another pane. Shift-click/drag still transitions an object to freeform. Preserve
   Command-arrow zoom and Option-arrow seam commands.
-- [ ] Add model-driven bottom-bar Open/Edit for all selection types, type-specific
+- [x] Add model-driven bottom-bar Open/Edit for all selection types, type-specific
   actions from the spec, and Remove Section only on a freeform range. Keep layout
   height fixed. Maintain the existing Mark shortcut for freeform ranges only.
-- [ ] Test the central safety behavior with this model test (helper APIs are
+- [x] Test the central safety behavior with this model test (helper APIs are
   introduced by Tasks 1–3):
 
 ```swift
@@ -367,13 +371,13 @@ and `EditSlice/SliceEditKeyMonitorTests.swift` (including its existing Delete ma
 }
 ```
 
-- [ ] Add equivalent clip and suggestion tests that verify one history entry,
+- [x] Add equivalent clip and suggestion tests that verify one history entry,
   restored object selection, unchanged timeline removals, accepted-origin status
   preservation, and no accidental source-audio removal. Update old tests that
   assert main Delete removes the range; retain tests for explicit Remove Section.
-- [ ] Test field-editor/chooser/sheet precedence and that one Escape cannot both
+- [x] Test field-editor/chooser/sheet precedence and that one Escape cannot both
   close an overlay and clear the underlying selection.
-- [ ] Run the named suites and `EditorSelectionTests`. Commit:
+- [x] Run the named suites and `EditorSelectionTests`. Commit:
   `feat: route deletion and keyboard actions by selection kind`.
 
 ## Task 4: Preserve full overlap geometry and wire click-versus-drag events
@@ -386,12 +390,12 @@ Tests: `QuickInterviewEditor/QuickInterviewEditorTests/Views/Pages/TranscriptPag
 `TranscriptClipContainersTests.swift`, plus `TranscriptSelectionTests.swift` and
 `Models/TranscriptClipStyleTests.swift` under the test root.
 
-- [ ] Keep full word sets in `clipBands`; never subtract clip words from suggestions.
+- [x] Keep full word sets in `clipBands`; never subtract clip words from suggestions.
   Build contiguous containers independently for each object, retaining its typed
   ID, base color, kind, and active/preview emphasis. Split at paragraph boundaries
   while retaining identity. Render all runs back-to-front; resolve foreground
   text color and hit priority from that exact same ordering.
-- [ ] Add a testable pointer classifier with the following complete core. The
+- [x] Add a testable pointer classifier with the following complete core. The
   AppKit bridge creates one instance per text view and forwards the resulting
   actions to the model; it does not decide which object wins.
 
@@ -435,7 +439,7 @@ struct TranscriptPointerGesture {
 }
 ```
 
-- [ ] Write the threshold regression first and run it red/green:
+- [x] Write the threshold regression first and run it red/green:
 
 ```swift
 @Test func jitterRemainsAClickAndRealDragNeverOpens() {
@@ -449,7 +453,7 @@ struct TranscriptPointerGesture {
 }
 ```
 
-- [ ] On first threshold crossing, begin the word drag at the original mouse-down
+- [x] On first threshold crossing, begin the word drag at the original mouse-down
   offset, then extend to the current offset. Do not mutate selection during
   mouse-down. On non-drag mouse-up forward offset, modifiers, click count and
   hit geometry. Classify background geometrically: paragraph gaps/margins cannot
@@ -457,22 +461,27 @@ struct TranscriptPointerGesture {
   Use `event.locationInWindow` exclusively for the 4-point threshold so scrolling
   does not create a spurious drag. Convert separately to text-view coordinates
   for hit resolution. Cancel tracking on view removal or lost interaction.
-- [ ] First-click model resolution: Shift range intent wins; otherwise preserve
+- [x] First-click model resolution: Shift range intent wins; otherwise preserve
   active freeform/object when hit, else choose the foremost candidate, else choose
   the word, else clear. Retain the first click's resolved target and timestamp
   through the system double-click interval. Open it once on click count 2 only
   if still valid and no intervening selection-changing gesture occurred. Ignore
   count >2 for opening; a fresh count-1 sequence replaces the capture.
-- [ ] Add a main-editor-only interaction capability so scoped sheet transcripts
+- [x] Add a main-editor-only interaction capability so scoped sheet transcripts
   keep word selection and do not recursively open draft editors.
-- [ ] Test identical, nested, partial, three-way and cross-paragraph overlaps;
+- [x] Test identical, nested, partial, three-way and cross-paragraph overlaps;
   padded boundary words; active freeform precedence; fully hidden suggestions;
   re-click preservation; shift extension; invalidated double-click capture;
   constant color on foreground promotion; and document changes between clicks.
-- [ ] Update existing tests asserting re-click-to-clear alongside the changed
+- [x] Update existing tests asserting re-click-to-clear alongside the changed
   gesture implementation.
-- [ ] Run the named transcript/style suites and `EditorGroupSelectionTests`.
+- [x] Run the named transcript/style suites and `EditorGroupSelectionTests`.
   Commit: `feat: select and open transcript groups with stable hit targets`.
+
+Task 3 committed as `f979207` with Escape correction `12450ce`; both reviews passed.
+Task 4 geometry and captured-click implementation passed both reviews and the full
+1,425-test suite (13 existing known issues). Suggestion/freeform Open and the
+Open/Edit bar button connect in Task 6 when real draft sessions are available.
 
 ## Task 5: Add the overlap chooser and synchronize both sidebars
 

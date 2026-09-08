@@ -62,10 +62,34 @@ struct TranscriptDocument: Equatable {
   /// contains the offset or is the nearest preceding one). Binary search finds it without a
   /// linear scan; when the offset is before the first word we fall back to the first word.
   func wordID(atUTF16Offset offset: Int) -> Word.ID? {
-    guard let first = wordRanges.first else { return nil }
+    guard let index = wordIndex(atOrBefore: offset) else { return wordRanges.first?.wordID }
+    return wordRanges[index].wordID
+  }
+
+  func containsWord(atUTF16Offset offset: Int) -> Bool {
+    guard let index = wordIndex(atOrBefore: offset) else { return false }
+    return NSLocationInRange(offset, wordRanges[index].range)
+  }
+
+  /// Uses the same run boundaries as the renderer: word glyphs and interior spaces
+  /// belong to a group; its trailing separator and paragraph breaks do not.
+  func groupContains(atUTF16Offset offset: Int, wordIDs: Set<Word.ID>) -> Bool {
+    guard let index = wordIndex(atOrBefore: offset), wordIDs.contains(wordRanges[index].wordID)
+    else { return false }
+    let range = wordRanges[index].range
+    if NSLocationInRange(offset, range) { return true }
+    guard index + 1 < wordRanges.count else { return false }
+    let next = wordRanges[index + 1]
+    guard offset < next.range.location, wordIDs.contains(next.wordID) else { return false }
+    let separator = NSRange(
+      location: NSMaxRange(range), length: next.range.location - NSMaxRange(range))
+    return !(text as NSString).substring(with: separator).contains("\n")
+  }
+
+  private func wordIndex(atOrBefore offset: Int) -> Int? {
     var low = 0
     var high = wordRanges.count - 1
-    var candidate = -1
+    var candidate: Int?
     while low <= high {
       let mid = (low + high) / 2
       if wordRanges[mid].range.location <= offset {
@@ -75,6 +99,6 @@ struct TranscriptDocument: Equatable {
         high = mid - 1
       }
     }
-    return candidate >= 0 ? wordRanges[candidate].wordID : first.wordID
+    return candidate
   }
 }

@@ -32,8 +32,11 @@ extension EditorModel {
   }
 
   func selectTranscriptObject(_ id: TranscriptObjectID) {
-    guard transcriptObject(id) != nil else { return }
-    selection = .object(id)
+    guard let object = transcriptObjects.first(where: { $0.id == id }) else { return }
+    if selection != .object(id) {
+      selectSourceRange(object.range, snapPlayhead: true)
+      selection = .object(id)
+    }
     selectionEditingEdge = nil
     transcript.invalidateSelectionAnchor()
     sidebarReveal = SidebarReveal(objectID: id, token: (sidebarReveal?.token ?? 0) &+ 1)
@@ -46,18 +49,89 @@ extension EditorModel {
     }
   }
 
-  private func transcriptObject(_ id: TranscriptObjectID) -> TranscriptObject? {
-    switch id {
-    case .clip(let id):
-      guard let index = slices.index(id: id) else { return nil }
-      return transcriptObject(for: slices[index], colorIndex: index)
-    case .suggestion(let id):
-      let suggestions = documentCutSuggestions.pending
-      guard let index = suggestions.firstIndex(where: { $0.id == id }) else { return nil }
-      return transcriptObject(
-        for: suggestions[index], colorIndex: slices.count + index,
-        transcriptHash: editPlan.transcriptHash)
+  var visibleTranscriptObjects: [TranscriptObject] {
+    foregroundObjects(
+      transcriptObjects.filter { object in
+        if case .suggestion = object.id { return cutSuggestions.showsSuggestionBands }
+        return true
+      }, selected: selection.objectID)
+  }
+
+  var clipBands: [TranscriptClipBand] {
+    visibleTranscriptObjects.map { object in
+      let id: UUID
+      let kind: TranscriptClipKind
+      switch object.id {
+      case .clip(let value):
+        id = value
+        kind = .approved
+      case .suggestion(let value):
+        id = value
+        kind = .suggested
+      }
+      return TranscriptClipBand(
+        id: id, wordIDs: object.wordIDs.sorted(), kind: kind,
+        colorIndex: object.colorIndex, isActive: object.id == selection.objectID,
+        isSubdued: selection.objectID != nil && object.id != selection.objectID)
     }
+  }
+
+  func transcriptClicked(_ click: TranscriptClick) {
+    if click.count == 2 {
+      openCapturedTranscriptClick(click)
+      return
+    }
+    guard click.count == 1 else { return }
+    transcript.clickCapture = nil
+    guard let wordID = click.wordID else {
+      clearSelection()
+      return
+    }
+    if click.extending {
+      selectWord(wordID, extending: true)
+      return
+    }
+    let candidates = objectsCovering(
+      wordID, objects: visibleTranscriptObjects,
+      selected: selection.objectID
+    ).filter { transcriptHit(click, belongsTo: $0.wordIDs) }
+    if selection.freeformRange != nil, transcriptHit(click, belongsTo: selectedWordIDs) {
+      // The live freeform highlight is the top click target throughout its extent.
+    } else if let object = candidates.first {
+      selectTranscriptObject(object.id)
+    } else if click.utf16Offset.map({ transcript.document.containsWord(atUTF16Offset: $0) }) ?? true
+    {
+      selectWord(wordID, extending: false)
+    } else {
+      clearSelection()
+    }
+    guard let range = audioSelection else { return }
+    transcript.clickCapture = TranscriptClickCapture(
+      selection: selection, range: range, timestamp: click.timestamp)
+  }
+
+  private func openCapturedTranscriptClick(_ click: TranscriptClick) {
+    defer { transcript.clickCapture = nil }
+    guard !click.extending, let captured = transcript.clickCapture,
+      captured.selection == selection, captured.range == audioSelection,
+      click.timestamp >= captured.timestamp,
+      click.timestamp - captured.timestamp <= click.doubleClickInterval,
+      transcriptHit(
+        click, belongsTo: Set(wordIDs(anyOverlap: captured.range, words: editPlan.words)))
+    else { return }
+    openSelectionTapped()
+  }
+
+  private func transcriptHit(_ click: TranscriptClick, belongsTo wordIDs: Set<Word.ID>) -> Bool {
+    guard let id = click.wordID, wordIDs.contains(id) else { return false }
+    guard let offset = click.utf16Offset else { return true }
+    return transcript.document.groupContains(atUTF16Offset: offset, wordIDs: wordIDs)
+  }
+
+  /// Draft targets are connected when the generalized editor lands in Task 6.
+  func openSelectionTapped() {
+    guard case .object(.clip(let id)) = selection else { return }
+    editSliceTapped(id)
   }
 
   private func transcriptObject(for slice: Slice, colorIndex: Int) -> TranscriptObject? {

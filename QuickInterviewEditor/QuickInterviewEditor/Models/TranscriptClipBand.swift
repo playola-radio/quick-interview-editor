@@ -11,6 +11,14 @@ struct TranscriptClipBand: Equatable, Identifiable {
   let id: UUID
   let wordIDs: [Word.ID]
   let kind: TranscriptClipKind
+  var colorIndex: Int?
+  var isActive = false
+  var isPreviewed = false
+  var isSubdued = false
+
+  var objectID: TranscriptObjectID {
+    kind == .suggested ? .suggestion(id) : .clip(id)
+  }
 }
 
 /// The four clip states the container palette covers. Only `approved` (real slices) and
@@ -56,6 +64,7 @@ struct TranscriptClipStyle: Equatable {
   /// A dashed ring marks a tentative container. Suggestions dash their outline so a proposal
   /// reads instantly differently from a committed slice's solid box; every other state is solid.
   var dashed = false
+  var ringWidth: Double = 1
 
   /// The clip palette. Clip text is white for every live state; a rejected clip dims its words
   /// and strikes them through.
@@ -164,4 +173,23 @@ struct TranscriptClipContainer: Equatable {
   let range: NSRange
   let kind: TranscriptClipKind
   let colorIndex: Int
+  var objectID: TranscriptObjectID?
+  var isActive = false
+  var isPreviewed = false
+  var isSubdued = false
+
+  var style: TranscriptClipStyle {
+    var style = TranscriptClipStyle.style(for: kind, variant: colorIndex)
+    if isSubdued {
+      style.fill.alpha *= 0.55
+      style.ring.alpha *= 0.55
+    }
+    if isActive || isPreviewed {
+      style.ring.alpha = 1
+      style.ringWidth = 2
+      style.text.alpha = 1
+      style.fill.alpha = max(style.fill.alpha, 0.22)
+    }
+    return style
+  }
 }

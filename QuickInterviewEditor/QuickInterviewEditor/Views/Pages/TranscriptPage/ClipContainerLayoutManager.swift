@@ -9,6 +9,7 @@ struct ClipContainerRun: Equatable {
   let ring: NSColor
   /// A dashed ring marks a tentative container (a suggestion); a solid ring a committed one.
   var dashed = false
+  var ringWidth: Double = 1
 }
 
 /// A TextKit-1 layout manager that paints clip containers behind the text: one continuous
@@ -28,7 +29,6 @@ final class ClipContainerLayoutManager: NSLayoutManager {
   var currentWordRange: NSRange?
 
   private let cornerRadius: CGFloat = 6
-  private let ringWidth: CGFloat = 1
   /// Symmetric breathing room above/below the glyph box (the mockup's `padding: 4px 0`); kept
   /// small because the font's ascender/descender box already includes some leading.
   private let verticalPadding: CGFloat = 3
@@ -107,7 +107,8 @@ final class ClipContainerLayoutManager: NSLayoutManager {
           height: textHeight + verticalPadding * 2)
 
         drawContainerSegment(
-          in: rect, roundedLeft: roundedLeft, roundedRight: roundedRight, dashed: run.dashed)
+          in: rect, roundedLeft: roundedLeft, roundedRight: roundedRight, dashed: run.dashed,
+          ringWidth: run.ringWidth)
       }
     }
   }
@@ -124,13 +125,14 @@ final class ClipContainerLayoutManager: NSLayoutManager {
   }
 
   private func drawContainerSegment(
-    in rect: CGRect, roundedLeft: Bool, roundedRight: Bool, dashed: Bool
+    in rect: CGRect, roundedLeft: Bool, roundedRight: Bool, dashed: Bool, ringWidth: Double
   ) {
     let radius = min(cornerRadius, rect.height / 2, rect.width / 2)
     fillPath(rect: rect, radius: radius, roundedLeft: roundedLeft, roundedRight: roundedRight)
       .fill()
     let ring = ringPath(
-      rect: rect, radius: radius, roundedLeft: roundedLeft, roundedRight: roundedRight)
+      rect: rect, radius: radius, roundedLeft: roundedLeft, roundedRight: roundedRight,
+      ringWidth: ringWidth)
     ring.lineWidth = ringWidth
     if dashed {
       // A short dash so the tentative outline reads clearly on the transcript's short clip runs
@@ -171,7 +173,9 @@ final class ClipContainerLayoutManager: NSLayoutManager {
   /// The 1px ring, stroked so top and bottom rules always show but a vertical rule (and its
   /// rounded corners) appear only at a real run end — a wrap-cut edge is left open so
   /// consecutive line fragments read as one continuous shape.
-  private func ringPath(rect: CGRect, radius: CGFloat, roundedLeft: Bool, roundedRight: Bool)
+  private func ringPath(
+    rect: CGRect, radius: CGFloat, roundedLeft: Bool, roundedRight: Bool, ringWidth: Double
+  )
     -> NSBezierPath
   {
     let inset = ringWidth / 2

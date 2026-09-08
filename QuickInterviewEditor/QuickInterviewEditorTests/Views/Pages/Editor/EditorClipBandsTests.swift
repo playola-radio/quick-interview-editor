@@ -9,8 +9,10 @@ import Testing
 struct EditorClipBandsTests {
 
   private func slice(_ id: UUID, wordIDs: [Word.ID]) -> Slice {
-    Slice(
-      id: id, name: "A story", startSample: 0, endSample: 100,
+    let words = Fixtures.editPlan().words.filter { wordIDs.contains($0.id) }
+    return Slice(
+      id: id, name: "A story", startSample: words.compactMap(\.startSample).min()!,
+      endSample: words.compactMap(\.endSample).max()!,
       wordIDs: wordIDs, snippet: "a story")
   }
 
@@ -20,9 +22,14 @@ struct EditorClipBandsTests {
   private func withEditor(
     suggestions: [CutSuggestion], _ body: (EditorModel) -> Void
   ) {
+    let plan = Fixtures.editPlan()
+    var suggestions = suggestions
+    for index in suggestions.indices {
+      suggestions[index].provenance.transcriptHash = plan.transcriptHash
+    }
     let model = EditorModel(
       sourceURL: URL(fileURLWithPath: "/clip.m4a"),
-      canonicalAudioURL: Fixtures.canonicalAudioURL, editPlan: Fixtures.editPlan(),
+      canonicalAudioURL: Fixtures.canonicalAudioURL, editPlan: plan, sourceFingerprint: "fp",
       initialDocument: EditorDocumentState(
         cutSuggestions: IdentifiedArray(uniqueElements: suggestions)))
     body(model)
@@ -39,7 +46,10 @@ struct EditorClipBandsTests {
       model.slices = [slice(Fixtures.uuid(1), wordIDs: [10, 11, 12])]
       expectNoDifference(
         model.clipBands,
-        [TranscriptClipBand(id: Fixtures.uuid(1), wordIDs: [10, 11, 12], kind: .approved)])
+        [
+          TranscriptClipBand(
+            id: Fixtures.uuid(1), wordIDs: [10, 11, 12], kind: .approved, colorIndex: 0)
+        ])
     }
   }
 
@@ -51,7 +61,10 @@ struct EditorClipBandsTests {
       // Accepted and rejected suggestions are not drawn as amber — only the pending one.
       expectNoDifference(
         model.clipBands,
-        [TranscriptClipBand(id: Fixtures.uuid(1), wordIDs: [1, 2], kind: .suggested)])
+        [
+          TranscriptClipBand(
+            id: Fixtures.uuid(1), wordIDs: [1, 2], kind: .suggested, colorIndex: 0)
+        ])
     }
   }
 
@@ -62,14 +75,16 @@ struct EditorClipBandsTests {
       expectNoDifference(
         model.clipBands,
         [
-          TranscriptClipBand(id: Fixtures.uuid(1), wordIDs: [1, 2], kind: .approved),
-          TranscriptClipBand(id: Fixtures.uuid(9), wordIDs: [7, 8], kind: .suggested),
+          TranscriptClipBand(
+            id: Fixtures.uuid(1), wordIDs: [1, 2], kind: .approved, colorIndex: 0),
+          TranscriptClipBand(
+            id: Fixtures.uuid(9), wordIDs: [7, 8], kind: .suggested, colorIndex: 1),
         ])
     }
   }
 
-  /// Green wins: a pending suggestion is drawn only over the words no slice already claims.
-  @Test func sliceClaimsWinOverOverlappingSuggestion() {
+  /// Overlaps keep complete geometry so a lower group remains a selectable candidate.
+  @Test func overlappingSuggestionKeepsItsFullBand() {
     let pending = Fixtures.cutSuggestion(
       id: Fixtures.uuid(9), wordIDs: [2, 3, 4], status: .pending)
     withEditor(suggestions: [pending]) { model in
@@ -77,9 +92,11 @@ struct EditorClipBandsTests {
       expectNoDifference(
         model.clipBands,
         [
-          TranscriptClipBand(id: Fixtures.uuid(1), wordIDs: [1, 2, 3], kind: .approved),
-          // words 2 and 3 are claimed green, so amber keeps only word 4.
-          TranscriptClipBand(id: Fixtures.uuid(9), wordIDs: [4], kind: .suggested),
+          TranscriptClipBand(
+            id: Fixtures.uuid(1), wordIDs: [1, 2, 3], kind: .approved, colorIndex: 0),
+          // All suggestion words remain even under the saved clip.
+          TranscriptClipBand(
+            id: Fixtures.uuid(9), wordIDs: [2, 3, 4], kind: .suggested, colorIndex: 1),
         ])
     }
   }
@@ -92,17 +109,22 @@ struct EditorClipBandsTests {
       model.cutSuggestions.showsSuggestionBands = false
       expectNoDifference(
         model.clipBands,
-        [TranscriptClipBand(id: Fixtures.uuid(1), wordIDs: [1, 2], kind: .approved)])
+        [TranscriptClipBand(id: Fixtures.uuid(1), wordIDs: [1, 2], kind: .approved, colorIndex: 0)])
     }
   }
 
-  @Test func suggestionFullyCoveredBySlicesProducesNoBand() {
+  @Test func suggestionFullyCoveredBySlicesStillHasItsOwnBand() {
     let pending = Fixtures.cutSuggestion(id: Fixtures.uuid(9), wordIDs: [1, 2], status: .pending)
     withEditor(suggestions: [pending]) { model in
       model.slices = [slice(Fixtures.uuid(1), wordIDs: [1, 2, 3])]
       expectNoDifference(
         model.clipBands,
-        [TranscriptClipBand(id: Fixtures.uuid(1), wordIDs: [1, 2, 3], kind: .approved)])
+        [
+          TranscriptClipBand(
+            id: Fixtures.uuid(1), wordIDs: [1, 2, 3], kind: .approved, colorIndex: 0),
+          TranscriptClipBand(
+            id: Fixtures.uuid(9), wordIDs: [1, 2], kind: .suggested, colorIndex: 1),
+        ])
     }
   }
 }
