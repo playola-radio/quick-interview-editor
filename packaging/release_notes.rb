@@ -1,5 +1,7 @@
 #!/usr/bin/env ruby
 
+require "rexml/document"
+
 module ReleaseNotes
   class Error < StandardError; end
 
@@ -26,5 +28,15 @@ module ReleaseNotes
     raise Error, "release #{version} has no notes" if matches.first.empty?
 
     matches.first
+  end
+
+  def self.set_description(item, notes)
+    raise Error, "release notes are empty" if notes.strip.empty?
+
+    item.delete_element("description") while item.elements["description"]
+    description = item.add_element("description")
+    description.add_attribute("sparkle:format", "markdown")
+    description.text = notes
+    description
   end
 end
