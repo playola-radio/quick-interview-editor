@@ -22,6 +22,18 @@ enum ProjectPackageError: Error, Equatable, LocalizedError {
     case .audioMismatch: return "The project's bundled audio does not match the project."
     }
   }
+
+  /// NSDocument supplies its own “could not be opened” headline. Put the actual
+  /// package error in the failure reason so AppKit preserves it in the alert body.
+  var failureReason: String? { errorDescription }
+
+  var recoverySuggestion: String? {
+    guard case .unsupportedSchema(let version) = self,
+      version > ProjectFile.currentSchemaVersion
+    else { return nil }
+    return "Open this project with the version of the app that last saved it, or a newer version."
+  }
+
 }
 
 /// The three pieces decoded from a `.pie` package: the small project file, the
