@@ -149,8 +149,11 @@ Deleting a clip, undoing acceptance, or running a new search does not release an
 number. This prevents later clips from accidentally reusing it.
 
 Running a new search asks before replacing existing suggestions and explains that saved
-clips are safe. **Resume** continues an unfinished search using its captured rules and
-saved successful responses. **Discard** removes that unfinished search. These differ
+clips are safe. **Replace Suggestions** immediately clears the old suggestions while the
+new search runs. Cancelling the dialog keeps them. Search failure, cancellation, or
+discarding the new run does not restore the old suggestions. **Resume** continues an
+unfinished search using its captured rules and saved successful responses. **Discard**
+removes that unfinished search. These differ
 from starting a fresh search under the current rules.
 
 New suggestion-derived clips export using their current clip names, such as `ID 7.aiff`,

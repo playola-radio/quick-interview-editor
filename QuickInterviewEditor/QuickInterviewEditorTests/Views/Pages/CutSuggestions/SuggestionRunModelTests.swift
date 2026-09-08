@@ -116,6 +116,12 @@ final class SuggestionRunFixture: Sendable {
         $0.unfinishedSuggestionRun = capture.checkpoint
       }
     }
+    model.onReplacementConfirmed = { [self] in
+      document.withValue {
+        $0.cutSuggestions = []
+        $0.suggestionBatch = nil
+      }
+    }
     model.onApply = { [self] candidates, batch in
       document.withValue {
         $0.cutSuggestions = IdentifiedArray(uniqueElements: candidates)
@@ -138,7 +144,9 @@ final class SuggestionRunFixture: Sendable {
   }
 
   @MainActor func wireEditor(_ editor: EditorModel) {
+    let onReplacementConfirmed = editor.cutSuggestions.run.onReplacementConfirmed
     wire(editor.cutSuggestions.run)
+    editor.cutSuggestions.run.onReplacementConfirmed = onReplacementConfirmed
     editor.cutSuggestions.run.currentDocument = { [weak editor] in editor?.documentState ?? .init()
     }
     editor.cutSuggestions.run.onCheckpoint = { [weak editor] capture in
@@ -282,7 +290,8 @@ struct SuggestionRunModelTests {
       expectNoDifference(model.replaceTitle, "Replace existing suggestions?")
       expectNoDifference(
         model.replaceMessage,
-        "This will run a new search and replace the current suggestions. Your saved clips will not be changed."
+        "This will immediately remove the current suggestions and search for replacements. "
+          + "Your saved clips will not be changed."
       )
       expectNoDifference(model.replaceButtonTitle, "Replace Suggestions")
       expectNoDifference(model.cancelButtonTitle, "Cancel")
@@ -311,6 +320,10 @@ struct SuggestionRunModelTests {
         let request = try #require(fixture.state.value.requests.first)
         let preparation = try #require(fixture.state.value.prepared.first)
         #expect(fixture.document.value.unfinishedSuggestionRun != nil)
+        expectNoDifference(fixture.document.value.cutSuggestions.elements, [])
+        expectNoDifference(
+          preparation.control.originalBatchFingerprint,
+          try suggestionBatchFingerprint(fixture.document.value))
         expectNoDifference(request.journalDirectory, fixture.directory)
         let json = try #require(
           JSONSerialization.jsonObject(with: preparation.originalRequest) as? [String: Any])
@@ -331,7 +344,8 @@ struct SuggestionRunModelTests {
     }
   }
 
-  @Test func bareCompletionAndProviderFailurePreserveOldBatchAndFutureStarts() async throws {
+  @Test func bareCompletionAndProviderFailureKeepClearedBatchAndPreserveFutureStarts() async throws
+  {
     for failure in [true, false] {
       try await withMainSerialExecutor {
         let fixture = SuggestionRunFixture()
@@ -358,7 +372,7 @@ struct SuggestionRunModelTests {
           await task.value
           #expect(!model.isRunning)
           #expect(model.message != nil)
-          expectNoDifference(fixture.document.value.cutSuggestions, before.cutSuggestions)
+          expectNoDifference(fixture.document.value.cutSuggestions.elements, [])
           expectNoDifference(fixture.document.value.slices, before.slices)
           expectNoDifference(fixture.document.value.suggestionStarts, before.suggestionStarts)
           #expect(model.canResume)
@@ -414,7 +428,7 @@ struct SuggestionRunModelTests {
     }
   }
 
-  @Test func cancelAndDiscardIgnoreLateCompletionAndUnlockOldBatch() async throws {
+  @Test func cancelAndDiscardIgnoreLateCompletionAndKeepClearedBatch() async throws {
     try await withMainSerialExecutor {
       let fixture = SuggestionRunFixture()
       fixture.document.withValue { $0.cutSuggestions = [fixture.candidate()] }
@@ -431,14 +445,14 @@ struct SuggestionRunModelTests {
         stream.yield(.completed([]))
         await model.waitUntilStopped()
         await task.value
-        expectNoDifference(fixture.document.value.cutSuggestions.count, 1)
+        expectNoDifference(fixture.document.value.cutSuggestions.count, 0)
         expectNoDifference(fixture.document.value.unfinishedSuggestionRun?.phase, .paused)
         #expect(!model.candidatesLocked)
         await model.discardSearchTapped()
         stream.yield(.progress("Late old event"))
         expectNoDifference(model.phase, .idle)
         expectNoDifference(fixture.document.value.unfinishedSuggestionRun, nil)
-        expectNoDifference(fixture.document.value.cutSuggestions.count, 1)
+        expectNoDifference(fixture.document.value.cutSuggestions.count, 0)
       }
     }
   }
@@ -457,7 +471,7 @@ struct SuggestionRunModelTests {
         model.cancelSearchTapped()
         await model.waitUntilStopped()
         await task.value
-        fixture.document.withValue { $0.cutSuggestions[id: Fixtures.uuid(1)]?.reject() }
+        fixture.document.withValue { $0.cutSuggestions = [fixture.candidate(2)] }
         let before = fixture.document.value
         let previous = model.phase
         await model.resumeTapped()

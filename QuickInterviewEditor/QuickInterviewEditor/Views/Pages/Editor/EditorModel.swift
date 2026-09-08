@@ -168,6 +168,13 @@ final class EditorModel: ViewModel {
   /// stack). Accepting also lands the derived slice, idempotently, through the same funnel.
   private func wireCutSuggestions() {
     cutSuggestions.run.currentDocument = { [weak self] in self?.documentState ?? .init() }
+    cutSuggestions.run.onReplacementConfirmed = { [weak self] in
+      guard let self else { throw CancellationError() }
+      self.mutateDocument(recordUndo: false) {
+        $0.cutSuggestions = []
+        $0.suggestionBatch = nil
+      }
+    }
     cutSuggestions.run.onApply = { [weak self] candidates, batch in
       guard let self else { throw CancellationError() }
       try self.applySuggestionRun(candidates: candidates, batch: batch)

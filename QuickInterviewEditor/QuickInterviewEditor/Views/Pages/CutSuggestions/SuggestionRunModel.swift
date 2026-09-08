@@ -60,6 +60,9 @@ final class SuggestionRunModel: ViewModel {
     _, _ in
     throw SuggestionRecoveryError.missingRun
   }
+  @ObservationIgnored var onReplacementConfirmed: @MainActor () throws -> Void = {
+    throw SuggestionRecoveryError.missingRun
+  }
   @ObservationIgnored var onDiscard: @MainActor () async throws -> Void = {
     throw SuggestionRecoveryError.missingRun
   }
@@ -79,7 +82,8 @@ final class SuggestionRunModel: ViewModel {
   // MARK: - View Helpers
   let replaceTitle = "Replace existing suggestions?"
   let replaceMessage =
-    "This will run a new search and replace the current suggestions. Your saved clips will not be changed."
+    "This will immediately remove the current suggestions and search for replacements. "
+    + "Your saved clips will not be changed."
   let replaceButtonTitle = "Replace Suggestions"
   let cancelButtonTitle = "Cancel"
   let resumeButtonTitle = "Resume Search"
@@ -159,8 +163,14 @@ final class SuggestionRunModel: ViewModel {
 
   func replaceConfirmed() async {
     acceptingConfirmation = false
-    guard let target = confirmation, !ownershipBlocked else { return }
+    guard let target = confirmation, !ownershipBlocked, !isRunning, stopTask == nil else { return }
     confirmation = nil
+    do {
+      try onReplacementConfirmed()
+    } catch {
+      phase = .failed(message: error.localizedDescription)
+      return
+    }
     switch target {
     case .fresh: await startFresh(mode: .fresh)
     case .resume(let runID, _): await startResume(runID: runID, replaceBaseline: true)

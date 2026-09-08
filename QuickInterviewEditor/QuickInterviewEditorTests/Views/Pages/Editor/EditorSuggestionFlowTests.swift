@@ -12,6 +12,55 @@ import Testing
 @MainActor
 struct EditorSuggestionFlowTests {
 
+  @Test func replacementClearsBeforePreparationAndCannotReturnThroughUndo() async throws {
+    try await withMainSerialExecutor {
+      let fixture = SuggestionRunFixture()
+      try await withDependencies {
+        fixture.install(&$0)
+      } operation: {
+        let model = editor()
+        fixture.wireEditor(model)
+        let (candidate, batch) = try numberedSuggestion(plan: model.editPlan)
+        let saved = Fixtures.slice(id: Fixtures.uuid(99))
+        let reservation = try #require(candidate.naming?.reservation)
+        model.mutateDocument(recordUndo: false) {
+          $0.cutSuggestions = [candidate]
+          $0.suggestionBatch = batch
+          $0.slices = [saved]
+          $0.suggestionStarts.types["spotlight"] = .init(number: 8, isExplicit: true)
+          $0.issuedSuggestionNumbers = [reservation]
+        }
+        model.mutateDocument { $0.slices[id: saved.id]?.name = "Edited clip" }
+        let before = model.documentState
+        var changes: [EditorDocumentState] = []
+        model.onDocumentStateChanged = { changes.append($0) }
+        let prepare = model.cutSuggestions.run.prepare
+        model.cutSuggestions.run.prepare = { preparation in
+          expectNoDifference(model.documentCutSuggestions.elements, [])
+          expectNoDifference(model.suggestionBatch, nil)
+          expectNoDifference(changes.first?.cutSuggestions.elements, [])
+          return try await prepare(preparation)
+        }
+        await model.cutSuggestions.run.suggestTapped()
+        expectNoDifference(model.documentState, before)
+        let task = Task { await model.cutSuggestions.run.replaceConfirmed() }
+        await fixture.waitForRequests()
+        expectNoDifference(model.documentCutSuggestions.elements, [])
+        expectNoDifference(model.documentState.slices, before.slices)
+        expectNoDifference(model.suggestionStarts, before.suggestionStarts)
+        expectNoDifference(model.issuedSuggestionNumbers, before.issuedSuggestionNumbers)
+        fixture.state.value.continuations[0].finish(
+          throwing: CutSuggestClientError.decodeFailed("Search failed"))
+        await task.value
+        await model.undoTapped()
+        expectNoDifference(model.slices.elements, [saved])
+        expectNoDifference(model.documentCutSuggestions.elements, [])
+        expectNoDifference(model.suggestionBatch, nil)
+        expectNoDifference(model.issuedSuggestionNumbers, before.issuedSuggestionNumbers)
+      }
+    }
+  }
+
   @Test func numbersAreIssuedInAcceptanceOrderWithoutRejectedSuggestionGaps() async throws {
     try await withMainSerialExecutor {
       let fixture = SuggestionRunFixture()
@@ -489,6 +538,8 @@ struct EditorSuggestionFlowTests {
         await model.cutSuggestions.suggestCutsTapped()
         let task = Task { await model.cutSuggestions.run.replaceConfirmed() }
         await fixture.waitForRequests()
+        expectNoDifference(model.documentCutSuggestions.elements, [])
+        model.mutateDocument(recordUndo: false) { $0.cutSuggestions = [old] }
         let before = model.documentCutSuggestions
         model.cutSuggestions.acceptTapped(old.id)
         model.acceptCutSuggestion(Fixtures.slice(), id: old.id)
@@ -707,12 +758,10 @@ struct EditorSuggestionFlowTests {
         }
         expectNoDifference(model.slices, savedClips)
         expectNoDifference(model.documentState.issuedSuggestionNumbers, ledger)
+        expectNoDifference(model.documentCutSuggestions.elements, [])
         if outcome == "empty" {
-          expectNoDifference(model.documentCutSuggestions.elements, [])
           expectNoDifference(
             model.cutSuggestions.emptyStateMessage, "No matching suggestions found.")
-        } else {
-          expectNoDifference(model.documentCutSuggestions, previous)
         }
       }
     }
