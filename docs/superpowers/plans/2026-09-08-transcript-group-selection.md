@@ -1,6 +1,6 @@
 # Transcript Group Selection Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. Execute inline unless the user requests delegation.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. Use the execution skill’s bounded implementation and review workflow.
 
 **Goal:** Select transcript objects with one click, open them with two, select words by dragging, resolve overlaps explicitly, and make object/highlight deletion and unsaved-draft boundary edits undoable.
 
@@ -40,7 +40,7 @@ New app files (all beneath `QuickInterviewEditor/QuickInterviewEditor/`):
 | `Models/TranscriptObject.swift` | Full object projection and deterministic hit ordering |
 | `Models/EditorHistory.swift` | Chronological document/selection change entries |
 | `Models/ClipEditTarget.swift` | Saved versus unsaved session identity and commit outcome |
-| `Views/Pages/Editor/EditorModel+TranscriptSelection.swift` | Object actions, selection resolution and sidebar reveal |
+| `Views/Pages/Editor/EditorModel+TranscriptSelection.swift` | Object actions, selection resolution and tokenized sidebar reveal |
 | `Views/Pages/Editor/EditorModel+SelectionHistory.swift` | Delete/Clear, history application and keyboard policy |
 | `Views/Pages/Editor/EditorModel+DraftEditing.swift` | Draft initialization, validation and atomic commit |
 | `Views/Pages/TranscriptPage/TranscriptPointerGesture.swift` | Testable press/click/drag classification |
@@ -164,8 +164,8 @@ Write the test before the helper implementation so the new API is initially red.
   Drive row active state from `selection.objectID`, not ambient `activeSliceID`.
 - [ ] Add model tests for actual padded clip bounds, an overlapping edge word,
   missing object IDs, same-ID clip/suggestion disambiguation, and selection
-  surviving `syncEditSession()`. Change existing selection tests intentionally
-  where they assert the removed re-click-to-clear behavior.
+  surviving `syncEditSession()`. Keep existing re-click tests until Task 4 changes
+  the corresponding gesture behavior.
 - [ ] Run `EditorGroupSelectionTests`, `EditorSelectionTests`,
   `EditorSeamSelectionTests`, `EditorFineTuneTests`, and `TranscriptObjectTests`.
   Commit: `feat: model transcript object selection explicitly`.
@@ -292,6 +292,10 @@ struct EditorHistoryTests {
   Reconcile missing object/seam identities and stale range bounds afterward.
   A pure selection entry never calls `restore`, document callbacks, or playback
   reconciliation; restoring its highlight does not seek or stop playback.
+- [ ] Introduce undoable explicit `clearSelectionTapped()` now, keeping the
+  lower-level clear non-recording. Suppress selection-driven transport work for
+  history-origin transitions, including the `EditorView` audio-selection observer.
+  Test restoring a highlight while playback is active: no stop or cursor seek.
 - [ ] Coalesce object deletion + deselection inside one helper around
   `mutateDocument`, adding an optional selection change to its recorded entry.
   Maintain background rebase on both before/after document snapshots. Keep
@@ -311,9 +315,11 @@ struct EditorHistoryTests {
 
 **Files:** Modify `Views/Pages/Editor/EditorModel+SelectionHistory.swift`,
 `EditorModel.swift`, `EditorKeyMonitor.swift`, `MarkClipBarView.swift`,
-`WaveformView.swift`, and `WaveformLaneView.swift` in the same Editor folder.
+`WaveformView.swift`, and `WaveformLaneView.swift` in the same Editor folder,
+plus `EditSlice/SliceEditKeyMonitor.swift`.
 Tests: `QuickInterviewEditor/QuickInterviewEditorTests/Views/Pages/Editor/EditorSelectionHistoryTests.swift`,
-`EditorKeyMonitorTests.swift`, `EditorRemovalTests.swift`, `EditorSeamSelectionTests.swift`.
+`EditorKeyMonitorTests.swift`, `EditorRemovalTests.swift`, `EditorSeamSelectionTests.swift`,
+and `EditSlice/SliceEditKeyMonitorTests.swift` (including its existing Delete mapping).
 
 - [ ] Add `deleteSelectionTapped() async`. Switch on `selection`: clip deletes its
   slice; suggestion removes its record from `documentCutSuggestions`; range records a pure
@@ -448,8 +454,9 @@ struct TranscriptPointerGesture {
   mouse-down. On non-drag mouse-up forward offset, modifiers, click count and
   hit geometry. Classify background geometrically: paragraph gaps/margins cannot
   inherit the nearest word; spaces inside drawn groups may select those groups.
-  Use window/view coordinates for the 4-point threshold so scrolling does not
-  create a spurious drag. Cancel tracking on view removal or lost interaction.
+  Use `event.locationInWindow` exclusively for the 4-point threshold so scrolling
+  does not create a spurious drag. Convert separately to text-view coordinates
+  for hit resolution. Cancel tracking on view removal or lost interaction.
 - [ ] First-click model resolution: Shift range intent wins; otherwise preserve
   active freeform/object when hit, else choose the foremost candidate, else choose
   the word, else clear. Retain the first click's resolved target and timestamp
@@ -462,6 +469,8 @@ struct TranscriptPointerGesture {
   padded boundary words; active freeform precedence; fully hidden suggestions;
   re-click preservation; shift extension; invalidated double-click capture;
   constant color on foreground promotion; and document changes between clicks.
+- [ ] Update existing tests asserting re-click-to-clear alongside the changed
+  gesture implementation.
 - [ ] Run the named transcript/style suites and `EditorGroupSelectionTests`.
   Commit: `feat: select and open transcript groups with stable hit targets`.
 
@@ -570,15 +579,18 @@ enum ClipEditCommitResult: Equatable {
 ```
 
 - [ ] Add `EditSliceModel.init(target:title:range:editPlan:)` and retain the current
-  `init(slice:editPlan:)` as a convenience for saved clips. Initialize the scoped
-  transcript from words overlapping the range. Keep a session-local model identity
+  `init(slice:editPlan:)` as a convenience for saved clips. Accept an optional
+  explicit scoped word set: saved clips preserve their stored `slice.wordIDs`,
+  while new drafts use words overlapping the range. Keep a session-local model identity
   for `.sheet(item:)`, distinct from the resulting clip's document ID.
   The saved initializer retains saved editing-complete state; drafts hide it.
 - [ ] Replace `onCommit: (Range<Int>) -> Void` with a result-bearing callback:
   `(Range<Int>) -> ClipEditCommitResult`. Default to a visible unavailable error,
   never success. Update saved-clip wiring/tests to return `.committed` only after
   the existing update succeeds. Keep `errorMessage` and `invalidationMessage`
-  observable on the sheet model.
+  observable on the sheet model. Make `commitSliceEdit` return the validated
+  outcome; a missing clip or weak parent returns failure and leaves the sheet open.
+  Add a saved-clip regression for this failure path.
 - [ ] Add `canCommitRange` validation for valid file bounds and at least one
   overlapping word; preserve boundary movement clamps. Set `canSave` to
   valid-and-not-invalidated for drafts, and changed-and-valid for saved clips.
@@ -632,6 +644,9 @@ func saveTapped() {
   reads the current edited timeline and previews the draft's final boundaries.
 - [ ] Show invalidation/error messages in the sheet. An invalidated draft keeps
   its boundary values/history, disables commit, and never binds to another target.
+  Replace saved-only `sliceID` cleanup consumers with explicit target branches,
+  particularly `editSliceRangeIsStale`: absence of a saved slice must not close
+  an unsaved draft.
   Show the spec's save/cancel-current-edit message when opening is blocked by an
   existing unsaved saved-clip session.
 - [ ] Run new draft tests plus the existing saved-sheet presentation, playback,
@@ -688,8 +703,11 @@ commit stays disabled; it must not clamp silently into a new source.
   callback calls `onDragBegan` idempotently then `onDrag`; ended calls
   `onDragEnded`. Default lifecycle closures are no-ops for the dormant
   `FineTuneView` so its behavior is preserved. A cancelled drag restores the
-  captured starting range and records nothing. Add a cancellation route for view
-  disappearance/lost gesture so a stale begin range cannot absorb later nudges.
+  captured starting range and records nothing. Deliver cancellation explicitly
+  on view disappearance, window deactivation, and gesture-state reset; normal
+  `.onEnded` and cancellation must yield exactly one terminal callback. A stale
+  begin range must never absorb later nudges. Preserve the committed initial
+  offset-adjusted range as the inset anchor throughout history changes.
 - [ ] Wrap each draft nudge in one before/after range record. No-op clamps do
   not add history. On local undo/redo stop/reconcile active draft preview through
   existing scoped transport hooks before changing boundaries; stale asynchronous
@@ -701,8 +719,10 @@ commit stays disabled; it must not clamp silently into a new source.
 - [ ] For draft commit, revalidate file bounds, nonempty word membership, source
   identity and live target status synchronously on the main actor before mutation.
   For suggestions, require the current suggestion still pending with the opening
-  word IDs/provenance, then call the existing `acceptCutSuggestion` validator on
-  the original suggestion. Map `.stale/.invalid` to the existing message helpers.
+  word IDs/provenance, then call the pure validator:
+  `acceptCutSuggestion(snapshot.id, in: ProjectState(cutSuggestions: documentCutSuggestions),
+  plan: editPlan, sourceFingerprint: sourceFingerprint, transcriptHash: transcriptHash)`.
+  This is distinct from the editor’s offset-applying insertion helper. Map `.stale/.invalid` to the existing message helpers.
   Use its successful original candidate only for validated identity/name; rebuild
   the final clip from the user's final range:
 
