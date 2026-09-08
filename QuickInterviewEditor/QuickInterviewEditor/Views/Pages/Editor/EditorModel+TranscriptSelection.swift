@@ -1,6 +1,22 @@
 import Foundation
 
 extension EditorModel {
+  func wireTranscriptInteractions() {
+    transcript.onGroupClick = { [weak self] click in self?.transcriptClicked(click) }
+  }
+
+  func cutSuggestionSelected(_ suggestion: CutSuggestion) {
+    revealWords(suggestion.wordIDs)
+  }
+
+  /// Clicking a saved clip reveals it the same way a suggestion does — its words are selected,
+  /// the transcript scrolls to them, and the waveform zooms to frame the clip.
+  func sliceRevealTapped(_ id: Slice.ID) {
+    guard let slice = slices[id: id] else { return }
+    revealWords(slice.wordIDs)
+  }
+
+
   var transcriptObjects: [TranscriptObject] {
     // Read the document even on a cache hit so Observation tracks live replacements.
     _ = slices
@@ -126,12 +142,6 @@ extension EditorModel {
     guard let id = click.wordID, wordIDs.contains(id) else { return false }
     guard let offset = click.utf16Offset else { return true }
     return transcript.document.groupContains(atUTF16Offset: offset, wordIDs: wordIDs)
-  }
-
-  /// Draft targets are connected when the generalized editor lands in Task 6.
-  func openSelectionTapped() {
-    guard case .object(.clip(let id)) = selection else { return }
-    editSliceTapped(id)
   }
 
   private func transcriptObject(for slice: Slice, colorIndex: Int) -> TranscriptObject? {

@@ -85,6 +85,7 @@
 		4D9DB274FCDD6151381DA5B6 /* ClipBoundarySettingsModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD4AA9D2064FA600DB5C7E15 /* ClipBoundarySettingsModel.swift */; };
 		4E6024258CA483E84644E9D9 /* EditorModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 760539D51B064EAD580F1255 /* EditorModel.swift */; };
 		4F1D0038E53A756B016A5FD3 /* AuditionKeyMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDC9A0882303EA39C03A6928 /* AuditionKeyMonitor.swift */; };
+		51ABB731D295BB86B9B21747 /* EditorModel+DraftEditing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 684967217A18967EB6437F62 /* EditorModel+DraftEditing.swift */; };
 		55091DB79655F5777996C449 /* ModelSetupModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34829E32B89E7F2CCC35587B /* ModelSetupModel.swift */; };
 		5544EFA958C30EE4CBC3F786 /* InstallLocation.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBD0DA622B239A3EAD03E156 /* InstallLocation.swift */; };
 		55C82C41FC00575BE9BD8475 /* QuickInterviewEditorApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD1502557C3DB411F1AA78A0 /* QuickInterviewEditorApp.swift */; };
@@ -386,6 +387,7 @@
 		673C43F2570A4E37EC98B443 /* CanonicalAudioStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanonicalAudioStore.swift; sourceTree = "<group>"; };
 		67D05DBD6158BFFBE1538A8C /* TranscriptUnitTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptUnitTests.swift; sourceTree = "<group>"; };
 		6809CA9CC008787B60C575C6 /* ProjectDocumentSink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectDocumentSink.swift; sourceTree = "<group>"; };
+		684967217A18967EB6437F62 /* EditorModel+DraftEditing.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "EditorModel+DraftEditing.swift"; sourceTree = "<group>"; };
 		68ED6B0140D2504D2069CA00 /* ExportRenderClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportRenderClient.swift; sourceTree = "<group>"; };
 		6985FA0705C12507EE03527A /* UpdaterClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdaterClientTests.swift; sourceTree = "<group>"; };
 		6BA38AF2B412ACE42029D064 /* EngineResolverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EngineResolverTests.swift; sourceTree = "<group>"; };
@@ -732,6 +734,7 @@
 				DCC95F21A4B8A615FA0CEF1D /* EditSlice */,
 				003C01D49831BFD1051854DF /* EditorModel+TranscriptSelection.swift */,
 				A19E981C474D93281DD774E4 /* EditorModel+SelectionHistory.swift */,
+				684967217A18967EB6437F62 /* EditorModel+DraftEditing.swift */,
 			);
 			path = Editor;
 			sourceTree = "<group>";
@@ -1377,6 +1380,7 @@
 				1DFE38FA557188CDE5335091 /* EditorHistory.swift in Sources */,
 				9F8FC35D72E13234931E3B8B /* EditorModel+SelectionHistory.swift in Sources */,
 				9DB14F84327BF68C01EF51FE /* TranscriptPointerGesture.swift in Sources */,
+				51ABB731D295BB86B9B21747 /* EditorModel+DraftEditing.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

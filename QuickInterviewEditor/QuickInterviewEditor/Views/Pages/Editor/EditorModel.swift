@@ -131,7 +131,7 @@ final class EditorModel: ViewModel {
     // and hands them here, and THIS model writes the authoritative freeform `audioSelection`. Wired
     // on the model (not a view `.onChange`) so headless model tests apply intents without a view.
     // One-directional — the model never writes the transcript's selection back through this.
-    transcript.onGroupClick = { [weak self] click in self?.transcriptClicked(click) }
+    wireTranscriptInteractions()
     transcript.onSelectionIntent = { [weak self] intent in
       guard let self else { return }
       switch intent {
@@ -1816,23 +1816,12 @@ final class EditorModel: ViewModel {
   /// Clicking a suggestion selects its words (lighting up the transcript + waveform highlights
   /// and opening the fine-tune pane so Preview/Audition are available) and reveals it in both
   /// panes. A no-op for a suggestion with no words.
-  func cutSuggestionSelected(_ suggestion: CutSuggestion) {
-    revealWords(suggestion.wordIDs)
-  }
-
-  /// Clicking a saved clip reveals it the same way a suggestion does — its words are selected,
-  /// the transcript scrolls to them, and the waveform zooms to frame the clip.
-  func sliceRevealTapped(_ id: Slice.ID) {
-    guard let slice = slices[id: id] else { return }
-    revealWords(slice.wordIDs)
-  }
-
   /// Selects the span covered by `wordIDs` then reveals it across both panes. Endpoints are the
   /// earliest and latest words by transcript position (not the array's first/last), so an
   /// unsorted or sparse `wordIDs` still frames the right range. Reveals only when the selection
   /// actually resolved — a stale item whose words are gone leaves the current view untouched
   /// instead of jumping to the previous selection.
-  private func revealWords(_ wordIDs: [Word.ID]) {
+  func revealWords(_ wordIDs: [Word.ID]) {
     let positions = wordIDs.compactMap { id in
       editPlan.words.firstIndex(where: { $0.id == id })
     }
