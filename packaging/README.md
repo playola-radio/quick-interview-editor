@@ -133,15 +133,18 @@ uploads both to S3. Sparkle in the app reads that appcast and self-updates in
 place, preserving the user's Keychain-stored API key.
 
 ```text
+packaging/release_notes.rb extract …  # preflight: select this version from CHANGELOG.md
 packaging/make-dmg.sh    # 6. hdiutil -> sign + notarize + staple the DMG
 sparkle sign_update <dmg>  # 7. EdDSA-sign the DMG (private key from login Keychain)
-packaging/appcast.rb …   # 8. append a signed <item> to appcast.xml (idempotent)
+packaging/appcast.rb … <notes_file>  # 8. append signed item + Markdown notes (idempotent)
 aws s3 cp …              # 9. upload versioned DMG (kept for rollback), copy it to
                          #    PlayolaInterviewEditor-latest.dmg, upload appcast.xml (no-cache)
 ```
 
-All nine steps run from **one lane**, locally (Decision 3 — the multi-GB
-Apple-Silicon engine freeze is impractical on hosted CI).
+The preflight plus all nine packaging steps run from **one lane**, locally
+(Decision 3 — the multi-GB Apple-Silicon engine freeze is impractical on hosted
+CI). The appcast embeds the selected notes as Markdown, which Sparkle 2.9.6
+displays in its standard update UI on the app's macOS 15 deployment target.
 
 ### Website download link
 
@@ -179,10 +182,25 @@ via Sparkle (the appcast points at the versioned DMG, not `latest`).
 
 ### One-command release
 
+Before bumping, move finished entries from `Unreleased` in the root
+`CHANGELOG.md` into an exact dated heading:
+
+```markdown
+## [2.0.1] - 2026-09-09
+
+- Describe a meaningful user-facing change.
+```
+
+Commit that changelog section before releasing, then run from the repository
+root. Fastlane changes into its own directory while it runs, so invoke it from
+`QuickInterviewEditor`, where the Gemfile lives:
+
 ```bash
+cd QuickInterviewEditor
 export NOTARY_PROFILE=qie-notary
-bundle exec fastlane mac bump version:1.1.0   # or: bump   (build integer only)
+bundle exec fastlane mac bump version:2.0.1   # or: bump   (build integer only)
 bundle exec fastlane mac release              # build → sign → notarize → DMG → appcast → S3
+cd ..
 ```
 
 `bump` edits the version single-source in `project.yml`
@@ -194,11 +212,57 @@ tree with a never-reused `CFBundleVersion`. Env overrides (defaults shown):
 `RELEASE_DOWNLOAD_HOST=https://playola-static.s3.amazonaws.com`,
 `AWS_PROFILE=default`.
 
+The release lane extracts the section matching `MARKETING_VERSION` before it
+freezes either engine. A missing, duplicate, or empty section aborts the release
+before the expensive build and before any upload. After building, the lane also
+verifies that the app's actual version matches the preflighted changelog
+version.
+
 To rehearse without changing production objects, point the release at a
 **staging prefix** (`RELEASE_S3_PREFIX=downloads/PlayolaInterviewEditor-staging`,
 matching `RELEASE_DOWNLOAD_HOST`) and run the checklist against that URL. This
 still uploads to S3 — `release` always does — it just isolates the artifacts
 under a separate prefix so the production feed and DMGs are untouched.
+
+### Backfill release notes for an existing appcast item
+
+`release_notes.rb backfill` only changes a local appcast file. It selects the
+exact changelog version, finds exactly one matching
+`sparkle:shortVersionString`, replaces that item's description with Markdown,
+and validates the complete XML before atomically replacing the local file. It
+does not alter the DMG enclosure URL, length, or EdDSA signature, and it never
+downloads from or uploads to S3.
+
+To backfill the published 2.0.0 item, run from the repository root and
+deliberately download, inspect, and upload the feed:
+
+```bash
+mkdir -p .context packaging/dist
+
+aws --profile default s3 cp \
+  s3://playola-static/downloads/PlayolaInterviewEditor/appcast.xml \
+  packaging/dist/appcast.xml
+
+cp packaging/dist/appcast.xml .context/appcast-before-backfill.xml
+
+ruby packaging/release_notes.rb backfill \
+  packaging/dist/appcast.xml CHANGELOG.md 2.0.0
+
+ruby -rrexml/document -e \
+  'abort "bad appcast" unless REXML::Document.new(File.read(ARGV.fetch(0))).root' \
+  packaging/dist/appcast.xml
+
+git diff --no-index \
+  .context/appcast-before-backfill.xml packaging/dist/appcast.xml
+
+aws --profile default s3 cp packaging/dist/appcast.xml \
+  s3://playola-static/downloads/PlayolaInterviewEditor/appcast.xml \
+  --content-type application/xml --cache-control no-cache
+```
+
+The final `aws s3 cp` is the user-facing production mutation. Review the local
+diff and confirm that only the 2.0.0 description changed before running it.
+Development and CI must stop before that upload.
 
 ### Release-verification checklist (run every release, before announcing)
 

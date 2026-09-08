@@ -1,30 +1,35 @@
 #!/usr/bin/env ruby
 # Append a signed <item> to packaging/dist/appcast.xml for the current DMG.
-#   packaging/appcast.rb <dmg> <public-download-url> <sign_update_path> [notes_file]
-# Inline release notes (CDATA). Idempotent: replaces an item with the same
+#   packaging/appcast.rb <dmg> <public-download-url> <sign_update_path> <notes_file>
+# Inline Markdown release notes. Idempotent: replaces an item with the same
 # sparkle:version. A malformed appcast breaks the update channel, so it validates
 # XML before writing.
 require "rexml/document"
 require "time"
 require "open3"
+require_relative "release_notes"
 
 dmg, url, sign_update, notes_file = ARGV
-abort "usage: appcast.rb <dmg> <download-url> <sign_update> [notes_file]" unless dmg && url && sign_update
+abort "usage: appcast.rb <dmg> <download-url> <sign_update> <notes_file>" unless ARGV.length == 4
 abort "sign_update not executable: #{sign_update}" unless File.executable?(sign_update)
 abort "dmg not found: #{dmg}" unless File.file?(dmg)
+abort "notes file not found: #{notes_file}" unless File.file?(notes_file)
 
 app = File.join(File.dirname(dmg), "PlayolaInterviewEditor.app")
 # Read plist keys via argv (no shell) so an app path with spaces/quotes/metacharacters
 # can't break or inject — matches the Open3 handling used for sign_update below.
-def plist(app, key)
-  out, _ = Open3.capture2("/usr/libexec/PlistBuddy", "-c", "Print :#{key}",
-                          File.join(app, "Contents", "Info.plist"))
+def plist(plist_buddy, app, key)
+  out, status = Open3.capture2(plist_buddy, "-c", "Print :#{key}",
+                               File.join(app, "Contents", "Info.plist"))
+  abort "cannot read #{key} from built app" unless status.success?
   out.strip
 end
-version    = plist(app, "CFBundleVersion")            # sparkle:version (integer)
-short      = plist(app, "CFBundleShortVersionString") # display
+plist_buddy = ENV.fetch("PLIST_BUDDY", "/usr/libexec/PlistBuddy")
+version    = plist(plist_buddy, app, "CFBundleVersion")            # sparkle:version (integer)
+short      = plist(plist_buddy, app, "CFBundleShortVersionString") # display
 min_os     = "15.0.0"                                # 3-component, Sparkle requirement
-notes      = notes_file ? File.read(notes_file) : "See the changelog."
+notes      = File.read(notes_file)
+abort "release notes are empty: #{notes_file}" if notes.strip.empty?
 
 # A bad appcast breaks the update channel for everyone, so validate the SEMANTICS
 # before writing — not just that the output is well-formed XML. Empty PlistBuddy
@@ -68,8 +73,7 @@ item.add_element("pubDate").text = Time.now.utc.rfc2822
 item.add_element("sparkle:version").text = version
 item.add_element("sparkle:shortVersionString").text = short
 item.add_element("sparkle:minimumSystemVersion").text = min_os
-desc = item.add_element("description")
-desc.add(REXML::CData.new(notes))
+ReleaseNotes.set_description(item, notes)
 enc = item.add_element("enclosure")
 enc.add_attribute("url", url)
 enc.add_attribute("length", len)
@@ -89,6 +93,13 @@ built = reparsed.elements.to_a("rss/channel/item").find { |i| i.elements["sparkl
 %w[title sparkle:version sparkle:shortVersionString sparkle:minimumSystemVersion].each do |field|
   t = built.elements[field]&.text
   abort "generated item missing #{field}" if t.nil? || t.strip.empty?
+end
+description = built.elements["description"] or abort "generated item missing description"
+unless description.attribute("sparkle:format")&.value == "markdown"
+  abort "generated item description is not markdown"
+end
+unless description.text == notes
+  abort "generated item release notes changed during XML serialization"
 end
 enc_out = built.elements["enclosure"] or abort "generated item missing enclosure"
 %w[url length sparkle:edSignature].each do |attr|

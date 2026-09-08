@@ -84,10 +84,19 @@ jobs:
         with:
           persist-credentials: false
 
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+
       # Cheap release-pipeline guards only — CI never builds/signs/notarizes the
       # DMG (Decision 3: the multi-GB engine freeze runs locally).
-      - name: Ruby syntax-check the appcast generator
-        run: ruby -c packaging/appcast.rb
+      - name: Ruby syntax-check the release tools
+        run: |
+          ruby -c packaging/appcast.rb
+          ruby -c packaging/release_notes.rb
+
+      - name: Test release notes and appcast mutation
+        run: ruby packaging/test/release_notes_test.rb
 
       - name: Bash syntax-check the packaging scripts
         run: bash -n packaging/make-dmg.sh packaging/sign-app.sh
@@ -102,6 +111,12 @@ jobs:
         run: |
           grep -Eq 'CURRENT_PROJECT_VERSION: "[0-9]+"' QuickInterviewEditor/project.yml
           grep -Eq 'MARKETING_VERSION: "[0-9]+\.[0-9]+\.[0-9]+"' QuickInterviewEditor/project.yml
+
+      - name: Checked-in marketing version has release notes
+        run: |
+          release_version="$(sed -n 's/.*MARKETING_VERSION: "\([0-9][0-9.]*\)".*/\1/p' QuickInterviewEditor/project.yml)"
+          ruby packaging/release_notes.rb extract CHANGELOG.md "$release_version" /tmp/release-notes.md
+          test -s /tmp/release-notes.md
 
       - name: Appcast (if ever committed) parses as XML
         run: |
