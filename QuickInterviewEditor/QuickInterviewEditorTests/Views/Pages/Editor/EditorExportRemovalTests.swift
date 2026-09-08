@@ -51,7 +51,7 @@ struct EditorExportRemovalTests {
       let approvedTask = model.exportTask
       review.exportWithSuffixesTapped()
       #expect(model.exportTask == approvedTask)
-      #expect(model.exportReview == nil)
+      #expect(model.exportReview === review)
       await model.exportTask?.value
       await approvedTask?.value
       expectNoDifference(model.exportPhase, .done(count: 1))
@@ -64,7 +64,8 @@ struct EditorExportRemovalTests {
     }
   }
 
-  @Test func reviewNamesCancelsAndCleansScratchWithoutCopying() async throws {
+  @Test(arguments: [false, true])
+  func cancellingReviewCleansScratchWithoutCopying(viaSheetDismissal: Bool) async throws {
     let model = editor(Fixtures.editPlan())
     var slice = Slice(
       id: Fixtures.uuid(1), name: "ID 1", startSample: 1000, endSample: 2000, wordIDs: [],
@@ -90,7 +91,12 @@ struct EditorExportRemovalTests {
       model.exportAllTapped()
       await model.exportTask?.value
       let review = try #require(model.exportReview)
-      review.reviewNamesTapped()
+      if viaSheetDismissal {
+        model.exportReview = nil
+        model.exportReviewDismissed()
+      } else {
+        review.reviewNamesTapped()
+      }
       await model.awaitExportTeardown()
       #expect(model.exportReview == nil)
       #expect(!model.isExporting)
@@ -149,6 +155,52 @@ struct EditorExportRemovalTests {
       #expect(
         !FileManager.default.fileExists(
           atPath: destination.appendingPathComponent("ID 2 2.aiff").path))
+    }
+  }
+
+  @Test func lateDismissalCannotCancelARevisedCollisionReview() async throws {
+    let model = editor(Fixtures.editPlan())
+    var slice = Slice(
+      id: Fixtures.uuid(1), name: "ID 1", startSample: 1000, endSample: 2000, wordIDs: [],
+      snippet: "")
+    slice.suggestionNaming = .init(
+      runID: Fixtures.uuid(90), typeID: "image-id", typeName: "ID", typeGroup: .audioImages,
+      discoveryLabel: "ID", extractedValues: [:], missingFieldIDs: [], correctedValues: [:],
+      reservation: nil)
+    model.slices = [slice]
+    let destination = try makeTempDir()
+    defer { try? FileManager.default.removeItem(at: destination) }
+    try Data("original".utf8).write(to: destination.appendingPathComponent("ID 1.aiff"))
+    let outputs = LockIsolated<[URL]>([])
+    try await withDependencies {
+      $0.exportRender.renderSlice = { job in
+        outputs.withValue { $0.append(job.outputURL) }
+        try writeStubAIFF(job)
+      }
+      $0.engine.injectMarkers = { _ in }
+      $0.workspace.reveal = { _ in }
+    } operation: {
+      model.destinationURL = destination
+      model.exportAllTapped()
+      await model.exportTask?.value
+      let first = try #require(model.exportReview)
+      expectNoDifference(first.mappings.first?.proposedName, "ID 1 2.aiff")
+      try Data("racing writer".utf8).write(to: destination.appendingPathComponent("ID 1 2.aiff"))
+      first.exportWithSuffixesTapped()
+      await model.exportTask?.value
+      let revised = try #require(model.exportReview)
+      expectNoDifference(revised.mappings.first?.proposedName, "ID 1 3.aiff")
+      model.exportReviewDismissed()
+      await model.exportTask?.value
+      #expect(model.exportReview === revised)
+      #expect(outputs.value.allSatisfy { FileManager.default.fileExists(atPath: $0.path) })
+      revised.exportWithSuffixesTapped()
+      await model.exportTask?.value
+      expectNoDifference(model.exportPhase, .done(count: 1))
+      expectNoDifference(outputs.value.count, 1)
+      #expect(
+        FileManager.default.fileExists(
+          atPath: destination.appendingPathComponent("ID 1 3.aiff").path))
     }
   }
   /// Every model gets its own unique sidecar fingerprint so `mutateDocument`'s

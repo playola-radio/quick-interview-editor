@@ -3705,7 +3705,7 @@ final class EditorModel: ViewModel {
   }
 
   func exportReviewDismissed() {
-    guard case .reviewing = exportPhase else { return }
+    guard exportReview == nil, case .reviewing = exportPhase else { return }
     cancelExportTapped()
   }
 
@@ -3956,9 +3956,8 @@ final class EditorModel: ViewModel {
     }
     session.onExport = { [weak self, weak session] mappings in
       guard let self, let session, exportSession === session, exportReview === session,
-        !session.isCopying
+        case .reviewing = exportPhase, !session.isCopying
       else { return }
-      exportReview = nil
       exportPhase = .exporting(current: session.copied.count, total: session.total)
       exportTask = Task { await self.continueExport(session, approved: mappings) }
     }

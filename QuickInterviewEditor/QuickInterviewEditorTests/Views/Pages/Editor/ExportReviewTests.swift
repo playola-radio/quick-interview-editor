@@ -7,6 +7,32 @@ import Testing
 
 @MainActor
 struct ExportReviewTests {
+  @Test func reviewNamesCanCancelWhileApprovedCopiesAreRunning() async {
+    let (enteredStream, entered) = AsyncStream.makeStream(of: Void.self)
+    let (releaseStream, release) = AsyncStream.makeStream(of: Void.self)
+    let model = withDependencies {
+      $0.exportCopy = .init(
+        listNames: { _ in [] },
+        copy: { _, _ in
+          entered.yield(())
+          for await _ in releaseStream {}
+        })
+    } operation: {
+      ExportReviewModel(request: request([clip(1, name: "ID 1")]), scratchDirectory: nil)
+    }
+    let worker = Task { await model.copy(approved: nil) }
+    var cancelled = false
+    model.onReviewNames = {
+      cancelled = true
+      worker.cancel()
+    }
+    for await _ in enteredStream { break }
+    #expect(model.isCopying)
+    model.reviewNamesTapped()
+    #expect(cancelled)
+    release.finish()
+    _ = await worker.value
+  }
   @Test func reviewActionsAuthorizeOnlyDisplayedMappingsAndUseExactWarning() async {
     let model = withDependencies {
       $0.exportCopy = .init(

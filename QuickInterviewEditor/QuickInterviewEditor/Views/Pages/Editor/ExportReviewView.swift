@@ -9,6 +9,7 @@ struct ExportReviewView: View {
       Text(model.warning).foregroundStyle(.orange)
       Text(model.helpText).foregroundStyle(.secondary)
       Text(model.progressLabel).font(.caption)
+      if model.isCopying { ProgressView() }
       ScrollView {
         VStack(alignment: .leading, spacing: 12) {
           ForEach(model.mappings) { mapping in

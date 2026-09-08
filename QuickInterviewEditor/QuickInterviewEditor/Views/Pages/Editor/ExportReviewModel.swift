@@ -51,7 +51,6 @@ final class ExportReviewModel: ViewModel, Identifiable {
 
   // MARK: - User Actions
   func reviewNamesTapped() {
-    guard !isCopying else { return }
     onReviewNames()
   }
 
