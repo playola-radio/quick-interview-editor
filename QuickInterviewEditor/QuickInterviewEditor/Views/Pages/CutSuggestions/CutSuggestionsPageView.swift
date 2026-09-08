@@ -14,7 +14,6 @@ struct CutSuggestionsPageView: View {
       }
       .disabled(model.suggestDisabled)
 
-      Button(model.configureSuggestionsLabel) { model.configureSuggestionsTapped() }
       Menu(model.typesMenuTitle) {
         Button(model.allTypesTitle, systemImage: model.allTypesState.image) {
           model.allTypesTapped()
@@ -111,10 +110,6 @@ struct CutSuggestionsPageView: View {
       Button(model.run.cancelButtonTitle, role: .cancel) { model.run.cancelReplacementTapped() }
     } message: {
       Text(model.run.replaceMessage)
-    }
-    .sheet(item: $model.suggestionSettings, onDismiss: model.suggestionSettingsDismissed) {
-      settings in
-      SuggestionSettingsView(model: settings)
     }
     .sheet(item: $model.suggestionReview) { review in
       SuggestionReviewView(model: review)

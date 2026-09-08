@@ -4,7 +4,7 @@ import SwiftUI
 struct QuickInterviewEditorApp: App {
   @State private var launch = AppLaunchModel()
   @State private var settings = SettingsModel()
-  @State private var suggestionSettings = SuggestionSettingsModel()
+  @State private var suggestionSettings = SuggestionSettingsModel(isSettingsTab: true)
   @State private var clipSettings = ClipBoundarySettingsModel()
 
   var body: some Scene {
@@ -16,6 +16,7 @@ struct QuickInterviewEditorApp: App {
           // object rebuilds the host rather than reusing a model bound to the old one.
           .id(ObjectIdentifier(configuration.document))
           .environment(launch)
+          .environment(suggestionSettings)
           .preferredColorScheme(.dark)
       }
     )

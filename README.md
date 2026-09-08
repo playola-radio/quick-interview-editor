@@ -96,17 +96,22 @@ extraction, useful complete commentary is kept as a Spotlight when that type is 
 otherwise the unqualified Intro is omitted. Failed extraction stays available to retry.
 
 Enter an optional **Interview Artist** before importing audio, or edit it later under
-**Configure Suggestions → This project → Interview** and click **Save**. The name belongs
+**Settings (⌘,) → Configure Suggestions → This project → Interview** and click **Save**. The name belongs
 to this project and helps resolve references to the subject’s own music. Other artists
 still come from the transcript. Each search captures the name it started with; changes
 apply to future searches.
+
+The Settings tab shows the last active project’s name. Activate another project window
+to edit its Interview and Numbering settings. Unsaved project drafts remain separate,
+and opening Settings keeps the last active project selected. App-wide rules remain
+available when no project is open.
 
 Use **Types** to show any combination of groups or individual types. The menu shows
 **Spotlights**, **Song Intros**, and **Audio Images**, with distinct subtype or custom
 choices where useful. Filtering changes what you see; it does not delete suggestions or change saved clip names. Saved clips remain
 available independently of this filter.
 
-Open **Configure Suggestions** to edit the app-wide rules. Each type has discovery
+Open **Settings (⌘,) → Configure Suggestions** to edit the app-wide rules. Each type has discovery
 guidelines and a naming template built from text, extracted fields, and an optional
 sequence number. You can add types and fields, with instructions explaining how to
 extract each field from the transcript. The default Intro fields identify the song and
@@ -121,7 +126,7 @@ correction. Pending suggestions retain their descriptive labels; the captured na
 template is applied when you accept a clip. Field corrections and canonical group
 spelling affect that accepted name without renaming clips you already accepted.
 
-Open **Configure Suggestions → Numbering**, under **This project**, for starting counts
+Open **Settings (⌘,) → Configure Suggestions → Numbering**, under **This project**, for starting counts
 and song/group overrides. Leave a count Automatic, or enter a starting number when
 continuing across source tapes or `.pie` files. Each Save/Reset applies directly to the
 project and can be undone in the editor. These counters are independent of app-wide

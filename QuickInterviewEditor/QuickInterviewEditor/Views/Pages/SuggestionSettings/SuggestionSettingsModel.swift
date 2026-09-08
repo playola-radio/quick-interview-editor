@@ -28,6 +28,7 @@ final class SuggestionSettingsModel: ViewModel, Identifiable {
   init(
     configuration: SuggestionConfiguration? = nil,
     numberingPage: CutSuggestionsPageModel? = nil,
+    isSettingsTab: Bool = false,
     onSaved: (() -> Void)? = nil, onCancelled: (() -> Void)? = nil
   ) {
     let initial = configuration ?? SuggestionDefaults.configuration
@@ -39,6 +40,7 @@ final class SuggestionSettingsModel: ViewModel, Identifiable {
     self.onSaved = onSaved
     self.onCancelled = onCancelled
     self.numberingPage = numberingPage
+    self.isSettingsTab = isSettingsTab
     super.init()
     rebuildNamingTemplate()
   }
@@ -53,7 +55,9 @@ final class SuggestionSettingsModel: ViewModel, Identifiable {
   weak var numberingPage: CutSuggestionsPageModel?
   private(set) var isNumberingSelected = false
   private(set) var isInterviewSelected = false
-  private var interviewArtistDraft: String?
+  private let isSettingsTab: Bool
+  private weak var activeProject: ProjectModel?
+  private var activeProjectName: String?
   var numberingReview: SuggestionReviewModel?
   private var validationErrors: [String] = []
   private(set) var statusMessage: String?
@@ -81,6 +85,17 @@ final class SuggestionSettingsModel: ViewModel, Identifiable {
     + "Leave blank to clear it. Existing clip names stay unchanged."
   let saveInterviewLabel = "Save"
   let projectScopeTitle = "This project"
+  var projectName: String? { activeProject == nil ? nil : activeProjectName }
+  var projectContextMessage: String {
+    if let projectName {
+      return showsNumberingOption
+        ? "Interview and Numbering apply to \(projectName)."
+        : "\(projectName) — Interview and Numbering are available after transcription finishes."
+    }
+    return showsNumberingOption
+      ? "Interview and Numbering apply to this project."
+      : "Open a project to configure Interview and Numbering. Rules remain available for all projects."
+  }
   let doneLabel = "Done"
   let typesTitle = "Types"
   let fieldsTitle = "Fields"
@@ -140,14 +155,16 @@ final class SuggestionSettingsModel: ViewModel, Identifiable {
   var showsInterviewOption: Bool { numberingPage != nil }
   var showsInterview: Bool { isInterviewSelected && showsInterviewOption }
   var showsProjectSettings: Bool { showsNumbering || showsInterview }
-  var canSaveInterview: Bool { showsInterviewOption && !isBusy && interviewArtistDraft != nil }
+  var canSaveInterview: Bool {
+    showsInterviewOption && !isBusy && numberingPage?.interviewArtistDraft != nil
+  }
   var interviewArtistText: String {
-    get { interviewArtistDraft ?? numberingPage?.interviewArtist ?? "" }
-    set { interviewArtistDraft = newValue }
+    get { numberingPage?.interviewArtistDraft ?? numberingPage?.interviewArtist ?? "" }
+    set { numberingPage?.interviewArtistDraft = newValue }
   }
   var showsNumbering: Bool { isNumberingSelected && showsNumberingOption }
   var showsRuleActions: Bool { !showsProjectSettings || draft != loadedConfiguration }
-  var showsDone: Bool { !showsRuleActions }
+  var showsDone: Bool { !isSettingsTab && !showsRuleActions }
   var showsTypeEditor: Bool { !showsProjectSettings && typeIndex != nil }
   var showsFieldEditor: Bool { !showsProjectSettings && fieldIndex != nil }
   var showsTunedDiscoveryHelp: Bool { selectedTypeID == "intro" || selectedTypeID == "spotlight" }
@@ -187,6 +204,35 @@ final class SuggestionSettingsModel: ViewModel, Identifiable {
   }
 
   // MARK: - User Actions
+  func projectActivityChanged(_ project: ProjectModel, appearsActive: Bool) {
+    guard appearsActive else { return }
+    if activeProject !== project { numberingReview = nil }
+    activeProject = project
+    projectUpdated(project)
+  }
+
+  func projectUpdated(_ project: ProjectModel) {
+    guard activeProject === project else { return }
+    let page = project.editor?.cutSuggestions
+    if numberingPage !== page { numberingReview = nil }
+    numberingPage = page
+    activeProjectName =
+      project.packageURL?.lastPathComponent
+      ?? project.suggestedDocumentName ?? "Untitled"
+  }
+
+  func projectClosed(_ project: ProjectModel) {
+    guard activeProject === project else { return }
+    activeProject = nil
+    activeProjectName = nil
+    numberingPage = nil
+    numberingReview = nil
+  }
+
+  func reviewGroupTapped(_ key: SuggestionSequenceKey) {
+    numberingPage?.reviewGroupTapped(key, settings: self)
+  }
+
   func viewAppeared() async {
     guard !hasLoaded, !attemptedLoad else { return }
     attemptedLoad = true
@@ -238,7 +284,7 @@ final class SuggestionSettingsModel: ViewModel, Identifiable {
     guard canSaveInterview else { return }
     let trimmed = interviewArtistText.trimmingCharacters(in: .whitespacesAndNewlines)
     numberingPage?.onInterviewArtistChanged?(trimmed.isEmpty ? nil : trimmed)
-    interviewArtistDraft = nil
+    numberingPage?.interviewArtistDraft = nil
   }
 
   func addTypeTapped() {

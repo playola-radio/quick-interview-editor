@@ -10,6 +10,8 @@ struct ProjectHostView: View {
   @State private var model: ProjectModel
   @Environment(\.undoManager) private var undoManager
   @Environment(AppLaunchModel.self) private var launch
+  @Environment(SuggestionSettingsModel.self) private var suggestionSettings
+  @Environment(\.appearsActive) private var appearsActive
 
   init(document: ProjectDocument, fileURL: URL?) {
     self.document = document
@@ -25,6 +27,10 @@ struct ProjectHostView: View {
     content
       .background(DocumentDefaultName(suggestedName: model.suggestedDocumentName))
       .focusedSceneValue(\.projectModel, model)
+      .onChange(of: appearsActive, initial: true) { _, active in
+        suggestionSettings.projectActivityChanged(model, appearsActive: active)
+      }
+      .onChange(of: model.editor) { _, _ in suggestionSettings.projectUpdated(model) }
       .onChange(of: undoManager, initial: true) { _, manager in document.undoManager = manager }
       // Wire the document's weak indicator to the RETAINED model's own SaveStatus (never a
       // fresh one made in init — SwiftUI reuses the @State model across view re-inits, so a
@@ -35,13 +41,17 @@ struct ProjectHostView: View {
       }
       .onChange(of: fileURL) { _, url in
         model.documentURLChanged(url)
+        suggestionSettings.projectUpdated(model)
         Task { await model.documentLocationObserved() }
       }
       .onChange(of: model.saveStatus.isSaving) { _, _ in
         Task { await model.savedProjectObserved() }
       }
       .task { await model.viewAppeared() }
-      .onDisappear { Task { await model.viewDisappeared() } }
+      .onDisappear {
+        suggestionSettings.projectClosed(model)
+        Task { await model.viewDisappeared() }
+      }
   }
 
   @ViewBuilder private var content: some View {

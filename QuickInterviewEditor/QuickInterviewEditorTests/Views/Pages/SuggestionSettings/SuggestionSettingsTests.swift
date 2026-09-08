@@ -8,14 +8,174 @@ import Testing
 
 @MainActor
 struct SuggestionSettingsTests {
+  @Test func settingsKeepLastActiveProjectWhenSettingsTakesFocus() throws {
+    let first = try project(named: "First.pie")
+    let second = try project(named: "Second.pie")
+    let model = SuggestionSettingsModel(
+      configuration: SuggestionDefaults.configuration, isSettingsTab: true)
+    model.projectActivityChanged(first, appearsActive: true)
+    model.interviewSelected()
+    model.projectActivityChanged(first, appearsActive: false)
+    model.projectActivityChanged(second, appearsActive: false)
+    #expect(model.numberingPage === first.editor?.cutSuggestions)
+    expectNoDifference(model.projectName, "First.pie")
+    #expect(model.showsInterview)
+    #expect(!model.showsDone)
+    model.projectUpdated(second)
+    model.projectClosed(second)
+    #expect(model.numberingPage === first.editor?.cutSuggestions)
+  }
+
+  @Test func switchingProjectsPreservesSeparateArtistCountAndGlobalRuleDrafts() throws {
+    let first = try project(named: "First.pie")
+    let second = try project(named: "Second.pie")
+    let model = SuggestionSettingsModel(
+      configuration: SuggestionDefaults.configuration, isSettingsTab: true)
+    model.typeName = "Unsaved rules"
+    let rules = model.draft
+    model.projectActivityChanged(first, appearsActive: true)
+    model.interviewSelected()
+    model.interviewArtistText = "First artist"
+    first.editor?.cutSuggestions[futureStart: "intro"] = "41"
+    model.projectActivityChanged(second, appearsActive: true)
+    expectNoDifference(model.interviewArtistText, "")
+    expectNoDifference(model.numberingPage?[futureStart: "intro"], "1")
+    model.interviewArtistText = "Second artist"
+    second.editor?.cutSuggestions[futureStart: "intro"] = "82"
+    model.projectActivityChanged(first, appearsActive: true)
+    expectNoDifference(model.interviewArtistText, "First artist")
+    expectNoDifference(model.numberingPage?[futureStart: "intro"], "41")
+    model.projectActivityChanged(second, appearsActive: true)
+    expectNoDifference(model.interviewArtistText, "Second artist")
+    expectNoDifference(model.numberingPage?[futureStart: "intro"], "82")
+    expectNoDifference(model.draft, rules)
+    #expect(model.showsInterview)
+  }
+
+  @Test func switchingProjectsRoutesSavesAndUndoToTheirOwningEditor() async throws {
+    let first = try project(named: "First.pie")
+    let second = try project(named: "Second.pie")
+    let firstEditor = try #require(first.editor)
+    let secondEditor = try #require(second.editor)
+    var firstChanges: [EditorDocumentState] = []
+    var secondChanges: [EditorDocumentState] = []
+    firstEditor.onDocumentStateChanged = { firstChanges.append($0) }
+    secondEditor.onDocumentStateChanged = { secondChanges.append($0) }
+    let model = SuggestionSettingsModel(
+      configuration: SuggestionDefaults.configuration, isSettingsTab: true)
+    model.projectActivityChanged(first, appearsActive: true)
+    model.interviewArtistText = "First artist"
+    model.projectActivityChanged(second, appearsActive: true)
+    model.interviewArtistText = "Second artist"
+    model.saveInterviewTapped()
+    expectNoDifference(secondEditor.documentState.interviewArtist, "Second artist")
+    expectNoDifference(secondChanges.last, secondEditor.documentState)
+    #expect(firstChanges.isEmpty)
+    model.projectActivityChanged(first, appearsActive: true)
+    model.saveInterviewTapped()
+    model.numberingPage?[futureStart: "intro"] = "9"
+    model.numberingPage?.applyTypeStartTapped("intro")
+    expectNoDifference(firstEditor.documentState.interviewArtist, "First artist")
+    expectNoDifference(firstEditor.suggestionStarts.types["intro"]?.number, 9)
+    expectNoDifference(firstChanges.last, firstEditor.documentState)
+    await firstEditor.undoTapped()
+    expectNoDifference(firstEditor.suggestionStarts.types["intro"], nil)
+    await firstEditor.undoTapped()
+    expectNoDifference(firstEditor.documentState.interviewArtist, nil)
+    expectNoDifference(secondEditor.documentState.interviewArtist, "Second artist")
+    #expect(!model.canSaveInterview)
+  }
+
+  @Test func contextChangesDismissGroupReviewAndFollowEditorReplacement() throws {
+    let first = try project(named: "First.pie")
+    let second = try project(named: "Second.pie")
+    let model = SuggestionSettingsModel(
+      configuration: SuggestionDefaults.configuration, isSettingsTab: true)
+    model.projectActivityChanged(first, appearsActive: true)
+    let editor = try #require(first.editor)
+    let batch = try #require(editor.suggestionBatch)
+    let key = try #require(reviewSequenceKey(editor.documentCutSuggestions[0], batch: batch))
+    model.reviewGroupTapped(key)
+    #expect(model.numberingReview != nil)
+    model.projectActivityChanged(second, appearsActive: true)
+    #expect(model.numberingReview == nil)
+    model.projectActivityChanged(first, appearsActive: true)
+    model.reviewGroupTapped(key)
+    first.editor = try SuggestionReviewTests().fixture()
+    model.projectUpdated(first)
+    #expect(model.numberingPage === first.editor?.cutSuggestions)
+    #expect(model.numberingPage !== editor.cutSuggestions)
+    #expect(model.numberingReview == nil)
+    first.editor = nil
+    model.projectUpdated(first)
+    #expect(!model.showsNumberingOption)
+    first.editor = editor
+    model.projectUpdated(first)
+    #expect(model.numberingPage === editor.cutSuggestions)
+    model.projectClosed(first)
+    #expect(model.numberingPage == nil)
+    expectNoDifference(model.projectName, nil)
+  }
+
+  @Test func settingsExplainMissingProjectAndDoNotRetainClosedProject() throws {
+    let model = SuggestionSettingsModel(
+      configuration: SuggestionDefaults.configuration, isSettingsTab: true)
+    #expect(model.projectContextMessage.contains("Open a project"))
+    #expect(model.projectContextMessage.contains("Interview"))
+    #expect(model.projectContextMessage.contains("Numbering"))
+    #expect(model.showsTypeEditor)
+    #expect(model.showsRuleActions)
+    #expect(!model.showsDone)
+    var active: ProjectModel? = try project(named: "Closing.pie")
+    weak var weakProject = active
+    weak var weakPage = active?.editor?.cutSuggestions
+    model.projectActivityChanged(try #require(active), appearsActive: true)
+    model.projectClosed(try #require(active))
+    active = nil
+    #expect(weakProject == nil)
+    #expect(weakPage == nil)
+    #expect(model.showsTypeEditor)
+    #expect(model.projectContextMessage.contains("Open a project"))
+  }
+
+  @Test func activeSettingsContextDoesNotOwnTheProjectLifetime() throws {
+    let model = SuggestionSettingsModel(isSettingsTab: true)
+    var active: ProjectModel? = try project(named: "Transient.pie")
+    weak var weakProject = active
+    weak var weakPage = active?.editor?.cutSuggestions
+    model.projectActivityChanged(try #require(active), appearsActive: true)
+    active = nil
+    #expect(weakProject == nil)
+    #expect(weakPage == nil)
+    #expect(model.numberingPage == nil)
+    expectNoDifference(model.projectName, nil)
+  }
+
+  @Test func settingsFollowProjectFilenameChanges() throws {
+    let project = try project(named: "First.pie")
+    let model = SuggestionSettingsModel(isSettingsTab: true)
+    model.projectActivityChanged(project, appearsActive: true)
+    project.documentURLChanged(URL(fileURLWithPath: "/Renamed.pie"))
+    model.projectUpdated(project)
+    expectNoDifference(model.projectName, "Renamed.pie")
+    #expect(model.projectContextMessage.contains("Renamed.pie"))
+  }
+
+  private func project(named name: String) throws -> ProjectModel {
+    let project = ProjectModel(
+      file: nil, plan: nil, audio: nil, packageURL: URL(fileURLWithPath: "/" + name),
+      sink: .init(commit: { _, _, _ in }, registerChange: {}))
+    project.editor = try SuggestionReviewTests().fixture()
+    return project
+  }
+
   @Test func interviewSaveAndClearAreUndoableAndIndependentOfRuleDraft() async throws {
     @Shared(.suggestionConfiguration) var published = SuggestionDefaults.configuration
     let editor = try SuggestionReviewTests().fixture()
     let before = editor.documentState
     var changes: [EditorDocumentState] = []
     editor.onDocumentStateChanged = { changes.append($0) }
-    editor.cutSuggestions.configureSuggestionsTapped()
-    let settings = try #require(editor.cutSuggestions.suggestionSettings)
+    let settings = SuggestionSettingsModel(numberingPage: editor.cutSuggestions)
     settings.typeName = "Unsaved rule edit"
     let ruleDraft = settings.draft
     settings.interviewSelected()
@@ -44,9 +204,9 @@ struct SuggestionSettingsTests {
     settings.cancelTapped()
     expectNoDifference(editor.documentState.interviewArtist, "Brandi Carlile")
     expectNoDifference(published, SuggestionDefaults.configuration)
-    editor.cutSuggestions.configureSuggestionsTapped()
     expectNoDifference(
-      editor.cutSuggestions.suggestionSettings?.interviewArtistText, "Brandi Carlile")
+      SuggestionSettingsModel(numberingPage: editor.cutSuggestions).interviewArtistText,
+      "Brandi Carlile")
   }
 
   @Test func interviewNavigationAndRuleReloadPreserveIndependentProjectDraft() async throws {
@@ -55,8 +215,7 @@ struct SuggestionSettingsTests {
     } operation: {
       CutSuggestionsPageModel(editPlan: Fixtures.editPlan(), sourceFingerprint: "interview")
     }
-    page.configureSuggestionsTapped()
-    let settings = try #require(page.suggestionSettings)
+    let settings = withDependencies(from: page) { SuggestionSettingsModel(numberingPage: page) }
     settings.interviewSelected()
     settings.interviewArtistText = "Unsaved artist"
     await settings.viewAppeared()
@@ -86,11 +245,11 @@ struct SuggestionSettingsTests {
     } operation: {
       CutSuggestionsPageModel(editPlan: Fixtures.editPlan(), sourceFingerprint: "settings-load")
     }
-    page.configureSuggestionsTapped()
-    page.suggestionSettings?.numberingSelected()
-    await page.suggestionSettings?.viewAppeared()
-    #expect(page.suggestionSettings?.showsNumbering == true)
-    #expect(page.suggestionSettings?.showsDone == true)
+    let settings = withDependencies(from: page) { SuggestionSettingsModel(numberingPage: page) }
+    settings.numberingSelected()
+    await settings.viewAppeared()
+    #expect(settings.showsNumbering)
+    #expect(settings.showsDone)
   }
 
   @Test func groupReviewBelongsToConfigurationAndKeepsItOpenOnClose() throws {
@@ -98,10 +257,9 @@ struct SuggestionSettingsTests {
     let page = editor.cutSuggestions
     let batch = try #require(editor.suggestionBatch)
     let key = try #require(reviewSequenceKey(editor.documentCutSuggestions[0], batch: batch))
-    page.configureSuggestionsTapped()
-    let settings = try #require(page.suggestionSettings)
+    let settings = withDependencies(from: page) { SuggestionSettingsModel(numberingPage: page) }
     settings.numberingSelected()
-    page.reviewGroupTapped(key)
+    settings.reviewGroupTapped(key)
     let review = try #require(settings.numberingReview)
     #expect(page.suggestionReview == nil)
     review.startText = "9"
@@ -109,7 +267,7 @@ struct SuggestionSettingsTests {
     expectNoDifference(editor.suggestionStarts.groups.first { $0.key == key }?.start.number, 9)
     review.cancelTapped()
     #expect(settings.numberingReview == nil)
-    #expect(page.suggestionSettings === settings)
+    #expect(settings.numberingPage === page)
     page.resetSongStartTapped(key)
     #expect(editor.suggestionStarts.groups.isEmpty)
     let before = editor.documentState
@@ -120,7 +278,7 @@ struct SuggestionSettingsTests {
     page.recoveryBlocksSuggestions = true
     page[futureStart: "intro"] = "10"
     page.applyTypeStartTapped("intro")
-    page.reviewGroupTapped(key)
+    settings.reviewGroupTapped(key)
     expectNoDifference(editor.documentState, before)
     #expect(settings.numberingReview == nil)
   }
@@ -129,8 +287,7 @@ struct SuggestionSettingsTests {
     @Shared(.suggestionConfiguration) var published = SuggestionDefaults.configuration
     let editor = try SuggestionReviewTests().fixture()
     let page = editor.cutSuggestions
-    page.configureSuggestionsTapped()
-    let settings = try #require(page.suggestionSettings)
+    let settings = withDependencies(from: page) { SuggestionSettingsModel(numberingPage: page) }
     #expect(settings.numberingPage === page)
     #expect(settings.showsNumberingOption)
     settings.typeName = "My Song Intro"
@@ -148,9 +305,9 @@ struct SuggestionSettingsTests {
     expectNoDifference(settings.typeName, "My Song Intro")
     page[futureStart: "spotlight"] = "99"
     settings.cancelTapped()
-    #expect(page.suggestionSettings == nil)
+    #expect(settings.numberingPage === page)
     expectNoDifference(editor.suggestionStarts.types["spotlight"]?.number, 7)
-    expectNoDifference(page[futureStart: "spotlight"], "7")
+    expectNoDifference(page[futureStart: "spotlight"], "99")
     expectNoDifference(published, SuggestionDefaults.configuration)
   }
 
@@ -165,8 +322,7 @@ struct SuggestionSettingsTests {
   @Test func numberingOnlyVisitShowsDoneAndDoesNotRetainPage() throws {
     var page: CutSuggestionsPageModel? = CutSuggestionsPageModel(
       editPlan: Fixtures.editPlan(), sourceFingerprint: "numbering")
-    page?.configureSuggestionsTapped()
-    let model = try #require(page?.suggestionSettings)
+    let model = SuggestionSettingsModel(numberingPage: page)
     model.numberingSelected()
     #expect(model.showsDone)
     #expect(!model.showsRuleActions)
@@ -345,17 +501,18 @@ struct SuggestionSettingsTests {
     expectNoDifference(model.draft.types[0].sequenceFieldIDs, ["song-title", "artist-name"])
   }
 
-  @Test func panelCreatesFreshEditorAndCancelClosesOnlyRulesSheet() throws {
+  @Test func cancellingRulesKeepsProjectConnectionAndIndependentDrafts() {
     let page = CutSuggestionsPageModel(editPlan: Fixtures.editPlan(), sourceFingerprint: "settings")
-    page.configureSuggestionsTapped()
-    let first = try #require(page.suggestionSettings)
-    first.typeName = "Unsaved"
-    first.cancelTapped()
-    #expect(page.suggestionSettings == nil)
-    page.configureSuggestionsTapped()
-    let second = try #require(page.suggestionSettings)
-    #expect(first !== second)
-    expectNoDifference(second.typeName, "Song Intro")
+    let model = SuggestionSettingsModel(
+      configuration: SuggestionDefaults.configuration, numberingPage: page, isSettingsTab: true)
+    model.typeName = "Unsaved"
+    model.interviewArtistText = "Artist draft"
+    page[futureStart: "intro"] = "99"
+    model.cancelTapped()
+    #expect(model.numberingPage === page)
+    expectNoDifference(model.typeName, "Song Intro")
+    expectNoDifference(model.interviewArtistText, "Artist draft")
+    expectNoDifference(page[futureStart: "intro"], "99")
   }
 
   @Test func failedInitialLoadPreventsSavingDefaults() async {

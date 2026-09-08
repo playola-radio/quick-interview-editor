@@ -111,11 +111,11 @@ final class CutSuggestionsPageModel: ViewModel {
   }
   /// The API-key entry sheet, presented when onboarding or when the user taps to add a key.
   var keyEntry: SettingsModel?
-  var suggestionSettings: SuggestionSettingsModel?
   var suggestionReview: SuggestionReviewModel?
   @ObservationIgnored var onReviewApply: (SuggestionReviewIntent) throws -> Void = { _ in
     throw SuggestionReviewError.unavailable
   }
+  var interviewArtistDraft: String?
   private var futureStartDrafts: [String: String] = [:]
   /// Whether pending suggestions are drawn as faint outline bands in the transcript. The ranked
   /// list in this panel is unaffected — this only mutes the transcript overlay so the user can
@@ -128,7 +128,6 @@ final class CutSuggestionsPageModel: ViewModel {
   var catalogMessage: String?
 
   // MARK: - Display Text
-  let configureSuggestionsLabel = "Configure Suggestions…"
   let typesMenuTitle = "Types"
   let allTypesTitle = "All Types"
   let noMatchesMessage = "No suggestions match the selected types. Choose All Types to show them."
@@ -421,9 +420,11 @@ final class CutSuggestionsPageModel: ViewModel {
     presentReview(candidateID: id)
   }
 
-  func reviewGroupTapped(_ key: SuggestionSequenceKey) {
+  func reviewGroupTapped(
+    _ key: SuggestionSequenceKey, settings: SuggestionSettingsModel? = nil
+  ) {
     guard !candidateActionsDisabled else { return }
-    presentReview(sequenceKey: key, settings: suggestionSettings)
+    presentReview(sequenceKey: key, settings: settings)
   }
 
   func orphanSelected(_ id: UUID) async {
@@ -509,25 +510,7 @@ final class CutSuggestionsPageModel: ViewModel {
     }
   }
 
-  func configureSuggestionsTapped() {
-    suggestionSettings = withDependencies(from: self) {
-      SuggestionSettingsModel(
-        numberingPage: self,
-        onSaved: { [weak self] in self?.closeSuggestionSettings() },
-        onCancelled: { [weak self] in self?.closeSuggestionSettings() })
-    }
-  }
-
-  func suggestionSettingsDismissed() {
-    guard suggestionSettings == nil else { return }
-    futureStartDrafts = [:]
-  }
-
   // MARK: - Private Helpers
-  private func closeSuggestionSettings() {
-    suggestionSettings = nil
-    suggestionSettingsDismissed()
-  }
   private func applyReviewIntent(_ intent: SuggestionReviewIntent) throws {
     guard !candidateActionsDisabled else { throw SuggestionReviewError.locked }
     try onReviewApply(intent)

@@ -7,6 +7,7 @@ struct SuggestionSettingsView: View {
     VStack(alignment: .leading, spacing: 12) {
       Text(model.title).font(.title2)
       Text(model.helpText).foregroundStyle(.secondary)
+      Text(model.projectContextMessage).foregroundStyle(.secondary)
       HSplitView {
         sidebar.frame(minWidth: 165, idealWidth: 190, maxWidth: 230)
         ScrollView {
@@ -14,7 +15,7 @@ struct SuggestionSettingsView: View {
             if model.showsInterview {
               interviewEditor
             } else if model.showsNumbering, let page = model.numberingPage {
-              SuggestionNumberingView(model: page)
+              SuggestionNumberingView(model: page, settings: model)
             } else if model.showsTypeEditor {
               typeEditor
             } else if model.showsFieldEditor {
@@ -157,6 +158,7 @@ struct SuggestionSettingsView: View {
 
 private struct SuggestionNumberingView: View {
   @Bindable var model: CutSuggestionsPageModel
+  let settings: SuggestionSettingsModel
 
   var body: some View {
     VStack(alignment: .leading, spacing: 16) {
@@ -186,7 +188,7 @@ private struct SuggestionNumberingView: View {
             Text(row.title).font(.headline)
             Text(row.startLabel).font(.caption)
             HStack {
-              Button(model.reviewGroupLabel) { model.reviewGroupTapped(row.id) }
+              Button(model.reviewGroupLabel) { settings.reviewGroupTapped(row.id) }
               if row.hasOverride {
                 Button(model.resetSongStartLabel) { model.resetSongStartTapped(row.id) }
               }
