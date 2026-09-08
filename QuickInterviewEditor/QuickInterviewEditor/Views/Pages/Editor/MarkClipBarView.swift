@@ -16,6 +16,22 @@ struct MarkClipBarView: View {
       Button(model.clearButtonLabel) { model.clearSelectionTapped() }
         .disabled(!model.canClearSelection)
 
+      if model.shouldShowSelectedClipControls {
+        Button(model.playLabel) { Task { await model.playSelectedClipTapped() } }
+      }
+
+      if model.shouldShowSelectedSuggestionControls {
+        Button(model.cutSuggestions.acceptLabel) { model.acceptSelectedSuggestionTapped() }
+          .disabled(model.isExporting)
+        Button(model.cutSuggestions.rejectLabel) { model.rejectSelectedSuggestionTapped() }
+          .disabled(model.isExporting)
+      }
+
+      if model.shouldShowRemoveSectionControl {
+        Button(model.removeSectionLabel) { Task { await model.removeSelectedSectionTapped() } }
+          .disabled(!model.canRemoveSelectedSection)
+      }
+
       if model.shouldShowRestoreControl {
         Button(model.restoreRemovedAudioLabel) { model.restoreRemovalTapped() }
           .disabled(!model.canRestoreSelectedRemoval)

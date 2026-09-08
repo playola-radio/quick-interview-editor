@@ -67,7 +67,10 @@ struct SliceEditKeyMonitorTests {
     expectNoDifference(key(6, [], characters: "z"), .zoom(.zoomFit))  // Z
   }
 
-  @Test func plainDeleteMapsToRemoveSection() {
-    expectNoDifference(key(51), .zoom(.removeSection))  // ⌫
+  @Test func plainDeleteKeepsScopedRemovalDespiteMainSelectionDelete() {
+    expectNoDifference(
+      EditorKeyMonitor.Coordinator.editorKey(forKeyCode: 51, modifiers: [], characters: nil),
+      .deleteSelection)
+    expectNoDifference(key(51), .zoom(.removeSection))
   }
 }

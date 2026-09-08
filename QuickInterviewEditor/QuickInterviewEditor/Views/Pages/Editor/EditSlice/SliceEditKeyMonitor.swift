@@ -90,7 +90,7 @@ struct SliceEditKeyMonitor: NSViewRepresentable {
       if let zoomKey = EditorKeyMonitor.Coordinator.editorKey(
         forKeyCode: keyCode, modifiers: modifiers, characters: characters)
       {
-        return .zoom(zoomKey)
+        return .zoom(zoomKey == .deleteSelection ? .removeSection : zoomKey)
       }
       let hasActionModifier = !modifiers.isDisjoint(with: [.command, .control, .option])
       // Space (no ⌘/⌃/⌥) is the Play/Pause transport — keyCode 49, the same physical key
@@ -179,7 +179,7 @@ struct SliceEditKeyMonitor: NSViewRepresentable {
         // the model no-ops when nothing is selected (so ⌫ never beeps in the sheet).
         if !isARepeat { Task { await model.removeSectionKeyPressed() } }
         return true
-      case .speedUp, .speedDown, .escape, .nudgeCutInEarlier, .nudgeCutInLater,
+      case .deleteSelection, .speedUp, .speedDown, .escape, .nudgeCutInEarlier, .nudgeCutInLater,
         .nudgeCutOutEarlier, .nudgeCutOutLater, .showClipsPanel, .showSuggestionsPanel,
         .showBothPanels, .returnToLastPlayStart, .nudgeLeftCutEarlier, .nudgeLeftCutLater,
         .nudgeRightCutEarlier, .nudgeRightCutLater:

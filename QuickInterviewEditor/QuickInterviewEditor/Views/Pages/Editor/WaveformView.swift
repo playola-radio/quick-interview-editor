@@ -25,6 +25,7 @@ struct WaveformView: View {
         onEdgeDragBegan: { model.selectionEdgeDragBegan($0) },
         onEdgeDragged: { model.selectionEdgeDragged($0, toX: $1) },
         onEdgeDragEnded: { model.selectionEdgeDragEnded($0) },
+        supportsEdgeDrag: model.canEditSelectionEdges,
         onSeamStretchBegan: { model.crossfadeStretchBegan(id: $0) },
         onSeamStretched: { model.crossfadeStretched($0, toX: $1) },
         onSeamStretchEnded: { model.crossfadeStretchEnded() },

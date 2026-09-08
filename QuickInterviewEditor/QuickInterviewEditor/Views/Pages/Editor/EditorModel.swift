@@ -13,6 +13,7 @@ enum EditorKey {
   case speedUp
   case speedDown
   case removeSection
+  case deleteSelection
   /// Nudges a pending removal's cut points by `FineTuneModel.nudgeMs` before commit — the
   /// forced-alignment word boundaries the removal starts from can blur ~10-20ms into a
   /// neighbor's tail/onset (Task 9).
@@ -490,6 +491,7 @@ final class EditorModel: ViewModel {
   // MARK: - Display Text
   let markAsClipLabel = "Mark as Clip"
   let clearButtonLabel = "Clear"
+  let removeSectionLabel = "Remove Section"
   let scrollToCurrentWordLabel = "Scroll to current word"
   let emptyStateMessage = "Select words in the transcript, then Mark as Clip."
   let playLabel = "Play"
@@ -878,14 +880,23 @@ final class EditorModel: ViewModel {
   /// silence-only selection (a marquee over a gap that overlaps no word) also disables it: it would
   /// derive no word IDs, so `addSliceTapped()` would no-op, leaving the button enabled but inert.
   var canAddSlice: Bool {
-    guard let range = selectedSourceRange else { return false }
+    guard let range = selection.freeformRange else { return false }
     return !wordIDs(anyOverlap: range, words: editPlan.words).isEmpty
       && !fineTune.hasUnsavedChange
   }
-  /// Clear is offered whenever a freeform selection exists — including a marquee/edge-drag one that
-  /// never touched the transcript. `audioSelection` is the source of truth; reading it here (not
-  /// `transcript.hasSelection`) is what keeps the bar live for waveform-created selections.
-  var canClearSelection: Bool { audioSelection != nil }
+  /// Clear is available for every main-editor selection, including objects and seams.
+  var canClearSelection: Bool { selection != .none }
+  var canEditSelectionEdges: Bool { selection.freeformRange != nil }
+  var shouldShowRemoveSectionControl: Bool { selection.freeformRange != nil }
+  var shouldShowSelectedClipControls: Bool {
+    if case .object(.clip) = selection { return true }
+    return false
+  }
+  var shouldShowSelectedSuggestionControls: Bool {
+    if case .object(.suggestion) = selection { return true }
+    return false
+  }
+
   /// The bar's word-count readout, derived from the freeform selection so it stays accurate for
   /// every selection path. Counts words the range overlaps (the same set the transcript highlights);
   /// a silence-only selection reads "0 words selected".
@@ -1403,7 +1414,10 @@ final class EditorModel: ViewModel {
   /// A left/right handle grab begins: mark which edge is live so `transportSelectionChanged` stops
   /// churning the playhead for the duration of the drag (mirrors the marquee's `isWaveformAreaSelecting`
   /// suppression). An edge drag is fine-tune, not seek — it never snaps the playhead.
-  func selectionEdgeDragBegan(_ edge: SelectionEdge) { selectionEditingEdge = edge }
+  func selectionEdgeDragBegan(_ edge: SelectionEdge) {
+    guard canEditSelectionEdges else { return }
+    selectionEditingEdge = edge
+  }
 
   /// A handle drag to view-x: map x → source sample and move only that edge, freeform (no silence
   /// snap). The opposite edge stays fixed; the min-duration floor keeps the range from collapsing.
@@ -1414,7 +1428,7 @@ final class EditorModel: ViewModel {
   /// Geometry-free seam behind `selectionEdgeDragged(_:toX:)`: take an exact SOURCE sample directly so
   /// tests exercise the edge math without a viewport (mirrors the marquee's sample-level seams).
   func selectionEdgeDraggedToSource(_ edge: SelectionEdge, _ sourceSample: Int) {
-    guard let range = audioSelection else { return }
+    guard let range = selection.freeformRange else { return }
     // No pre-clamp: `boundaryEditor` already clamps `sourceSample` into the legal window
     // (`0...fileDurationSamples`) via `clampedBoundary`. Clamping here against
     // `waveform.totalSamples` would wrongly couple this geometry-free seam to async waveform load.
@@ -1458,7 +1472,7 @@ final class EditorModel: ViewModel {
   /// Moves one edge of the selection by a signed millisecond delta (the ←/→/⇧←/⇧→ 10 ms nudges),
   /// freeform. No-op with no selection.
   func selectionNudged(_ edge: SelectionEdge, byMs ms: Double) {
-    guard let range = audioSelection else { return }
+    guard let range = selection.freeformRange else { return }
     applyEdgeEdit(
       edge, of: range,
       to: edge == .start
@@ -1554,8 +1568,8 @@ final class EditorModel: ViewModel {
     case .zoomFit: editedWaveform.zoomFitToggled(sourceSelection: selectedSourceRange)
     case .speedUp: transcript.speedUpTapped()
     case .speedDown: transcript.speedDownTapped()
-    case .removeSection:
-      return handleRemoveSectionKey()
+    case .deleteSelection, .removeSection:
+      return handleDeletionKey(key)
     case .escape:
       return handleEscapeKey()
     case .nudgeCutInEarlier, .nudgeCutInLater, .nudgeCutOutEarlier, .nudgeCutOutLater,
@@ -1583,11 +1597,10 @@ final class EditorModel: ViewModel {
     }
   }
 
-  /// Esc handling, split out of `editorKeyDown`'s switch to keep its cyclomatic complexity in
-  /// check. Consumed only when it actually deselects a seam, so a no-op Escape still propagates.
+  /// Escape clears the main selection and propagates when nothing is selected.
   private func handleEscapeKey() -> Bool {
-    guard selectedSeamID != nil else { return false }
-    deselectSeam()
+    guard selection != .none else { return false }
+    clearSelectionTapped()
     return true
   }
 
@@ -1602,10 +1615,13 @@ final class EditorModel: ViewModel {
     }
   }
 
-  /// Delete-key arbitration (decision 6), split out of `editorKeyDown`'s switch to keep its
-  /// cyclomatic complexity in check: a selected seam restores its removal; else a removable
-  /// source-range selection removes a section; else fall through (`false`) so the event still
-  /// reaches a focused slice row's List `.onDelete`.
+  private func handleDeletionKey(_ key: EditorKey) -> Bool {
+    if key == .removeSection { return handleRemoveSectionKey() }
+    Task { await deleteSelectionTapped() }
+    return true
+  }
+
+  /// Explicit Remove Section routing retains range removal and seam restoration.
   private func handleRemoveSectionKey() -> Bool {
     if selectedSeamID != nil {
       restoreRemovalTapped()
@@ -1621,7 +1637,8 @@ final class EditorModel: ViewModel {
   /// through unconsumed (`false`) when there is no selection, so the key still reaches a focused slice
   /// row that might handle it.
   private func nudgeSelection(_ key: EditorKey) -> Bool {
-    guard audioSelection != nil else { return false }
+    if selection.objectID != nil { return true }
+    guard selection.freeformRange != nil else { return false }
     switch key {
     case .nudgeCutInEarlier: selectionNudged(.start, byMs: -fineTune.nudgeMs)
     case .nudgeCutInLater: selectionNudged(.start, byMs: fineTune.nudgeMs)
@@ -2051,7 +2068,7 @@ final class EditorModel: ViewModel {
   /// The SOURCE range a removal would apply to: the primary selection. Edge drag + nudge now mutate
   /// `audioSelection` directly (see `selectionNudged` / `selectionEdgeDragged`), so there is no
   /// separate fine-tune draft to prefer — the selection is already the (possibly nudged) truth.
-  private var pendingRemovalSourceRange: Range<Int>? { selectedSourceRange }
+  private var pendingRemovalSourceRange: Range<Int>? { selection.freeformRange }
 
   /// Whether `range` can become a removal: non-empty. Cross-seam is now allowed — a range that
   /// overlaps existing removals merges them into one larger removal via `removeSourceRange`

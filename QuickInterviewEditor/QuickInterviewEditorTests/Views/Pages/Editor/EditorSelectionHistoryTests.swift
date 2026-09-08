@@ -181,4 +181,168 @@ struct EditorSelectionHistoryTests {
     model.clearSelection()
     #expect(!model.canUndo)
   }
+
+  @Test(arguments: [false, true])
+  func deleteObjectIsOneAtomicHistoryEntry(deletingSuggestion: Bool) async {
+    let model = editor()
+    let clip = Fixtures.slice(id: Fixtures.uuid(31), start: 70_648, end: 119_202)
+    var suggestion = Fixtures.cutSuggestion(id: Fixtures.uuid(31))
+    suggestion.status = deletingSuggestion ? .pending : .accepted
+    suggestion.provenance.transcriptHash = model.editPlan.transcriptHash
+    suggestion.provenance.sourceFingerprint = model.sourceFingerprint
+    let removal = TimelineRemoval(
+      id: Fixtures.uuid(33), removedRange: 300_000..<320_000,
+      crossfade: Crossfade(lengthSamples: 96, curve: .equalPower))
+    model.mutateDocument(recordUndo: false) {
+      $0.slices.append(clip)
+      $0.cutSuggestions.append(suggestion)
+      $0.timelineRemovals.append(removal)
+    }
+    let selected = EditorSelection.object(
+      deletingSuggestion ? .suggestion(suggestion.id) : .clip(clip.id))
+    model.selection = selected
+    let before = model.documentState
+    var writes = 0
+    model.onDocumentStateChanged = { _ in writes += 1 }
+    await model.deleteSelectionTapped()
+    expectNoDifference(model.selection, .none)
+    expectNoDifference(model.timelineRemovals, before.timelineRemovals)
+    expectNoDifference(model.slices[id: clip.id], deletingSuggestion ? clip : nil)
+    expectNoDifference(
+      model.documentCutSuggestions[id: suggestion.id], deletingSuggestion ? nil : suggestion)
+    expectNoDifference(writes, 1)
+    await model.undoTapped()
+    expectNoDifference(model.selection, selected)
+    expectNoDifference(model.documentState, before)
+    #expect(!model.canUndo)
+    await model.redoTapped()
+    expectNoDifference(model.selection, .none)
+    expectNoDifference(model.slices[id: clip.id], deletingSuggestion ? clip : nil)
+    expectNoDifference(
+      model.documentCutSuggestions[id: suggestion.id], deletingSuggestion ? nil : suggestion)
+    #expect(!model.canRedo)
+  }
+
+  @Test func deleteRangeOnlyClearsHighlightAndIsUndoable() async {
+    let model = editor()
+    model.selectSourceRange(70_648..<119_202, snapPlayhead: false)
+    let selected = model.selection
+    let before = model.documentState
+    var writes = 0
+    model.onDocumentStateChanged = { _ in writes += 1 }
+    await model.deleteSelectionTapped()
+    expectNoDifference(model.selection, .none)
+    expectNoDifference(model.documentState, before)
+    await model.undoTapped()
+    expectNoDifference(model.selection, selected)
+    #expect(!model.canUndo)
+    await model.redoTapped()
+    expectNoDifference(model.selection, .none)
+    expectNoDifference(model.documentState, before)
+    expectNoDifference(writes, 0)
+  }
+
+  @Test func deleteSeamRestoresAudioAndSelectionOnUndo() async {
+    let model = editor()
+    let removal = TimelineRemoval(
+      id: Fixtures.uuid(33), removedRange: 300_000..<320_000,
+      crossfade: Crossfade(lengthSamples: 96, curve: .equalPower))
+    model.mutateDocument(recordUndo: false) { $0.timelineRemovals.append(removal) }
+    model.selectSeam(removal.id)
+    await model.deleteSelectionTapped()
+    expectNoDifference(model.selection, .none)
+    #expect(model.timelineRemovals.isEmpty)
+    await model.undoTapped()
+    expectNoDifference(model.selection, .seam(removal.id))
+    expectNoDifference(model.timelineRemovals[id: removal.id], removal)
+    #expect(!model.canUndo)
+  }
+
+  @Test func objectSelectionCannotBeNudgedResizedOrMarkedAgain() {
+    let model = editor()
+    let clip = Fixtures.slice(id: Fixtures.uuid(31), start: 70_648, end: 119_202)
+    model.mutateDocument(recordUndo: false) { $0.slices.append(clip) }
+    model.selectTranscriptObject(.clip(clip.id))
+    let before = model.documentState
+    let selected = model.selection
+    #expect(!model.canAddSlice)
+    #expect(!model.canRemoveSelectedSection)
+    #expect(!model.canEditSelectionEdges)
+    for key in [
+      EditorKey.nudgeCutInEarlier, .nudgeCutInLater, .nudgeCutOutEarlier, .nudgeCutOutLater,
+    ] {
+      #expect(model.editorKeyDown(key))
+      expectNoDifference(model.selection, selected)
+    }
+    model.selectionEdgeDragBegan(.start)
+    model.selectionEdgeDraggedToSource(.start, 90_000)
+    model.selectionNudged(.end, byMs: 10)
+    model.addSliceTapped()
+    expectNoDifference(model.selectionEditingEdge, nil)
+    expectNoDifference(model.selection, selected)
+    expectNoDifference(model.documentState, before)
+  }
+
+  @Test func escapeClearsObjectSelection() {
+    let model = editor()
+    let clip = Fixtures.slice(id: Fixtures.uuid(31), start: 70_648, end: 119_202)
+    model.mutateDocument(recordUndo: false) { $0.slices.append(clip) }
+    model.selectTranscriptObject(.clip(clip.id))
+    #expect(model.editorKeyDown(.escape))
+    expectNoDifference(model.selection, .none)
+    #expect(!model.editorKeyDown(.escape))
+  }
+
+  @Test func deleteIsBlockedWhileExporting() async {
+    let model = editor()
+    let clip = Fixtures.slice(id: Fixtures.uuid(31), start: 70_648, end: 119_202)
+    model.mutateDocument(recordUndo: false) { $0.slices.append(clip) }
+    model.selectTranscriptObject(.clip(clip.id))
+    let selected = model.selection
+    let before = model.documentState
+    model.exportPhase = .exporting(current: 0, total: 1)
+    await model.deleteSelectionTapped()
+    expectNoDifference(model.selection, selected)
+    expectNoDifference(model.documentState, before)
+    #expect(!model.canUndo)
+  }
+
+  @Test func deleteWithoutSelectionDoesNothing() async {
+    let model = editor()
+    let before = model.documentState
+    await model.deleteSelectionTapped()
+    expectNoDifference(model.selection, .none)
+    expectNoDifference(model.documentState, before)
+    #expect(!model.canUndo)
+  }
+
+  @Test func deletingClipDoesNotClearSelectionMadeDuringPlaybackReconciliation() async {
+    let started = AsyncStream<Void>.makeStream()
+    let released = AsyncStream<Void>.makeStream()
+    let model = withDependencies {
+      $0.audioPlayer.stop = { _ in
+        started.continuation.yield(())
+        for await _ in released.stream { break }
+      }
+    } operation: {
+      editor()
+    }
+    let clip = Fixtures.slice(id: Fixtures.uuid(31), start: 70_648, end: 119_202)
+    model.mutateDocument(recordUndo: false) { $0.slices.append(clip) }
+    model.selectTranscriptObject(.clip(clip.id))
+    model.transportContext = .slice(clip.id)
+    model.transportPhase = .playing(PlaybackSessionID())
+    let deletion = Task { await model.deleteSelectionTapped() }
+    var starts = started.stream.makeAsyncIterator()
+    _ = await starts.next()
+    model.selectSourceRange(120_000..<150_000, snapPlayhead: false)
+    let newerSelection = model.selection
+    released.continuation.yield(())
+    await deletion.value
+    expectNoDifference(model.selection, newerSelection)
+    expectNoDifference(model.slices[id: clip.id], nil)
+    #expect(model.timelineRemovals.isEmpty)
+    started.continuation.finish()
+    released.continuation.finish()
+  }
 }

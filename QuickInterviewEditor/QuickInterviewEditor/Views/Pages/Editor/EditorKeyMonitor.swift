@@ -76,7 +76,7 @@ struct EditorKeyMonitor: NSViewRepresentable {
       // ambiguous across layouts — the comma/period keys are 43/47, mirroring the arrow keyCodes.
       case 43 where modifiers == .shift: return .speedDown  // <
       case 47 where modifiers == .shift: return .speedUp  // >
-      case 51 where modifiers.isEmpty: return .removeSection  // ⌫ (⌘⌫/⌥⌫ fall through)
+      case 51 where modifiers.isEmpty: return .deleteSelection  // ⌫ (⌘⌫/⌥⌫ fall through)
       case 53 where modifiers.isEmpty: return .escape  // Esc deselects a selected seam
       default: break
       }
@@ -144,7 +144,7 @@ struct EditorKeyMonitor: NSViewRepresentable {
       // flicker fit↔restore, blow through every speed, fire multiple removals, or machine-gun
       // restart (and doesn't beep). The arrow zoom keys intentionally keep repeating.
       if isARepeat,
-        key == .zoomFit || key == .speedUp || key == .speedDown || key == .removeSection
+        key == .zoomFit || key == .speedUp || key == .speedDown || key == .deleteSelection
           || key == .returnToLastPlayStart
       {
         return true

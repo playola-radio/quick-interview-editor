@@ -1,6 +1,46 @@
 import Foundation
 
 extension EditorModel {
+  func playSelectedClipTapped() async {
+    guard case .object(.clip(let id)) = selection else { return }
+    await playSliceTapped(id)
+  }
+
+  func acceptSelectedSuggestionTapped() {
+    guard !isExporting, case .object(.suggestion(let id)) = selection else { return }
+    cutSuggestions.acceptTapped(id)
+  }
+
+  func rejectSelectedSuggestionTapped() {
+    guard !isExporting, case .object(.suggestion(let id)) = selection else { return }
+    cutSuggestions.rejectTapped(id)
+  }
+
+  func deleteSelectionTapped() async {
+    guard !isExporting else { return }
+    switch selection {
+    case .object(.clip(let id)):
+      mutateDocument(selectionAfter: EditorSelection.none, label: "Delete Clip") {
+        $0.slices[id: id] = nil
+      }
+      await reconcilePlayback()
+    case .object(.suggestion(let id)):
+      mutateDocument(selectionAfter: EditorSelection.none, label: "Delete Suggestion") {
+        $0.cutSuggestions[id: id] = nil
+      }
+      await reconcilePlayback()
+    case .range:
+      clearSelectionTapped()
+    case .seam(let id):
+      mutateDocument(selectionAfter: EditorSelection.none, label: "Restore Removed Audio") {
+        $0.timelineRemovals[id: id] = nil
+      }
+      await reconcilePlayback()
+    case .none:
+      break
+    }
+  }
+
   /// Explicit Clear is undoable; ordinary navigation uses the non-recording clear.
   func clearSelectionTapped() {
     finishCutSuggestionTitleEdit()
