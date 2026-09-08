@@ -485,6 +485,34 @@ struct SuggestionConfigurationTests {
       SuggestionDefaults.configuration)
   }
 
+  @Test func sharedWhitespaceContractValidatesRulesAndDuplicateNames() throws {
+    struct WhitespaceCase: Decodable {
+      var value: String
+      var isBlank: Bool
+    }
+    let cases = try JSONDecoder().decode(
+      [WhitespaceCase].self, from: suggestionContractFixture("suggestion-whitespace"))
+    for item in cases {
+      for property in ["typeName", "guidelines", "fieldName", "instructions"] {
+        var config = validConfiguration()
+        switch property {
+        case "typeName": config.types[0].name = item.value
+        case "guidelines": config.types[0].guidelines = item.value
+        case "fieldName": config.fields[0].name = item.value
+        default: config.fields[0].instructions = item.value
+        }
+        expectNoDifference(config.validationMessages().isEmpty, !item.isBlank)
+      }
+      var config = validConfiguration()
+      config.types[0].name = "A" + item.value + "B"
+      var second = config.types[0]
+      second.id = "second"
+      second.name = "A B"
+      config.types.append(second)
+      expectNoDifference(config.validationMessages().isEmpty, !item.isBlank)
+    }
+  }
+
   private func validConfiguration() -> SuggestionConfiguration {
     SuggestionConfiguration(
       types: [

@@ -154,3 +154,19 @@ def test_configuration_rejects_duplicate_normalized_type_and_field_names():
     config["fields"].append(duplicate_field)
     with pytest.raises(ConfigurationError, match="duplicate field name"):
         validate_configuration(config)
+
+
+@pytest.mark.parametrize("case", json.loads(
+    (Path(__file__).parent / "fixtures" / "suggestion-whitespace.json").read_text()))
+@pytest.mark.parametrize("collection,property_name", [
+    ("types", "name"), ("types", "guidelines"), ("fields", "name"), ("fields", "instructions")])
+def test_shared_configuration_whitespace_contract(case, collection, property_name):
+    config = _config()
+    config[collection][0][property_name] = case["value"]
+    if case["isBlank"]:
+        with pytest.raises(ConfigurationError):
+            validate_configuration(config)
+    else:
+        validate_configuration(config)
+    folded = normalize_configuration_name("A" + case["value"] + "B")
+    assert (folded == "a b") == case["isBlank"]

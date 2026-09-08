@@ -88,6 +88,8 @@
             ReferencedContainer = "container:PlayolaInterviewEditor.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
+      <CommandLineArguments>
+      </CommandLineArguments>
       <EnvironmentVariables>
          <EnvironmentVariable
             key = "QIE_ENGINE_REPO"

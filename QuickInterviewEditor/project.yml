@@ -127,6 +127,12 @@ targets:
         buildPhase: resources
       - path: ../tests/fixtures/suggestion-result-v2.json
         buildPhase: resources
+      - path: ../tests/fixtures/suggestion-whitespace.json
+        buildPhase: resources
+      - path: ../tests/fixtures/suggestion-integration-request-v2.json
+        buildPhase: resources
+      - path: ../tests/fixtures/suggestion-integration-response-v2.json
+        buildPhase: resources
       - path: QuickInterviewEditorTests/Fixtures/project-v1.pie
         type: folder
         buildPhase: resources
