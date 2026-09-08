@@ -110,14 +110,16 @@ struct EditorDocumentMutationTests {
       sourceURL: URL(fileURLWithPath: "/clip.m4a"), canonicalAudioURL: Fixtures.canonicalAudioURL,
       editPlan: plan, initialDocument: seed)
     expectNoDifference(model.documentState, seed)
-    await expectDifference(model.documentState) {
-      model.mutateDocument {
+    await MainActor.run {
+      expectDifference(model.documentState) {
+        model.mutateDocument {
+          $0.unfinishedSuggestionRun?.failureMessage = "Updated"
+          $0.lastAppliedSuggestionRunID = Fixtures.uuid(4)
+        }
+      } changes: {
         $0.unfinishedSuggestionRun?.failureMessage = "Updated"
         $0.lastAppliedSuggestionRunID = Fixtures.uuid(4)
       }
-    } changes: {
-      $0.unfinishedSuggestionRun?.failureMessage = "Updated"
-      $0.lastAppliedSuggestionRunID = Fixtures.uuid(4)
     }
     await model.undoTapped()
     expectNoDifference(model.documentState, seed)

@@ -183,10 +183,12 @@ struct SuggestionSettingsTests {
     #expect(!settings.showsTypeEditor)
     settings.interviewArtistText = "  Brandi Carlile \n"
     expectNoDifference(editor.documentState, before)
-    await expectDifference(editor.documentState) {
-      settings.saveInterviewTapped()
-    } changes: {
-      $0.interviewArtist = "Brandi Carlile"
+    await MainActor.run {
+      expectDifference(editor.documentState) {
+        settings.saveInterviewTapped()
+      } changes: {
+        $0.interviewArtist = "Brandi Carlile"
+      }
     }
     expectNoDifference(settings.interviewArtistText, "Brandi Carlile")
     expectNoDifference(settings.draft, ruleDraft)
