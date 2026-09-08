@@ -30,8 +30,8 @@ func renderSuggestionName(
       result += component.value ?? ""
     case .field:
       guard let fieldID = component.value,
-            let value = values[fieldID],
-            !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let value = values[fieldID],
+        !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
       else { return fallback }
       result += value
     case .sequence:
