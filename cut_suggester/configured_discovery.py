@@ -13,7 +13,7 @@ from collections.abc import Callable, Mapping, Sequence
 
 from .llm import LLMClient
 from .models import Sentence
-from .suggestion_config import BROAD_INTRO_DISCOVERY_VERSION, CONFIGURED_DISCOVERY_VERSION, IMAGING_IDS
+from .suggestion_config import BROAD_INTRO_DISCOVERY_VERSIONS, CONFIGURED_DISCOVERY_VERSION, IMAGING_IDS
 
 
 class DiscoveryError(ValueError):
@@ -90,8 +90,8 @@ def _prompt(sentences: list[Sentence], types: dict[str, str], start: int, end: i
         if any(type_id in IMAGING_IDS for type_id in types) else ""
     )
     take_rule = ""
-    broad_intro = discovery_prompt_version == BROAD_INTRO_DISCOVERY_VERSION and 'intro' in types
-    repeated_takes = discovery_prompt_version in (CONFIGURED_DISCOVERY_VERSION, BROAD_INTRO_DISCOVERY_VERSION)
+    broad_intro = discovery_prompt_version in BROAD_INTRO_DISCOVERY_VERSIONS and 'intro' in types
+    repeated_takes = discovery_prompt_version in BROAD_INTRO_DISCOVERY_VERSIONS | {CONFIGURED_DISCOVERY_VERSION}
     nested_rule = "A complete usable ID nested in a longer promo may be returned alongside the promo."
     if repeated_takes and (imaging_rule or broad_intro):
         take_rule = (

@@ -44,6 +44,7 @@ final class CutSuggestionsPageModel: ViewModel {
   @ObservationIgnored var onTitleChanged: (@MainActor (CutSuggestion.ID, String) -> Void)?
   @ObservationIgnored var onTitleEditingBegan: (@MainActor (CutSuggestion.ID) -> Void)?
   @ObservationIgnored var onTitleEditingEnded: (@MainActor (CutSuggestion.ID) -> Void)?
+  @ObservationIgnored var onInterviewArtistChanged: (@MainActor (String?) -> Void)?
   /// Emits per-file speaker overrides for the editor to fold into the document. Wired now;
   /// the paragraph/speaker UI that drives it lands in a later PR.
   @ObservationIgnored var onSpeakerOverridesChanged: (@MainActor (Int?, [String: String]) -> Void)?
@@ -190,6 +191,18 @@ final class CutSuggestionsPageModel: ViewModel {
   /// so they aren't double-drawn here); rejected ones aren't drawn at all.
   var pendingSuggestions: [CutSuggestion] {
     visibleSuggestions(currentSuggestions().pending, selected: selectedTypeIDs)
+  }
+
+  var interviewArtist: String? { run.currentDocument().interviewArtist }
+
+  func visibleTypeFilterRows(in group: SuggestionGroup) -> [SuggestionTypeFilterRow] {
+    let rows = typeFilterRows.filter { $0.group == group }
+    guard rows.count == 1, let row = rows.first,
+      row.id == "intro" || row.id == "spotlight",
+      let preset = SuggestionDefaults.types.first(where: { $0.id == row.id }),
+      row.group == preset.group, row.title == preset.name
+    else { return rows }
+    return []
   }
 
   var typeFilterRows: [SuggestionTypeFilterRow] {

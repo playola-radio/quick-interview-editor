@@ -782,3 +782,41 @@ extension SuggestionRecoveryClientTests {
     expectNoDifference(try Data(contentsOf: manifestURL), malformed)
   }
 }
+
+extension SuggestionRecoveryClientTests {
+  @Test func interviewArtistParticipatesInImmutableRecoveryIdentity() throws {
+    let fixture = try RecoveryFixture()
+    var request = try #require(
+      JSONSerialization.jsonObject(with: fixture.preparation.originalRequest) as? [String: Any])
+    request["interview_artist"] = "River Vale"
+    let archive = SuggestionRecoveryArchive(
+      manifest: .init(
+        owner: fixture.owner, snapshot: fixture.snapshot,
+        originalRequest: try JSONSerialization.data(withJSONObject: request),
+        control: fixture.preparation.control), records: [:])
+    expectNoDifference(try archive.immutableRequest()["interview_artist"], .string("River Vale"))
+    #expect(throws: SuggestionRecoveryError.self) { try archive.validateManifest() }
+  }
+
+  @Test func capturedInterviewArtistRoundTripsRecoveryAndRejectsTampering() throws {
+    let fixture = try RecoveryFixture()
+    var snapshotJSON = try #require(
+      JSONSerialization.jsonObject(with: JSONEncoder().encode(fixture.snapshot)) as? [String: Any])
+    snapshotJSON["interviewArtist"] = "River Vale"
+    let snapshot = try JSONDecoder().decode(
+      SuggestionRunSnapshot.self, from: JSONSerialization.data(withJSONObject: snapshotJSON))
+    var request = try #require(
+      JSONSerialization.jsonObject(with: fixture.preparation.originalRequest) as? [String: Any])
+    request["interview_artist"] = "River Vale"
+    var archive = SuggestionRecoveryArchive(
+      manifest: .init(
+        owner: fixture.owner, snapshot: snapshot,
+        originalRequest: try JSONSerialization.data(withJSONObject: request),
+        control: fixture.preparation.control), records: [:])
+    let restored = try SuggestionRecoveryArchive.decode(JSONEncoder().encode(archive))
+    expectNoDifference(try restored.immutableRequest()["interview_artist"], .string("River Vale"))
+    request["interview_artist"] = "Other Artist"
+    archive.manifest.originalRequest = try JSONSerialization.data(withJSONObject: request)
+    #expect(throws: SuggestionRecoveryError.self) { try archive.validateManifest() }
+  }
+}

@@ -11,7 +11,9 @@ struct SuggestionSettingsView: View {
         sidebar.frame(minWidth: 165, idealWidth: 190, maxWidth: 230)
         ScrollView {
           VStack(alignment: .leading, spacing: 12) {
-            if model.showsNumbering, let page = model.numberingPage {
+            if model.showsInterview {
+              interviewEditor
+            } else if model.showsNumbering, let page = model.numberingPage {
               SuggestionNumberingView(model: page)
             } else if model.showsTypeEditor {
               typeEditor
@@ -95,6 +97,10 @@ struct SuggestionSettingsView: View {
         if model.showsNumberingOption {
           Divider()
           Text(model.projectScopeTitle).font(.headline)
+          Button(model.interviewTitle) { model.interviewSelected() }
+            .buttonStyle(.plain)
+            .fontWeight(model.isInterviewSelected ? .semibold : .regular)
+            .foregroundStyle(model.isInterviewSelected ? Color.accentColor : Color.primary)
           Button(model.numberingTitle) { model.numberingSelected() }
             .buttonStyle(.plain)
             .fontWeight(model.isNumberingSelected ? .semibold : .regular)
@@ -103,6 +109,16 @@ struct SuggestionSettingsView: View {
       }
       .frame(maxWidth: .infinity, alignment: .leading)
       .padding(.trailing, 8)
+    }
+  }
+
+  private var interviewEditor: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      Text(model.interviewTitle).font(.title3)
+      TextField(model.interviewArtistLabel, text: $model.interviewArtistText)
+      Text(model.interviewArtistHelp).foregroundStyle(.secondary)
+      Button(model.saveInterviewLabel) { model.saveInterviewTapped() }
+        .disabled(!model.canSaveInterview)
     }
   }
 

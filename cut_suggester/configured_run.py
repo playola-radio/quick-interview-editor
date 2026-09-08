@@ -8,10 +8,13 @@ import uuid
 
 from .configured_discovery import _candidate_id, _overlap, _span_length, discover_configured
 from .cutter import suggest_cuts
-from .extraction import parse_extraction_response, plan_extraction_batches
+from .extraction import (completed_extraction_values, parse_extraction_response,
+                         plan_extraction_batches, required_field_ids)
+from .intro_qualification import QUALIFICATION_FIELD_IDS, qualify_intros
 from .run_journal import JournalRecoveryError, JournalStorageError, RunJournal, canonical_json, digest
 from .suggestion_config import (
-    BROAD_INTRO_DISCOVERY_VERSION, CONFIGURED_DISCOVERY_VERSION,
+    BROAD_INTRO_DISCOVERY_VERSIONS, CONFIGURED_DISCOVERY_VERSION, QUALIFIED_INTRO_DISCOVERY_VERSION,
+    _trim_foundation_whitespace,
     split_discovery_types, validate_configuration,
 )
 from .transcript import sentences_from_units
@@ -36,6 +39,10 @@ def validate_request(request: object) -> None:
     for name in ('transcript_hash', 'source_fingerprint'):
         if not isinstance(request.get(name), str) or not request[name].strip():
             raise ValueError(f'{name} must be a nonblank string')
+    if 'interview_artist' in request:
+        artist = request['interview_artist']
+        if not isinstance(artist, str) or not _trim_foundation_whitespace(artist):
+            raise ValueError('interview_artist must be a nonblank string when supplied')
     options = request.get('options')
     if not isinstance(options, dict):
         raise ValueError('options must be an object')
@@ -79,8 +86,11 @@ def validate_request(request: object) -> None:
 
 def immutable_request(request: dict) -> dict:
     """Only protocol input: exclude execution mode, credentials and path options."""
-    return {**{name: request[name] for name in _IMMUTABLE_KEYS},
-            'options': {name: request['options'][name] for name in _OPTION_KEYS}}
+    result = {**{name: request[name] for name in _IMMUTABLE_KEYS},
+              'options': {name: request['options'][name] for name in _OPTION_KEYS}}
+    if 'interview_artist' in request:
+        result['interview_artist'] = request['interview_artist']
+    return result
 
 
 def request_identity(request: dict) -> str:
@@ -101,10 +111,11 @@ def run_configured_suggest(request: dict, llm, journal: RunJournal, emit) -> dic
     recovered = journal.checkpoint['suggestions'] if journal.checkpoint else []
     recovered_fields = {c['candidate_id']: c.get('fields', {}) for c in recovered}
     discovery_complete = False
+    qualification_complete = options['discovery_prompt_version'] != QUALIFIED_INTRO_DISCOVERY_VERSION
 
     def checkpoint(phase):
         saved = journal.write_checkpoint(run_id=run_id, phase=phase,
-                                        suggestions=(recovered if recovered and not discovery_complete else suggestions),
+                                        suggestions=(recovered if recovered and not (discovery_complete and qualification_complete) else suggestions),
                                         failed_batches=failed_batches)
         emit({'type': 'checkpoint', 'run_id': run_id, 'revision': saved['revision']})
         return saved
@@ -118,7 +129,8 @@ def run_configured_suggest(request: dict, llm, journal: RunJournal, emit) -> dic
         checkpoint('discovering')
         return result
 
-    broad_intros = options['discovery_prompt_version'] == BROAD_INTRO_DISCOVERY_VERSION
+    broad_intros = options['discovery_prompt_version'] in BROAD_INTRO_DISCOVERY_VERSIONS
+    qualify = options['discovery_prompt_version'] == QUALIFIED_INTRO_DISCOVERY_VERSION
     tuned, generic = split_discovery_types(configuration, discovery_prompt_version=options['discovery_prompt_version'])
     try:
         if tuned:
@@ -148,7 +160,7 @@ def run_configured_suggest(request: dict, llm, journal: RunJournal, emit) -> dic
         checkpoint('needs_retry')
         raise
     discovery_complete = True
-    if broad_intros:
+    if broad_intros and not qualify:
         intros = [item for item in suggestions if item['product_type'] == 'intro']
         suggestions = [item for item in suggestions
                        if item['product_type'] != 'spotlight'
@@ -156,29 +168,63 @@ def run_configured_suggest(request: dict, llm, journal: RunJournal, emit) -> dic
     suggestions.sort(key=lambda c: (c['start_index'], c['end_index'], c['product_type']))
     for candidate in suggestions:
         candidate['fields'] = recovered_fields.get(candidate['candidate_id'], {}).copy()
-    plan = plan_extraction_batches(
-        suggestions, configuration['types'], configuration['fields'], sentences,
-        speaker_ids={u['id']: u.get('speaker_id') for u in request['transcript_units']})
-    failed_batches.extend({'kind': 'input_size', 'retryable': False, **asdict(d)} for d in plan.input_size_diagnostics)
-    checkpoint('extracting')
-    by_id = {c['candidate_id']: c for c in suggestions}
-    for index, batch in enumerate(plan.batches):
-        stage = f'extract:{batch.stable_key}'
-        key = digest({'request_identity': journal.request_identity, 'stage': stage, 'prompt': batch.prompt})
-        progress(phase='extracting', message=f'Naming batch {index + 1} of {len(plan.batches)}', index=index + 1, total=len(plan.batches))
-        try:
-            values = journal.request(key, lambda: llm.complete(batch.prompt, purpose=stage).text,
-                                     lambda text: parse_extraction_response(text, batch.expected))
-        except (JournalStorageError, JournalRecoveryError):
-            raise
-        except Exception as exc:
-            failed_batches.append({'kind': 'extraction', 'request_key': key,
-                                   'candidate_ids': list(batch.candidate_ids), 'retryable': True,
-                                   'error_type': type(exc).__name__})
-        else:
-            for candidate_id, fields in values.items():
-                by_id[candidate_id]['fields'] = fields
+    naming_fields = {item['id']: set(required_field_ids(item)) for item in configuration['types']}
+    available = {field['id'] for field in configuration['fields']}
+    qualification_fields = {'intro': QUALIFICATION_FIELD_IDS & available} if qualify else {}
+    evidence = {}
+
+    def extract(candidates, *, reuse_completed=False):
+        if reuse_completed:
+            expected = {c['candidate_id']: naming_fields[c['product_type']] for c in candidates}
+            cached = completed_extraction_values(journal.completed_responses, expected)
+            for candidate in candidates:
+                if candidate['candidate_id'] in cached:
+                    candidate['fields'] = cached[candidate['candidate_id']].copy()
+            candidates = [c for c in candidates if c['candidate_id'] not in cached]
+        plan = plan_extraction_batches(
+            candidates, configuration['types'], configuration['fields'], sentences,
+            speaker_ids={u['id']: u.get('speaker_id') for u in request['transcript_units']},
+            extra_field_ids_by_type=qualification_fields,
+            interview_artist=request.get('interview_artist'),
+            extraction_prompt_version=options['extraction_prompt_version'])
+        failed_batches.extend({'kind': 'input_size', 'retryable': False, **asdict(d)}
+                              for d in plan.input_size_diagnostics)
         checkpoint('extracting')
+        by_id = {c['candidate_id']: c for c in candidates}
+        for index, batch in enumerate(plan.batches):
+            stage = f'extract:{batch.stable_key}'
+            key = digest({'request_identity': journal.request_identity, 'stage': stage, 'prompt': batch.prompt})
+            progress(phase='extracting', message=f'Naming batch {index + 1} of {len(plan.batches)}',
+                     index=index + 1, total=len(plan.batches))
+            try:
+                values = journal.request(key, lambda: llm.complete(batch.prompt, purpose=stage).text,
+                                         lambda text: parse_extraction_response(text, batch.expected))
+            except (JournalStorageError, JournalRecoveryError):
+                raise
+            except Exception as exc:
+                failed_batches.append({'kind': 'extraction', 'request_key': key,
+                                       'candidate_ids': list(batch.candidate_ids), 'retryable': True,
+                                       'error_type': type(exc).__name__})
+            else:
+                evidence.update(values)
+                for candidate_id, fields in values.items():
+                    candidate = by_id[candidate_id]
+                    candidate['fields'] = {field: value for field, value in fields.items()
+                                           if field in naming_fields[candidate['product_type']]}
+            checkpoint('extracting')
+
+    # Keep tuned Spotlights available until qualification resolves Intro priority.
+    # Name them only after resolution so suppressed candidates cannot create failures.
+    extract([c for c in suggestions if c['product_type'] != 'spotlight'] if qualify else suggestions)
+    if qualify:
+        suggestions = qualify_intros(suggestions, evidence, configuration, run_id)
+        qualification_complete = True
+        for candidate in suggestions:
+            if candidate['product_type'] == 'spotlight':
+                candidate['fields'] = recovered_fields.get(candidate['candidate_id'], {}).copy()
+        # Retry can change the selected set and thus batch prompt keys. Reuse
+        # identity-bound paid values before batching only the remaining Spotlights.
+        extract([c for c in suggestions if c['product_type'] == 'spotlight'], reuse_completed=True)
     status = 'needs_retry' if failed_batches else 'ready'
     saved = checkpoint(status)
     return {'schema_version': 2, 'run_id': run_id, 'checkpoint_revision': saved['revision'],

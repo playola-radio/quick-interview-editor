@@ -12,7 +12,7 @@ struct CutSuggestOptions: Equatable, Sendable {
   var stage1Window: Int
   var stage1Step: Int
 
-  static var freshConfigured: Self { Self(promptVersion: "configured-v3") }
+  static var freshConfigured: Self { Self(promptVersion: "configured-v4") }
 
   init(
     model: String = "claude-sonnet-5",

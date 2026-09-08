@@ -5,6 +5,18 @@ import Testing
 @testable import PlayolaInterviewEditor
 
 struct ProjectFileTests {
+  @Test func interviewArtistPersistsAndOldDocumentsDefaultToAbsent() throws {
+    var file = Fixtures.projectFile()
+    file.content.interviewArtist = "Björk"
+    let data = try ProjectPackage.projectEncoder().encode(file)
+    expectNoDifference(
+      try ProjectPackage.projectDecoder().decode(ProjectFile.self, from: data), file)
+    let old = Data(#"{"slices":[],"timelineRemovals":[]}"#.utf8)
+    expectNoDifference(
+      try JSONDecoder().decode(EditorDocumentState.self, from: old).interviewArtist, nil)
+    expectNoDifference(file.content.rekeyed(to: Fixtures.editPlan()).interviewArtist, "Björk")
+  }
+
   @Test func projectFileRoundTrips() throws {
     let file = Fixtures.projectFile()
     let data = try JSONEncoder().encode(file)

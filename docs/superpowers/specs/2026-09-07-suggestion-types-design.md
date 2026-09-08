@@ -6,6 +6,8 @@
 
 **Intro definition update (2026-09-08):** [Broader Intro plan](../plans/2026-09-08-broader-intros.md) supersedes the handoff-only definition. Complete song or artist commentary qualifies; Intro takes naming priority over substantially duplicate Spotlights. Names remain editable.
 
+**Interview context update (2026-09-08):** [Interview artist and qualification](2026-09-08-interview-artist-design.md) adds project identity, requires at least one established default Intro naming field after successful extraction, and removes redundant singleton filter choices.
+
 **Working branch:** `briankeane/suggestion-types`
 
 **Baseline:** `d38c9d8ddfb14f0ca477ea23c6a559584475e5d9`

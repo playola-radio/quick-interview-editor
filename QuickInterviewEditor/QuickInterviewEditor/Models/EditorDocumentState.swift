@@ -17,6 +17,7 @@ struct EditorDocumentState: Equatable, Codable, Sendable {
   var suggestionRecoveryOwnerID: UUID?
   var speakerCountOverride: Int?
   var speakerDisplayNames: [String: String]
+  var interviewArtist: String?
 
   init(
     slices: IdentifiedArrayOf<Slice> = [],
@@ -29,7 +30,8 @@ struct EditorDocumentState: Equatable, Codable, Sendable {
     lastAppliedSuggestionRunID: UUID? = nil,
     suggestionRecoveryOwnerID: UUID? = nil,
     speakerCountOverride: Int? = nil,
-    speakerDisplayNames: [String: String] = [:]
+    speakerDisplayNames: [String: String] = [:],
+    interviewArtist: String? = nil
   ) {
     self.slices = slices
     self.timelineRemovals = timelineRemovals
@@ -42,12 +44,14 @@ struct EditorDocumentState: Equatable, Codable, Sendable {
     self.suggestionRecoveryOwnerID = suggestionRecoveryOwnerID
     self.speakerCountOverride = speakerCountOverride
     self.speakerDisplayNames = speakerDisplayNames
+    self.interviewArtist = interviewArtist
   }
 
   enum CodingKeys: String, CodingKey {
     case suggestionStarts, suggestionBatch, issuedSuggestionNumbers, unfinishedSuggestionRun,
       lastAppliedSuggestionRunID, suggestionRecoveryOwnerID
     case slices, timelineRemovals, cutSuggestions, speakerCountOverride, speakerDisplayNames
+    case interviewArtist
   }
 
   /// Lenient decode: a project persisted before cut suggestions / speaker overrides
@@ -76,7 +80,8 @@ struct EditorDocumentState: Equatable, Codable, Sendable {
       speakerCountOverride: try container.decodeIfPresent(
         Int.self, forKey: .speakerCountOverride),
       speakerDisplayNames: try container.decodeIfPresent(
-        [String: String].self, forKey: .speakerDisplayNames) ?? [:]
+        [String: String].self, forKey: .speakerDisplayNames) ?? [:],
+      interviewArtist: try container.decodeIfPresent(String.self, forKey: .interviewArtist)
     )
     for candidate in cutSuggestions where candidate.status == .accepted && candidate.naming == nil {
       guard slices[id: candidate.id]?.suggestionTypeID == nil,

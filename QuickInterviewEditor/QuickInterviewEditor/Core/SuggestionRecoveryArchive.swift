@@ -86,10 +86,11 @@ struct SuggestionRecoveryArchive: Codable, Equatable, Sendable {
     let snapshotFields: Set<String> = [
       "runID", "configuration", "configurationHash", "model", "discoveryPromptVersion",
       "extractionPromptVersion", "productSpecVersion", "transcriptHash", "sourceFingerprint",
-      "sampleRate", "stage1Window", "stage1Step",
+      "sampleRate", "stage1Window", "stage1Step", "interviewArtist",
     ]
     try json["snapshot"]?.keys(
-      allowed: snapshotFields, required: snapshotFields.subtracting(["stage1Window", "stage1Step"]))
+      allowed: snapshotFields,
+      required: snapshotFields.subtracting(["stage1Window", "stage1Step", "interviewArtist"]))
   }
 
   func validatedCheckpoint(requireReferencedRecords: Bool = true) throws -> SuggestionRunCheckpoint
@@ -185,6 +186,8 @@ struct SuggestionRecoveryArchive: Codable, Equatable, Sendable {
       request["transcript_hash"] == .string(snapshot.transcriptHash),
       request["source_fingerprint"] == .string(snapshot.sourceFingerprint),
       request["configuration"] == configuration,
+      request["interview_artist"] == snapshot.interviewArtist.map(RecoveryJSON.string),
+      snapshot.interviewArtist?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != true,
       request["options"]
         == .object([
           "model": .string(snapshot.model), "sample_rate": .integer(Int64(snapshot.sampleRate)),
@@ -226,6 +229,7 @@ struct SuggestionRecoveryArchive: Codable, Equatable, Sendable {
       }
       values[key] = value
     }
+    if let artist = json["interview_artist"] { result["interview_artist"] = artist }
     result["options"] = .object(values)
     return .object(result)
   }

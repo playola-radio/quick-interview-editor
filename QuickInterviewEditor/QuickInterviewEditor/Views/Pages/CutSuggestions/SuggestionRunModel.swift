@@ -281,10 +281,13 @@ final class SuggestionRunModel: ViewModel {
         runID: runID, configuration: configuration,
         configurationHash: try SuggestionRecoveryArchive.configurationHash(configuration),
         model: self.options.model, discoveryPromptVersion: self.options.promptVersion,
-        extractionPromptVersion: "fields-v1", productSpecVersion: "configured-v1",
+        extractionPromptVersion: self.options.promptVersion == "configured-v4"
+          ? "fields-v2" : "fields-v1",
+        productSpecVersion: "configured-v1",
         transcriptHash: self.editPlan.transcriptHash, sourceFingerprint: self.sourceFingerprint,
         sampleRate: self.editPlan.source.sampleRate,
-        stage1Window: self.options.stage1Window, stage1Step: self.options.stage1Step)
+        stage1Window: self.options.stage1Window, stage1Step: self.options.stage1Step,
+        interviewArtist: document.interviewArtist)
       let original = self.makeRequest(snapshot, mode, nil)
       let preparation = SuggestionRecoveryPreparation(
         snapshot: snapshot, originalRequest: try LiveCutSuggester.encodedRequest(original),

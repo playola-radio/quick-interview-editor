@@ -26,7 +26,7 @@ struct CutSuggestionsPageView: View {
               model.groupFilterTapped(group.id)
             }
             .accessibilityValue(group.state.accessibilityValue)
-            ForEach(group.types) { type in
+            ForEach(model.visibleTypeFilterRows(in: group.id)) { type in
               Button(type.title, systemImage: type.state.image) { model.typeFilterTapped(type.id) }
                 .accessibilityValue(type.state.accessibilityValue)
             }

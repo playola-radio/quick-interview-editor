@@ -490,6 +490,7 @@ private struct ConfiguredRequestWire: Encodable {
   var transcriptHash: String
   var sourceFingerprint: String
   var transcriptUnits: [RequestWire.Unit]
+  var interviewArtist: String?
   var configuration: SuggestionConfiguration
   var options: Options
 
@@ -500,6 +501,7 @@ private struct ConfiguredRequestWire: Encodable {
     case transcriptHash = "transcript_hash"
     case sourceFingerprint = "source_fingerprint"
     case transcriptUnits = "transcript_units"
+    case interviewArtist = "interview_artist"
   }
 
   init(request: CutSuggestRequest, snapshot: SuggestionRunSnapshot) {
@@ -508,6 +510,7 @@ private struct ConfiguredRequestWire: Encodable {
     transcriptHash = snapshot.transcriptHash
     sourceFingerprint = snapshot.sourceFingerprint
     transcriptUnits = request.transcriptUnits.map(RequestWire.Unit.init)
+    interviewArtist = snapshot.interviewArtist
     configuration = snapshot.configuration
     options = Options(
       model: snapshot.model, sampleRate: snapshot.sampleRate,

@@ -52,6 +52,8 @@ final class SuggestionSettingsModel: ViewModel, Identifiable {
   private(set) var selectedFieldID: String?
   weak var numberingPage: CutSuggestionsPageModel?
   private(set) var isNumberingSelected = false
+  private(set) var isInterviewSelected = false
+  private var interviewArtistDraft: String?
   var numberingReview: SuggestionReviewModel?
   private var validationErrors: [String] = []
   private(set) var statusMessage: String?
@@ -72,6 +74,12 @@ final class SuggestionSettingsModel: ViewModel, Identifiable {
 
   let title = "Configure Suggestions"
   let numberingTitle = "Numbering"
+  let interviewTitle = "Interview"
+  let interviewArtistLabel = "Interview Artist (optional)"
+  let interviewArtistHelp =
+    "Used for future suggestions when the interview subject talks about their own music. "
+    + "Leave blank to clear it. Existing clip names stay unchanged."
+  let saveInterviewLabel = "Save"
   let projectScopeTitle = "This project"
   let doneLabel = "Done"
   let typesTitle = "Types"
@@ -90,8 +98,9 @@ final class SuggestionSettingsModel: ViewModel, Identifiable {
   let reloadLabel = "Reload Saved Rules"
   let selectionPrompt = "Choose a type or field to edit."
   var helpText: String {
-    showsNumbering
-      ? "Starting counts belong to this project. Save Rules and Cancel Rule Edits apply only to the rule draft."
+    showsProjectSettings
+      ? "Interview details and starting counts belong to this project. "
+        + "Save Rules and Cancel Rule Edits apply only to the rule draft."
       : "Saved rules apply to future searches in all projects. Removing a type keeps its existing suggestions visible."
   }
   let builtInHelp =
@@ -112,14 +121,14 @@ final class SuggestionSettingsModel: ViewModel, Identifiable {
     draft.types.map {
       .init(
         id: $0.id, title: $0.name.isEmpty ? "Untitled Type" : $0.name,
-        isSelected: !isNumberingSelected && $0.id == selectedTypeID)
+        isSelected: !showsProjectSettings && $0.id == selectedTypeID)
     }
   }
   var fieldRows: [SuggestionSettingsRow] {
     draft.fields.map {
       .init(
         id: $0.id, title: $0.name.isEmpty ? "Untitled Field" : $0.name,
-        isSelected: !isNumberingSelected && $0.id == selectedFieldID)
+        isSelected: !showsProjectSettings && $0.id == selectedFieldID)
     }
   }
   var missingPresets: [SuggestionSettingsRow] {
@@ -128,11 +137,19 @@ final class SuggestionSettingsModel: ViewModel, Identifiable {
   }
   var showsRestore: Bool { !missingPresets.isEmpty }
   var showsNumberingOption: Bool { numberingPage != nil }
+  var showsInterviewOption: Bool { numberingPage != nil }
+  var showsInterview: Bool { isInterviewSelected && showsInterviewOption }
+  var showsProjectSettings: Bool { showsNumbering || showsInterview }
+  var canSaveInterview: Bool { showsInterviewOption && !isBusy && interviewArtistDraft != nil }
+  var interviewArtistText: String {
+    get { interviewArtistDraft ?? numberingPage?.interviewArtist ?? "" }
+    set { interviewArtistDraft = newValue }
+  }
   var showsNumbering: Bool { isNumberingSelected && showsNumberingOption }
-  var showsRuleActions: Bool { !showsNumbering || draft != loadedConfiguration }
+  var showsRuleActions: Bool { !showsProjectSettings || draft != loadedConfiguration }
   var showsDone: Bool { !showsRuleActions }
-  var showsTypeEditor: Bool { !showsNumbering && typeIndex != nil }
-  var showsFieldEditor: Bool { !showsNumbering && fieldIndex != nil }
+  var showsTypeEditor: Bool { !showsProjectSettings && typeIndex != nil }
+  var showsFieldEditor: Bool { !showsProjectSettings && fieldIndex != nil }
   var showsTunedDiscoveryHelp: Bool { selectedTypeID == "intro" || selectedTypeID == "spotlight" }
   var isBusy: Bool { isSaving || isLoading }
   var canEdit: Bool { hasLoaded && !isBusy }
@@ -190,6 +207,7 @@ final class SuggestionSettingsModel: ViewModel, Identifiable {
   }
 
   func typeSelected(_ id: String) {
+    isInterviewSelected = false
     isNumberingSelected = false
     selectedTypeID = id
     selectedFieldID = nil
@@ -197,6 +215,7 @@ final class SuggestionSettingsModel: ViewModel, Identifiable {
   }
 
   func fieldSelected(_ id: String) {
+    isInterviewSelected = false
     isNumberingSelected = false
     selectedFieldID = id
     selectedTypeID = nil
@@ -205,7 +224,21 @@ final class SuggestionSettingsModel: ViewModel, Identifiable {
 
   func numberingSelected() {
     guard showsNumberingOption else { return }
+    isInterviewSelected = false
     isNumberingSelected = true
+  }
+
+  func interviewSelected() {
+    guard showsInterviewOption else { return }
+    isNumberingSelected = false
+    isInterviewSelected = true
+  }
+
+  func saveInterviewTapped() {
+    guard canSaveInterview else { return }
+    let trimmed = interviewArtistText.trimmingCharacters(in: .whitespacesAndNewlines)
+    numberingPage?.onInterviewArtistChanged?(trimmed.isEmpty ? nil : trimmed)
+    interviewArtistDraft = nil
   }
 
   func addTypeTapped() {
@@ -307,6 +340,7 @@ final class SuggestionSettingsModel: ViewModel, Identifiable {
 
   private func applyLoaded(_ configuration: SuggestionConfiguration, markLoaded: Bool = true) {
     let wasNumberingSelected = isNumberingSelected
+    let wasInterviewSelected = isInterviewSelected
     draft = configuration
     loadedConfiguration = configuration
     loadedRevision = configuration.revision
@@ -320,6 +354,7 @@ final class SuggestionSettingsModel: ViewModel, Identifiable {
           ?? configuration.types.first?.id ?? "")
     }
     isNumberingSelected = wasNumberingSelected
+    isInterviewSelected = wasInterviewSelected
   }
 
   private func rebuildNamingTemplate() {

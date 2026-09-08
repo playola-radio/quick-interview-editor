@@ -174,6 +174,15 @@ class RunJournal:
         return sorted(k for k, r in self._records.items() if r['status'] == 'completed')
 
     @property
+    def completed_responses(self) -> tuple[str, ...]:
+        """Previously validated responses, including successes ahead of checkpoints.
+
+        Records loaded from disk have already passed identity, integrity, and
+        response-digest checks. Consumers must still validate their own shape.
+        """
+        return tuple(self._records[key]['response'] for key in self.completed_request_keys)
+
+    @property
     def failed_request_keys(self):
         return sorted(k for k, r in self._records.items() if r['status'] == 'failed')
 

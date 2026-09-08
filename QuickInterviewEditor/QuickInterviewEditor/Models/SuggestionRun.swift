@@ -13,6 +13,7 @@ struct SuggestionRunSnapshot: Codable, Equatable, Sendable {
   var sampleRate: Int
   var stage1Window: Int = 130
   var stage1Step: Int = 110
+  var interviewArtist: String?
 }
 
 extension SuggestionRunSnapshot {
@@ -30,6 +31,7 @@ extension SuggestionRunSnapshot {
     sampleRate = try values.decode(Int.self, forKey: .sampleRate)
     stage1Window = try values.decodeIfPresent(Int.self, forKey: .stage1Window) ?? 130
     stage1Step = try values.decodeIfPresent(Int.self, forKey: .stage1Step) ?? 110
+    interviewArtist = try values.decodeIfPresent(String.self, forKey: .interviewArtist)
   }
 }
 

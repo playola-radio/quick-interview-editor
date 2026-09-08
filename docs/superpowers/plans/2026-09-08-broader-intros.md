@@ -73,3 +73,5 @@ return migrated
 ## Completion
 
 Implemented and independently reviewed. See [validation evidence](../reviews/2026-09-08-broader-intros.md). Historical fixture setup was corrected to decode captured configuration rather than current defaults; old request JSON remains unchanged.
+
+The later [interview artist follow-up](2026-09-08-interview-artist.md) supersedes retention of Intro candidates whose two default naming fields both successfully extract as missing. Versioned historical runs retain their original behavior.

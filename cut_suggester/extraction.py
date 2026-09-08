@@ -108,6 +108,30 @@ def parse_extraction_response(
     return parsed
 
 
+def completed_extraction_values(
+    responses: Sequence[str], expected: Mapping[str, Set[str]],
+) -> dict[str, dict[str, str | None]]:
+    """Reuse exact candidate/field matches from an identity-bound success journal.
+
+    A prior batch may also include candidates no longer selected. Validate the
+    entire extraction response, then retain only exact current field-set matches.
+    Discovery responses and other response formats cannot supply naming values.
+    """
+    cached = {}
+    for text in responses:
+        try:
+            decoded = json.loads(text, object_pairs_hook=_no_duplicate_object_keys)
+            declared = {item['candidate_id']: frozenset(field['field_id'] for field in item['fields'])
+                        for item in decoded['results']}
+            values = parse_extraction_response(text, declared)
+        except (KeyError, TypeError, ValueError):
+            continue
+        for candidate_id, fields in values.items():
+            if candidate_id in expected and fields.keys() == expected[candidate_id]:
+                cached.setdefault(candidate_id, fields)
+    return cached
+
+
 def required_field_ids(type_definition: Mapping) -> list[str]:
     """Return sorted fields that actually participate in a type's output name."""
     template = type_definition.get("template")
@@ -197,6 +221,8 @@ def plan_extraction_batches(
     candidates: Sequence[Mapping], type_definitions: Sequence[Mapping], field_definitions: Sequence[Mapping],
     sentences: Sequence[Sentence], *, speaker_ids: Mapping[object, object] | None = None,
     max_candidates: int = 20, max_input_characters: int = 24000,
+    extra_field_ids_by_type: Mapping[str, Set[str]] | None = None,
+    interview_artist: str | None = None, extraction_prompt_version: str = "fields-v1",
 ) -> ExtractionPlan:
     """Make bounded deterministic requests without performing provider work.
 
@@ -208,6 +234,17 @@ def plan_extraction_batches(
     if not isinstance(max_input_characters, int) or isinstance(max_input_characters, bool) or not 0 < max_input_characters <= 24000:
         raise ExtractionError("max_input_characters must be an integer from 1 through 24000")
     types, fields = _type_and_fields(type_definitions, field_definitions)
+    artist_context = ""
+    if extraction_prompt_version == "fields-v2":
+        artist_context = (
+            "Never emit the literal placeholder SELF. "
+            "Use user-provided interview context only when the passage concerns the interview "
+            "subject's own music; resolve other performers from transcript evidence. "
+            "The name is not a blanket default for every speaker or artist mention. "
+            "Configured field instructions remain authoritative.\n"
+        )
+        if interview_artist is not None:
+            artist_context += f"User-provided interview artist: {json.dumps(interview_artist, ensure_ascii=False)}\n"
     prepared: list[tuple[str, set[str], str, Mapping]] = []
     seen_ids: set[str] = set()
     for candidate in candidates:
@@ -219,6 +256,7 @@ def plan_extraction_batches(
             raise ExtractionError("candidate references an undeclared type")
         seen_ids.add(candidate_id)
         field_ids = set(required_field_ids(types[type_id]))
+        field_ids.update((extra_field_ids_by_type or {}).get(type_id, set()))
         if field_ids:
             prepared.append((candidate_id, field_ids, _candidate_text(candidate, sentences, speaker_ids), candidate))
 
@@ -228,14 +266,14 @@ def plan_extraction_batches(
     for item in prepared:
         prospective = current + [item]
         expected = {candidate_id: field_ids for candidate_id, field_ids, _, _ in prospective}
-        mandatory = _mandatory(prospective, fields)
+        mandatory = _mandatory(prospective, fields, artist_context)
         mandatory_prompt = _prompt(mandatory, "")
         if len(mandatory_prompt) > max_input_characters:
             if current:
-                batches.append(_make_batch(current, fields, sentences, speaker_ids, max_input_characters))
+                batches.append(_make_batch(current, fields, sentences, speaker_ids, max_input_characters, artist_context))
                 current = [item]
                 expected = {item[0]: item[1]}
-                only_mandatory = _mandatory([item], fields)
+                only_mandatory = _mandatory([item], fields, artist_context)
                 only_mandatory_characters = len(_prompt(only_mandatory, ""))
                 if only_mandatory_characters <= max_input_characters:
                     continue
@@ -249,23 +287,23 @@ def plan_extraction_batches(
             current = []
             continue
         if len(prospective) > max_candidates:
-            batches.append(_make_batch(current, fields, sentences, speaker_ids, max_input_characters))
+            batches.append(_make_batch(current, fields, sentences, speaker_ids, max_input_characters, artist_context))
             current = [item]
         else:
             current = prospective
     if current:
-        batches.append(_make_batch(current, fields, sentences, speaker_ids, max_input_characters))
+        batches.append(_make_batch(current, fields, sentences, speaker_ids, max_input_characters, artist_context))
     return ExtractionPlan(tuple(batches), tuple(diagnostics))
 
 
 def _make_batch(
     items: Sequence[tuple[str, set[str], str, Mapping]], fields: Mapping[str, str], sentences: Sequence[Sentence],
-    speaker_ids: Mapping[object, object] | None, max_input_characters: int,
+    speaker_ids: Mapping[object, object] | None, max_input_characters: int, artist_context: str = "",
 ) -> ExtractionBatch:
     expected = MappingProxyType({
         candidate_id: frozenset(field_ids) for candidate_id, field_ids, _, _ in items
     })
-    mandatory = _mandatory(items, fields)
+    mandatory = _mandatory(items, fields, artist_context)
     mandatory_prompt = _prompt(mandatory, "")
     optional_lines: list[str] = []
     candidate_indexes: set[int] = set()
@@ -292,8 +330,8 @@ def _make_batch(
     return ExtractionBatch(tuple(expected), expected, prompt, _stable_key(expected), len(prompt), len(mandatory_prompt))
 
 
-def _mandatory(items: Sequence[tuple[str, set[str], str, Mapping]], fields: Mapping[str, str]) -> str:
-    return f"{_instructions(set().union(*(field_ids for _, field_ids, _, _ in items)), fields)}\n\n" + "\n\n".join(
+def _mandatory(items: Sequence[tuple[str, set[str], str, Mapping]], fields: Mapping[str, str], artist_context: str = "") -> str:
+    return artist_context + f"{_instructions(set().union(*(field_ids for _, field_ids, _, _ in items)), fields)}\n\n" + "\n\n".join(
         f"For candidate {candidate_id}, return exactly these field IDs: {', '.join(sorted(field_ids))}.\n"
         f"Candidate {candidate_id} (required evidence):\n{text}"
         for candidate_id, field_ids, text, _ in items

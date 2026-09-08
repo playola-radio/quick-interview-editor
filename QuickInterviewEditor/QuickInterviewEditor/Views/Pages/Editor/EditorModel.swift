@@ -126,6 +126,7 @@ final class EditorModel: ViewModel {
     self.suggestionRecoveryOwnerID = initialDocument.suggestionRecoveryOwnerID
     self.speakerCountOverride = initialDocument.speakerCountOverride
     self.speakerDisplayNames = initialDocument.speakerDisplayNames
+    self.interviewArtist = initialDocument.interviewArtist
     syncEditedTimeline()
     wireCutSuggestions()
     // The speed control lives in the transcript panel, but the transport owns the shared player, so
@@ -193,6 +194,9 @@ final class EditorModel: ViewModel {
     cutSuggestions.onTitleEditingEnded = { [weak self] id in
       self?.cutSuggestionTitleEditingEnded(id)
     }
+    cutSuggestions.onInterviewArtistChanged = { [weak self] artist in
+      self?.mutateDocument { $0.interviewArtist = artist }
+    }
     cutSuggestions.onSpeakerOverridesChanged = { [weak self] count, names in
       self?.mutateDocument {
         $0.speakerCountOverride = count
@@ -230,6 +234,7 @@ final class EditorModel: ViewModel {
   /// only through `mutateDocument` (accept/reject undoably; the background pass with
   /// `recordUndo: false`), so it moves with the rest of the document on undo.
   var documentCutSuggestions: IdentifiedArrayOf<CutSuggestion> = []
+  var interviewArtist: String?
   var suggestionStarts: SuggestionStarts = SuggestionStarts()
   var suggestionBatch: SuggestionBatch?
   var issuedSuggestionNumbers: [SequenceReservation] = []
@@ -407,7 +412,7 @@ final class EditorModel: ViewModel {
       lastAppliedSuggestionRunID: lastAppliedSuggestionRunID,
       suggestionRecoveryOwnerID: suggestionRecoveryOwnerID,
       speakerCountOverride: speakerCountOverride,
-      speakerDisplayNames: speakerDisplayNames)
+      speakerDisplayNames: speakerDisplayNames, interviewArtist: interviewArtist)
   }
 
   /// Rebuilds the edited timeline the collapsed waveform renders on from the current removals,
@@ -2004,6 +2009,7 @@ final class EditorModel: ViewModel {
     suggestionRecoveryOwnerID = new.suggestionRecoveryOwnerID
     speakerCountOverride = new.speakerCountOverride
     speakerDisplayNames = new.speakerDisplayNames
+    interviewArtist = new.interviewArtist
     if recordUndo {
       documentUndo.record(before: old, after: new)
     } else {
@@ -2913,6 +2919,7 @@ final class EditorModel: ViewModel {
     suggestionRecoveryOwnerID = restored.suggestionRecoveryOwnerID
     speakerCountOverride = restored.speakerCountOverride
     speakerDisplayNames = restored.speakerDisplayNames
+    interviewArtist = restored.interviewArtist
     syncEditedTimeline()
     onDocumentStateChanged?(documentState)
   }

@@ -90,10 +90,20 @@ Suggestions finds three groups of material in your transcript:
 
 Song Intros include complete commentary about a song or artist, even without a lead-in
 to music. When the same passage also fits Spotlight, Intro takes priority for naming.
-Names remain editable; an Intro with an unknown song title keeps a descriptive name.
+Names remain editable; an Intro with an unknown song title keeps a descriptive name
+when its artist is established. If both song and artist are missing after successful
+extraction, useful complete commentary is kept as a Spotlight when that type is configured;
+otherwise the unqualified Intro is omitted. Failed extraction stays available to retry.
 
-Use **Types** to show any combination of groups or individual types. Filtering changes
-what you see; it does not delete suggestions or change saved clip names. Saved clips remain
+Enter an optional **Interview Artist** before importing audio, or edit it later under
+**Configure Suggestions → This project → Interview** and click **Save**. The name belongs
+to this project and helps resolve references to the subject’s own music. Other artists
+still come from the transcript. Each search captures the name it started with; changes
+apply to future searches.
+
+Use **Types** to show any combination of groups or individual types. The menu shows
+**Spotlights**, **Song Intros**, and **Audio Images**, with distinct subtype or custom
+choices where useful. Filtering changes what you see; it does not delete suggestions or change saved clip names. Saved clips remain
 available independently of this filter.
 
 Open **Configure Suggestions** to edit the app-wide rules. Each type has discovery

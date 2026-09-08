@@ -8,6 +8,77 @@ import Testing
 
 @MainActor
 struct SuggestionSettingsTests {
+  @Test func interviewSaveAndClearAreUndoableAndIndependentOfRuleDraft() async throws {
+    @Shared(.suggestionConfiguration) var published = SuggestionDefaults.configuration
+    let editor = try SuggestionReviewTests().fixture()
+    let before = editor.documentState
+    var changes: [EditorDocumentState] = []
+    editor.onDocumentStateChanged = { changes.append($0) }
+    editor.cutSuggestions.configureSuggestionsTapped()
+    let settings = try #require(editor.cutSuggestions.suggestionSettings)
+    settings.typeName = "Unsaved rule edit"
+    let ruleDraft = settings.draft
+    settings.interviewSelected()
+    #expect(settings.showsInterview)
+    #expect(!settings.showsTypeEditor)
+    settings.interviewArtistText = "  Brandi Carlile \n"
+    expectNoDifference(editor.documentState, before)
+    await expectDifference(editor.documentState) {
+      settings.saveInterviewTapped()
+    } changes: {
+      $0.interviewArtist = "Brandi Carlile"
+    }
+    expectNoDifference(settings.interviewArtistText, "Brandi Carlile")
+    expectNoDifference(settings.draft, ruleDraft)
+    expectNoDifference(published, SuggestionDefaults.configuration)
+    expectNoDifference(changes.last, editor.documentState)
+    settings.interviewArtistText = "  \n"
+    settings.saveInterviewTapped()
+    expectNoDifference(editor.documentState.interviewArtist, nil)
+    await editor.undoTapped()
+    expectNoDifference(editor.documentState.interviewArtist, "Brandi Carlile")
+    await editor.undoTapped()
+    expectNoDifference(editor.documentState, before)
+    await editor.redoTapped()
+    expectNoDifference(editor.documentState.interviewArtist, "Brandi Carlile")
+    settings.cancelTapped()
+    expectNoDifference(editor.documentState.interviewArtist, "Brandi Carlile")
+    expectNoDifference(published, SuggestionDefaults.configuration)
+    editor.cutSuggestions.configureSuggestionsTapped()
+    expectNoDifference(
+      editor.cutSuggestions.suggestionSettings?.interviewArtistText, "Brandi Carlile")
+  }
+
+  @Test func interviewNavigationAndRuleReloadPreserveIndependentProjectDraft() async throws {
+    let page = withDependencies {
+      $0.suggestionConfiguration = .inMemory()
+    } operation: {
+      CutSuggestionsPageModel(editPlan: Fixtures.editPlan(), sourceFingerprint: "interview")
+    }
+    page.configureSuggestionsTapped()
+    let settings = try #require(page.suggestionSettings)
+    settings.interviewSelected()
+    settings.interviewArtistText = "Unsaved artist"
+    await settings.viewAppeared()
+    #expect(settings.showsInterview)
+    #expect(settings.showsDone)
+    expectNoDifference(settings.interviewArtistText, "Unsaved artist")
+    settings.numberingSelected()
+    #expect(!settings.showsInterview)
+    #expect(settings.showsNumbering)
+    settings.interviewSelected()
+    #expect(!settings.showsNumbering)
+    settings.typeSelected("intro")
+    #expect(!settings.showsInterview)
+    settings.fieldSelected("artist-name")
+    #expect(settings.showsFieldEditor)
+    expectNoDifference(settings.interviewArtistText, "Unsaved artist")
+    let standalone = SuggestionSettingsModel(configuration: SuggestionDefaults.configuration)
+    #expect(!standalone.showsInterviewOption)
+    standalone.interviewSelected()
+    #expect(!standalone.showsInterview)
+  }
+
   @Test func loadingRulesPreservesNumberingSelection() async {
     @Shared(.suggestionConfiguration) var published = SuggestionDefaults.configuration
     let page = withDependencies {

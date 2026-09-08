@@ -9,6 +9,36 @@ import Testing
 
 @MainActor
 struct CutSuggestionsPageTests {
+  @Test func conventionalSingletonFiltersHideOnlyRedundantChildren() throws {
+    let page = CutSuggestionsPageModel(editPlan: Fixtures.editPlan(), sourceFingerprint: "filters")
+    page.catalog = SuggestionDefaults.configuration
+    expectNoDifference(page.visibleTypeFilterRows(in: .songIntros).map(\.id), [])
+    expectNoDifference(page.visibleTypeFilterRows(in: .spotlights).map(\.id), [])
+    expectNoDifference(page.visibleTypeFilterRows(in: .audioImages).count, 4)
+    page.groupFilterTapped(.songIntros)
+    expectNoDifference(
+      page.typeFilterGroups.first { $0.id == .songIntros }?.state, SuggestionFilterState.none)
+    #expect(page.selectedTypeIDs?.contains("intro") == false)
+    page.groupFilterTapped(.songIntros)
+    expectNoDifference(page.typeFilterGroups.first { $0.id == .songIntros }?.state, .all)
+    page.catalog?.types[0].name = "Opening Song"
+    expectNoDifference(page.visibleTypeFilterRows(in: .songIntros).map(\.title), ["Opening Song"])
+    page.catalog?.types[0].name = "Song Intro"
+    var custom = try #require(page.catalog?.types.first)
+    custom.id = "custom-intro"
+    custom.name = "Custom Intro"
+    page.catalog?.types.append(custom)
+    expectNoDifference(
+      page.visibleTypeFilterRows(in: .songIntros).map(\.id), ["intro", "custom-intro"])
+    page.typeFilterTapped("custom-intro")
+    page.typeFilterTapped("intro")
+    expectNoDifference(page.typeFilterGroups.first { $0.id == .songIntros }?.state, .some)
+    page.catalog?.types.removeAll { $0.id == "intro" }
+    expectNoDifference(page.visibleTypeFilterRows(in: .songIntros).map(\.id), ["custom-intro"])
+    page.catalog?.types.removeAll { $0.group == .audioImages && $0.id != "image-id" }
+    expectNoDifference(page.visibleTypeFilterRows(in: .audioImages).map(\.id), ["image-id"])
+  }
+
   @Test func typeOnlyStartRowsUseTypeNameWhileProvisionalGroupsRemainUnresolved() throws {
     let editor = try SuggestionReviewTests().fixture()
     let resolvedRows = editor.cutSuggestions.songStartRows.map(\.title)
@@ -32,8 +62,8 @@ struct CutSuggestionsPageTests {
 
   @Test func freshPageUsesConfiguredDiscoveryWhileLegacyOptionsStayPinned() {
     let page = CutSuggestionsPageModel(editPlan: Fixtures.editPlan(), sourceFingerprint: "fresh")
-    expectNoDifference(page.options.promptVersion, "configured-v3")
-    expectNoDifference(page.run.options.promptVersion, "configured-v3")
+    expectNoDifference(page.options.promptVersion, "configured-v4")
+    expectNoDifference(page.run.options.promptVersion, "configured-v4")
     expectNoDifference(CutSuggestOptions().promptVersion, "v2")
   }
 

@@ -82,6 +82,7 @@ final class ProjectModel: ViewModel {
   var phase: Phase
   var editor: EditorModel?
   var isImporterPresented = false
+  var interviewArtistText = ""
   private var maxFraction: Double?
   private var elapsedSeconds: Double = 0
   /// The engine phase identity currently on screen — index plus raw name. A change in either
@@ -101,6 +102,8 @@ final class ProjectModel: ViewModel {
   // MARK: - Display Text
   let emptyStateTitle = "Drop an audio clip to transcribe"
   let emptyStateSubtitle = "Drag a file here, or choose one to open."
+  let interviewArtistLabel = "Interview Artist (optional)"
+  let interviewArtistHelp = "Helps identify the artist when they talk about their own music."
   let importButtonLabel = "Open Audio File…"
   let reimportMenuLabel = "Re-import (Ignore Cache)"
   let cancelButtonLabel = "Cancel"
@@ -812,6 +815,11 @@ final class ProjectModel: ViewModel {
     }
   }
 
+  private var normalizedInterviewArtist: String? {
+    let trimmed = interviewArtistText.trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.isEmpty ? nil : trimmed
+  }
+
   /// Seeds the editor's document from the legacy per-file `.projectState` sidecar, once, on
   /// import (spec A8 migration). A pure read: the sidecar is never written or deleted from here.
   private func migrationSeed(fingerprint: String) -> EditorDocumentState {
@@ -821,7 +829,8 @@ final class ProjectModel: ViewModel {
       timelineRemovals: projectState.timelineRemovals,
       cutSuggestions: projectState.cutSuggestions,
       speakerCountOverride: projectState.speakerCountOverride,
-      speakerDisplayNames: projectState.speakerDisplayNames)
+      speakerDisplayNames: projectState.speakerDisplayNames,
+      interviewArtist: normalizedInterviewArtist)
   }
 
   private func buildEditor(

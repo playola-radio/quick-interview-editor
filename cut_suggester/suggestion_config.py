@@ -15,6 +15,8 @@ from .models import DEFAULT_SPECS, ProductSpec, ProductType
 TUNED_IDS = frozenset(("spotlight", "intro"))
 CONFIGURED_DISCOVERY_VERSION = "configured-v2"
 BROAD_INTRO_DISCOVERY_VERSION = "configured-v3"
+QUALIFIED_INTRO_DISCOVERY_VERSION = "configured-v4"
+BROAD_INTRO_DISCOVERY_VERSIONS = frozenset((BROAD_INTRO_DISCOVERY_VERSION, QUALIFIED_INTRO_DISCOVERY_VERSION))
 IMAGING_IDS = frozenset(("image-id", "image-pre-commercial", "image-post-commercial", "image-promo"))
 _GROUPS = frozenset(("spotlights", "songIntros", "audioImages"))
 _FOUNDATION_WHITESPACE = frozenset(
@@ -168,7 +170,7 @@ def split_discovery_types(config: object, *, discovery_prompt_version: str = "co
     """Validate then return (tuned, configured) type definitions in config order."""
     validate_configuration(config)
     types = config["types"]  # validated list of dictionaries
-    tuned_ids = TUNED_IDS - {"intro"} if discovery_prompt_version == BROAD_INTRO_DISCOVERY_VERSION else TUNED_IDS
+    tuned_ids = TUNED_IDS - {"intro"} if discovery_prompt_version in BROAD_INTRO_DISCOVERY_VERSIONS else TUNED_IDS
     return ([item for item in types if item["id"] in tuned_ids],
             [item for item in types if item["id"] not in tuned_ids])
 

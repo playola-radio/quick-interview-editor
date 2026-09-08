@@ -11,6 +11,31 @@ import Testing
 
 @MainActor
 struct ProjectModelTests {
+  @Test(arguments: ["  Brandi Carlile \n", "  \n"])
+  func optionalInterviewArtistSeedsImportAndSurvivesRetranscription(text: String) async throws {
+    let canonical = try temporaryCanonicalAudio(bytes: 1234)
+    defer { try? FileManager.default.removeItem(at: canonical) }
+    let (sink, record) = ProjectDocumentSink.recorder()
+    let model = ProjectModel(file: nil, plan: nil, audio: nil, sink: sink)
+    model.interviewArtistText = text
+    await withDependencies {
+      $0.continuousClock = TestClock()
+      $0.date = .constant(importedAt)
+      $0.transcription.transcribe = { _, _, _ in
+        engineEvents([.completed(Fixtures.transcriptionResult(canonicalAudioURL: canonical))])
+      }
+    } operation: {
+      await model.importAudioTapped(URL(fileURLWithPath: "/artist-interview.m4a"))
+      let expected: String? = text.contains("Brandi") ? "Brandi Carlile" : nil
+      expectNoDifference(model.editor?.documentState.interviewArtist, expected)
+      expectNoDifference(record.commits.last?.file.content.interviewArtist, expected)
+      model.editor?.mutateDocument { $0.interviewArtist = "Saved project artist" }
+      model.interviewArtistText = "Stale import draft"
+      await model.reimportIgnoringCacheTapped()
+    }
+    expectNoDifference(model.editor?.documentState.interviewArtist, "Saved project artist")
+    expectNoDifference(record.commits.last?.file.content.interviewArtist, "Saved project artist")
+  }
 
   // `/clip.m4a` is unreadable, so `SourceFingerprint` falls back to the standardized path —
   // the same key the legacy sidecar was written under.

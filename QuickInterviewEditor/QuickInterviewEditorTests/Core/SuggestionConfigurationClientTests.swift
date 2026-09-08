@@ -292,7 +292,7 @@ struct SuggestionConfigurationClientTests {
   }
 
   @Test func freshSearchUsesBroadIntrosAndHistoricalOptionsRemainUnchanged() {
-    expectNoDifference(CutSuggestOptions.freshConfigured.promptVersion, "configured-v3")
+    expectNoDifference(CutSuggestOptions.freshConfigured.promptVersion, "configured-v4")
     expectNoDifference(
       CutSuggestOptions(promptVersion: "configured-v2").promptVersion, "configured-v2")
   }

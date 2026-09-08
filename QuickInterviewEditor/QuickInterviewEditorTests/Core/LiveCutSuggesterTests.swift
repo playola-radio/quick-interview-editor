@@ -428,3 +428,20 @@ extension LiveCutSuggesterTests {
     expectNoDifference(events, [.checkpoint(runID: id, revision: 4)])
   }
 }
+
+extension LiveCutSuggesterTests {
+  @MainActor @Test func capturedInterviewArtistSurvivesSnapshotDecodeAndWireEncoding() throws {
+    var snapshotJSON = try #require(
+      JSONSerialization.jsonObject(with: JSONEncoder().encode(suggestionResultSnapshot()))
+        as? [String: Any])
+    snapshotJSON["interviewArtist"] = "River Vale"
+    let captured = try JSONDecoder().decode(
+      SuggestionRunSnapshot.self, from: JSONSerialization.data(withJSONObject: snapshotJSON))
+    let model = SuggestionRunModel(editPlan: Fixtures.editPlan(), sourceFingerprint: "test")
+    let request = model.makeRequest(captured, .resume, nil)
+    let encoded = try #require(
+      JSONSerialization.jsonObject(with: LiveCutSuggester.encodedRequest(request)) as? [String: Any]
+    )
+    expectNoDifference(encoded["interview_artist"] as? String, "River Vale")
+  }
+}

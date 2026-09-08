@@ -223,7 +223,39 @@ struct SuggestionRunModelTests {
 
   @Test func freshRunUsesConfiguredDiscoveryVersion() {
     let model = SuggestionRunModel(editPlan: Fixtures.editPlan(), sourceFingerprint: "fresh")
-    expectNoDifference(model.options.promptVersion, "configured-v3")
+    expectNoDifference(model.options.promptVersion, "configured-v4")
+  }
+
+  @Test func freshSearchCapturesInterviewArtistAndResumeKeepsItAfterProjectEdit() async throws {
+    try await withMainSerialExecutor {
+      let fixture = SuggestionRunFixture()
+      fixture.document.withValue { $0.interviewArtist = "River Vale" }
+      try await withDependencies {
+        fixture.install(&$0)
+      } operation: {
+        let model = fixture.model()
+        let task = Task { await model.suggestTapped() }
+        await fixture.waitForRequests()
+        let first = try #require(fixture.state.value.requests.first)
+        expectNoDifference(first.snapshot?.interviewArtist, "River Vale")
+        expectNoDifference(first.snapshot?.extractionPromptVersion, "fields-v2")
+        fixture.checkpoint(phase: .needsRetry, completed: ["saved"], failed: ["retry"])
+        fixture.state.value.continuations[0].yield(
+          .recoverableFailure(
+            runID: try #require(first.snapshot?.runID),
+            failedRequestKeys: ["retry"], message: "retry"))
+        fixture.state.value.continuations[0].finish()
+        await task.value
+        fixture.document.withValue { $0.interviewArtist = "Changed Project Artist" }
+        let reopened = fixture.model()
+        let retry = Task { await reopened.resumeTapped() }
+        await fixture.waitForRequests(2)
+        expectNoDifference(fixture.state.value.requests.last?.snapshot, first.snapshot)
+        fixture.finish([], attempt: 1)
+        await retry.value
+        expectNoDifference(fixture.document.value.interviewArtist, "Changed Project Artist")
+      }
+    }
   }
 
   @Test func confirmationCancelPreservesTheExactDocumentWithoutPreparing() async {
@@ -355,7 +387,7 @@ struct SuggestionRunModelTests {
         await task.value
         expectNoDifference(model.message, "One field request failed.")
         let reopened = fixture.model()
-        expectNoDifference(reopened.options.promptVersion, "configured-v3")
+        expectNoDifference(reopened.options.promptVersion, "configured-v4")
         let retry = Task { await reopened.resumeTapped() }
         await fixture.waitForRequests(2)
         expectNoDifference(fixture.state.value.prepared.count, 1)
