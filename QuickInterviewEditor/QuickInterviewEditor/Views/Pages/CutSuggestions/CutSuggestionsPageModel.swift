@@ -485,12 +485,18 @@ final class CutSuggestionsPageModel: ViewModel {
   /// Renames a suggestion as the user types in its title field. Routed to the editor so the
   /// document and accepted-slice name stay live while the surrounding focus session is coalesced.
   func titleChanged(_ id: CutSuggestion.ID, to newTitle: String) {
+    guard !candidateActionsDisabled,
+      let candidate = currentSuggestions()[id: id], candidate.isPending, candidate.naming == nil
+    else { return }
     onTitleChanged?(id, newTitle)
   }
 
   func titleFocusChanged(_ id: CutSuggestion.ID, isFocused: Bool) {
     if isFocused {
-      guard editingTitleID != id else { return }
+      guard !candidateActionsDisabled,
+        let candidate = currentSuggestions()[id: id], candidate.isPending, candidate.naming == nil,
+        editingTitleID != id
+      else { return }
       if let editingTitleID { finishTitleEditing(editingTitleID) }
       editingTitleID = id
       onTitleEditingBegan?(id)

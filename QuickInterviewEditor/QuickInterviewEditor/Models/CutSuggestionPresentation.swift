@@ -139,8 +139,8 @@ func suggestionRow(
     showsAcceptButton: pending,
     showsRejectButton: pending,
     showsFreshnessWarning: stale && pending,
-    showsEditableTitle: pending,
-    showsRevealableTitle: !pending,
+    showsEditableTitle: pending && suggestion.naming == nil,
+    showsRevealableTitle: !pending || suggestion.naming != nil,
     titlePlaceholder: suggestion.productType.displayLabel,
     showsReviewButton: pending && suggestion.naming != nil,
     missingFieldsMessage: missingSuggestionFields(suggestion.naming, fieldNames: fieldNames)

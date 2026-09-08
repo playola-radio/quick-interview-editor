@@ -35,7 +35,8 @@ extension Slice {
     wordIDs = try container.decode([Word.ID].self, forKey: .wordIDs)
     snippet = try container.decode(String.self, forKey: .snippet)
     editingComplete = try container.decodeIfPresent(Bool.self, forKey: .editingComplete) ?? false
-    suggestionNaming = try container.decodeIfPresent(SuggestionNamingRecord.self, forKey: .suggestionNaming)
+    suggestionNaming = try container.decodeIfPresent(
+      SuggestionNamingRecord.self, forKey: .suggestionNaming)
     suggestionTypeID = try container.decodeIfPresent(String.self, forKey: .suggestionTypeID)
   }
 }

@@ -450,11 +450,36 @@ struct EditorSuggestionFlowTests {
     expectNoDifference(model.documentCutSuggestions[id: suggestion.id]?.status, .pending)
   }
 
+  @Test func configuredAndLockedSuggestionsDoNotAllowInlineTitleEditing() throws {
+    let model = editor()
+    let (candidate, batch) = try numberedSuggestion(plan: model.editPlan)
+    model.mutateDocument(recordUndo: false) {
+      $0.cutSuggestions = [candidate]
+      $0.suggestionBatch = batch
+    }
+    let row = suggestionRow(candidate, currentTranscriptHash: "t", currentFingerprint: "f")
+    expectNoDifference(row.showsEditableTitle, false)
+    expectNoDifference(row.showsRevealableTitle, true)
+    expectNoDifference(row.showsReviewButton, true)
+    let before = model.documentState
+    model.cutSuggestions.titleChanged(candidate.id, to: "Ignored")
+    model.cutSuggestions.onTitleChanged?(candidate.id, "Also ignored")
+    expectNoDifference(model.documentState, before)
+    let legacy = freshSuggestion(Fixtures.uuid(9), plan: model.editPlan)
+    model.mutateDocument(recordUndo: false) { $0.cutSuggestions = [legacy] }
+    model.cutSuggestions.run.ownershipBlocked = true
+    let locked = model.documentState
+    model.cutSuggestions.titleFocusChanged(legacy.id, isFocused: true)
+    model.cutSuggestions.titleChanged(legacy.id, to: "Ignored")
+    model.cutSuggestions.onTitleChanged?(legacy.id, "Also ignored")
+    expectNoDifference(model.documentState, locked)
+  }
+
   @Test func editingASuggestionTitleCoalescesTypingIntoOneUndoableAction() async {
     let plan = Fixtures.editPlan()
     let model = editor(plan)
     let suggestion = freshSuggestion(Fixtures.uuid(1), plan: plan)
-    model.cutSuggestions.onSuggestionsProduced?([suggestion])
+    model.mutateDocument(recordUndo: false) { $0.cutSuggestions = [suggestion] }
 
     var seen: [EditorDocumentState] = []
     model.onDocumentStateChanged = { seen.append($0) }
@@ -483,7 +508,7 @@ struct EditorSuggestionFlowTests {
     let plan = Fixtures.editPlan()
     let model = editor(plan)
     let suggestion = freshSuggestion(Fixtures.uuid(1), plan: plan)
-    model.cutSuggestions.onSuggestionsProduced?([suggestion])
+    model.mutateDocument(recordUndo: false) { $0.cutSuggestions = [suggestion] }
 
     model.cutSuggestions.titleFocusChanged(suggestion.id, isFocused: true)
     model.cutSuggestions.titleChanged(suggestion.id, to: "My custom")

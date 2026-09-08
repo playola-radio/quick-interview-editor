@@ -217,6 +217,7 @@ private struct SuggestionCard: View {
       text: $model[dynamicMember: \.[editableTitle: row.id]]
     )
     .textFieldStyle(.plain)
+    .disabled(model.candidateActionsDisabled)
     .focused($titleFocused)
     .padding(.horizontal, 6).padding(.vertical, 3)
     .background(

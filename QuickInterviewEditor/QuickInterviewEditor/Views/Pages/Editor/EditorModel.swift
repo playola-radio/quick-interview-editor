@@ -148,6 +148,10 @@ final class EditorModel: ViewModel {
       case .clear: self.clearSelection()
       }
     }
+    wireTranscriptResize()
+  }
+
+  private func wireTranscriptResize() {
     // Transcript edge-resize gestures are intents too: the overlay resolves the grabbed item/edge
     // and the dragged-over word and hands them here, and THIS model runs the resize state machine
     // (live selection repaint, clip container preview, single commit on release).
@@ -859,7 +863,7 @@ final class EditorModel: ViewModel {
     }
     if cutSuggestions.showsSuggestionBands {
       let clipClaimed = Set(slices.flatMap { draftedWordIDs(forClip: $0.id) ?? $0.wordIDs })
-      for suggestion in documentCutSuggestions.pending {
+      for suggestion in cutSuggestions.pendingSuggestions {
         let words = ordered(suggestion.wordIDs)
         guard words.contains(where: { !clipClaimed.contains($0.wordID) }) else { continue }
         items.append(.init(identity: .suggestion(suggestion.id), wordOccurrences: words))
@@ -1010,7 +1014,7 @@ final class EditorModel: ViewModel {
     switch identity {
     case .selection: true
     case .clip: !isExporting && !hasUncommittedSliceEdit
-    case .suggestion: !isExporting
+    case .suggestion: !isExporting && !cutSuggestions.candidateActionsDisabled
     }
   }
 
@@ -1071,7 +1075,7 @@ final class EditorModel: ViewModel {
       else { return }
       mutateSlices { $0[id: id] = updatedSlice(current, to: range) }
     case .suggestion(let id):
-      guard !isExporting,
+      guard !isExporting, !cutSuggestions.candidateActionsDisabled,
         let current = documentCutSuggestions[id: id], current.isPending,
         sourceRange(coveringWordOccurrences: draft.draftedWordOccurrences) != nil
       else { return }
@@ -1191,12 +1195,14 @@ final class EditorModel: ViewModel {
   // export is the one being written to disk, and rewinding it mid-run would leave the
   // finished AIFFs stale relative to what the user sees.
   var canUndo: Bool {
-    documentUndo.canUndo && cutSuggestionTitleEdit == nil && !hasUncommittedSliceEdit && !isExporting
+    documentUndo.canUndo && cutSuggestionTitleEdit == nil && !hasUncommittedSliceEdit
+      && !isExporting
       && (!cutSuggestions.candidateActionsDisabled
         || documentUndo.undo.last?.cutSuggestions == documentCutSuggestions)
   }
   var canRedo: Bool {
-    documentUndo.canRedo && cutSuggestionTitleEdit == nil && !hasUncommittedSliceEdit && !isExporting
+    documentUndo.canRedo && cutSuggestionTitleEdit == nil && !hasUncommittedSliceEdit
+      && !isExporting
       && (!cutSuggestions.candidateActionsDisabled
         || documentUndo.redo.last?.cutSuggestions == documentCutSuggestions)
   }
@@ -2032,11 +2038,16 @@ final class EditorModel: ViewModel {
 
   private func cutSuggestionTitleEditingBegan(_ id: CutSuggestion.ID) {
     finishCutSuggestionTitleEdit()
-    guard documentCutSuggestions[id: id] != nil else { return }
+    guard !cutSuggestions.candidateActionsDisabled,
+      let candidate = documentCutSuggestions[id: id], candidate.isPending, candidate.naming == nil
+    else { return }
     cutSuggestionTitleEdit = (id, documentState)
   }
 
   private func cutSuggestionTitleChanged(_ id: CutSuggestion.ID, to newTitle: String) {
+    guard !cutSuggestions.candidateActionsDisabled,
+      let candidate = documentCutSuggestions[id: id], candidate.isPending, candidate.naming == nil
+    else { return }
     guard cutSuggestionTitleEdit?.id == id else {
       mutateDocument { $0.cutSuggestions[id: id]?.title = newTitle }
       return

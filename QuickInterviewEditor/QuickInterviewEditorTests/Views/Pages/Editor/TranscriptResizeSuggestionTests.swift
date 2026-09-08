@@ -16,6 +16,27 @@ struct TranscriptResizeSuggestionTests {
       initialDocument: EditorDocumentState(cutSuggestions: suggestions))
   }
 
+  @Test func lockedSuggestionsCannotBeginOrCommitResize() {
+    let suggestion = Fixtures.cutSuggestion(id: Fixtures.uuid(1), wordIDs: [1, 2])
+    let model = editor(suggestions: [suggestion])
+    model.cutSuggestions.run.ownershipBlocked = true
+    expectNoDifference(model.transcriptResizeBegan(.suggestion(suggestion.id), .end), false)
+    model.cutSuggestions.run.ownershipBlocked = false
+    model.transcriptResizeBegan(.suggestion(suggestion.id), .end)
+    model.transcriptResizeDragged(toWord: 4)
+    model.cutSuggestions.run.ownershipBlocked = true
+    model.transcriptResizeEnded()
+    expectNoDifference(model.documentCutSuggestions.elements, [suggestion])
+  }
+
+  @Test func filteredSuggestionsHaveNoResizeHandles() {
+    let suggestion = Fixtures.cutSuggestion(id: Fixtures.uuid(1), wordIDs: [1, 2])
+    let model = editor(suggestions: [suggestion])
+    model.cutSuggestions.selectedTypeIDs = []
+    expectNoDifference(model.transcriptResizeItems, [])
+    expectNoDifference(model.transcriptResizeBegan(.suggestion(suggestion.id), .end), false)
+  }
+
   @Test func suggestionResizeCommitsOnceAndDerivesSamplesFromWords() async {
     let suggestionID = Fixtures.uuid(1)
     let suggestion = Fixtures.cutSuggestion(
