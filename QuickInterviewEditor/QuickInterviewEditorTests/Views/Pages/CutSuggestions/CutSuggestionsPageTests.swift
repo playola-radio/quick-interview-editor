@@ -9,6 +9,27 @@ import Testing
 
 @MainActor
 struct CutSuggestionsPageTests {
+  @Test func typeOnlyStartRowsUseTypeNameWhileProvisionalGroupsRemainUnresolved() throws {
+    let editor = try SuggestionReviewTests().fixture()
+    let resolvedRows = editor.cutSuggestions.songStartRows.map(\.title)
+    let typeOnly = SuggestionSequenceKey(
+      typeID: "spotlight", fields: [], provisionalCandidateID: nil)
+    let provisional = SuggestionSequenceKey(
+      typeID: "intro", fields: [], provisionalCandidateID: Fixtures.uuid(99))
+    editor.suggestionStarts.groups = [
+      .init(key: typeOnly, start: .init(number: 7, isExplicit: true)),
+      .init(key: provisional, start: .init(number: 3, isExplicit: true)),
+    ]
+    let document = editor.documentState
+    let rows = editor.cutSuggestions.songStartRows
+    expectNoDifference(rows.first { $0.id == typeOnly }?.title, "Spotlight")
+    expectNoDifference(rows.first { $0.id == typeOnly }?.startLabel, "Start next search at: 7")
+    expectNoDifference(rows.first { $0.id == typeOnly }?.hasOverride, true)
+    expectNoDifference(rows.first { $0.id == provisional }?.title, "Song Intro · Unresolved group")
+    expectNoDifference(Array(rows.dropFirst(2)).map(\.title), resolvedRows)
+    expectNoDifference(editor.documentState, document)
+  }
+
   @Test func freshPageUsesConfiguredDiscoveryWhileLegacyOptionsStayPinned() {
     let page = CutSuggestionsPageModel(editPlan: Fixtures.editPlan(), sourceFingerprint: "fresh")
     expectNoDifference(page.options.promptVersion, "configured-v2")

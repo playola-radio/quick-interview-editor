@@ -264,8 +264,11 @@ final class CutSuggestionsPageModel: ViewModel {
       let override = document.suggestionStarts.groups.first { $0.key == key }
       let number =
         override?.start.number ?? document.suggestionStarts.types[key.typeID]?.number ?? 1
+      let title =
+        key.fields.isEmpty && key.provisionalCandidateID == nil
+        ? display.typeName : display.typeName + " · " + song
       return .init(
-        id: key, title: display.typeName + " · " + song,
+        id: key, title: title,
         startLabel: "Start next search at: \(number)", hasOverride: override != nil)
     }
   }
