@@ -297,6 +297,10 @@
 		B61500000000000000000003 /* SuggestionReviewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61500000000000000000003 /* SuggestionReviewTests.swift */; };
 		B61500000000000000000001 /* SuggestionReviewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61500000000000000000001 /* SuggestionReviewModel.swift */; };
 		B61500000000000000000002 /* SuggestionReviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61500000000000000000002 /* SuggestionReviewView.swift */; };
+		B61600000000000000000004 /* ExportReviewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61600000000000000000004 /* ExportReviewTests.swift */; };
+		B61600000000000000000001 /* ExportCopyClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61600000000000000000001 /* ExportCopyClient.swift */; };
+		B61600000000000000000002 /* ExportReviewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61600000000000000000002 /* ExportReviewModel.swift */; };
+		B61600000000000000000003 /* ExportReviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61600000000000000000003 /* ExportReviewView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -596,6 +600,10 @@
 		A61500000000000000000003 /* SuggestionReviewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SuggestionReviewTests.swift; sourceTree = "<group>"; };
 		A61500000000000000000001 /* SuggestionReviewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SuggestionReviewModel.swift; sourceTree = "<group>"; };
 		A61500000000000000000002 /* SuggestionReviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SuggestionReviewView.swift; sourceTree = "<group>"; };
+		A61600000000000000000004 /* ExportReviewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportReviewTests.swift; sourceTree = "<group>"; };
+		A61600000000000000000001 /* ExportCopyClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportCopyClient.swift; sourceTree = "<group>"; };
+		A61600000000000000000002 /* ExportReviewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportReviewModel.swift; sourceTree = "<group>"; };
+		A61600000000000000000003 /* ExportReviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportReviewView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -794,6 +802,8 @@
 				35158E7CE1A9A9D52CC12728 /* BoundaryInset.swift */,
 				0DD0FAE781DD1D7E71822C90 /* EditorKeyMonitor.swift */,
 				760539D51B064EAD580F1255 /* EditorModel.swift */,
+				A61600000000000000000003 /* ExportReviewView.swift */,
+				A61600000000000000000002 /* ExportReviewModel.swift */,
 				BBDE8EFCC51F23D22523B0DB /* EditorView.swift */,
 				42FDC5127D4F87D92B9DD311 /* FineTuneModel.swift */,
 				3E112DAB8D928502DC603DDB /* FineTuneView.swift */,
@@ -847,6 +857,7 @@
 				E3AEBF05FDB35420234953B2 /* EngineResolution.swift */,
 				AFDC493A0BFDDA6659699772 /* EnvironmentClient.swift */,
 				68ED6B0140D2504D2069CA00 /* ExportRenderClient.swift */,
+				A61600000000000000000001 /* ExportCopyClient.swift */,
 				DBD0DA622B239A3EAD03E156 /* InstallLocation.swift */,
 				8ADD68993B71E01BF3459A44 /* KeychainClient.swift */,
 				E34F3BE83ABC5A5F9AC915D6 /* LiveCutSuggester.swift */,
@@ -1080,6 +1091,7 @@
 				368F192CC9A03B4397AC249B /* EditorEditingCompleteTests.swift */,
 				7E6CDAFD169715E44AE5E9EA /* EditorEditSlicePresentationTests.swift */,
 				1658534D0F4E09A3E6E82E62 /* EditorExportRemovalTests.swift */,
+				A61600000000000000000004 /* ExportReviewTests.swift */,
 				EC37D37F52E14878D616441E /* EditorFineTuneTests.swift */,
 				596802732F75F6D8016A8BD5 /* EditorKeyMonitorTests.swift */,
 				A4B9F806A62832D6C46F012C /* EditorRemovalTests.swift */,
@@ -1415,6 +1427,8 @@
 				C0DE8B83CAF912D297A18A7F /* EditorDocumentState.swift in Sources */,
 				60AD38B45E13054BB5344FBD /* EditorKeyMonitor.swift in Sources */,
 				4E6024258CA483E84644E9D9 /* EditorModel.swift in Sources */,
+				B61600000000000000000003 /* ExportReviewView.swift in Sources */,
+				B61600000000000000000002 /* ExportReviewModel.swift in Sources */,
 				4AA9594B7525A38EBDC2E915 /* EditorView.swift in Sources */,
 				93DCDB27FD94F43B51D39FCC /* EngineClient.swift in Sources */,
 				9CBCADFDCD6BEFAC0DBAD96C /* EngineEvent.swift in Sources */,
@@ -1423,6 +1437,7 @@
 				5E5E5CC91819A66082EF8207 /* EnvironmentClient.swift in Sources */,
 				47BA9FAA3B8E2114AAF390A9 /* ExportNaming.swift in Sources */,
 				73AF3E4C215AD54FC8C68039 /* ExportRenderClient.swift in Sources */,
+				B61600000000000000000001 /* ExportCopyClient.swift in Sources */,
 				4CF5472B24FE7AD0A22F0B72 /* FineTuneGeometry.swift in Sources */,
 				AFD996551EC4474E1ECAA39A /* FineTuneModel.swift in Sources */,
 				E017438EFB01213628D8B56D /* FineTuneView.swift in Sources */,
@@ -1554,6 +1569,7 @@
 				2F0127ADB4E75C78E7298CD6 /* EditorEditedCursorTests.swift in Sources */,
 				23A9266348B9CC8970D77A58 /* EditorEditingCompleteTests.swift in Sources */,
 				975D1C597F743E73191A9C97 /* EditorExportRemovalTests.swift in Sources */,
+				B61600000000000000000004 /* ExportReviewTests.swift in Sources */,
 				B856314A2828CD9D1E7052DA /* EditorFineTuneTests.swift in Sources */,
 				C4FDA356AE6646BA68DD867F /* EditorKeyMonitorTests.swift in Sources */,
 				62E73C3E02605A22C6A96C7A /* EditorRemovalTests.swift in Sources */,

@@ -12,6 +12,145 @@ import Testing
 /// this file drives the removal-aware pieces through the real `performExport` pipeline.
 @MainActor
 struct EditorExportRemovalTests {
+  @Test func generatedCollisionRetainsRenderUntilApprovedAndFreezesClipEdits() async throws {
+    let model = editor(Fixtures.editPlan())
+    var slice = Slice(
+      id: Fixtures.uuid(1), name: "ID 1", startSample: 1000, endSample: 2000, wordIDs: [],
+      snippet: "")
+    slice.suggestionNaming = .init(
+      runID: Fixtures.uuid(90), typeID: "image-id", typeName: "ID", typeGroup: .audioImages,
+      discoveryLabel: "ID", extractedValues: [:], missingFieldIDs: [], correctedValues: [:],
+      reservation: nil)
+    model.slices = [slice]
+    let destination = try makeTempDir()
+    defer { try? FileManager.default.removeItem(at: destination) }
+    let existing = destination.appendingPathComponent("ID 1.aiff")
+    let original = Data("existing file".utf8)
+    try original.write(to: existing)
+    let jobs = LockIsolated<[ExportRenderJob]>([])
+    try await withDependencies {
+      $0.exportRender.renderSlice = { job in
+        jobs.withValue { $0.append(job) }
+        try writeStubAIFF(job)
+      }
+      $0.engine.injectMarkers = { _ in }
+      $0.workspace.reveal = { _ in }
+    } operation: {
+      model.destinationURL = destination
+      model.exportAllTapped()
+      await model.exportTask?.value
+      let review = try #require(model.exportReview)
+      #expect(model.isExporting)
+      #expect(!model.canUndo)
+      let rendered = try #require(jobs.value.first?.outputURL)
+      #expect(FileManager.default.fileExists(atPath: rendered.path))
+      model.renameSlice(slice.id, to: "Changed")
+      await model.deleteSlice(slice.id)
+      expectNoDifference(model.slices.first?.name, "ID 1")
+      review.exportWithSuffixesTapped()
+      let approvedTask = model.exportTask
+      review.exportWithSuffixesTapped()
+      #expect(model.exportTask == approvedTask)
+      #expect(model.exportReview == nil)
+      await model.exportTask?.value
+      await approvedTask?.value
+      expectNoDifference(model.exportPhase, .done(count: 1))
+      expectNoDifference(jobs.value.count, 1)
+      expectNoDifference(try Data(contentsOf: existing), original)
+      #expect(
+        FileManager.default.fileExists(
+          atPath: destination.appendingPathComponent("ID 1 2.aiff").path))
+      #expect(!FileManager.default.fileExists(atPath: rendered.path))
+    }
+  }
+
+  @Test func reviewNamesCancelsAndCleansScratchWithoutCopying() async throws {
+    let model = editor(Fixtures.editPlan())
+    var slice = Slice(
+      id: Fixtures.uuid(1), name: "ID 1", startSample: 1000, endSample: 2000, wordIDs: [],
+      snippet: "")
+    slice.suggestionNaming = .init(
+      runID: Fixtures.uuid(90), typeID: "image-id", typeName: "ID", typeGroup: .audioImages,
+      discoveryLabel: "ID", extractedValues: [:], missingFieldIDs: [], correctedValues: [:],
+      reservation: nil)
+    model.slices = [slice]
+    let destination = try makeTempDir()
+    defer { try? FileManager.default.removeItem(at: destination) }
+    try Data().write(to: destination.appendingPathComponent("ID 1.aiff"))
+    let output = LockIsolated<URL?>(nil)
+    try await withDependencies {
+      $0.exportRender.renderSlice = { job in
+        output.setValue(job.outputURL)
+        try writeStubAIFF(job)
+      }
+      $0.engine.injectMarkers = { _ in }
+      $0.workspace.reveal = { _ in }
+    } operation: {
+      model.destinationURL = destination
+      model.exportAllTapped()
+      await model.exportTask?.value
+      let review = try #require(model.exportReview)
+      review.reviewNamesTapped()
+      await model.awaitExportTeardown()
+      #expect(model.exportReview == nil)
+      #expect(!model.isExporting)
+      let rendered = try #require(output.value)
+      #expect(!FileManager.default.fileExists(atPath: rendered.path))
+      expectNoDifference(
+        try FileManager.default.contentsOfDirectory(atPath: destination.path), ["ID 1.aiff"])
+    }
+  }
+
+  @Test func partialCopyRaceCancelKeepsCopiedFileAndCleansRemainingRender() async throws {
+    let model = editor(Fixtures.editPlan())
+    model.slices = IdentifiedArray(
+      uniqueElements: [1, 2].map { index in
+        var slice = Slice(
+          id: Fixtures.uuid(index), name: "ID \(index)", startSample: 1000, endSample: 2000,
+          wordIDs: [], snippet: "")
+        slice.suggestionNaming = .init(
+          runID: Fixtures.uuid(90), typeID: "image-id", typeName: "ID", typeGroup: .audioImages,
+          discoveryLabel: "ID", extractedValues: [:], missingFieldIDs: [], correctedValues: [:],
+          reservation: nil)
+        return slice
+      })
+    let destination = try makeTempDir()
+    defer { try? FileManager.default.removeItem(at: destination) }
+    let outputs = LockIsolated<[URL]>([])
+    try await withDependencies {
+      $0.exportRender.renderSlice = { job in
+        outputs.withValue { $0.append(job.outputURL) }
+        try writeStubAIFF(job)
+      }
+      $0.engine.injectMarkers = { _ in }
+      $0.workspace.reveal = { _ in }
+      $0.exportCopy.copy = { source, target in
+        if target.lastPathComponent == "ID 2.aiff" {
+          try Data("other writer".utf8).write(to: target)
+          throw CocoaError(.fileWriteFileExists)
+        }
+        try FileManager.default.copyItem(at: source, to: target)
+      }
+    } operation: {
+      model.destinationURL = destination
+      model.exportAllTapped()
+      await model.exportTask?.value
+      let review = try #require(model.exportReview)
+      expectNoDifference(review.copied.count, 1)
+      expectNoDifference(review.total, 2)
+      #expect(outputs.value.allSatisfy { FileManager.default.fileExists(atPath: $0.path) })
+      model.cancelExportTapped()
+      await model.awaitExportTeardown()
+      expectNoDifference(model.exportPhase, .failed("Export cancelled — 1 of 2 exported."))
+      #expect(outputs.value.allSatisfy { !FileManager.default.fileExists(atPath: $0.path) })
+      #expect(
+        FileManager.default.fileExists(atPath: destination.appendingPathComponent("ID 1.aiff").path)
+      )
+      #expect(
+        !FileManager.default.fileExists(
+          atPath: destination.appendingPathComponent("ID 2 2.aiff").path))
+    }
+  }
   /// Every model gets its own unique sidecar fingerprint so `mutateDocument`'s
   /// `persistTimelineRemovals` writes can never collide across tests (or with a real
   /// file's sidecar) — the same isolation `EditorSeamSelectionTests` gets from per-test

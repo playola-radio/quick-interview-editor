@@ -207,6 +207,7 @@ final class EditorModel: ViewModel {
   enum ExportPhase: Equatable {
     case idle
     case exporting(current: Int, total: Int)
+    case reviewing(current: Int, total: Int)
     case done(count: Int)
     case failed(String)
   }
@@ -366,6 +367,8 @@ final class EditorModel: ViewModel {
   /// Bumped each time a marquee drag begins so a stale auto-scroll tick from a previous drag bails.
   @ObservationIgnored private var areaSelectGeneration = 0
   var exportPhase: ExportPhase = .idle
+  var exportReview: ExportReviewModel?
+  @ObservationIgnored private var exportSession: ExportReviewModel?
   var destinationURL: URL?
   /// Which pane the right column shows. The clips list and the cut-suggester share the
   /// column so accepting a suggestion visibly lands a clip in the Slices tab.
@@ -1189,8 +1192,10 @@ final class EditorModel: ViewModel {
   }
 
   var isExporting: Bool {
-    if case .exporting = exportPhase { return true }
-    return false
+    switch exportPhase {
+    case .exporting, .reviewing: true
+    default: false
+    }
   }
   var canExportAll: Bool {
     !slices.isEmpty && !isExporting && !hasUncommittedSliceEdit && editedTimeline.isValid
@@ -1218,6 +1223,8 @@ final class EditorModel: ViewModel {
       return ""
     case .exporting(let current, let total):
       return current <= 0 ? "Preparing export…" : "Exporting slice \(current) of \(total)…"
+    case .reviewing(let current, let total):
+      return "Review filenames — \(current) of \(total) exported."
     case .done(let count):
       let clips = count == 1 ? "clip" : "clips"
       let location = destinationURL.map { " to \($0.lastPathComponent)" } ?? ""
@@ -2041,6 +2048,7 @@ final class EditorModel: ViewModel {
   /// `slices`-only convenience over `mutateDocument`, kept so every existing slice
   /// mutation site reads the same as before.
   func mutateSlices(_ body: (inout IdentifiedArrayOf<Slice>) -> Void) {
+    guard !isExporting else { return }
     mutateDocument { doc in body(&doc.slices) }
   }
 
@@ -3685,6 +3693,20 @@ final class EditorModel: ViewModel {
 
   func cancelExportTapped() {
     exportTask?.cancel()
+    guard let session = exportSession, !session.isCopying else { return }
+    exportReview = nil
+    exportPhase = .exporting(current: session.copied.count, total: session.total)
+    exportTask = Task {
+      await session.cleanup()
+      guard exportSession === session else { return }
+      exportSession = nil
+      exportPhase = .failed(cancelMessage(copied: session.copied.count, total: session.total))
+    }
+  }
+
+  func exportReviewDismissed() {
+    guard case .reviewing = exportPhase else { return }
+    cancelExportTapped()
   }
 
   /// Waits for any in-flight export to finish unwinding. The engine subprocess reads the
@@ -3692,6 +3714,7 @@ final class EditorModel: ViewModel {
   /// this — after ``cancelExportTapped()`` — before releasing the session audio, or it could
   /// delete the file out from under a render still in flight.
   func awaitExportTeardown() async {
+    if case .reviewing = exportPhase { cancelExportTapped() }
     await exportTask?.value
   }
 
@@ -3817,6 +3840,10 @@ final class EditorModel: ViewModel {
   /// rendered out rather than silently shipped.
   private func performExport(_ targets: [Slice], removals: [TimelineRemoval]) async {
     guard let destination = await exportDestination() else { return }
+    guard !Task.isCancelled else {
+      exportPhase = .failed(cancelMessage(copied: 0, total: targets.count))
+      return
+    }
     exportPhase = .exporting(current: 0, total: targets.count)
 
     // Re-check right before touching audio — see `removalsInvalidNote`'s doc comment for
@@ -3918,25 +3945,46 @@ final class EditorModel: ViewModel {
     targets: [Slice], outputsByID: [Slice.ID: URL],
     scratchDir: URL, destination: URL
   ) async {
-    // Copy off the main actor — copying many/large AIFFs (or to a slow/network
-    // folder) must not freeze the UI or block the cancel control.
-    let stem = sourceURL.deletingPathExtension().lastPathComponent
-    let outcome = await Self.copyRenderedSlices(
-      stem: stem, targets: targets, renderedByID: outputsByID, destination: destination)
-    await removeWorkDir(scratchDir)
+    let session = ExportReviewModel(
+      request: .init(
+        targets: targets, sourceStem: sourceURL.deletingPathExtension().lastPathComponent,
+        renderedByID: outputsByID, destination: destination), scratchDirectory: scratchDir)
+    exportSession = session
+    session.onReviewNames = { [weak self, weak session] in
+      guard let self, let session, exportSession === session else { return }
+      cancelExportTapped()
+    }
+    session.onExport = { [weak self, weak session] mappings in
+      guard let self, let session, exportSession === session, exportReview === session,
+        !session.isCopying
+      else { return }
+      exportReview = nil
+      exportPhase = .exporting(current: session.copied.count, total: session.total)
+      exportTask = Task { await self.continueExport(session, approved: mappings) }
+    }
+    await continueExport(session, approved: nil)
+  }
 
+  private func continueExport(_ session: ExportReviewModel, approved: [ExportNameMapping]?) async {
+    let outcome = await session.copy(approved: approved)
+    guard exportSession === session else { return }
+    if !outcome.cancelled, !Task.isCancelled, outcome.reviewMappings != nil {
+      exportPhase = .reviewing(current: outcome.copied.count, total: session.total)
+      exportReview = session
+      return
+    }
+    await session.cleanup()
+    guard exportSession === session else { return }
+    exportSession = nil
+    exportReview = nil
     if outcome.cancelled || Task.isCancelled {
-      // A cancel landing during the final copy also lands here, so the cancel
-      // button can never report success.
-      exportPhase = .failed(cancelMessage(copied: outcome.copied.count, total: targets.count))
+      exportPhase = .failed(cancelMessage(copied: outcome.copied.count, total: session.total))
     } else if let message = outcome.errorMessage {
       exportPhase = .failed(message)
-    } else if outcome.copied.count != targets.count {
-      // Defense-in-depth: `outputsByID` is built 1:1 with `targets` above, so this
-      // shouldn't be reachable — but report a short result rather than claim success.
-      exportPhase = .failed("Rendered \(outcome.copied.count) of \(targets.count) slices.")
+    } else if outcome.copied.count != session.total {
+      exportPhase = .failed("Rendered \(outcome.copied.count) of \(session.total) slices.")
     } else {
-      workspace.reveal(outcome.copied)
+      workspace.reveal(outcome.copied.map(\.url))
       exportPhase = .done(count: outcome.copied.count)
     }
   }
@@ -3946,44 +3994,6 @@ final class EditorModel: ViewModel {
     guard let chosen = await workspace.chooseDirectory() else { return nil }
     destinationURL = chosen
     return chosen
-  }
-
-  /// The result of copying rendered slices to the destination, computed off the main
-  /// actor. `cancelled` means the export task was cancelled mid-copy (partial state);
-  /// `errorMessage` means a copy failed; otherwise `copied` holds one URL per target.
-  struct CopyOutcome: Sendable {
-    var copied: [URL]
-    var cancelled: Bool
-    var errorMessage: String?
-  }
-
-  /// Copies each rendered temp AIFF to the destination under a unique, sanitized name.
-  /// `nonisolated` so the file IO runs off the main actor. Cancellation is honoured
-  /// between files so a mid-copy cancel reports how many actually landed.
-  private nonisolated static func copyRenderedSlices(
-    stem: String, targets: [Slice], renderedByID: [UUID: URL], destination: URL
-  ) async -> CopyOutcome {
-    var taken = Set(
-      ((try? FileManager.default.contentsOfDirectory(atPath: destination.path)) ?? [])
-        .map { $0.lowercased() })
-    var copied: [URL] = []
-    for (offset, slice) in targets.enumerated() {
-      if Task.isCancelled {
-        return CopyOutcome(copied: copied, cancelled: true, errorMessage: nil)
-      }
-      guard let source = renderedByID[slice.id] else { continue }
-      let name = exportFileName(
-        sourceStem: stem, sliceName: slice.name, index: offset + 1, taken: &taken)
-      let target = destination.appendingPathComponent(name)
-      do {
-        try FileManager.default.copyItem(at: source, to: target)
-        copied.append(target)
-      } catch {
-        return CopyOutcome(
-          copied: copied, cancelled: false, errorMessage: error.localizedDescription)
-      }
-    }
-    return CopyOutcome(copied: copied, cancelled: false, errorMessage: nil)
   }
 
   private nonisolated func removeWorkDir(_ workDir: URL?) async {
