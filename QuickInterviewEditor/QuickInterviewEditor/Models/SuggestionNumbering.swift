@@ -52,7 +52,6 @@ struct SuggestionStarts: Codable, Equatable, Sendable {
 
 enum SuggestionReviewIntent {
   case fields(candidateID: UUID, runID: UUID, values: [String: String])
-  case renumber(key: SuggestionSequenceKey, runID: UUID, start: Int)
   case spelling(key: SuggestionSequenceKey, runID: UUID, values: [String: String])
   case futureType(typeID: String, start: Int)
   case futureGroup(key: SuggestionSequenceKey, start: Int, display: SuggestionStarts.GroupDisplay?)
@@ -106,32 +105,9 @@ func suggestionReviewChange(
   case .fields(let candidateID, let runID, let values):
     return try fieldReviewChange(
       candidateID: candidateID, runID: runID, values: values, document: document)
-  case .renumber(let key, let runID, let start):
-    return try renumberReviewChange(key: key, runID: runID, start: start, document: document)
   case .spelling(let key, let runID, let values):
     return try spellingReviewChange(key: key, runID: runID, values: values, document: document)
   }
-}
-
-private func renumberReviewChange(
-  key: SuggestionSequenceKey, runID: UUID, start: Int, document: EditorDocumentState
-) throws -> SuggestionReviewChange {
-  guard start > 0 else { throw SuggestionNumberingError.invalidStart }
-  let batch = try reviewBatch(document, runID: runID)
-  let selected = Set(
-    document.cutSuggestions.filter {
-      $0.isPending && reviewSequenceKey($0, batch: batch) == key
-    }.map(\.id))
-  guard !selected.isEmpty else { throw SuggestionReviewError.unavailable }
-  var starts = batch.actualStarts
-  starts.groups.removeAll { $0.key == key }
-  starts.groups.append(.init(key: key, start: .init(number: start, isExplicit: true)))
-  let result = try numberSuggestions(
-    Array(document.cutSuggestions), snapshot: batch.snapshot, starts: starts,
-    issued: document.issuedSuggestionNumbers,
-    retained: document.cutSuggestions.compactMap { $0.naming?.reservation },
-    mode: .pendingRenumber(selectedCandidateIDs: selected), existingBatch: batch)
-  return .batch(result.candidates, result.batch)
 }
 
 private func fieldReviewChange(
@@ -148,12 +124,15 @@ private func fieldReviewChange(
     .union(type.sequenceFieldIDs)
   guard Set(values.keys).isSubset(of: referenced) else { throw SuggestionReviewError.unavailable }
   candidates[index].naming?.correctedValues.merge(values) { _, corrected in corrected }
-  let result = try numberSuggestions(
-    candidates, snapshot: batch.snapshot, starts: batch.actualStarts,
-    issued: document.issuedSuggestionNumbers,
-    retained: document.cutSuggestions.compactMap { $0.naming?.reservation },
-    mode: .correction(candidateID: candidateID), existingBatch: batch)
-  return .batch(result.candidates, result.batch)
+  let key = reviewSequenceKey(candidates[index], batch: batch)
+  if let reservation = candidates[index].naming?.reservation,
+    reservation.key != key
+      || !document.issuedSuggestionNumbers.contains(where: { $0.identity == reservation.identity })
+  {
+    candidates[index].naming?.reservation = nil
+  }
+  candidates[index].title = naming.discoveryLabel
+  return .batch(candidates, batch)
 }
 
 func reviewSequenceKey(_ candidate: CutSuggestion, batch: SuggestionBatch) -> SuggestionSequenceKey?
@@ -191,21 +170,25 @@ private func spellingReviewChange(
       let naming = original.naming
     else { return original }
     var candidate = original
-    let effective = naming.extractedValues.merging(naming.correctedValues) { _, value in value }
-      .merging(values) { _, canonical in canonical }
-    candidate.title = renderSuggestionName(
-      template: type.template, values: effective, sequence: naming.reservation?.number,
-      fallback: naming.discoveryLabel)
-    candidate.naming?.reservation?.canonicalValues = values
+    candidate.title = naming.discoveryLabel
     return candidate
   }
   return .batch(candidates, batch)
 }
 
-enum SuggestionNumberingError: Error, Equatable {
+enum SuggestionNumberingError: Error, Equatable, LocalizedError {
   case invalidStart
   case minimumSafeStart(Int)
   case exhausted
+
+  var errorDescription: String? {
+    switch self {
+    case .invalidStart: "Enter a positive whole number for the starting count."
+    case .minimumSafeStart(let minimum): "The next available number is \(minimum)."
+    case .exhausted:
+      "This group's numbering has reached the largest supported number. No clip was added."
+    }
+  }
 }
 
 func parseSuggestionStartingNumber(_ text: String) throws -> Int {

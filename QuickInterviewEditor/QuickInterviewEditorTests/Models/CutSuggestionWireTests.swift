@@ -294,8 +294,21 @@ extension CutSuggestionWireTests {
     expectNoDifference(result.status, .ready)
     expectNoDifference(result.checkpointRevision, 20)
     expectNoDifference(result.candidates.count, 10)
-    let numbered = try numberSuggestions(
-      result.candidates, snapshot: snapshot, starts: .init(), issued: [], retained: [])
+    let pending = try preparePendingSuggestions(
+      result.candidates, snapshot: snapshot, starts: .init(), issued: [])
+    expectNoDifference(pending.candidates.map(\.title), result.candidates.map(\.title))
+    expectNoDifference(pending.candidates.compactMap { $0.naming?.reservation }, [])
+    var batch = pending.batch
+    var issued: [SequenceReservation] = []
+    var accepted: [CutSuggestion] = []
+    for candidate in pending.candidates {
+      let finalized = try suggestionForAcceptance(
+        candidate, batch: batch, starts: .init(), issued: issued)
+      accepted.append(finalized.candidate)
+      batch = finalized.batch
+      if let reservation = finalized.candidate.naming?.reservation { issued.append(reservation) }
+    }
+    let numbered = (candidates: accepted, batch: batch)
     expectNoDifference(
       numbered.candidates.map(\.title),
       [

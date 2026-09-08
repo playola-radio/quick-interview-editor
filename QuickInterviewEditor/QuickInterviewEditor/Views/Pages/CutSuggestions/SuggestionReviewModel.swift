@@ -60,11 +60,7 @@ final class SuggestionReviewModel: ViewModel, Identifiable {
     groupingFields = fields.filter { type?.sequenceFieldIDs.contains($0.id) == true }
     let key = self.sequenceKey
     let savedDisplay = document.suggestionStarts.groups.first { $0.key == key }?.display
-    let canonical =
-      batch?.canonicalGroups.first { $0.key == key }?.values
-      ?? savedDisplay?.canonicalValues
-      ?? Dictionary(uniqueKeysWithValues: (key?.fields ?? []).map { ($0.fieldID, $0.value) })
-    canonicalValues = canonical
+    let canonical = Self.canonicalValues(for: key, document: document)
     display = .init(
       typeName: type?.name ?? savedDisplay?.typeName ?? typeID ?? "Suggestion type",
       fieldNames: savedDisplay?.fieldNames
@@ -84,7 +80,7 @@ final class SuggestionReviewModel: ViewModel, Identifiable {
   let groupingFields: [SuggestionReviewField]
   let display: SuggestionStarts.GroupDisplay
   private var fieldDraftValues: [String: String] = [:]
-  private var canonicalValues: [String: String]
+  private var canonicalDraftValues: [String: String] = [:]
   var startText: String
   private(set) var errorMessage: String?
   private(set) var statusMessage: String?
@@ -93,22 +89,20 @@ final class SuggestionReviewModel: ViewModel, Identifiable {
   let title = "Review Suggestion Naming"
   let fieldsTitle = "Correct Extracted Fields"
   let applyFieldsLabel = "Apply Field Corrections"
-  let startLabel = "Start next search at"
+  let startLabel = "Start numbering at"
   let applyFutureStartLabel = "Save Song Start"
-  let renumberLabel = "Renumber Pending Suggestions"
   let spellingTitle = "Group Spelling"
   let spellingHelp =
-    "Choose the spelling used by pending names in this group. "
-    + "Saved clips and accepted or rejected suggestions keep their names."
+    "Choose the spelling used when accepting clips in this group. "
+    + "Saved clips and previously issued names stay unchanged."
   let applySpellingLabel = "Apply Group Spelling"
   let cancelLabel = "Close"
-  let beforeLabel = "Before"
-  let afterLabel = "After"
-  let renumberPreviewTitle = "Pending Names After Renumbering"
-  let spellingPreviewTitle = "Pending Names After Spelling Change"
+  let beforeLabel = "If Accepted Now"
+  let afterLabel = "If Accepted After Corrections"
+  let spellingPreviewTitle = "Names If Accepted Next"
   let futureHelp =
-    "Saving a start changes future searches only. "
-    + "Renumbering is a separate change to pending suggestions in this search."
+    "The next accepted clip starts at this number or after the highest previously issued number, "
+    + "whichever is greater. Pending suggestions do not consume numbers."
   var contextTitle: String {
     display.typeName + " · "
       + (sequenceKey?.fields.compactMap { display.canonicalValues[$0.fieldID] }
@@ -122,30 +116,13 @@ final class SuggestionReviewModel: ViewModel, Identifiable {
       && fieldsIntent.flatMap { try? suggestionReviewChange($0, document: currentDocument()) }
         != nil
   }
-  var canRenumber: Bool {
-    canEdit
-      && renumberIntent.flatMap { try? suggestionReviewChange($0, document: currentDocument()) }
-        != nil
-  }
   var canApplyGroupSpelling: Bool {
-    canEdit
+    canEdit && canonicalValues != currentCanonicalValues
       && spellingIntent.flatMap { try? suggestionReviewChange($0, document: currentDocument()) }
         != nil
   }
   var canApplyFutureStart: Bool {
     canEdit && sequenceKey != nil && (try? parseSuggestionStartingNumber(startText)) != nil
-  }
-  var thisSearchStart: String {
-    let document = currentDocument()
-    guard let batch = document.suggestionBatch,
-      document.cutSuggestions.contains(where: {
-        reviewSequenceKey($0, batch: batch) == sequenceKey
-      })
-    else { return "This group has no suggestions in the current search." }
-    guard
-      let start = batch.actualStarts.groups.first(where: { $0.key == sequenceKey })?.start.number
-    else { return "This group has no recorded starting number in this search." }
-    return "This search started at: \(start)"
   }
   var missingFieldsMessage: String? {
     let missing = fields.filter {
@@ -157,19 +134,11 @@ final class SuggestionReviewModel: ViewModel, Identifiable {
         + ". The descriptive name is kept when naming fields are missing; you can still accept the suggestion."
   }
   var previewNames: [SuggestionNamePreview] { previews(fieldsIntent) }
-  var renumberPreviewNames: [SuggestionNamePreview] { previews(renumberIntent) }
-  var spellingPreviewNames: [SuggestionNamePreview] { previews(spellingIntent) }
+  var spellingPreviewNames: [SuggestionNamePreview] {
+    canonicalValues == currentCanonicalValues ? [] : previews(spellingIntent)
+  }
   var fieldsError: String? { validationError(fieldsIntent) }
   var spellingError: String? { validationError(spellingIntent) }
-  var numberingError: String? {
-    do {
-      _ = try parseSuggestionStartingNumber(startText)
-      if let intent = renumberIntent {
-        _ = try suggestionReviewChange(intent, document: currentDocument())
-      }
-      return nil
-    } catch { return reviewErrorMessage(error) }
-  }
 
   subscript(field id: String) -> String {
     get { fieldValues[id] ?? "" }
@@ -190,15 +159,17 @@ final class SuggestionReviewModel: ViewModel, Identifiable {
     errorMessage = nil
   }
   func canonicalValueChanged(_ id: String, value: String) {
-    canonicalValues[id] = value
+    canonicalDraftValues[id] = value == (currentCanonicalValues[id] ?? "") ? nil : value
     errorMessage = nil
   }
   func applyFieldsTapped() {
     guard !fieldDraftValues.isEmpty, apply(fieldsIntent) else { return }
     fieldDraftValues = [:]
   }
-  func renumberTapped() { apply(renumberIntent) }
-  func applyGroupSpellingTapped() { apply(spellingIntent) }
+  func applyGroupSpellingTapped() {
+    guard canonicalValues != currentCanonicalValues, apply(spellingIntent) else { return }
+    canonicalDraftValues = [:]
+  }
   func applyFutureStartTapped() {
     guard let sequenceKey, let number = try? parseSuggestionStartingNumber(startText) else {
       errorMessage = reviewErrorMessage(SuggestionNumberingError.invalidStart)
@@ -214,6 +185,34 @@ final class SuggestionReviewModel: ViewModel, Identifiable {
   func cancelTapped() { onCancelled() }
 
   // MARK: - Private Helpers
+  private var currentCanonicalValues: [String: String] {
+    Self.canonicalValues(for: sequenceKey, document: currentDocument())
+  }
+  private var canonicalValues: [String: String] {
+    currentCanonicalValues.merging(canonicalDraftValues) { _, draft in draft }
+  }
+  private static func canonicalValues(
+    for key: SuggestionSequenceKey?, document: EditorDocumentState
+  ) -> [String: String] {
+    guard let key else { return [:] }
+    let batch = document.suggestionBatch
+    let type = batch?.snapshot.configuration.types.first { $0.id == key.typeID }
+    let groupCandidate = document.cutSuggestions.first { candidate in
+      batch.map { reviewSequenceKey(candidate, batch: $0) == key } == true
+    }
+    let candidateValues = groupCandidate?.naming.map {
+      $0.extractedValues.merging($0.correctedValues) { _, corrected in corrected }
+    }
+    let sourceCanonical =
+      batch?.canonicalGroups.first { $0.key == key }?.values
+      ?? document.issuedSuggestionNumbers.first { $0.key == key && !$0.canonicalValues.isEmpty }?
+      .canonicalValues
+      ?? document.suggestionStarts.groups.first { $0.key == key }?.display?.canonicalValues
+      ?? candidateValues
+      ?? Dictionary(uniqueKeysWithValues: key.fields.map { ($0.fieldID, $0.value) })
+    let groupingIDs = Set(type?.sequenceFieldIDs ?? key.fields.map(\.fieldID))
+    return sourceCanonical.filter { groupingIDs.contains($0.key) }
+  }
   private var currentFieldValues: [String: String] {
     guard let candidateID, let naming = currentDocument().cutSuggestions[id: candidateID]?.naming
     else { return [:] }
@@ -227,11 +226,6 @@ final class SuggestionReviewModel: ViewModel, Identifiable {
     return .fields(
       candidateID: candidateID, runID: runID,
       values: fieldDraftValues)
-  }
-  private var renumberIntent: SuggestionReviewIntent? {
-    guard let sequenceKey, let runID, let start = try? parseSuggestionStartingNumber(startText)
-    else { return nil }
-    return .renumber(key: sequenceKey, runID: runID, start: start)
   }
   private var spellingIntent: SuggestionReviewIntent? {
     guard let sequenceKey, let runID else { return nil }
@@ -263,15 +257,23 @@ final class SuggestionReviewModel: ViewModel, Identifiable {
   private func previews(_ intent: SuggestionReviewIntent?) -> [SuggestionNamePreview] {
     let document = currentDocument()
     guard let intent, let change = try? suggestionReviewChange(intent, document: document),
-      case .batch(let candidates, _) = change
+      case .batch(let candidates, let batch) = change,
+      let previousBatch = document.suggestionBatch
     else { return [] }
     return candidates.compactMap { candidate in
       guard let old = document.cutSuggestions[id: candidate.id], candidate.isPending,
-        candidate.id == candidateID || candidate.title != old.title
+        candidate.id == candidateID || reviewSequenceKey(candidate, batch: batch) == sequenceKey,
+        let before = try? suggestionForAcceptance(
+          old, batch: previousBatch,
+          starts: document.suggestionStarts, issued: document.issuedSuggestionNumbers),
+        let after = try? suggestionForAcceptance(
+          candidate, batch: batch,
+          starts: document.suggestionStarts, issued: document.issuedSuggestionNumbers)
       else { return nil }
-      return .init(id: candidate.id, before: old.title, after: candidate.title)
+      return .init(id: candidate.id, before: before.candidate.title, after: after.candidate.title)
     }
   }
+
 }
 
 func reviewErrorMessage(_ error: Error) -> String {
@@ -279,7 +281,7 @@ func reviewErrorMessage(_ error: Error) -> String {
   case SuggestionNumberingError.invalidStart: "Enter a positive whole number."
   case SuggestionNumberingError.minimumSafeStart(let minimum): "The next safe start is \(minimum)."
   case SuggestionNumberingError.exhausted:
-    "There are no available numbers at this start. Choose a lower start or another group."
+    "This group's numbering has reached the largest supported number. No clip was added."
   default: error.localizedDescription
   }
 }

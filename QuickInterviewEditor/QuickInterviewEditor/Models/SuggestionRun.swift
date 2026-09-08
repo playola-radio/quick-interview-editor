@@ -104,7 +104,7 @@ enum SuggestionRunValidationError: Error, Equatable, LocalizedError {
     case .missingOwningSnapshot:
       "This suggestion's saved naming rules are missing. Suggest cuts again before accepting."
     case .invalidNaming:
-      "This suggestion's saved name or number is invalid. Renumber it or suggest cuts again."
+      "This suggestion's saved naming details are invalid. Review its fields or suggest cuts again."
     }
   }
 }
@@ -120,7 +120,9 @@ func validateSuggestionRunApplication(
       naming.typeName == type.name,
       naming.typeGroup == type.group,
       candidate.productType.rawValue == type.id,
-      type.template.contains(where: { $0.kind == .sequence }) == (naming.reservation != nil)
+      naming.reservation == nil || type.template.contains(where: { $0.kind == .sequence }),
+      candidate.status != .accepted || naming.reservation != nil
+        || !type.template.contains(where: { $0.kind == .sequence })
     else { throw SuggestionRunValidationError.invalidNaming(candidateID: candidate.id) }
     if let reservation = naming.reservation {
       let values = naming.extractedValues.merging(naming.correctedValues) { _, corrected in
@@ -133,6 +135,62 @@ func validateSuggestionRunApplication(
       else { throw SuggestionRunValidationError.invalidNaming(candidateID: candidate.id) }
     }
   }
+}
+
+func preparePendingSuggestions(
+  _ candidates: [CutSuggestion], snapshot: SuggestionRunSnapshot,
+  starts: SuggestionStarts, issued: [SequenceReservation]
+) throws -> (candidates: [CutSuggestion], batch: SuggestionBatch) {
+  try validateNumberingInput(candidates: candidates, snapshot: snapshot, starts: starts)
+  let prepared = try candidates.map { original in
+    guard
+      let type = snapshot.configuration.types.first(where: {
+        $0.id == original.productType.rawValue
+      })
+    else { throw SuggestionBatchNumberingError.unknownType(original.productType.rawValue) }
+    var candidate = original
+    var naming = try sourceNaming(for: original, type: type, snapshot: snapshot)
+    if let reservation = naming.reservation,
+      !issued.contains(where: { $0.identity == reservation.identity })
+    {
+      naming.reservation = nil
+    }
+    candidate.title = naming.discoveryLabel
+    candidate.naming = naming
+    return candidate
+  }
+  let batch = SuggestionBatch(snapshot: snapshot, actualStarts: .init(), canonicalGroups: [])
+  try validateSuggestionRunApplication(candidates: prepared, batch: batch)
+  return (prepared, batch)
+}
+
+func suggestionForAcceptance(
+  _ original: CutSuggestion, batch: SuggestionBatch, starts: SuggestionStarts,
+  issued: [SequenceReservation]
+) throws -> (candidate: CutSuggestion, batch: SuggestionBatch) {
+  try validateSuggestionRunApplication(candidates: [original], batch: batch)
+  guard let key = reviewSequenceKey(original, batch: batch) else {
+    return (original, batch)
+  }
+  var candidate = original
+  let existing = candidate.naming?.reservation
+  candidate.naming?.reservation =
+    issued.first(where: { $0.identity == existing?.identity })
+    ?? issued.last(where: { $0.candidateID == candidate.id && $0.key == key })
+  var floors = starts
+  floors.types = floors.types.mapValues { .init(number: $0.number, isExplicit: false) }
+  floors.groups = floors.groups.map {
+    .init(
+      key: $0.key, start: .init(number: $0.start.number, isExplicit: false), display: $0.display)
+  }
+  var result = try numberSuggestions(
+    [candidate], snapshot: batch.snapshot, starts: floors, issued: issued,
+    retained: [], existingBatch: batch)
+  for recorded in batch.actualStarts.groups {
+    result.batch.actualStarts.groups.removeAll { $0.key == recorded.key }
+    result.batch.actualStarts.groups.append(recorded)
+  }
+  return (result.candidates[0], result.batch)
 }
 
 // swiftlint:disable:next function_body_length cyclomatic_complexity

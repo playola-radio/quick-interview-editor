@@ -108,6 +108,8 @@ final class EditorModel: ViewModel {
     // Seeded from the caller's initial document (the tab reads the sidecar and hands it in);
     // the editor no longer touches `@Shared` — persistence flows out through
     // `onDocumentStateChanged`, which the tab wires to the sidecar.
+    var initialDocument = initialDocument
+    initialDocument.normalizePendingSuggestionNaming()
     self.slices = initialDocument.slices
     // Seed the auto-name counter past whatever's already in the document. The editor is rebuilt
     // from the sidecar's slices every time the tab reloads, so a counter that always started at 1
@@ -2064,11 +2066,13 @@ final class EditorModel: ViewModel {
       let validated = try suggestionSliceForAcceptance(
         id: id, state: documentState, plan: editPlan, sourceFingerprint: sourceFingerprint)
       let firstAccept = slices[id: id] == nil
-      let nudged = offsetNudgedClip(validated)
-      let reservations = validated.suggestionNaming?.reservation.map { [$0] } ?? []
+      guard firstAccept else { return }
+      let nudged = offsetNudgedClip(validated.slice)
+      let reservations = validated.slice.suggestionNaming?.reservation.map { [$0] } ?? []
       mutateDocument(recordingPermanentReservations: reservations) {
         if $0.slices[id: id] == nil { $0.slices.append(nudged) }
-        $0.cutSuggestions[id: id]?.accept()
+        $0.cutSuggestions[id: id] = validated.candidate
+        $0.suggestionBatch = validated.batch
       }
       if firstAccept { sliceScrollTarget = id }
     } catch {
@@ -2123,11 +2127,12 @@ final class EditorModel: ViewModel {
     guard checkpoint.phase == .ready || checkpoint.phase == .needsNumbering else {
       throw SuggestionRecoveryError.invalid("The search does not have complete saved results.")
     }
-    let validated = try numberSuggestions(
+    let validated = try preparePendingSuggestions(
       checkpoint.candidates, snapshot: snapshot, starts: checkpoint.proposedStarts,
-      issued: issuedSuggestionNumbers, retained: [])
+      issued: issuedSuggestionNumbers)
     guard validated.candidates == candidates, validated.batch == batch else {
-      throw SuggestionRecoveryError.conflict("The issued numbers changed. Apply numbering again.")
+      throw SuggestionRecoveryError.conflict(
+        "The saved suggestions changed. Resume the search again.")
     }
     mutateDocument(recordUndo: false) {
       $0.cutSuggestions = IdentifiedArray(uniqueElements: candidates)
@@ -2895,6 +2900,8 @@ final class EditorModel: ViewModel {
   /// stack — replaying history must never record a new entry), rebuilds the edited timeline,
   /// and fires the change callback so persistence stays in step with in-memory state.
   private func restore(_ restored: EditorDocumentState) {
+    var restored = restored
+    restored.normalizePendingSuggestionNaming()
     slices = restored.slices
     timelineRemovals = restored.timelineRemovals
     documentCutSuggestions = restored.cutSuggestions

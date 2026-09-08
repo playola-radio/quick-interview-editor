@@ -8,6 +8,78 @@ import Testing
 
 @MainActor
 struct SuggestionReviewTests {
+  @Test func groupReviewStartsWithIssuedSpellingAndDoesNotProposeAnUneditedChange() throws {
+    let editor = try fixture(values: [["song-title": "Wildflowers", "artist-name": "TOM PETTY"]])
+    editor.issuedSuggestionNumbers = [
+      .init(
+        candidateID: Fixtures.uuid(99), key: try key(editor), number: 7,
+        canonicalValues: ["song-title": "Wildflowers", "artist-name": "Tom Petty"])
+    ]
+    let model = SuggestionReviewModel(
+      sequenceKey: try key(editor),
+      currentDocument: { editor.documentState }, isLocked: { false },
+      onApply: { try editor.applySuggestionReviewIntent($0) })
+    expectNoDifference(model[canonical: "artist-name"], "Tom Petty")
+    #expect(!model.canApplyGroupSpelling)
+    expectNoDifference(model.spellingPreviewNames.count, 0)
+    let before = editor.documentState
+    model.applyGroupSpellingTapped()
+    expectNoDifference(editor.documentState, before)
+    model.canonicalValueChanged("artist-name", value: "TOM PETTY")
+    #expect(model.canApplyGroupSpelling)
+    expectNoDifference(model.spellingPreviewNames.first?.before, "Wildflowers 8, Tom Petty")
+    expectNoDifference(model.spellingPreviewNames.first?.after, "Wildflowers 8, TOM PETTY")
+    model.applyGroupSpellingTapped()
+    #expect(!model.canApplyGroupSpelling)
+  }
+
+  @Test func cleanGroupSpellingFollowsUndoWhileDirtySpellingSurvivesOtherEdits() async throws {
+    let editor = try fixture()
+    let model = SuggestionReviewModel(
+      sequenceKey: try key(editor),
+      currentDocument: { editor.documentState }, isLocked: { false },
+      onApply: { try editor.applySuggestionReviewIntent($0) })
+    model.canonicalValueChanged("artist-name", value: "TOM PETTY")
+    model.applyGroupSpellingTapped()
+    await editor.undoTapped()
+    expectNoDifference(model[canonical: "artist-name"], "Tom Petty")
+    #expect(!model.canApplyGroupSpelling)
+    expectNoDifference(model.spellingPreviewNames.count, 0)
+    model.canonicalValueChanged("artist-name", value: "TOM PETTY")
+    try editor.applySuggestionReviewIntent(
+      .spelling(
+        key: try key(editor),
+        runID: try #require(editor.suggestionBatch?.snapshot.runID),
+        values: ["song-title": "WILDFLOWERS", "artist-name": "Tom Petty"]))
+    expectNoDifference(model[canonical: "artist-name"], "TOM PETTY")
+    expectNoDifference(model[canonical: "song-title"], "WILDFLOWERS")
+    #expect(model.canApplyGroupSpelling)
+    model.applyGroupSpellingTapped()
+    expectNoDifference(
+      editor.suggestionBatch?.canonicalGroups.first?.values,
+      ["song-title": "WILDFLOWERS", "artist-name": "TOM PETTY"])
+  }
+
+  @Test func groupSpellingIgnoresNonGroupingTemplateFields() throws {
+    let editor = try fixture()
+    editor.suggestionBatch?.snapshot.configuration.types[0].template.append(
+      .init(kind: .field, value: "descriptive-title"))
+    editor.documentCutSuggestions[0].naming?.extractedValues["descriptive-title"] =
+      "An acoustic take"
+    let model = SuggestionReviewModel(
+      sequenceKey: try key(editor), currentDocument: { editor.documentState }, isLocked: { false },
+      onApply: { try editor.applySuggestionReviewIntent($0) })
+    model.canonicalValueChanged("artist-name", value: "TOM PETTY")
+    #expect(model.canApplyGroupSpelling)
+    model.applyGroupSpellingTapped()
+    expectNoDifference(
+      editor.suggestionBatch?.canonicalGroups.first?.values,
+      ["song-title": "Wildflowers", "artist-name": "TOM PETTY"])
+    expectNoDifference(
+      editor.documentCutSuggestions[0].naming?.extractedValues["descriptive-title"],
+      "An acoustic take")
+  }
+
   @Test func cleanReviewFollowsUndoAndApplyMatchesVisibleFields() async throws {
     let editor = try fixture()
     let model = review(editor)
@@ -17,7 +89,7 @@ struct SuggestionReviewTests {
     await editor.undoTapped()
     expectNoDifference(editor.documentState, original)
     expectNoDifference(model[field: "artist-name"], "Tom Petty")
-    expectNoDifference(model.previewNames.first?.after, original.cutSuggestions[0].title)
+    expectNoDifference(model.previewNames.first?.after, "Wildflowers 1, Tom Petty")
     model.applyFieldsTapped()
     expectNoDifference(editor.documentState, original)
     expectNoDifference(model[field: "artist-name"], "Tom Petty")
@@ -34,7 +106,7 @@ struct SuggestionReviewTests {
     expectNoDifference(model[field: "song-title"], "Dreams")
     expectNoDifference(model.previewNames.first?.after, "Dreams 1, Stevie Nicks")
     model.applyFieldsTapped()
-    expectNoDifference(editor.documentCutSuggestions[0].title, "Dreams 1, Stevie Nicks")
+    expectNoDifference(editor.documentCutSuggestions[0].title, "A song introduction")
   }
 
   @Test func repeatedFieldApplyCanReturnToOriginalAndPreservesUnrelatedCurrentEdits() throws {
@@ -49,7 +121,7 @@ struct SuggestionReviewTests {
     otherReview.applyFieldsTapped()
     model.fieldChanged("artist-name", value: "Tom Petty")
     model.applyFieldsTapped()
-    expectNoDifference(editor.documentCutSuggestions[0].title, "Dreams 1, Tom Petty")
+    expectNoDifference(editor.documentCutSuggestions[0].title, "A song introduction")
     expectNoDifference(model[field: "song-title"], "Dreams")
     expectNoDifference(model[field: "artist-name"], "Tom Petty")
     model.fieldChanged("artist-name", value: "Stevie Nicks")
@@ -78,19 +150,18 @@ struct SuggestionReviewTests {
       editor.documentCutSuggestions[0].naming?.correctedValues["artist-name"], "Stevie Nicks")
   }
 
-  @Test func correctionIntoNewGroupDoesNotClaimCapturedTypeStartWasApplied() throws {
+  @Test func correctionIntoNewGroupUsesCurrentFloorOnlyInAcceptancePreview() throws {
     let editor = try fixture()
-    editor.suggestionBatch?.actualStarts.types["intro"] = .init(number: 7, isExplicit: true)
+    editor.suggestionStarts.types["intro"] = .init(number: 7, isExplicit: true)
     let model = review(editor)
     model.fieldChanged("song-title", value: "Dreams")
+    expectNoDifference(model.previewNames.first?.after, "Dreams 7, Tom Petty")
     model.applyFieldsTapped()
-    expectNoDifference(editor.documentCutSuggestions[0].naming?.reservation?.number, 1)
-    let key = try #require(editor.documentCutSuggestions[0].naming?.reservation?.key)
-    let group = SuggestionReviewModel(
-      sequenceKey: key, currentDocument: { editor.documentState }, isLocked: { false },
-      onApply: { try editor.applySuggestionReviewIntent($0) })
-    expectNoDifference(
-      group.thisSearchStart, "This group has no recorded starting number in this search.")
+    expectNoDifference(editor.documentCutSuggestions[0].naming?.reservation, nil)
+    expectNoDifference(editor.documentCutSuggestions[0].title, "A song introduction")
+    expectNoDifference(editor.issuedSuggestionNumbers, [])
+    editor.cutSuggestions.acceptTapped(Fixtures.uuid(1))
+    expectNoDifference(editor.slices.first?.name, "Dreams 7, Tom Petty")
   }
 
   func fixture(
@@ -118,8 +189,8 @@ struct SuggestionReviewTests {
         correctedValues: [:], reservation: nil)
       return candidate
     }
-    let numbered = try numberSuggestions(
-      candidates, snapshot: snapshot, starts: .init(), issued: [], retained: [])
+    let numbered = try preparePendingSuggestions(
+      candidates, snapshot: snapshot, starts: .init(), issued: [])
     return EditorModel(
       sourceURL: URL(fileURLWithPath: "/review.m4a"), canonicalAudioURL: Fixtures.canonicalAudioURL,
       editPlan: plan, sourceFingerprint: "review",
@@ -146,7 +217,7 @@ struct SuggestionReviewTests {
     expectNoDifference(editor.documentState, before)
     expectNoDifference(model.previewNames.first?.after, "Wildflowers 1, Stevie Nicks")
     model.applyFieldsTapped()
-    expectNoDifference(editor.documentCutSuggestions[0].title, "Wildflowers 1, Stevie Nicks")
+    expectNoDifference(editor.documentCutSuggestions[0].title, "A song introduction")
     expectNoDifference(editor.documentCutSuggestions[1], before.cutSuggestions[1])
     expectNoDifference(
       editor.documentCutSuggestions[0].naming?.extractedValues["artist-name"], "Tom Petty")
@@ -154,27 +225,30 @@ struct SuggestionReviewTests {
       editor.documentCutSuggestions[0].naming?.correctedValues["artist-name"], "Stevie Nicks")
   }
 
-  @Test func caseCorrectionPreservesNumberAndCanonicalUntilExplicitGroupEdit() throws {
+  @Test func explicitCanonicalSpellingControlsLaterAcceptancesWithoutReservingPreviews() throws {
     let editor = try fixture()
-    let before = editor.documentState
     let model = review(editor)
     model.fieldChanged("artist-name", value: "TOM PETTY")
     model.applyFieldsTapped()
-    expectNoDifference(editor.documentCutSuggestions[0].title, before.cutSuggestions[0].title)
-    expectNoDifference(editor.documentCutSuggestions[0].naming?.reservation?.number, 1)
-    let key = try #require(editor.documentCutSuggestions[0].naming?.reservation?.key)
     let group = SuggestionReviewModel(
-      sequenceKey: key, currentDocument: { editor.documentState },
+      sequenceKey: try key(editor), currentDocument: { editor.documentState },
       isLocked: { false }, onApply: { try editor.applySuggestionReviewIntent($0) })
-    group.canonicalValueChanged("artist-name", value: "TOM PETTY")
-    expectNoDifference(editor.documentCutSuggestions[1].title, "Wildflowers 2, Tom Petty")
+    group.canonicalValueChanged("artist-name", value: "Tom Petty")
+    expectNoDifference(
+      group.spellingPreviewNames.map(\.after),
+      ["Wildflowers 1, Tom Petty", "Wildflowers 1, Tom Petty"])
     group.applyGroupSpellingTapped()
     expectNoDifference(
       editor.documentCutSuggestions.map(\.title),
-      ["Wildflowers 1, TOM PETTY", "Wildflowers 2, TOM PETTY"])
+      ["A song introduction", "A song introduction"])
+    expectNoDifference(editor.issuedSuggestionNumbers, [])
+    editor.cutSuggestions.acceptTapped(Fixtures.uuid(2))
+    editor.cutSuggestions.acceptTapped(Fixtures.uuid(1))
+    expectNoDifference(
+      editor.slices.map(\.name), ["Wildflowers 1, Tom Petty", "Wildflowers 2, Tom Petty"])
     group.applyFutureStartTapped()
     expectNoDifference(
-      editor.suggestionStarts.groups.first?.display?.canonicalValues["artist-name"], "TOM PETTY")
+      editor.suggestionStarts.groups.first?.display?.canonicalValues["artist-name"], "Tom Petty")
     group.canonicalValueChanged("artist-name", value: "Different Artist")
     #expect(!group.canApplyGroupSpelling)
   }
@@ -193,50 +267,55 @@ struct SuggestionReviewTests {
       ["song-title": "Wildflowers", "artist-name": "Tom Petty"],
       ["song-title": "Dreams", "artist-name": "Stevie Nicks"],
     ])
-    let oldKey = try #require(editor.documentCutSuggestions[0].naming?.reservation?.key)
+    let oldKey = try key(editor)
     editor.suggestionStarts.groups = [.init(key: oldKey, start: .init(number: 8, isExplicit: true))]
     let model = review(editor)
     model.fieldChanged("song-title", value: "Dreams")
     model.fieldChanged("artist-name", value: "Stevie Nicks")
     model.applyFieldsTapped()
-    expectNoDifference(editor.documentCutSuggestions[0].title, "Dreams 2, Stevie Nicks")
+    expectNoDifference(editor.documentCutSuggestions[0].title, "A song introduction")
     expectNoDifference(editor.suggestionStarts.groups.first?.key, oldKey)
   }
 
-  @Test func renumberSkipsRejectedAndIssuedAndIsSeparateUndoFromFutureStart() async throws {
+  @Test func groupFloorChangesOnlyFutureAcceptanceAndIsUndoable() async throws {
     let editor = try fixture()
-    let key = try #require(editor.documentCutSuggestions[0].naming?.reservation?.key)
     editor.documentCutSuggestions[1].reject()
     let original = editor.documentState
     let model = SuggestionReviewModel(
-      sequenceKey: key, currentDocument: { editor.documentState },
+      sequenceKey: try key(editor), currentDocument: { editor.documentState },
       isLocked: { false }, onApply: { try editor.applySuggestionReviewIntent($0) })
-    model.startChanged("2")
+    model.startChanged("7")
     model.applyFutureStartTapped()
     expectNoDifference(editor.documentCutSuggestions, original.cutSuggestions)
-    model.renumberTapped()
-    expectNoDifference(editor.documentCutSuggestions[0].naming?.reservation?.number, 3)
+    expectNoDifference(editor.issuedSuggestionNumbers, [])
+    await editor.undoTapped()
+    expectNoDifference(editor.documentState, original)
+    model.applyFutureStartTapped()
+    editor.cutSuggestions.acceptTapped(Fixtures.uuid(1))
+    expectNoDifference(editor.slices.first?.name, "Wildflowers 7, Tom Petty")
     expectNoDifference(editor.documentCutSuggestions[1], original.cutSuggestions[1])
-    await editor.undoTapped()
-    expectNoDifference(editor.documentCutSuggestions, original.cutSuggestions)
-    expectNoDifference(editor.suggestionStarts.groups.first?.start.number, 2)
-    await editor.undoTapped()
-    expectNoDifference(editor.suggestionStarts, original.suggestionStarts)
   }
 
-  @Test func invalidStartsAndExhaustionNeverPartiallyApply() throws {
+  @Test func invalidGroupStartsNeverMutateAndMaximumIssuesOnlyOnAcceptance() throws {
     let editor = try fixture()
-    let key = try #require(editor.documentCutSuggestions[0].naming?.reservation?.key)
     let before = editor.documentState
     let model = SuggestionReviewModel(
-      sequenceKey: key, currentDocument: { editor.documentState },
+      sequenceKey: try key(editor), currentDocument: { editor.documentState },
       isLocked: { false }, onApply: { try editor.applySuggestionReviewIntent($0) })
-    for text in ["1.2", "12abc", "+1", "0", "-2", "9999999999999999999999", String(Int.max)] {
+    for text in ["1.2", "12abc", "+1", "0", "-2", "9999999999999999999999"] {
       model.startChanged(text)
-      model.renumberTapped()
+      model.applyFutureStartTapped()
       expectNoDifference(editor.documentState, before)
       #expect(model.errorMessage != nil)
     }
+    model.startChanged(String(Int.max))
+    model.applyFutureStartTapped()
+    editor.cutSuggestions.acceptTapped(Fixtures.uuid(1))
+    expectNoDifference(editor.slices.first?.suggestionNaming?.reservation?.number, Int.max)
+    let maximumIssued = editor.documentState
+    editor.cutSuggestions.acceptTapped(Fixtures.uuid(2))
+    expectNoDifference(editor.documentState, maximumIssued)
+    #expect(editor.cutSuggestions.actionMessage != nil)
   }
 
   @Test func staleOrLockedOpenReviewCannotApply() throws {
@@ -272,8 +351,7 @@ struct SuggestionReviewTests {
     model.startChanged("10")
     model.applyFutureStartTapped()
     expectNoDifference(editor.suggestionStarts.groups.first?.display, display)
-    expectNoDifference(
-      model.thisSearchStart, "This group has no suggestions in the current search.")
+    expectNoDifference(model.startLabel, "Start numbering at")
   }
 
   @Test func explicitSpellingLeavesAcceptedRejectedSavedAndIssuedUntouchedAndUndoesOnce()
@@ -284,7 +362,7 @@ struct SuggestionReviewTests {
     editor.cutSuggestions.acceptTapped(Fixtures.uuid(2))
     editor.cutSuggestions.rejectTapped(Fixtures.uuid(3))
     let before = editor.documentState
-    let key = try #require(before.cutSuggestions[0].naming?.reservation?.key)
+    let key = try key(editor)
     let model = SuggestionReviewModel(
       sequenceKey: key, currentDocument: { editor.documentState }, isLocked: { false },
       onApply: { try editor.applySuggestionReviewIntent($0) })
@@ -294,7 +372,7 @@ struct SuggestionReviewTests {
     expectNoDifference(editor.documentState.issuedSuggestionNumbers, before.issuedSuggestionNumbers)
     expectNoDifference(
       Array(editor.documentCutSuggestions.dropFirst()), Array(before.cutSuggestions.dropFirst()))
-    expectNoDifference(editor.documentCutSuggestions[0].title, "Wildflowers 1, TOM PETTY")
+    expectNoDifference(editor.documentCutSuggestions[0].title, "A song introduction")
     await editor.undoTapped()
     expectNoDifference(editor.documentState, before)
   }
@@ -303,7 +381,7 @@ struct SuggestionReviewTests {
     let editor = try fixture()
     editor.cutSuggestions.acceptTapped(Fixtures.uuid(2))
     let issued = editor.documentState.issuedSuggestionNumbers
-    let oldKey = try #require(editor.documentCutSuggestions[0].naming?.reservation?.key)
+    let oldKey = try key(editor)
     editor.suggestionStarts.groups = [.init(key: oldKey, start: .init(number: 9, isExplicit: true))]
     let model = review(editor)
     model.fieldChanged("song-title", value: "Dreams")
@@ -321,19 +399,22 @@ struct SuggestionReviewTests {
     expectNoDifference(next.candidates[0].naming?.reservation?.number, 9)
   }
 
-  @Test func pendingRenumberSkipsIssuedIdentityEvenAfterAcceptanceUndo() async throws {
+  @Test func acceptancePreviewReusesOwnerIdentityAfterUndo() async throws {
     let editor = try fixture()
     editor.cutSuggestions.acceptTapped(Fixtures.uuid(1))
+    let original = try #require(editor.slices.first)
     await editor.undoTapped()
-    let issued = editor.documentState.issuedSuggestionNumbers
-    let key = try #require(editor.documentCutSuggestions[0].naming?.reservation?.key)
-    let model = SuggestionReviewModel(
-      sequenceKey: key, currentDocument: { editor.documentState }, isLocked: { false },
-      onApply: { try editor.applySuggestionReviewIntent($0) })
-    model.startChanged("1")
-    model.renumberTapped()
-    expectNoDifference(
-      editor.documentCutSuggestions.compactMap { $0.naming?.reservation?.number }, [2, 3])
-    expectNoDifference(editor.documentState.issuedSuggestionNumbers, issued)
+    editor.suggestionStarts.types["intro"] = .init(number: 20, isExplicit: true)
+    let issued = editor.issuedSuggestionNumbers
+    expectNoDifference(review(editor).previewNames.first?.after, original.name)
+    editor.cutSuggestions.acceptTapped(Fixtures.uuid(1))
+    expectNoDifference(editor.slices.first, original)
+    expectNoDifference(editor.issuedSuggestionNumbers, issued)
   }
+
+  private func key(_ editor: EditorModel) throws -> SuggestionSequenceKey {
+    let batch = try #require(editor.suggestionBatch)
+    return try #require(reviewSequenceKey(editor.documentCutSuggestions[0], batch: batch))
+  }
+
 }

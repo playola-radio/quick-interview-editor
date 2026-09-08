@@ -5,6 +5,85 @@ import Testing
 @testable import PlayolaInterviewEditor
 
 struct SuggestionRunTests {
+  @Test func acceptanceUsesCurrentFloorAndPermanentOccupancyInsteadOfPendingReservations() throws {
+    let snapshot = introSnapshot()
+    var original = candidate(
+      id: Fixtures.uuid(1), startSample: 100,
+      values: ["song-title": "Song", "artist-name": "Artist"])
+    let key = suggestionSequenceKey(
+      type: snapshot.configuration.types[0],
+      values: original.naming!.extractedValues, candidateID: original.id)
+    original.naming?.reservation = .init(
+      candidateID: original.id, key: key, number: 99, canonicalValues: [:])
+    let batch = SuggestionBatch(snapshot: snapshot, actualStarts: .init(), canonicalGroups: [])
+    let issued = SequenceReservation(
+      candidateID: Fixtures.uuid(9), key: key, number: 4,
+      canonicalValues: ["song-title": "SONG", "artist-name": "Artist"])
+    let starts = SuggestionStarts(groups: [
+      .init(key: key, start: .init(number: 7, isExplicit: true))
+    ])
+    let next = try suggestionForAcceptance(original, batch: batch, starts: starts, issued: [issued])
+    expectNoDifference(next.candidate.title, "SONG 7, Artist")
+    expectNoDifference(next.candidate.naming?.reservation?.number, 7)
+    expectNoDifference(original.naming?.reservation?.number, 99)
+    let assigned = try #require(next.candidate.naming?.reservation)
+    var afterUndo = original
+    afterUndo.naming?.reservation = nil
+    let restored = try suggestionForAcceptance(
+      afterUndo, batch: next.batch,
+      starts: .init(types: ["intro": .init(number: 30, isExplicit: true)]),
+      issued: [issued, assigned])
+    expectNoDifference(restored.candidate.naming?.reservation?.identity, assigned.identity)
+    expectNoDifference(restored.candidate.title, next.candidate.title)
+  }
+
+  @Test func acceptanceOrderUsesIndependentSongPerformersAndCanonicalFirstAcceptedSpelling() throws
+  {
+    let snapshot = introSnapshot()
+    let batch = SuggestionBatch(snapshot: snapshot, actualStarts: .init(), canonicalGroups: [])
+    let late = candidate(
+      id: Fixtures.uuid(2), startSample: 200,
+      values: ["song-title": "Song", "artist-name": "Artist"])
+    let early = candidate(
+      id: Fixtures.uuid(1), startSample: 100,
+      values: ["song-title": "song", "artist-name": "ARTIST"])
+    let other = candidate(
+      id: Fixtures.uuid(3), startSample: 300,
+      values: ["song-title": "Song", "artist-name": "Other"])
+    let starts = SuggestionStarts(types: ["intro": .init(number: 7, isExplicit: true)])
+    let first = try suggestionForAcceptance(late, batch: batch, starts: starts, issued: [])
+    let ledger = [try #require(first.candidate.naming?.reservation)]
+    let second = try suggestionForAcceptance(
+      early, batch: first.batch, starts: starts, issued: ledger)
+    let separate = try suggestionForAcceptance(
+      other, batch: second.batch, starts: starts, issued: ledger)
+    expectNoDifference(
+      [first.candidate.title, second.candidate.title, separate.candidate.title],
+      ["Song 7, Artist", "Song 8, Artist", "Song 7, Other"])
+    expectNoDifference(first.batch.actualStarts.groups.first?.start.number, 7)
+    expectNoDifference(second.batch.actualStarts.groups.first?.start.number, 7)
+  }
+
+  @Test func acceptanceRendersSequenceFreeCapturedTemplateWithoutIssuingNumber() throws {
+    var snapshot = introSnapshot()
+    snapshot.configuration.types[0].template = [
+      .init(kind: .field, value: "artist-name"), .init(kind: .literal, value: " — "),
+      .init(kind: .field, value: "song-title"),
+    ]
+    let original = candidate(
+      id: Fixtures.uuid(1), startSample: 100,
+      values: ["song-title": "Song", "artist-name": "Artist"])
+    let prepared = try preparePendingSuggestions(
+      [original], snapshot: snapshot, starts: .init(), issued: [])
+    expectNoDifference(prepared.candidates[0].title, original.naming?.discoveryLabel)
+    let result = try suggestionForAcceptance(
+      prepared.candidates[0], batch: prepared.batch,
+      starts: .init(), issued: [])
+    expectNoDifference(result.candidate.title, "Artist — Song")
+    expectNoDifference(result.candidate.naming?.reservation, nil)
+    expectNoDifference(result.batch.snapshot, snapshot)
+  }
+
   @Test func freshNumberingUsesSnapshotTemplateAndSourceOrder() throws {
     let snapshot = introSnapshot()
     let late = candidate(
@@ -219,7 +298,7 @@ struct SuggestionRunTests {
   }
 
   @Test(arguments: [false, true], [false, true])
-  func applicationRequiresReservationExactlyWhenTemplateHasSequence(
+  func pendingApplicationAllowsUnissuedSequenceButRejectsReservationWithoutSequence(
     hasSequence: Bool, hasReservation: Bool
   ) throws {
     let snapshot = introSnapshot()
@@ -234,7 +313,7 @@ struct SuggestionRunTests {
     if !hasSequence {
       batch.snapshot.configuration.types[0].template = [.init(kind: .literal, value: "Song")]
     }
-    if hasSequence == hasReservation {
+    if hasSequence || !hasReservation {
       try validateSuggestionRunApplication(candidates: [candidate], batch: batch)
     } else {
       #expect(throws: SuggestionRunValidationError.invalidNaming(candidateID: candidate.id)) {

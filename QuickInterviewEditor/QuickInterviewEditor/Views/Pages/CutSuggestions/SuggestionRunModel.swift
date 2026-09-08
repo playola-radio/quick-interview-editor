@@ -439,9 +439,9 @@ final class SuggestionRunModel: ViewModel {
     guard checkpoint.phase == .ready || checkpoint.phase == .needsNumbering else {
       throw SuggestionRecoveryError.invalid("The search has not finished extracting names.")
     }
-    return try numberSuggestions(
+    return try preparePendingSuggestions(
       checkpoint.candidates, snapshot: checkpoint.snapshot, starts: starts,
-      issued: currentDocument().issuedSuggestionNumbers, retained: [])
+      issued: currentDocument().issuedSuggestionNumbers)
   }
 
   private func apply(_ checkpoint: SuggestionRunCheckpoint, attemptID: UUID, automatic: Bool) throws
@@ -513,11 +513,7 @@ final class SuggestionRunModel: ViewModel {
     switch checkpoint.phase {
     case .paused:
       phase = .paused(runID: runID, message: checkpoint.failureMessage ?? "Search paused.")
-    case .needsNumbering:
-      phase = .needsNumbering(
-        runID: runID, message: "Choose starting numbers to finish this search.")
-      seedNumbering(minimum: 1)
-    case .ready:
+    case .ready, .needsNumbering:
       phase = .paused(runID: runID, message: "Search complete. Resume to apply its suggestions.")
     case .discovering, .extracting, .needsRetry:
       phase = .needsRetry(
