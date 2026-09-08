@@ -48,9 +48,13 @@ struct EditSliceTests {
   }
 
   @Test func draggingMutatesDraftOnly_savingCommitsOnce() {
-    let (model, _) = makeModel()
+    let model = EditSliceModel(
+      slice: Fixtures.slice(start: 55_000, end: 90_000), editPlan: Fixtures.editPlan())
     var committed: [Range<Int>] = []
-    model.onCommit = { committed.append($0) }
+    model.onCommit = {
+      committed.append($0)
+      return .committed
+    }
 
     model.fineTune.nudgeCutIn(byMs: 10)  // move the draft
     #expect(model.canSave == true)
@@ -65,7 +69,10 @@ struct EditSliceTests {
     let (model, _) = makeModel()
     var committed = 0
     var dismissed = 0
-    model.onCommit = { _ in committed += 1 }
+    model.onCommit = { _ in
+      committed += 1
+      return .committed
+    }
     model.onDismiss = { dismissed += 1 }
 
     model.fineTune.nudgeCutOut(byMs: -10)

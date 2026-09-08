@@ -148,6 +148,18 @@ final class FineTuneModel: ViewModel {
     draftRange = range
   }
 
+  func isValidDraftRange(_ range: Range<Int>) -> Bool {
+    range.lowerBound >= 0 && range.upperBound <= durationSamples
+      && range.count >= max(1, minDurationSamples)
+  }
+
+  func restoreDraftRange(_ range: Range<Int>) {
+    guard target != nil, range.lowerBound >= 0, range.upperBound <= durationSamples,
+      !range.isEmpty
+    else { return }
+    draftRange = range
+  }
+
   /// Cancel: drop the unsaved change, keeping the pane open on the committed range.
   func resetDraft() { draftRange = committedRange }
 

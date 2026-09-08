@@ -7,7 +7,9 @@ import Observation
 final class EditSliceModel: ViewModel, Identifiable {
 
   // MARK: - Initialization
-  let sliceID: Slice.ID
+  let target: ClipEditTarget
+  var sliceID: Slice.ID { target.resultingClipID }
+  private let editPlan: EditPlan
   let fineTune: FineTuneModel
   let title: String
   let overviewWindow: Range<Int>
@@ -25,16 +27,28 @@ final class EditSliceModel: ViewModel, Identifiable {
   /// on this lane exactly as it does on the main timeline.
   let editedWaveform: EditedWaveformAdapter
 
-  init(slice: Slice, editPlan: EditPlan) {
-    sliceID = slice.id
-    title = slice.name
+  convenience init(slice: Slice, editPlan: EditPlan) {
+    self.init(
+      target: .savedClip(slice.id), title: slice.name,
+      range: slice.startSample..<slice.endSample, editPlan: editPlan,
+      scopedWordIDs: slice.wordIDs)
     editingComplete = slice.editingComplete
+  }
+
+  init(
+    target: ClipEditTarget, title: String, range: Range<Int>, editPlan: EditPlan,
+    scopedWordIDs: [Word.ID]? = nil
+  ) {
+    self.target = target
+    self.title = title
+    self.editPlan = editPlan
+    editingComplete = false
     fineTune = FineTuneModel(
       sampleRate: editPlan.source.sampleRate,
       durationSamples: editPlan.source.durationSamples,
       silences: editPlan.silences)
-    overviewWindow = slice.startSample..<slice.endSample
-    let sliceWordIDSet = Set(slice.wordIDs)
+    overviewWindow = range
+    let sliceWordIDSet = Set(scopedWordIDs ?? wordIDs(anyOverlap: range, words: editPlan.words))
     let scopedWords = editPlan.words.filter { sliceWordIDSet.contains($0.id) }
     let scopedPlan = EditPlan(
       schemaVersion: editPlan.schemaVersion,
@@ -51,12 +65,22 @@ final class EditSliceModel: ViewModel, Identifiable {
       timeline: EditedTimeline(
         sourceDurationSamples: editPlan.source.durationSamples, removals: []))
     super.init()
-    fineTune.begin(target: .slice(slice.id), range: slice.startSample..<slice.endSample)
+    fineTune.begin(
+      target: target.isDraft ? .pendingSelection : .slice(target.resultingClipID), range: range)
     editedWaveform.setNavigableEditedRange(pinnedEditedRange)
   }
 
   // MARK: - Properties
-  var onCommit: (Range<Int>) -> Void = { _ in }
+  var onCommit: (Range<Int>) -> ClipEditCommitResult = { _ in
+    .failed("Saving is unavailable. Try opening this edit again.")
+  }
+  var onInvalidatePreview: () -> Void = {}
+  private(set) var commitError: String?
+  private(set) var invalidationReason: String?
+  private(set) var didCommit = false
+  private var draftHistory = UndoStack<Range<Int>>()
+  private(set) var boundaryGestureStart: Range<Int>?
+  private var ignoresBoundaryGestureUpdates = false
   var onDismiss: () -> Void = {}
   /// Applies an editing-complete toggle immediately (no Save dependency), routed to the
   /// parent's `setSliceEditingComplete`.
@@ -144,7 +168,22 @@ final class EditSliceModel: ViewModel, Identifiable {
   let restoreRemovedAudioLabel = "Restore Removed Audio"
 
   // MARK: - View Helpers
-  var canSave: Bool { fineTune.hasUnsavedChange }
+  var canMutateDocument: Bool { !target.isDraft }
+  var canUndoDraft: Bool { target.isDraft && draftHistory.canUndo }
+  var canRedoDraft: Bool { target.isDraft && draftHistory.canRedo }
+  var canSave: Bool {
+    guard !didCommit, invalidationReason == nil, let range = fineTune.draftRange,
+      fineTune.isValidDraftRange(range), !wordIDs(anyOverlap: range, words: editPlan.words).isEmpty
+    else { return false }
+    return target.isDraft || fineTune.hasUnsavedChange
+  }
+
+  func invalidate(_ reason: String) {
+    guard invalidationReason == nil else { return }
+    invalidationReason = reason
+    commitError = reason
+    invalidateDraftPreview()
+  }
   var playPauseLabel: String { isPlaying ? "Pause" : "Play" }
   var playButtonSystemImage: String { isPlaying ? "pause.fill" : "play.fill" }
   let editingCompleteLabel = "Editing Complete"
@@ -157,7 +196,7 @@ final class EditSliceModel: ViewModel, Identifiable {
   var waveformHighlightRange: Range<Int>? { waveformSelection ?? fineTune.draftRange }
 
   /// Whether the Remove control acts on anything — a marquee selection exists.
-  var canRemoveSelection: Bool { waveformSelection != nil }
+  var canRemoveSelection: Bool { canMutateDocument && waveformSelection != nil }
 
   // MARK: - Seam overlays
   /// The bowtie spans the lane draws at each seam, mapped to the collapsed lane's view coordinates.
@@ -185,7 +224,7 @@ final class EditSliceModel: ViewModel, Identifiable {
       // boundary seam (a removal crossing or touching a slice edge) plays as a hard cut here, so it
       // gets no handle: a drag would author a fade this slice never plays.
       let handles =
-        isInteriorSeam(seam)
+        canMutateDocument && isInteriorSeam(seam)
         ? editedWaveform.seamHandleXs(seam, previewLength: length)
         : (leading: nil, trailing: nil)
       return SeamOverlay(
@@ -238,6 +277,7 @@ final class EditSliceModel: ViewModel, Identifiable {
   /// Remove Section when a marquee selection exists, else empty. Mirrors the main editor's
   /// `seamContextMenuItems` and adds the modal's Remove entry.
   func waveformContextMenuItems(atX positionX: CGFloat) -> [WaveformMenuItem] {
+    guard canMutateDocument else { return [] }
     if let id = seamID(atX: positionX) {
       selectSeam(id)
       return [
@@ -337,12 +377,16 @@ final class EditSliceModel: ViewModel, Identifiable {
 
   // MARK: - User Actions
   func saveTapped() {
-    guard let draft = fineTune.draftRange, fineTune.hasUnsavedChange else {
+    guard canSave, let draft = fineTune.draftRange else { return }
+    boundaryGestureEnded()
+    switch onCommit(draft) {
+    case .committed:
+      didCommit = true
+      commitError = nil
       onDismiss()
-      return
+    case .failed(let message):
+      commitError = message
     }
-    onCommit(draft)
-    onDismiss()
   }
 
   func cancelTapped() {
@@ -353,18 +397,25 @@ final class EditSliceModel: ViewModel, Identifiable {
   /// Flips the completion flag and applies it immediately — there is no Save dependency for
   /// this toggle, so Cancel does not revert it.
   func editingCompleteToggled() {
+    guard canMutateDocument else { return }
     editingComplete.toggle()
     onSetEditingComplete(editingComplete)
   }
 
-  func cutInDragged(toInsetX positionX: CGFloat) { fineTune.dragCutIn(toInsetX: positionX) }
-  func cutOutDragged(toInsetX positionX: CGFloat) { fineTune.dragCutOut(toInsetX: positionX) }
+  func cutInDragged(toInsetX positionX: CGFloat) {
+    guard !ignoresBoundaryGestureUpdates else { return }
+    fineTune.dragCutIn(toInsetX: positionX)
+  }
+  func cutOutDragged(toInsetX positionX: CGFloat) {
+    guard !ignoresBoundaryGestureUpdates else { return }
+    fineTune.dragCutOut(toInsetX: positionX)
+  }
   // The nudge direction and step live on the model, so the view forwards a named action rather
   // than deciding the sign/magnitude of the delta itself.
-  func cutInNudgedBack() { fineTune.nudgeCutIn(byMs: -fineTune.nudgeMs) }
-  func cutInNudgedForward() { fineTune.nudgeCutIn(byMs: fineTune.nudgeMs) }
-  func cutOutNudgedBack() { fineTune.nudgeCutOut(byMs: -fineTune.nudgeMs) }
-  func cutOutNudgedForward() { fineTune.nudgeCutOut(byMs: fineTune.nudgeMs) }
+  func cutInNudgedBack() { recordDraftNudge { fineTune.nudgeCutIn(byMs: -fineTune.nudgeMs) } }
+  func cutInNudgedForward() { recordDraftNudge { fineTune.nudgeCutIn(byMs: fineTune.nudgeMs) } }
+  func cutOutNudgedBack() { recordDraftNudge { fineTune.nudgeCutOut(byMs: -fineTune.nudgeMs) } }
+  func cutOutNudgedForward() { recordDraftNudge { fineTune.nudgeCutOut(byMs: fineTune.nudgeMs) } }
 
   /// Bumped at the start of every transport-mutating user action (Play/Pause, Stop, the audition
   /// hotkeys, a waveform seek). `stopTapped`'s `onStop` and `playPauseTapped`'s pause-branch
@@ -442,8 +493,72 @@ final class EditSliceModel: ViewModel, Identifiable {
   /// edit). Forwarded from ``SliceEditKeyMonitor`` because the main editor's undo shortcut lives in a
   /// window that is not key while the sheet is up. The parent's own guards decide whether anything
   /// happens, so these are safe no-ops when there is nothing to undo/redo.
-  func undoTapped() async { await onUndo() }
-  func redoTapped() async { await onRedo() }
+  func undoTapped() async {
+    guard target.isDraft else {
+      await onUndo()
+      return
+    }
+    cancelBoundaryGesture(ignoringRemainingUpdates: true)
+    guard let current = fineTune.draftRange, let previous = draftHistory.undo(current: current)
+    else { return }
+    invalidateDraftPreview()
+    fineTune.restoreDraftRange(previous)
+  }
+
+  func redoTapped() async {
+    guard target.isDraft else {
+      await onRedo()
+      return
+    }
+    cancelBoundaryGesture(ignoringRemainingUpdates: true)
+    guard let current = fineTune.draftRange, let next = draftHistory.redo(current: current)
+    else { return }
+    invalidateDraftPreview()
+    fineTune.restoreDraftRange(next)
+  }
+
+  func boundaryGestureBegan() {
+    guard target.isDraft, boundaryGestureStart == nil, !ignoresBoundaryGestureUpdates else {
+      return
+    }
+    boundaryGestureStart = fineTune.draftRange
+  }
+
+  func boundaryGestureEnded() {
+    ignoresBoundaryGestureUpdates = false
+    guard let before = boundaryGestureStart else { return }
+    boundaryGestureStart = nil
+    if let after = fineTune.draftRange { draftHistory.record(before: before, after: after) }
+  }
+
+  func boundaryGestureCancelled() {
+    ignoresBoundaryGestureUpdates = false
+    cancelBoundaryGesture(ignoringRemainingUpdates: false)
+  }
+
+  private func cancelBoundaryGesture(ignoringRemainingUpdates: Bool) {
+    guard let before = boundaryGestureStart else { return }
+    ignoresBoundaryGestureUpdates = ignoringRemainingUpdates
+    boundaryGestureStart = nil
+    invalidateDraftPreview()
+    fineTune.restoreDraftRange(before)
+  }
+
+  private func recordDraftNudge(_ action: () -> Void) {
+    boundaryGestureEnded()
+    let before = fineTune.draftRange
+    action()
+    if target.isDraft, let before, let after = fineTune.draftRange {
+      draftHistory.record(before: before, after: after)
+    }
+  }
+
+  private func invalidateDraftPreview() {
+    transportActionGeneration += 1
+    activeAudition = nil
+    isPlaying = false
+    onInvalidatePreview()
+  }
 
   // MARK: - Audition
   enum AuditionMode: Equatable {
@@ -512,6 +627,7 @@ final class EditSliceModel: ViewModel, Identifiable {
   /// A body drag on the collapsed lane starts a Logic-style marquee for an interior removal. Clears
   /// any seam selection so the two never coexist. A no-op until the lane geometry is usable.
   func waveformAreaSelectBegan(atX startX: CGFloat, extending: Bool) {
+    guard canMutateDocument else { return }
     guard editedWaveform.hasUsableGeometry else { return }
     selectedSeamID = nil
     marqueeAnchorSample = clampedToWindow(editedWaveform.xToSourceSample(startX))
@@ -538,6 +654,7 @@ final class EditSliceModel: ViewModel, Identifiable {
   /// Removes the current marquee selection through the parent's merge funnel, then clears it. The
   /// timeline re-sync (parent → `syncTimeline`) collapses the removed span on this lane.
   func removeSelectionTapped() async {
+    guard canMutateDocument else { return }
     guard let range = waveformSelection else { return }
     await onRemoveSection(range)
     waveformSelection = nil
@@ -547,6 +664,7 @@ final class EditSliceModel: ViewModel, Identifiable {
   /// otherwise the marquee selection is removed through the parent merge funnel. No-ops when neither
   /// is present (the key monitor consumes ⌫ regardless, like ⌘Z, so it never beeps in the sheet).
   func removeSectionKeyPressed() async {
+    guard canMutateDocument else { return }
     if let seamID = selectedSeamID {
       onRestore(seamID)
       return
@@ -561,6 +679,7 @@ final class EditSliceModel: ViewModel, Identifiable {
   /// offers no handle for (`seamOverlays`). No transport teardown is needed here, unlike the main
   /// editor: the sheet's preview only widens the bowtie overlay and never reflows the lane's timeline.
   func crossfadeStretchBegan(id: TimelineRemoval.ID) {
+    guard canMutateDocument else { return }
     guard canEditCrossfade(), let length = currentCrossfadeLength(id),
       let seam = editedWaveform.timeline.seams.first(where: { $0.id == id }),
       let renderedLength = sliceLocalTimeline?.seams.first(where: { $0.id == id })?.crossfadeLength,
@@ -618,6 +737,7 @@ final class EditSliceModel: ViewModel, Identifiable {
   /// moved remains at its initial rendered length and commits nothing, preserving any longer latent
   /// fade stored in the document.
   func crossfadeStretchEnded() {
+    guard canMutateDocument else { return }
     guard let draft = crossfadeStretchDraft else { return }
     let initialRenderedLength = crossfadeStretchInitialRenderedLength
     crossfadeStretchDraft = nil
@@ -657,6 +777,7 @@ final class EditSliceModel: ViewModel, Identifiable {
   func crossfadeCutPointDragBegan(
     id: TimelineRemoval.ID, edge: RemovalBoundary, atX posX: CGFloat
   ) {
+    guard canMutateDocument else { return }
     guard canEditCrossfade(), let storedLength = currentCrossfadeLength(id),
       let seam = editedWaveform.timeline.seams.first(where: { $0.id == id }),
       isInteriorSeam(seam),
@@ -724,6 +845,7 @@ final class EditSliceModel: ViewModel, Identifiable {
   /// through the parent. A drag that netted no range change pushes no entry. A no-op if no drag is live
   /// or the removal vanished mid-drag.
   func crossfadeCutPointDragEnded() {
+    guard canMutateDocument else { return }
     guard let draft = crossfadeCutPointDraft else { return }
     crossfadeCutPointDraft = nil
     editedWaveform.timeline = draft.frozenCommittedTimeline

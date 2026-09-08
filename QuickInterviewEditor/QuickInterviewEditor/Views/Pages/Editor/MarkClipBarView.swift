@@ -13,6 +13,9 @@ struct MarkClipBarView: View {
         .keyboardShortcut("d", modifiers: .command)
         .disabled(!model.canAddSlice)
 
+      Button(model.openSelectionLabel) { model.openSelectionTapped() }
+        .disabled(!model.canOpenSelection)
+
       Button(model.clearButtonLabel) { model.clearSelectionTapped() }
         .disabled(!model.canClearSelection)
 
@@ -35,6 +38,10 @@ struct MarkClipBarView: View {
       if model.shouldShowRestoreControl {
         Button(model.restoreRemovedAudioLabel) { model.restoreRemovalTapped() }
           .disabled(!model.canRestoreSelectedRemoval)
+      }
+
+      if let message = model.clipEditorMessage {
+        Text(message).foregroundStyle(.red)
       }
 
       Text(model.selectionSummary)

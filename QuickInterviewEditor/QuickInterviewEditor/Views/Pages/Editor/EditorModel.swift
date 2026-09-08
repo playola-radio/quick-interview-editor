@@ -80,6 +80,9 @@ final class EditorModel: ViewModel {
   /// The slice-detail edit modal, presented when non-nil. A separate, scoped model — distinct
   /// from `fineTune`, which drives the docked pane — so the two can't fight over one session.
   var editSlice: EditSliceModel?
+  var clipEditorMessage: String?
+  @ObservationIgnored var committingDraftID: UUID?
+  @ObservationIgnored @Dependency(\.uuid) var draftUUID
 
   init(
     sourceURL: URL, canonicalAudioURL: URL, editPlan: EditPlan, sourceFingerprint: String? = nil,
@@ -351,7 +354,7 @@ final class EditorModel: ViewModel {
   var sliceFilter: SliceFilter = .all
   /// The number the next auto-named "Slice N" gets. Seeded in `init` from the loaded slices (so a
   /// rebuilt editor keeps counting past existing clips) and bumped as clips are added in-session.
-  private var nextSliceNumber = 1
+  var nextSliceNumber = 1
   /// Names of slices skipped by the most recent "Export all" because their entire audio
   /// fell inside a removed section — surfaced by `exportSkippedRemovedWarning`.
   private var lastExportSkippedRemovedNames: [String] = []
@@ -472,17 +475,16 @@ final class EditorModel: ViewModel {
     if case .free = transportContext { return true }
     // The Edit Slice modal previews the collapsed (removal-aware) audio, so it must reset like a
     // saved-slice session; its slice is the open sheet's, since `.sliceEdit` carries no id.
-    let contextSliceID: Slice.ID?
-    if case .sliceEdit = transportContext {
-      contextSliceID = editSlice?.sliceID
+    let range: Range<Int>
+    if case .sliceEdit = transportContext, let draftRange = editSlice?.fineTune.draftRange {
+      range = draftRange
+    } else if let id = transportContext.sliceID, let slice = slices[id: id] {
+      range = slice.startSample..<slice.endSample
     } else {
-      contextSliceID = transportContext.sliceID
-    }
-    guard let sliceID = contextSliceID, let slice = slices[id: sliceID] else {
       return false
     }
     let newLocal = SliceRenderPlanBuilder.localTimeline(
-      sliceRange: slice.startSample..<slice.endSample, removals: Array(timelineRemovals))
+      sliceRange: range, removals: Array(timelineRemovals))
     guard let scheduled = slicePlaybackConversion?.localTimeline else {
       return !newLocal.removals.isEmpty
     }
@@ -509,10 +511,12 @@ final class EditorModel: ViewModel {
     "The working audio for this file is no longer available — it can be cleared by an app "
     + "update or another window. Re-import the file to export again."
   var undoLabel: String {
+    if editSlice?.target.isDraft == true { return "Undo Cut Point Edit" }
     guard let label = history.undo.last?.label, !label.isEmpty else { return "Undo" }
     return "Undo \(label)"
   }
   var redoLabel: String {
+    if editSlice?.target.isDraft == true { return "Redo Cut Point Edit" }
     guard let label = history.redo.last?.label, !label.isEmpty else { return "Redo" }
     return "Redo \(label)"
   }
@@ -551,6 +555,9 @@ final class EditorModel: ViewModel {
       if selection != oldValue {
         selectionPreservesTransport = false
         transcript.clickCapture = nil
+        transcript.overlap.dismiss()
+        cutSuggestions.selectedObjectID = selection.objectID
+        transcript.overlap.selectedID = selection.objectID
       }
     }
   }
@@ -890,11 +897,13 @@ final class EditorModel: ViewModel {
   // export is the one being written to disk, and rewinding it mid-run would leave the
   // finished AIFFs stale relative to what the user sees.
   var canUndo: Bool {
-    history.canUndo && cutSuggestionTitleEdit == nil && !hasUncommittedSliceEdit
+    if let editing = editSlice, editing.target.isDraft { return editing.canUndoDraft }
+    return history.canUndo && cutSuggestionTitleEdit == nil && !hasUncommittedSliceEdit
       && !isExporting
   }
   var canRedo: Bool {
-    history.canRedo && cutSuggestionTitleEdit == nil && !hasUncommittedSliceEdit
+    if let editing = editSlice, editing.target.isDraft { return editing.canRedoDraft }
+    return history.canRedo && cutSuggestionTitleEdit == nil && !hasUncommittedSliceEdit
       && !isExporting
   }
 
@@ -985,7 +994,7 @@ final class EditorModel: ViewModel {
           // Play shortcut now (no per-slice Stop — the global transport owns Pause/Stop, ruling F).
           isPlaying: transportContext.sliceID == slice.id,
           playButtonLabel: playLabel,
-          isActive: activeSliceID == slice.id,
+          isActive: selection == .object(.clip(slice.id)),
           // The fine-tune button switches the edit target, which `sliceSelected` rejects while
           // another draft is unsaved — disable it then so it doesn't look broken when clicked.
           canFineTune: !fineTune.hasUnsavedChange || activeSliceID == slice.id,
@@ -1353,6 +1362,8 @@ final class EditorModel: ViewModel {
   /// derived — so we also invalidate it here. Otherwise a later transcript Shift-click would extend
   /// from the anchor of the selection the user just cleared, resurrecting it.
   func clearSelection() {
+    transcript.overlapClick = nil
+    transcript.overlap.update([], anchor: nil, selected: nil)
     selectionPreservesTransport = false
     selection = .none
     selectionEditingEdge = nil
@@ -1707,6 +1718,7 @@ final class EditorModel: ViewModel {
     speakerDisplayNames = new.speakerDisplayNames
     if let selectionAfter { selection = selectionAfter }
     reconcileSelection()
+    reconcileDraftEditing()
     if recordUndo {
       history.record(
         .init(
@@ -1770,11 +1782,14 @@ final class EditorModel: ViewModel {
   func acceptCutSuggestion(_ slice: Slice, id: CutSuggestion.ID) {
     let firstAccept = slices[id: slice.id] == nil
     let nudged = offsetNudgedClip(slice)
-    mutateDocument {
+    let acceptedSelection: EditorSelection? =
+      selection == .object(.suggestion(id)) ? .object(.clip(nudged.id)) : nil
+    mutateDocument(selectionAfter: acceptedSelection) {
       if $0.slices[id: nudged.id] == nil { $0.slices.append(nudged) }
       $0.cutSuggestions[id: id]?.accept()
     }
     if firstAccept { sliceScrollTarget = nudged.id }
+    if acceptedSelection != nil { revealSelectedSidebarObject(.clip(nudged.id)) }
   }
 
   /// The single funnel for every NEW clip (Mark as Clip, fine-tune commit): nudges its cut
@@ -1856,19 +1871,20 @@ final class EditorModel: ViewModel {
   /// Guarded the same way switching the docked pane's target is (`hasUnsavedChange`) so opening
   /// the modal can't silently strand or clobber an in-flight docked-pane edit.
   func editSliceTapped(_ id: Slice.ID) {
-    guard let slice = slices[id: id], !fineTune.hasUnsavedChange else { return }
-    // Opening the modal supersedes any in-progress MAIN playback — the main timeline and its
-    // hidden transcript shouldn't keep running behind the sheet. Snapshot-stop it (covers a PAUSED
-    // main transport too, not just a playing one) so this stop, which may land after the modal's
-    // own Play has started a fresh `.sliceEdit` session, can never kill that newer session.
+    guard let slice = slices[id: id], canOpenClipEditor else { return }
+    presentClipEditor(EditSliceModel(slice: slice, editPlan: editPlan))
+  }
+
+  func presentClipEditor(_ child: EditSliceModel) {
+    if fineTune.target == .pendingSelection { fineTune.clear() }
     stopActiveTransportSnapshotting()
-    let child = EditSliceModel(slice: slice, editPlan: editPlan)
+    let id = child.sliceID
     // Give the sheet its OWN lane, seeded from the already-decoded pyramid so nothing is re-decoded,
     // pinned to this slice (you cannot scroll or zoom past its boundaries). It must not share the
     // main editor's WaveformModel (that one is bound to the main viewport's zoom/scroll/width).
     child.waveform.adopt(
       waveform: waveform.waveform, totalSamples: waveform.totalSamples,
-      sampleRate: waveform.sampleRate, contentRange: slice.startSample..<slice.endSample)
+      sampleRate: waveform.sampleRate, contentRange: child.overviewWindow)
     // Seed the sheet's collapsed lane with the parent's current GLOBAL timeline so any removals
     // already inside the slice render collapsed the moment it opens. `syncEditedTimeline` keeps it
     // in sync for every later removal/undo/redo while the sheet stays up.
@@ -1877,14 +1893,22 @@ final class EditorModel: ViewModel {
     // seam restore route through the SAME funnels the main editor uses, so both surfaces merge
     // cross-seam removals identically and every edit is one ⌘Z step. `syncEditedTimeline` fans the
     // result back into the open sheet.
-    child.onRemoveSection = { [weak self] range in await self?.removeSourceRange(range) }
-    child.onRestore = { [weak self] removalID in self?.restoreRemoval(id: removalID) }
+    child.onRemoveSection = { [weak self, weak child] range in
+      guard child?.canMutateDocument == true else { return }
+      await self?.removeSourceRange(range)
+    }
+    child.onRestore = { [weak self, weak child] removalID in
+      guard child?.canMutateDocument == true else { return }
+      self?.restoreRemoval(id: removalID)
+    }
     // A crossfade stretch inside the sheet commits through the SAME `updateCrossfade` funnel the main
     // editor uses, so a stretch is identical on both surfaces and one ⌘Z step. The sheet drafts the
     // length against its own (parent-synced) lane and hands the committed length here; the parent
     // preserves the removal's curve/center and fans the result back into the open sheet.
-    child.onStretchCrossfade = { [weak self] removalID, length in
-      guard let self, var crossfade = timelineRemovals[id: removalID]?.crossfade else { return }
+    child.onStretchCrossfade = { [weak self, weak child] removalID, length in
+      guard child?.canMutateDocument == true, let self,
+        var crossfade = timelineRemovals[id: removalID]?.crossfade
+      else { return }
       crossfade.lengthSamples = length
       updateCrossfade(id: removalID, crossfade)
     }
@@ -1894,14 +1918,28 @@ final class EditorModel: ViewModel {
     wireSliceCutPointCommit(child)
     // Mirror the main lane's begin-time refusal: `updateCrossfade` is frozen mid-export, so the sheet
     // must not preview a stretch its release would discard.
-    child.canEditCrossfade = { [weak self] in self?.isExporting == false }
+    child.canEditCrossfade = { [weak self, weak child] in
+      child?.canMutateDocument == true && self?.isExporting == false
+    }
     // ⌘Z/⌘⇧Z pressed inside the sheet route here: a modal removal lives on this document's undo
     // stack, and `undoTapped`/`redoTapped` fan the restored timeline back into the open sheet via
     // `syncEditedTimeline`. The main window's SwiftUI undo shortcut can't fire while the sheet is key.
     child.onUndo = { [weak self] in await self?.undoTapped() }
     child.onRedo = { [weak self] in await self?.redoTapped() }
-    child.onCommit = { [weak self] range in self?.commitSliceEdit(id: id, range: range) }
-    child.onSetEditingComplete = { [weak self] value in self?.setSliceEditingComplete(id, to: value)
+    child.onCommit = { [weak self, weak child] range in
+      guard let self, let child, editSlice === child else {
+        return .failed("This edit is no longer available.")
+      }
+      if child.target.isDraft { return commitDraftEdit(child, range: range) }
+      return commitSliceEdit(id: id, range: range)
+    }
+    child.onInvalidatePreview = { [weak self, weak child] in
+      guard let self, let child, editSlice === child, transportContext == .sliceEdit else { return }
+      stopActiveTransportSnapshotting()
+    }
+    child.onSetEditingComplete = { [weak self, weak child] value in
+      guard child?.canMutateDocument == true else { return }
+      self?.setSliceEditingComplete(id, to: value)
     }
     child.onPlay = { [weak self] range in
       // Logic model: Play always plays `range` from the playhead as a fresh, exclusive `.sliceEdit`
@@ -1940,9 +1978,10 @@ final class EditorModel: ViewModel {
       placeCursor(atSource: sample)
       editSlice?.updatePlayback(sample: sample, isPlaying: isTransportPlaying)
     }
-    child.onDismiss = { [weak self] in
-      self?.stopActiveTransportSnapshotting()
-      self?.editSlice = nil
+    child.onDismiss = { [weak self, weak child] in
+      guard let self, let child, editSlice === child else { return }
+      stopActiveTransportSnapshotting()
+      editSlice = nil
     }
     editSlice = child
   }
@@ -1954,7 +1993,8 @@ final class EditorModel: ViewModel {
   /// slice window, delegating the neighbor/cross-cut/non-empty part to the parent's tested
   /// `clampedRemovalRange`. Split out of `editSliceTapped` to keep its body within the linter's limit.
   private func wireSliceCutPointCommit(_ child: EditSliceModel) {
-    child.onMoveCutPoint = { [weak self] removalID, range in
+    child.onMoveCutPoint = { [weak self, weak child] removalID, range in
+      guard child?.canMutateDocument == true else { return }
       self?.updateRemovalRange(id: removalID, removedRange: range)
     }
     child.clampCutPointRange = { [weak self] removalID, proposed in
@@ -2008,7 +2048,7 @@ final class EditorModel: ViewModel {
   /// Bumps the auto-name counter after a clip is added, saturating at `Int.max` so a poisoned
   /// persisted name (`Slice \(Int.max - 1)`) that seeded the counter to the ceiling can't trap on
   /// overflow. A real session never reaches this; at the ceiling the next clip just reuses the name.
-  private func advanceSliceNumber() {
+  func advanceSliceNumber() {
     if nextSliceNumber < Int.max { nextSliceNumber += 1 }
   }
 
@@ -2491,11 +2531,19 @@ final class EditorModel: ViewModel {
   /// Applies the next chronological history entry. Pure selection restores never
   /// write the document or reconcile playback; document entries preserve persistence.
   func undoTapped() async {
+    if let editing = editSlice, editing.target.isDraft {
+      await editing.undoTapped()
+      return
+    }
     guard canUndo, let entry = history.undoEntry() else { return }
     await applyHistory(entry, undoing: true)
   }
 
   func redoTapped() async {
+    if let editing = editSlice, editing.target.isDraft {
+      await editing.redoTapped()
+      return
+    }
     guard canRedo, let entry = history.redoEntry() else { return }
     await applyHistory(entry, undoing: false)
   }
@@ -2509,6 +2557,7 @@ final class EditorModel: ViewModel {
     documentCutSuggestions = restored.cutSuggestions
     speakerCountOverride = restored.speakerCountOverride
     speakerDisplayNames = restored.speakerDisplayNames
+    reconcileDraftEditing()
     syncEditedTimeline()
     onDocumentStateChanged?(documentState)
   }
@@ -2518,6 +2567,7 @@ final class EditorModel: ViewModel {
   /// slice is gone (clearing its target + draft). Centralized so every removal path behaves
   /// the same.
   func reconcilePlayback() async {
+    reconcileDraftEditing()
     // A shared-document undo/redo can pull the Edit Slice sheet's slice out from under it: ⌘Z can
     // delete the slice (rewinding its creation) OR revert its boundaries. The modal's overview
     // window and committed range are seeded once at open and never re-seed, so a survived-but-moved
@@ -2526,7 +2576,9 @@ final class EditorModel: ViewModel {
     if let editing = editSlice, editSliceRangeIsStale(editing) {
       stopActiveTransportSnapshotting()
       editSlice = nil
-    } else if let editing = editSlice, let slice = slices[id: editing.sliceID] {
+    } else if let editing = editSlice, case .savedClip(let id) = editing.target,
+      let slice = slices[id: id]
+    {
       // The sheet survived (boundaries intact) but a shared-document undo/redo can still have
       // flipped this slice's editing-complete flag underneath it. The flag was seeded once at open,
       // so re-sync it here or the sheet shows a stale icon and the next toggle sends a no-op value.
@@ -2559,7 +2611,8 @@ final class EditorModel: ViewModel {
   /// modal committed to at open (the modal never re-seeds its overview window / committed range).
   /// A modal removal leaves the slice's own bounds untouched, so it never reads as stale here.
   private func editSliceRangeIsStale(_ editing: EditSliceModel) -> Bool {
-    guard let slice = slices[id: editing.sliceID] else { return true }
+    guard case .savedClip(let id) = editing.target else { return false }
+    guard let slice = slices[id: id] else { return true }
     return editing.fineTune.committedRange != slice.startSample..<slice.endSample
   }
 
@@ -3138,11 +3191,16 @@ final class EditorModel: ViewModel {
   /// Commits an existing slice's cut points to `range` as exactly ONE `mutateSlices` (one undo
   /// entry): word IDs, snippet, and warnings are re-derived from the new range. A no-op if the
   /// slice no longer exists (e.g. deleted out from under an in-flight edit).
-  func commitSliceEdit(id: Slice.ID, range: Range<Int>) {
-    guard slices[id: id] != nil else { return }
+  @discardableResult
+  func commitSliceEdit(id: Slice.ID, range: Range<Int>) -> ClipEditCommitResult {
+    guard slices[id: id] != nil else { return .failed("This clip no longer exists.") }
+    guard validClipEditRange(range) else {
+      return .failed("Choose a valid range containing words.")
+    }
     mutateSlices { slices in
       if let slice = slices[id: id] { slices[id: id] = updatedSlice(slice, to: range) }
     }
+    return .committed
   }
 
   /// Commits the draft as exactly ONE `mutateSlices` (one undo entry) for a whole drag: an

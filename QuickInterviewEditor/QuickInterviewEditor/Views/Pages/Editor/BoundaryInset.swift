@@ -19,6 +19,11 @@ struct BoundaryInset: View {
   let onNudgeBack: () -> Void
   let onNudgeForward: () -> Void
   let onDrag: (CGFloat) -> Void
+  var onDragBegan: () -> Void = {}
+  var onDragEnded: () -> Void = {}
+  var onDragCancelled: () -> Void = {}
+  @GestureState private var gestureActive = false
+  @State private var dragActive = false
 
   private let boxHeight: CGFloat = 86
   private let cutLineHandle: CGFloat = 9
@@ -74,8 +79,18 @@ struct BoundaryInset: View {
       .contentShape(Rectangle())
       .gesture(
         DragGesture(minimumDistance: 0, coordinateSpace: .local)
-          .onChanged { onDrag($0.location.x) }
+          .updating($gestureActive) { _, active, _ in active = true }
+          .onChanged { dragChanged($0.location.x) }
+          .onEnded { dragEnded($0.location.x) }
       )
+      .onChange(of: gestureActive) { _, active in
+        if !active { dragCancelled() }
+      }
+      .onDisappear { dragCancelled() }
+      .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) {
+        _ in
+        dragCancelled()
+      }
       HStack(spacing: 6) {
         Button(nudgeBackLabel) { onNudgeBack() }
         Button(nudgeForwardLabel) { onNudgeForward() }
@@ -84,6 +99,27 @@ struct BoundaryInset: View {
       .foregroundStyle(Color(white: 0.7))
     }
   }
+  private func dragChanged(_ positionX: CGFloat) {
+    if !dragActive {
+      dragActive = true
+      onDragBegan()
+    }
+    onDrag(positionX)
+  }
+
+  private func dragEnded(_ positionX: CGFloat) {
+    guard dragActive else { return }
+    onDrag(positionX)
+    dragActive = false
+    onDragEnded()
+  }
+
+  private func dragCancelled() {
+    guard dragActive else { return }
+    dragActive = false
+    onDragCancelled()
+  }
+
 }
 
 /// The mirrored min/max silhouette, gray with the kept side tinted red. Also reused
