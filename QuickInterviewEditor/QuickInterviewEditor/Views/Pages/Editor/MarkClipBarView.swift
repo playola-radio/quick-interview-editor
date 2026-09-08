@@ -25,9 +25,9 @@ struct MarkClipBarView: View {
 
       if model.shouldShowSelectedSuggestionControls {
         Button(model.cutSuggestions.acceptLabel) { model.acceptSelectedSuggestionTapped() }
-          .disabled(model.isExporting)
+          .disabled(model.selectedSuggestionActionsDisabled)
         Button(model.cutSuggestions.rejectLabel) { model.rejectSelectedSuggestionTapped() }
-          .disabled(model.isExporting)
+          .disabled(model.selectedSuggestionActionsDisabled)
       }
 
       if model.shouldShowRemoveSectionControl {

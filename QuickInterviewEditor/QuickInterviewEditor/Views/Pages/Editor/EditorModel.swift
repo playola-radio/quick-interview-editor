@@ -1191,6 +1191,9 @@ final class EditorModel: ViewModel {
     if case .object(.suggestion) = selection { return true }
     return false
   }
+  var selectedSuggestionActionsDisabled: Bool {
+    isExporting || cutSuggestions.candidateActionsDisabled
+  }
 
   /// The bar's word-count readout, derived from the freeform selection so it stays accurate for
   /// every selection path. Counts words the range overlaps (the same set the transcript highlights);
