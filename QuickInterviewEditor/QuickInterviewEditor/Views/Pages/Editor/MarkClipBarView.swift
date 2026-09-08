@@ -13,12 +13,35 @@ struct MarkClipBarView: View {
         .keyboardShortcut("d", modifiers: .command)
         .disabled(!model.canAddSlice)
 
+      Button(model.openSelectionLabel) { model.openSelectionTapped() }
+        .disabled(!model.canOpenSelection)
+
       Button(model.clearButtonLabel) { model.clearSelectionTapped() }
         .disabled(!model.canClearSelection)
+
+      if model.shouldShowSelectedClipControls {
+        Button(model.playLabel) { Task { await model.playSelectedClipTapped() } }
+      }
+
+      if model.shouldShowSelectedSuggestionControls {
+        Button(model.cutSuggestions.acceptLabel) { model.acceptSelectedSuggestionTapped() }
+          .disabled(model.selectedSuggestionActionsDisabled)
+        Button(model.cutSuggestions.rejectLabel) { model.rejectSelectedSuggestionTapped() }
+          .disabled(model.selectedSuggestionActionsDisabled)
+      }
+
+      if model.shouldShowRemoveSectionControl {
+        Button(model.removeSectionLabel) { Task { await model.removeSelectedSectionTapped() } }
+          .disabled(!model.canRemoveSelectedSection)
+      }
 
       if model.shouldShowRestoreControl {
         Button(model.restoreRemovedAudioLabel) { model.restoreRemovalTapped() }
           .disabled(!model.canRestoreSelectedRemoval)
+      }
+
+      if let message = model.clipEditorMessage {
+        Text(message).foregroundStyle(.red)
       }
 
       Text(model.selectionSummary)

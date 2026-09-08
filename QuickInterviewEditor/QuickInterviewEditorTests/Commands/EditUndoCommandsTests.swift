@@ -78,4 +78,27 @@ struct EditUndoCommandsTests {
     #expect(commands.canReimport)
     expectNoDifference(commands.reimportMenuLabel, project.reimportMenuLabel)
   }
+  @Test func draftMenuUndoIsLocalEvenWithDocumentHistoryAndExport() async throws {
+    let project = try await loadedProject()
+    let editor = try #require(project.editor)
+    editor.mutateDocument { $0.speakerCountOverride = 4 }
+    let draft = EditSliceModel(
+      target: .freeformDraft(UUID(1)), title: "Draft", range: 55_000..<90_000,
+      editPlan: editor.editPlan)
+    editor.editSlice = draft
+    let commands = EditUndoCommandsModel(project: project)
+    #expect(!commands.canUndo)
+    await commands.undoTapped()
+    expectNoDifference(editor.speakerCountOverride, 4)
+    draft.cutInNudgedForward()
+    #expect(commands.canUndo)
+    expectNoDifference(commands.undoLabel, "Undo Cut Point Edit")
+    await commands.undoTapped()
+    expectNoDifference(draft.fineTune.draftRange, 55_000..<90_000)
+    expectNoDifference(editor.speakerCountOverride, 4)
+    #expect(commands.canRedo)
+    await commands.redoTapped()
+    expectNoDifference(draft.fineTune.draftRange, 55_441..<90_000)
+  }
+
 }

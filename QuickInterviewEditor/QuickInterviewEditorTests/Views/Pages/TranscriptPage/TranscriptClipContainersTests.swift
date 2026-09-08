@@ -1,3 +1,4 @@
+import AppKit
 import CustomDump
 import Foundation
 import Testing
@@ -32,108 +33,114 @@ struct TranscriptClipContainersTests {
     expectNoDifference(model(clipBands: []).clipContainers, [])
   }
 
-  /// Adjacent same-kind words merge into ONE range that spans their interior separator but
-  /// stops at the last word's end (no trailing space). "Hello world" = [0, 11).
-  @Test func adjacentWordsMergeIntoOneContainer() {
+  @Test func adjacentWordsMergeWithTypedIdentity() {
     let bands = [TranscriptClipBand(id: Fixtures.uuid(1), wordIDs: [1, 2], kind: .approved)]
     expectNoDifference(
       model(clipBands: bands).clipContainers,
       [
         TranscriptClipContainer(
-          range: NSRange(location: 0, length: 11), kind: .approved, colorIndex: 0)
+          range: NSRange(location: 0, length: 11), kind: .approved,
+          colorIndex: 0, objectID: .clip(Fixtures.uuid(1)))
       ])
   }
 
-  /// Two disjoint bands become two containers, in transcript order, each carrying its kind.
-  @Test func disjointBandsBecomeSeparateContainers() {
+  @Test func identicalOverlappingBandsKeepBothFullContainers() {
+    let id = Fixtures.uuid(1)
     let bands = [
-      TranscriptClipBand(id: Fixtures.uuid(1), wordIDs: [1, 2], kind: .approved),
-      TranscriptClipBand(id: Fixtures.uuid(2), wordIDs: [4, 5], kind: .suggested),
+      TranscriptClipBand(id: id, wordIDs: [1, 2, 3], kind: .approved),
+      TranscriptClipBand(id: id, wordIDs: [1, 2, 3], kind: .suggested),
+    ]
+    let containers = model(clipBands: bands).clipContainers
+    expectNoDifference(
+      containers.map(\.range),
+      [
+        NSRange(location: 0, length: 15), NSRange(location: 0, length: 15),
+      ])
+    expectNoDifference(containers.map(\.objectID), [.clip(id), .suggestion(id)])
+  }
+
+  @Test func foregroundOrderDoesNotTruncateNestedOrPartialBands() {
+    let bands = [
+      TranscriptClipBand(id: Fixtures.uuid(1), wordIDs: [2], kind: .approved),
+      TranscriptClipBand(id: Fixtures.uuid(2), wordIDs: [1, 2, 3, 4], kind: .suggested),
+      TranscriptClipBand(id: Fixtures.uuid(3), wordIDs: [3, 4, 5], kind: .approved),
     ]
     expectNoDifference(
-      model(clipBands: bands).clipContainers,
+      model(clipBands: bands).clipContainers.map(\.range),
       [
-        TranscriptClipContainer(
-          range: NSRange(location: 0, length: 11), kind: .approved, colorIndex: 0),
-        // "bar baz" starts at "Hello world Foo " = 16, ends at 23.
-        TranscriptClipContainer(
-          range: NSRange(location: 16, length: 7), kind: .suggested, colorIndex: 1),
+        NSRange(location: 6, length: 5), NSRange(location: 0, length: 19),
+        NSRange(location: 12, length: 11),
       ])
   }
 
-  /// A different-kind word between same-kind words splits the run: a green word sitting inside
-  /// an amber span (the precedence-hole case) yields three separate containers.
-  @Test func aStateChangeBetweenWordsSplitsTheRun() {
+  @Test func missingInteriorWordsSplitOnlyTheirOwnBand() {
     let bands = [
       TranscriptClipBand(id: Fixtures.uuid(1), wordIDs: [2], kind: .approved),
       TranscriptClipBand(id: Fixtures.uuid(2), wordIDs: [1, 3], kind: .suggested),
     ]
+    let containers = model(clipBands: bands).clipContainers
     expectNoDifference(
-      model(clipBands: bands).clipContainers,
+      containers.map(\.range),
       [
-        // Hello and Foo are the same band, so they share colorIndex 0; world is a different clip.
-        TranscriptClipContainer(
-          range: NSRange(location: 0, length: 5), kind: .suggested, colorIndex: 0),  // Hello
-        TranscriptClipContainer(
-          range: NSRange(location: 6, length: 5), kind: .approved, colorIndex: 1),  // world
-        TranscriptClipContainer(
-          range: NSRange(location: 12, length: 3), kind: .suggested, colorIndex: 0),  // Foo
+        NSRange(location: 6, length: 5), NSRange(location: 0, length: 5),
+        NSRange(location: 12, length: 3),
       ])
+    expectNoDifference(containers.map(\.colorIndex), [0, 1, 1])
   }
 
-  /// Two distinct bands of the SAME kind that sit back-to-back stay separate containers, each
-  /// with its own caps — merging them would erase the per-clip boundary.
   @Test func adjacentSameKindBandsStaySeparate() {
     let bands = [
       TranscriptClipBand(id: Fixtures.uuid(1), wordIDs: [1, 2], kind: .approved),
       TranscriptClipBand(id: Fixtures.uuid(2), wordIDs: [3, 4], kind: .approved),
     ]
+    let containers = model(clipBands: bands).clipContainers
     expectNoDifference(
-      model(clipBands: bands).clipContainers,
+      containers.map(\.range),
       [
-        // Hello world
-        TranscriptClipContainer(
-          range: NSRange(location: 0, length: 11), kind: .approved, colorIndex: 0),
-        // Foo bar — a different clip, so a different colour.
-        TranscriptClipContainer(
-          range: NSRange(location: 12, length: 7), kind: .approved, colorIndex: 1),
+        NSRange(location: 0, length: 11), NSRange(location: 12, length: 7),
       ])
+    expectNoDifference(containers.map(\.colorIndex), [0, 1])
   }
 
-  /// A clip that spans a paragraph break splits into one capped container per paragraph — a
-  /// single container can't bridge the vertical gap between paragraphs — but BOTH pieces keep
-  /// the same `colorIndex`, so the one clip draws in a single colour.
-  @Test func aClipSpanningAParagraphBreakSplits() {
+  @Test func paragraphBreakSplitsEachFullObjectWhileKeepingIdentityAndColor() {
     let model = TranscriptPageModel(planURL: nil)
-    // "Hello world\nFoo bar baz" — the break falls after word 2.
     model.document = TranscriptDocument(
-      words: [
-        word(1, "Hello"), word(2, "world"), word(3, "Foo"), word(4, "bar"), word(5, "baz"),
-      ],
-      paragraphs: [paragraph([1, 2]), paragraph([3, 4, 5])])
+      words: [word(1, "Hello"), word(2, "world"), word(3, "Foo"), word(4, "bar")],
+      paragraphs: [paragraph([1, 2]), paragraph([3, 4])])
     model.clipBands = [
-      TranscriptClipBand(id: Fixtures.uuid(1), wordIDs: [1, 2, 3, 4], kind: .approved)
+      TranscriptClipBand(id: Fixtures.uuid(1), wordIDs: [1, 2, 3, 4], kind: .approved),
+      TranscriptClipBand(id: Fixtures.uuid(2), wordIDs: [2, 3], kind: .suggested),
     ]
     expectNoDifference(
-      model.clipContainers,
+      model.clipContainers.map(\.range),
       [
-        // Hello world
-        TranscriptClipContainer(
-          range: NSRange(location: 0, length: 11), kind: .approved, colorIndex: 0),
-        // Foo bar — same clip, so the SAME colorIndex.
-        TranscriptClipContainer(
-          range: NSRange(location: 12, length: 7), kind: .approved, colorIndex: 0),
+        NSRange(location: 0, length: 11), NSRange(location: 12, length: 7),
+        NSRange(location: 6, length: 5), NSRange(location: 12, length: 3),
+      ])
+    expectNoDifference(model.clipContainers.map(\.colorIndex), [0, 0, 1, 1])
+    expectNoDifference(
+      model.clipContainers.map(\.objectID),
+      [
+        .clip(Fixtures.uuid(1)), .clip(Fixtures.uuid(1)),
+        .suggestion(Fixtures.uuid(2)), .suggestion(Fixtures.uuid(2)),
       ])
   }
 
-  /// Bands handed in out of transcript order still yield position-ordered containers.
-  @Test func containersFollowTranscriptOrderNotBandOrder() {
+  @Test func promotionPreservesExplicitColorAndSuggestionOutline() {
     let bands = [
-      TranscriptClipBand(id: Fixtures.uuid(2), wordIDs: [5], kind: .suggested),
-      TranscriptClipBand(id: Fixtures.uuid(1), wordIDs: [1], kind: .approved),
+      TranscriptClipBand(
+        id: Fixtures.uuid(2), wordIDs: [1, 2], kind: .suggested,
+        colorIndex: 3, isActive: true),
+      TranscriptClipBand(
+        id: Fixtures.uuid(1), wordIDs: [1, 2], kind: .approved,
+        colorIndex: 1, isSubdued: true),
     ]
     let containers = model(clipBands: bands).clipContainers
-    expectNoDifference(containers.map(\.range.location), [0, 20])
+    expectNoDifference(containers.map(\.colorIndex), [3, 1])
+    #expect(containers[0].style.dashed)
+    #expect(!containers[1].style.dashed)
+    expectNoDifference(containers[0].style.ringWidth, 2)
+    expectNoDifference(containers[1].style.ringWidth, 1)
   }
 
   // MARK: - changed(from:to:) — the resize-drag repaint diff
@@ -186,15 +193,76 @@ struct TranscriptClipContainersTests {
       [container(0, 11, .approved), container(0, 11, .rejected)])
   }
 
-  /// Documents the helper's precondition (see `changed(from:to:)`): the diff keys on member
-  /// equality, so the SAME two containers in a different array order register as no change. This
-  /// is only safe because `clipContainers` are non-overlapping and position-ordered, so a word's
-  /// winning container never flips by reordering alone. If this test ever needs to change, the
-  /// non-overlap invariant has been relaxed and the helper must repaint on reorder too.
-  @Test func changedIgnoresPureReorderingBecauseContainersNeverOverlap() {
+  @Test func changedRepaintsWhenOverlappingForegroundOrderChanges() {
     let clip = container(0, 11, .approved)
-    let suggestion = container(16, 7, .suggested)
+    let suggestion = container(0, 11, .suggested)
     expectNoDifference(
-      TranscriptClipContainer.changed(from: [clip, suggestion], to: [suggestion, clip]), [])
+      TranscriptClipContainer.changed(from: [clip, suggestion], to: [suggestion, clip]),
+      [clip, suggestion, suggestion, clip])
   }
+
+  @Test func changedDetectsPreviewOnlyChange() {
+    let original = container(0, 11, .suggested)
+    var previewed = original
+    previewed.isPreviewed = true
+    expectNoDifference(
+      TranscriptClipContainer.changed(from: [original], to: [previewed]),
+      [original, previewed])
+  }
+
+  private func applyResizeItems(
+    _ items: [TranscriptResizeItem], to coordinator: TranscriptTextView.Coordinator
+  ) {
+    coordinator.apply(
+      text: coordinator.model.plainTranscriptText, fontSize: 17, selected: [],
+      clipContainers: [], removedWordIDs: [], currentWordID: nil, scrollTarget: nil,
+      followMode: .following, reveal: nil, resizeItems: items)
+  }
+
+  @Test func coincidentResizeEdgesFollowForegroundObjectOrderAndFreeformWins() throws {
+    let model = model(clipBands: [])
+    let coordinator = TranscriptTextView.Coordinator(model: model)
+    let textView = NSTextView(frame: NSRect(x: 0, y: 0, width: 500, height: 300))
+    coordinator.textView = textView
+    let occurrences = [
+      TranscriptWordOccurrence(wordID: 1, transcriptIndex: 0),
+      TranscriptWordOccurrence(wordID: 2, transcriptIndex: 1),
+    ]
+    let suggestion = TranscriptResizeItem(
+      identity: .suggestion(Fixtures.uuid(1)), wordOccurrences: occurrences)
+    let clip = TranscriptResizeItem(
+      identity: .clip(Fixtures.uuid(2)), wordOccurrences: occurrences)
+    applyResizeItems([suggestion, clip], to: coordinator)
+    let zone = try #require(coordinator.resizeZones().first)
+    let point = NSPoint(x: zone.rect.midX, y: zone.rect.midY)
+    expectNoDifference(coordinator.resizeHandle(at: point)?.identity, suggestion.identity)
+    let endZone = try #require(coordinator.resizeZones().first { $0.edge == .end })
+    let bodyPoint = NSPoint(x: (zone.rect.midX + endZone.rect.midX) / 2, y: zone.rect.midY)
+    #expect(coordinator.resizeHandle(at: bodyPoint) == nil)
+
+    applyResizeItems([clip, suggestion], to: coordinator)
+    expectNoDifference(coordinator.resizeHandle(at: point)?.identity, clip.identity)
+
+    let selection = TranscriptResizeItem(identity: .selection, wordOccurrences: occurrences)
+    applyResizeItems([suggestion, clip, selection], to: coordinator)
+    expectNoDifference(coordinator.resizeHandle(at: point)?.identity, .selection)
+  }
+
+  @Test func rebuildingTextMovesCachedResizeEdgesWithoutChangingWordOccurrences() throws {
+    let model = model(clipBands: [])
+    let coordinator = TranscriptTextView.Coordinator(model: model)
+    let textView = NSTextView(frame: NSRect(x: 0, y: 0, width: 500, height: 300))
+    coordinator.textView = textView
+    let item = TranscriptResizeItem(
+      identity: .clip(Fixtures.uuid(1)),
+      wordOccurrences: [TranscriptWordOccurrence(wordID: 1, transcriptIndex: 0)])
+    applyResizeItems([item], to: coordinator)
+    let originalEnd = try #require(coordinator.resizeZones().last).rect.midX
+
+    model.document = TranscriptDocument(words: [word(1, "A significantly longer word")])
+    applyResizeItems([item], to: coordinator)
+    let rebuiltEnd = try #require(coordinator.resizeZones().last).rect.midX
+    #expect(rebuiltEnd > originalEnd)
+  }
+
 }

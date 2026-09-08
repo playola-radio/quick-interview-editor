@@ -18,7 +18,12 @@ struct TranscriptTextView: NSViewRepresentable {
   let scrollTarget: Word.ID?
   let followMode: TranscriptFollowMode
   let reveal: TranscriptReveal?
+  var overlapPresentation: String = ""
   let resizeItems: [TranscriptResizeItem]
+
+  static func dismantleNSView(_ nsView: NSScrollView, coordinator: Coordinator) {
+    coordinator.overlapPresenter.dismantle()
+  }
 
   func makeCoordinator() -> Coordinator { Coordinator(model: model) }
 
@@ -83,10 +88,12 @@ struct TranscriptTextView: NSViewRepresentable {
       text: text, fontSize: fontSize, selected: selected, clipContainers: clipContainers,
       removedWordIDs: removedWordIDs, currentWordID: currentWordID, scrollTarget: scrollTarget,
       followMode: followMode, reveal: reveal, resizeItems: resizeItems)
+    context.coordinator.updateOverlap()
   }
 
   @MainActor
   final class Coordinator: NSObject {
+    let overlapPresenter: TranscriptOverlapPresenter
     var model: TranscriptPageModel
     weak var textView: NSTextView?
     weak var scrollView: NSScrollView?
@@ -117,7 +124,15 @@ struct TranscriptTextView: NSViewRepresentable {
     private var scrollStartedAt = Date()
     private let scrollDuration: TimeInterval = 0.3
 
-    init(model: TranscriptPageModel) { self.model = model }
+    init(model: TranscriptPageModel) {
+      self.model = model
+      overlapPresenter = TranscriptOverlapPresenter(model: model.overlap)
+    }
+
+    func updateOverlap() {
+      guard let textView else { return }
+      overlapPresenter.update(textView: textView, document: model.document)
+    }
 
     // The reveal scroll timer isn't invalidated here (a nonisolated deinit can't touch the
     // non-Sendable Timer): it self-invalidates when the 0.3s animation completes or the scroll
@@ -143,6 +158,7 @@ struct TranscriptTextView: NSViewRepresentable {
       clipContainers: [TranscriptClipContainer], removedWordIDs: Set<Word.ID>
     ) {
       guard let storage = textView?.textStorage else { return }
+      cachedResizeZones = nil
       let attr = NSMutableAttributedString(string: text)
       let full = NSRange(location: 0, length: attr.length)
       attr.addAttribute(.font, value: NSFont.systemFont(ofSize: fontSize), range: full)
@@ -330,14 +346,10 @@ struct TranscriptTextView: NSViewRepresentable {
     /// clip's own colour (white for live clips, dim grey for rejected), else the body grey.
     /// Both the selection diff and the clip diff route foreground through here so neither
     /// stomps the other when a word is both selected and inside a clip.
-    private func foregroundColor(selected: Bool, kind: TranscriptClipKind?) -> NSColor {
+    private func foregroundColor(selected: Bool, container: TranscriptClipContainer?) -> NSColor {
       if selected { return Self.selectedFG }
-      guard let kind else { return Self.normalFG }
-      return Self.nsColor(TranscriptClipStyle.style(for: kind).text)
-    }
-
-    private func clipKind(atLocation location: Int) -> TranscriptClipKind? {
-      lastClipContainers.first { NSLocationInRange(location, $0.range) }?.kind
+      guard let container else { return Self.normalFG }
+      return Self.nsColor(container.style.text)
     }
 
     /// The single authority for both a word's text colour AND its strikethrough. Strikethrough
@@ -345,10 +357,11 @@ struct TranscriptTextView: NSViewRepresentable {
     /// (selection, clip, removed-words) routes through here so none of them can stomp the
     /// others when a word is affected by more than one.
     private func setForeground(storage: NSTextStorage, wordRange: NSRange, wordID: Word.ID) {
-      let kind = clipKind(atLocation: wordRange.location)
+      let container = lastClipContainers.first { NSLocationInRange(wordRange.location, $0.range) }
+      let kind = container?.kind
       storage.addAttribute(
         .foregroundColor,
-        value: foregroundColor(selected: lastSelected.contains(wordID), kind: kind),
+        value: foregroundColor(selected: lastSelected.contains(wordID), container: container),
         range: wordRange)
       let struck = kind == .rejected || lastRemovedWordIDs.contains(wordID)
       if struck {
@@ -371,11 +384,16 @@ struct TranscriptTextView: NSViewRepresentable {
       lastClipContainers = new
       // The clip's own `colorIndex` is the palette variant, so every run of one clip shares a
       // colour while adjacent clips differ.
-      layoutManager.containerRuns = new.map { container in
-        let style = TranscriptClipStyle.style(for: container.kind, variant: container.colorIndex)
+      layoutManager.containerRuns = new.reversed().map { container in
+        let style = container.style
         return ClipContainerRun(
           range: container.range, fill: Self.nsColor(style.fill), ring: Self.nsColor(style.ring),
-          dashed: style.dashed)
+          dashed: style.dashed, ringWidth: style.ringWidth)
+      }
+      layoutManager.containerRuns += new.filter(\.isPreviewed).map { container in
+        ClipContainerRun(
+          range: container.range, fill: .clear, ring: Self.nsColor(container.style.ring),
+          dashed: container.style.dashed, ringWidth: 2)
       }
       storage.beginEditing()
       for container in affected {
@@ -432,12 +450,20 @@ struct TranscriptTextView: NSViewRepresentable {
     // changes after a programmatic auto-scroll, so bounds are NOT a reliable user signal.
     func observeScroll() {
       guard let scrollView else { return }
+      scrollView.contentView.postsBoundsChangedNotifications = true
+      NotificationCenter.default.addObserver(
+        self, selector: #selector(viewportChanged),
+        name: NSView.boundsDidChangeNotification, object: scrollView.contentView)
       NotificationCenter.default.addObserver(
         self, selector: #selector(userDidLiveScroll),
         name: NSScrollView.willStartLiveScrollNotification, object: scrollView)
     }
 
+    @objc private func viewportChanged() { updateOverlap() }
+
     @objc private func userDidLiveScroll() {
+      model.overlap.dismiss()
+      updateOverlap()
       model.transcriptUserScrolled()
     }
 
@@ -453,13 +479,23 @@ struct TranscriptTextView: NSViewRepresentable {
         x: point.x - textView.textContainerInset.width,
         y: point.y - textView.textContainerInset.height)
       let glyph = lm.glyphIndex(for: local, in: container)
+      guard glyph < lm.numberOfGlyphs else { return nil }
       // TextKit clamps out-of-bounds points to the nearest glyph, so a click on blank
       // space (below the last line, above the first, or in the left inset / right of a
       // ragged line's end) would toggle a stray word. Require the point to fall inside the
       // resolved line fragment's drawn text so only genuine word clicks resolve.
       let lineRect = lm.lineFragmentUsedRect(forGlyphAt: glyph, effectiveRange: nil)
       guard lineRect.contains(local) else { return nil }
-      return lm.characterIndexForGlyph(at: glyph)
+      let character = lm.characterIndexForGlyph(at: glyph)
+      let font =
+        textView.textStorage?.attribute(.font, at: character, effectiveRange: nil) as? NSFont
+        ?? .systemFont(ofSize: NSFont.systemFontSize)
+      let fragment = lm.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
+      let baseline = fragment.minY + lm.location(forGlyphAt: glyph).y
+      guard local.y >= baseline - font.ascender - 3,
+        local.y <= baseline - font.descender + 3
+      else { return nil }
+      return character
     }
 
     // MARK: Resize handle geometry (Task 3 — cursor/geometry only, no mutation)
@@ -477,9 +513,10 @@ struct TranscriptTextView: NSViewRepresentable {
       if let cached = cachedResizeZones, cachedResizeZonesWidth == width {
         return cached
       }
+      layoutManager.ensureLayout(for: textContainer)
       let inset = textView.textContainerInset
       var zones: [TranscriptResizeHandleZone] = []
-      for item in resizeItems {
+      for (index, item) in resizeItems.enumerated() {
         guard let first = item.wordOccurrences.first, let last = item.wordOccurrences.last,
           let firstRange = range(for: first), let lastRange = range(for: last)
         else { continue }
@@ -498,7 +535,8 @@ struct TranscriptTextView: NSViewRepresentable {
             width: TranscriptResizeMetrics.grabTolerance * 2, height: rect.height)
           return TranscriptResizeHandleZone(
             identity: item.identity, edge: edge, occurrence: occurrence, rect: grab,
-            priority: item.identity.priority)
+            priority: item.identity == .selection
+              ? resizeItems.count + 1 : resizeItems.count - index)
         }
         if let handleZone = zone(firstRange, .start, first) { zones.append(handleZone) }
         if let handleZone = zone(lastRange, .end, last) { zones.append(handleZone) }
@@ -564,39 +602,88 @@ struct TranscriptTextView: NSViewRepresentable {
 final class HitTestingTextView: NSTextView {
   weak var coordinator: TranscriptTextView.Coordinator?
   private var anchorOffset: Int?
-  private var didDrag = false
+  private var pointer = TranscriptPointerGesture()
+  private var beganWordDrag = false
+
+  override func accessibilityChildren() -> [Any]? {
+    var children = super.accessibilityChildren() ?? []
+    if let button = coordinator?.overlapPresenter.button, !button.isHidden {
+      children.append(button)
+    }
+    return children
+  }
 
   override func mouseDown(with event: NSEvent) {
     endActiveTextEditing()
-    let point = convert(event.locationInWindow, from: nil)
-    anchorOffset = coordinator?.utf16Offset(at: point)
-    didDrag = false
+    anchorOffset = coordinator?.utf16Offset(at: convert(event.locationInWindow, from: nil))
+    pointer.began(at: event.locationInWindow)
+    beganWordDrag = false
   }
 
   override func mouseDragged(with event: NSEvent) {
-    guard let coordinator, let anchor = anchorOffset else { return }
+    _ = pointer.moved(to: event.locationInWindow)
+    guard pointer.isDragging, let coordinator else { return }
     let point = convert(event.locationInWindow, from: nil)
-    guard let offset = coordinator.utf16Offset(at: point) else { return }
-    if !didDrag {
-      didDrag = true
-      coordinator.model.transcriptDragBegan(atUTF16Offset: anchor)
+    let offset = coordinator.utf16Offset(at: point)
+    if !beganWordDrag {
+      beganWordDrag = coordinator.model.transcriptDragBegan(atUTF16Offset: anchorOffset ?? offset)
     }
-    coordinator.model.transcriptDragged(toUTF16Offset: offset)
+    if beganWordDrag, let offset { coordinator.model.transcriptDragged(toUTF16Offset: offset) }
   }
 
   override func mouseUp(with event: NSEvent) {
-    guard let coordinator else { return }
-    if !didDrag, let anchor = anchorOffset {
-      coordinator.model.transcriptClicked(
-        atUTF16Offset: anchor, extending: event.modifierFlags.contains(.shift))
+    defer {
+      anchorOffset = nil
+      beganWordDrag = false
     }
-    coordinator.model.transcriptDragEnded()
+    guard let coordinator else {
+      pointer.cancelled()
+      return
+    }
+    switch pointer.ended(clickCount: event.clickCount) {
+    case .click(let count):
+      coordinator.model.transcriptClicked(
+        atUTF16Offset: anchorOffset, extending: event.modifierFlags.contains(.shift),
+        clickCount: count, timestamp: event.timestamp,
+        doubleClickInterval: NSEvent.doubleClickInterval)
+    case .dragEnded:
+      coordinator.model.transcriptDragEnded()
+    case .none: break
+    }
+  }
+
+  override func viewDidMoveToWindow() {
+    super.viewDidMoveToWindow()
+    NotificationCenter.default.removeObserver(
+      self, name: NSWindow.didResignKeyNotification, object: nil)
+    if let window {
+      NotificationCenter.default.addObserver(
+        self, selector: #selector(windowResignedKey),
+        name: NSWindow.didResignKeyNotification, object: window)
+    } else {
+      cancelPointerTracking()
+    }
+  }
+
+  deinit { NotificationCenter.default.removeObserver(self) }
+
+  @objc private func windowResignedKey() { cancelPointerTracking() }
+
+  override func cancelOperation(_ sender: Any?) {
+    cancelPointerTracking()
+  }
+
+  private func cancelPointerTracking() {
+    pointer.cancelled()
     anchorOffset = nil
-    didDrag = false
+    beganWordDrag = false
+    coordinator?.model.clickCapture = nil
   }
 
   override func scrollWheel(with event: NSEvent) {
     coordinator?.model.transcriptUserScrolled()
+    coordinator?.model.overlap.dismiss()
     super.scrollWheel(with: event)
+    coordinator?.updateOverlap()
   }
 }

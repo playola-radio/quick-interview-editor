@@ -82,7 +82,9 @@ final class TranscriptResizeHandleOverlayView: NSView {
       let offset = coordinator.utf16Offset(at: down)
     {
       coordinator.model.transcriptClicked(
-        atUTF16Offset: offset, extending: event.modifierFlags.contains(.shift))
+        atUTF16Offset: offset, extending: event.modifierFlags.contains(.shift),
+        clickCount: event.clickCount, timestamp: event.timestamp,
+        doubleClickInterval: NSEvent.doubleClickInterval)
     }
     activeHandle = nil
     downPoint = nil

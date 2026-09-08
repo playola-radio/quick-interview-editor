@@ -38,8 +38,9 @@ struct EditorRevealTests {
 
   @Test func clickingASuggestionSelectsItsWordsScrollsAndZooms() {
     let model = editor()
-    let suggestion = Fixtures.cutSuggestion(id: Fixtures.uuid(1), wordIDs: [1, 3])
+    var suggestion = Fixtures.cutSuggestion(id: Fixtures.uuid(1), wordIDs: [1, 3])
 
+    suggestion.status = .rejected
     model.cutSuggestionSelected(suggestion)
 
     expectNoDifference(model.selectedWordIDs, [1, 2, 3])
@@ -87,8 +88,9 @@ struct EditorRevealTests {
   @Test func clickingASuggestionResolvesEndpointsByPositionNotArrayOrder() {
     let model = editor()
     // wordIDs given out of transcript order — the span must still be word 1 … word 3.
-    let suggestion = Fixtures.cutSuggestion(id: Fixtures.uuid(1), wordIDs: [3, 1])
+    var suggestion = Fixtures.cutSuggestion(id: Fixtures.uuid(1), wordIDs: [3, 1])
 
+    suggestion.status = .rejected
     model.cutSuggestionSelected(suggestion)
 
     expectNoDifference(model.selectedWordIDs, [1, 2, 3])
@@ -98,8 +100,9 @@ struct EditorRevealTests {
 
   @Test func clickingASuggestionWithNoWordsIsANoOp() {
     let model = editor()
-    let suggestion = Fixtures.cutSuggestion(id: Fixtures.uuid(1), wordIDs: [])
+    var suggestion = Fixtures.cutSuggestion(id: Fixtures.uuid(1), wordIDs: [])
 
+    suggestion.status = .rejected
     model.cutSuggestionSelected(suggestion)
 
     expectNoDifference(model.selectedWordIDs, [])
@@ -119,7 +122,8 @@ struct EditorRevealTests {
 
     model.sliceRevealTapped(id)
 
-    expectNoDifference(model.selectedWordIDs, [2, 3])
+    expectNoDifference(model.selection, .object(.clip(id)))
+    expectNoDifference(model.selectedTranscriptObject?.wordIDs, [2, 3])
     expectNoDifference(model.transcript.reveal, TranscriptReveal(wordID: 2, token: 1))
     // range 150_000..<250_000 (count 100_000), padded ×1.2 over 1000 px ⇒ 120 spp, centered.
     expectNoDifference(model.editedWaveform.samplesPerPixel, 120)

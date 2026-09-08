@@ -13,11 +13,29 @@ struct TranscriptResizeSuggestionTests {
       sourceURL: URL(fileURLWithPath: "/clip.m4a"),
       canonicalAudioURL: Fixtures.canonicalAudioURL,
       editPlan: Fixtures.editPlan(),
+      sourceFingerprint: "resize-source",
       initialDocument: EditorDocumentState(cutSuggestions: suggestions))
   }
 
+  private func candidate(
+    id: UUID, wordIDs: [Word.ID], status: CutSuggestion.Status = .pending
+  ) -> CutSuggestion {
+    let plan = Fixtures.editPlan()
+    let words = plan.words.filter { wordIDs.contains($0.id) }
+    let start = words.compactMap(\.startSample).min()!
+    let end = words.compactMap(\.endSample).max()!
+    let sampleRate = Double(plan.source.sampleRate)
+    var candidate = Fixtures.cutSuggestion(
+      id: id, wordIDs: wordIDs, startSample: start, endSample: end,
+      startSec: Double(start) / sampleRate, endSec: Double(end) / sampleRate,
+      durationSec: Double(end - start) / sampleRate, status: status)
+    candidate.provenance.sourceFingerprint = "resize-source"
+    candidate.provenance.transcriptHash = plan.transcriptHash
+    return candidate
+  }
+
   @Test func lockedSuggestionsCannotBeginOrCommitResize() {
-    let suggestion = Fixtures.cutSuggestion(id: Fixtures.uuid(1), wordIDs: [1, 2])
+    let suggestion = candidate(id: Fixtures.uuid(1), wordIDs: [1, 2])
     let model = editor(suggestions: [suggestion])
     model.cutSuggestions.run.ownershipBlocked = true
     expectNoDifference(model.transcriptResizeBegan(.suggestion(suggestion.id), .end), false)
@@ -30,7 +48,7 @@ struct TranscriptResizeSuggestionTests {
   }
 
   @Test func filteredSuggestionsHaveNoResizeHandles() {
-    let suggestion = Fixtures.cutSuggestion(id: Fixtures.uuid(1), wordIDs: [1, 2])
+    let suggestion = candidate(id: Fixtures.uuid(1), wordIDs: [1, 2])
     let model = editor(suggestions: [suggestion])
     model.cutSuggestions.selectedTypeIDs = []
     expectNoDifference(model.transcriptResizeItems, [])
@@ -39,7 +57,7 @@ struct TranscriptResizeSuggestionTests {
 
   @Test func suggestionResizeCommitsOnceAndDerivesSamplesFromWords() async {
     let suggestionID = Fixtures.uuid(1)
-    let suggestion = Fixtures.cutSuggestion(
+    let suggestion = candidate(
       id: suggestionID, wordIDs: [1, 2], status: .pending)
     let model = editor(suggestions: [suggestion])
 
@@ -64,7 +82,7 @@ struct TranscriptResizeSuggestionTests {
 
   @Test func acceptedSuggestionIsNotResizable() {
     let suggestionID = Fixtures.uuid(1)
-    let suggestion = Fixtures.cutSuggestion(
+    let suggestion = candidate(
       id: suggestionID, wordIDs: [1, 2], status: .accepted)
     let model = editor(suggestions: [suggestion])
 
@@ -75,7 +93,7 @@ struct TranscriptResizeSuggestionTests {
 
   @Test func rejectedSuggestionIsNotResizable() {
     let suggestionID = Fixtures.uuid(1)
-    let suggestion = Fixtures.cutSuggestion(
+    let suggestion = candidate(
       id: suggestionID, wordIDs: [1, 2], status: .rejected)
     let model = editor(suggestions: [suggestion])
 
@@ -85,19 +103,17 @@ struct TranscriptResizeSuggestionTests {
   }
 
   private func slice(_ id: UUID, wordIDs: [Word.ID]) -> Slice {
-    Slice(
-      id: id, name: "A story", startSample: 0, endSample: 100,
+    let words = Fixtures.editPlan().words.filter { wordIDs.contains($0.id) }
+    return Slice(
+      id: id, name: "A story", startSample: words.compactMap(\.startSample).min()!,
+      endSample: words.compactMap(\.endSample).max()!,
       wordIDs: wordIDs, snippet: "a story")
   }
 
-  /// Regression for Codex challenge P1#3: `transcriptResizeItems` must match `clipBands`'
-  /// visibility rules. A suggestion fully covered by a clip draws no band, so it must publish no
-  /// resize handles either — otherwise the invisible suggestion still steals clicks. A
-  /// partially-covered suggestion in the same setup survives with its FULL (unfiltered) wordIDs.
-  @Test func suggestionFullyCoveredByClipHasNoResizeItem() {
-    let fullyCovered = Fixtures.cutSuggestion(
+  @Test func overlappingSuggestionsKeepFullResizeItemsAndSelectedSuggestionIsForeground() {
+    let fullyCovered = candidate(
       id: Fixtures.uuid(1), wordIDs: [1, 2], status: .pending)
-    let partiallyCovered = Fixtures.cutSuggestion(
+    let partiallyCovered = candidate(
       id: Fixtures.uuid(2), wordIDs: [3, 4], status: .pending)
     let model = editor(suggestions: [fullyCovered, partiallyCovered])
     model.slices = [
@@ -109,8 +125,17 @@ struct TranscriptResizeSuggestionTests {
       if case .suggestion = $0.identity { return true }
       return false
     }
-    expectNoDifference(suggestionItems.map(\.identity), [.suggestion(Fixtures.uuid(2))])
-    expectNoDifference(suggestionItems.first?.wordIDs, [3, 4])
+    expectNoDifference(
+      suggestionItems.map(\.identity),
+      [.suggestion(fullyCovered.id), .suggestion(partiallyCovered.id)])
+    expectNoDifference(suggestionItems.map(\.wordIDs), [[1, 2], [3, 4]])
+    model.selectTranscriptObject(.suggestion(fullyCovered.id))
+    expectNoDifference(model.transcriptResizeItems.first?.identity, .suggestion(fullyCovered.id))
+    expectNoDifference(model.transcriptResizeBegan(.suggestion(fullyCovered.id), .end), true)
+    model.transcriptResizeDragged(toWord: 3)
+    expectNoDifference(
+      model.clipBands.first { $0.id == fullyCovered.id }?.wordIDs, [1, 2, 3])
+    expectNoDifference(model.documentCutSuggestions[id: fullyCovered.id]?.wordIDs, [1, 2])
   }
 
   /// Regression for Codex challenge P1#3: toggling the Suggestions panel's show/hide bands off
@@ -118,7 +143,7 @@ struct TranscriptResizeSuggestionTests {
   /// them when toggled back on.
   @Test func suggestionResizeItemsHiddenWhenBandsToggledOff() {
     let suggestionID = Fixtures.uuid(1)
-    let suggestion = Fixtures.cutSuggestion(id: suggestionID, wordIDs: [1, 2], status: .pending)
+    let suggestion = candidate(id: suggestionID, wordIDs: [1, 2], status: .pending)
     let model = editor(suggestions: [suggestion])
     expectNoDifference(
       model.transcriptResizeItems.map(\.identity), [.suggestion(suggestionID)])
@@ -133,7 +158,7 @@ struct TranscriptResizeSuggestionTests {
 
   @Test func suggestionResizeBackToOriginalRecordsNoUndo() {
     let suggestionID = Fixtures.uuid(1)
-    let suggestion = Fixtures.cutSuggestion(
+    let suggestion = candidate(
       id: suggestionID, wordIDs: [1, 2], status: .pending)
     let model = editor(suggestions: [suggestion])
 
@@ -142,7 +167,7 @@ struct TranscriptResizeSuggestionTests {
     model.transcriptResizeDragged(toWord: 4)
     model.transcriptResizeEnded()
     let before = model.documentCutSuggestions[id: suggestionID]
-    let undoCountBefore = model.documentUndo.undo.count
+    let undoCountBefore = model.history.undo.count
 
     // Dragging back to the same drafted words nets no change, so `ended` must be a no-op.
     model.transcriptResizeBegan(.suggestion(suggestionID), .end)
@@ -150,6 +175,6 @@ struct TranscriptResizeSuggestionTests {
     model.transcriptResizeEnded()
 
     expectNoDifference(model.documentCutSuggestions[id: suggestionID], before)
-    expectNoDifference(model.documentUndo.undo.count, undoCountBefore)
+    expectNoDifference(model.history.undo.count, undoCountBefore)
   }
 }

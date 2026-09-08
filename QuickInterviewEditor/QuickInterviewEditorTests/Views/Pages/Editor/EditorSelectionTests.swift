@@ -266,24 +266,14 @@ struct EditorSelectionTests {
     #expect(model.audioSelection?.upperBound == 119_202)
   }
 
-  /// An edge edit (nudge or drag) writes `audioSelection` directly, bypassing `selectSourceRange`'s
-  /// `.external` transcript-anchor invalidation. It must still drop the transcript's toggle anchor, or
-  /// re-clicking the originally-selected word hits the toggle branch (anchor == focus == X) and clears
-  /// the edited selection instead of reselecting X. Regression for the edge-edit sibling of the
-  /// "stale transcript toggle state" finding.
-  @Test func edgeEditInvalidatesTranscriptToggleAnchor() {
+  /// Clicking within an adjusted freeform highlight preserves its exact audio edges.
+  @Test func edgeEditedHighlightSurvivesClickWithinIt() {
     let model = editor()
     model.transcript.wordClicked(2, extending: false)
-    let word2 = model.editPlan.words.first { $0.id == 2 }!
-    expectNoDifference(model.audioSelection, word2.startSample!..<word2.endSample!)
-
-    // Trim the start edge: the freeform selection no longer equals word 2's exact bounds.
     model.selectionNudged(.start, byMs: -10)
-    #expect(model.audioSelection != word2.startSample!..<word2.endSample!)
-
-    // Re-clicking word 2 must reselect it (anchor was dropped), not toggle the edited selection off.
+    let adjusted = model.selection
     model.transcript.wordClicked(2, extending: false)
-    expectNoDifference(model.audioSelection, word2.startSample!..<word2.endSample!)
+    expectNoDifference(model.selection, adjusted)
   }
 
   /// A slice/suggestion reveal *replaces* the selection, so it must repin `selectionAnchorSample` to
@@ -302,8 +292,9 @@ struct EditorSelectionTests {
 
     // Revealing a later suggestion (words 4..5) replaces the selection; the extend anchor must move to
     // the revealed range's start, not linger on word 2 (which a later Shift-extend would resurrect).
-    model.cutSuggestionSelected(
-      Fixtures.cutSuggestion(id: Fixtures.uuid(1), wordIDs: [4, 5]))
+    var historical = Fixtures.cutSuggestion(id: Fixtures.uuid(1), wordIDs: [4, 5])
+    historical.status = .rejected
+    model.cutSuggestionSelected(historical)
     expectNoDifference(model.selectionAnchorSample, word4.startSample!)
   }
 
@@ -314,6 +305,7 @@ struct EditorSelectionTests {
   @Test func selectSourceRangeSnapsExtendAnchorOntoStoredBoundary() {
     let model = editor()
     let duration = model.editPlan.source.durationSamples
+    model.audioSelection = (duration - 10_000)..<(duration + 50_000)
     model.selectionAnchorSample = duration + 50_000
     model.selectSourceRange((duration - 10_000)..<(duration + 50_000), snapPlayhead: false)
     expectNoDifference(model.audioSelection, (duration - 10_000)..<duration)

@@ -13,6 +13,7 @@ enum EditorKey {
   case speedUp
   case speedDown
   case removeSection
+  case deleteSelection
   /// Nudges a pending removal's cut points by `FineTuneModel.nudgeMs` before commit — the
   /// forced-alignment word boundaries the removal starts from can blur ~10-20ms into a
   /// neighbor's tail/onset (Task 9).
@@ -80,6 +81,9 @@ final class EditorModel: ViewModel {
   /// The slice-detail edit modal, presented when non-nil. A separate, scoped model — distinct
   /// from `fineTune`, which drives the docked pane — so the two can't fight over one session.
   var editSlice: EditSliceModel?
+  var clipEditorMessage: String?
+  @ObservationIgnored var committingDraftID: UUID?
+  @ObservationIgnored @Dependency(\.uuid) var draftUUID
 
   init(
     sourceURL: URL, canonicalAudioURL: URL, editPlan: EditPlan, sourceFingerprint: String? = nil,
@@ -140,6 +144,7 @@ final class EditorModel: ViewModel {
     // and hands them here, and THIS model writes the authoritative freeform `audioSelection`. Wired
     // on the model (not a view `.onChange`) so headless model tests apply intents without a view.
     // One-directional — the model never writes the transcript's selection back through this.
+    wireTranscriptInteractions()
     transcript.onSelectionIntent = { [weak self] intent in
       guard let self else { return }
       switch intent {
@@ -233,10 +238,14 @@ final class EditorModel: ViewModel {
   enum AuditionKey: Equatable { case cutIn, cutOut, space }
 
   // MARK: - Properties
-  var slices: IdentifiedArrayOf<Slice> = []
+  var slices: IdentifiedArrayOf<Slice> = [] {
+    didSet { transcriptObjectCache = nil }
+  }
+  @ObservationIgnored var transcriptObjectCache: [TranscriptObject]?
   /// The slice the slices list should scroll into view. Set to a freshly created clip's id so a
   /// new clip appended below the fold becomes visible; the list observes this and scrolls to it.
   var sliceScrollTarget: Slice.ID?
+  var sidebarReveal: SidebarReveal?
   /// Removed source ranges (with their crossfades) that collapse the timeline. Mutated
   /// only through `mutateDocument`, alongside `slices`, so the two move together on undo.
   var timelineRemovals: IdentifiedArrayOf<TimelineRemoval> = []
@@ -244,7 +253,9 @@ final class EditorModel: ViewModel {
   /// `cutSuggestions` page model reads (via its injected accessor) and displays. Mutated
   /// only through `mutateDocument` (accept/reject undoably; the background pass with
   /// `recordUndo: false`), so it moves with the rest of the document on undo.
-  var documentCutSuggestions: IdentifiedArrayOf<CutSuggestion> = []
+  var documentCutSuggestions: IdentifiedArrayOf<CutSuggestion> = [] {
+    didSet { transcriptObjectCache = nil }
+  }
   var interviewArtist: String?
   var suggestionStarts: SuggestionStarts = SuggestionStarts()
   var suggestionBatch: SuggestionBatch?
@@ -258,10 +269,9 @@ final class EditorModel: ViewModel {
   /// Paragraph/speaker spec: `SPEAKER_00` → "Host" display-name overrides. Part of the
   /// document; unused by the editor UI yet.
   var speakerDisplayNames: [String: String] = [:]
-  /// Undo/redo history over the document (`slices` + `timelineRemovals`) — never
-  /// selection, zoom, playback, or export phase. Every document mutation routes
-  /// through `mutateDocument`, which records here.
-  var documentUndo = UndoStack<EditorDocumentState>()
+  /// Chronological document edits and explicit selection clears. Navigation itself
+  /// is not recorded; deletion may pair its document change with deselection.
+  var history = EditorHistory<EditorDocumentState, EditorSelection>()
   private var cutSuggestionTitleEdit: (id: CutSuggestion.ID, before: EditorDocumentState)?
   /// Fired after every committed document change (mutation, undo, redo) with the new
   /// document — the single dirtiness signal. The tab model wires this to persistence, so
@@ -395,7 +405,7 @@ final class EditorModel: ViewModel {
   var sliceFilter: SliceFilter = .all
   /// The number the next auto-named "Slice N" gets. Seeded in `init` from the loaded slices (so a
   /// rebuilt editor keeps counting past existing clips) and bumped as clips are added in-session.
-  private var nextSliceNumber = 1
+  var nextSliceNumber = 1
   /// Names of slices skipped by the most recent "Export all" because their entire audio
   /// fell inside a removed section — surfaced by `exportSkippedRemovedWarning`.
   private var lastExportSkippedRemovedNames: [String] = []
@@ -523,17 +533,16 @@ final class EditorModel: ViewModel {
     if case .free = transportContext { return true }
     // The Edit Slice modal previews the collapsed (removal-aware) audio, so it must reset like a
     // saved-slice session; its slice is the open sheet's, since `.sliceEdit` carries no id.
-    let contextSliceID: Slice.ID?
-    if case .sliceEdit = transportContext {
-      contextSliceID = editSlice?.sliceID
+    let range: Range<Int>
+    if case .sliceEdit = transportContext, let draftRange = editSlice?.fineTune.draftRange {
+      range = draftRange
+    } else if let id = transportContext.sliceID, let slice = slices[id: id] {
+      range = slice.startSample..<slice.endSample
     } else {
-      contextSliceID = transportContext.sliceID
-    }
-    guard let sliceID = contextSliceID, let slice = slices[id: sliceID] else {
       return false
     }
     let newLocal = SliceRenderPlanBuilder.localTimeline(
-      sliceRange: slice.startSample..<slice.endSample, removals: Array(timelineRemovals))
+      sliceRange: range, removals: Array(timelineRemovals))
     guard let scheduled = slicePlaybackConversion?.localTimeline else {
       return !newLocal.removals.isEmpty
     }
@@ -543,6 +552,7 @@ final class EditorModel: ViewModel {
   // MARK: - Display Text
   let markAsClipLabel = "Mark as Clip"
   let clearButtonLabel = "Clear"
+  let removeSectionLabel = "Remove Section"
   let scrollToCurrentWordLabel = "Scroll to current word"
   let emptyStateMessage = "Select words in the transcript, then Mark as Clip."
   let playLabel = "Play"
@@ -558,8 +568,16 @@ final class EditorModel: ViewModel {
   let canonicalMissingMessage =
     "The working audio for this file is no longer available — it can be cleared by an app "
     + "update or another window. Re-import the file to export again."
-  let undoLabel = "Undo"
-  let redoLabel = "Redo"
+  var undoLabel: String {
+    if editSlice?.target.isDraft == true { return "Undo Cut Point Edit" }
+    guard let label = history.undo.last?.label, !label.isEmpty else { return "Undo" }
+    return "Undo \(label)"
+  }
+  var redoLabel: String {
+    if editSlice?.target.isDraft == true { return "Redo Cut Point Edit" }
+    guard let label = history.redo.last?.label, !label.isEmpty else { return "Redo" }
+    return "Redo \(label)"
+  }
   let removedBadgeLabel = "Removed"
   let removedBadgeHelp =
     "This clip's audio is entirely inside a removed section — there is nothing to export."
@@ -590,23 +608,59 @@ final class EditorModel: ViewModel {
   var activeEditingRange: Range<Int>? { fineTune.draftRange ?? activeOrSelectedRange }
 
   // MARK: - Selection (source samples — the single source of truth)
-  /// The freeform selected range in SOURCE samples. Plain @Observable — not @Shared, not in the
-  /// undo stack. During migration it is SEEDED from the transcript selection; later tasks flip the
-  /// writers so this becomes authoritative and the transcript derives from it.
-  var audioSelection: Range<Int>?
-  /// The fixed edge held during a marquee / shift-extend (set in Task 6).
-  var selectionAnchorSample: Int?
+  var selection: EditorSelection = .none {
+    didSet {
+      if selection != oldValue {
+        selectionPreservesTransport = false
+        transcript.clickCapture = nil
+        transcript.overlap.dismiss()
+        cutSuggestions.selectedObjectID = selection.objectID
+        transcript.overlap.selectedID = selection.objectID
+        reconcileTranscriptOverlap()
+      }
+    }
+  }
+  /// Explicit clears and history restore selection without changing transport.
+  var selectionPreservesTransport = false
+
+  var audioSelection: Range<Int>? {
+    get { selection.freeformRange ?? selectedTranscriptObject?.range }
+    set {
+      guard let range = newValue, !range.isEmpty else {
+        if selectedSeamID == nil { selection = .none }
+        return
+      }
+      selection = .range(range, anchor: selectionAnchorSample ?? range.lowerBound)
+    }
+  }
+
+  var selectionAnchorSample: Int? {
+    get {
+      if case .range(_, let anchor) = selection { return anchor }
+      return selectedTranscriptObject?.range.lowerBound
+    }
+    set {
+      guard case .range(let range, _) = selection else { return }
+      selection = .range(range, anchor: newValue ?? range.lowerBound)
+    }
+  }
   /// The edge currently being drag-edited (set in Task 8).
   var selectionEditingEdge: SelectionEdge?
 
   // MARK: - Seam selection
-  /// The crossfade seam currently selected, identified by its removal's id (a `TimelineSeam`'s id
-  /// IS its `TimelineRemoval`'s id). A peer of `audioSelection` and MUTUALLY EXCLUSIVE with it
-  /// (decision 6): selecting a seam clears the freeform selection, and any freeform-selection write
-  /// clears the seam. Plain @Observable transient view state — like `audioSelection`, it is not part
-  /// of the undo-tracked document. Kept valid by `syncEditedTimeline`, which drops it when the
-  /// removal it points at no longer exists (restore, undo, redo).
-  var selectedSeamID: TimelineRemoval.ID?
+  var selectedSeamID: TimelineRemoval.ID? {
+    get {
+      guard case .seam(let id) = selection else { return nil }
+      return id
+    }
+    set {
+      if let newValue {
+        selection = .seam(newValue)
+      } else if case .seam = selection {
+        selection = .none
+      }
+    }
+  }
 
   /// Selects the crossfade seam for removal `id`, mutually exclusive with the range selection:
   /// clears any freeform selection first, then records the seam. A no-op if that removal doesn't
@@ -651,9 +705,9 @@ final class EditorModel: ViewModel {
   /// ordered by transcript position) becomes an exact source range and seeds the freeform selection.
   func selectWords(anchorID: Word.ID, focusID: Word.ID) {
     guard let range = sourceRange(coveringWords: anchorID, focusID) else { return }
-    selectionAnchorSample =
-      anchorHoldSample(anchorID: anchorID, focusID: focusID) ?? range.lowerBound
-    selectSourceRange(range, snapPlayhead: true, origin: .transcript)
+    selectSourceRange(
+      range, snapPlayhead: true, origin: .transcript,
+      anchor: anchorHoldSample(anchorID: anchorID, focusID: focusID) ?? range.lowerBound)
   }
 
   /// The anchor word's far-from-focus edge, so a later Shift-extend pivots from where the drag began
@@ -678,13 +732,13 @@ final class EditorModel: ViewModel {
         min(anchor, wordRange.lowerBound)..<max(anchor, wordRange.upperBound), snapPlayhead: false,
         origin: .transcript)
     } else if let wordRange = sourceRange(ofWord: id) {
-      selectionAnchorSample = wordRange.lowerBound
-      selectSourceRange(wordRange, snapPlayhead: true, origin: .transcript)
+      selectSourceRange(
+        wordRange, snapPlayhead: true, origin: .transcript, anchor: wordRange.lowerBound)
     }
   }
 
   /// The exact source range of one word, or nil if it has no monotonic sample bounds.
-  private func sourceRange(ofWord id: Word.ID) -> Range<Int>? {
+  func sourceRange(ofWord id: Word.ID) -> Range<Int>? {
     guard let word = editPlan.words.first(where: { $0.id == id }),
       let start = word.startSample, let end = word.endSample, start < end
     else { return nil }
@@ -704,7 +758,7 @@ final class EditorModel: ViewModel {
   /// selection is a new-slice intent that retargets the pane), else the active slice.
   /// `sliceSelected` clears the selection so an edited slice cleanly becomes the driver.
   var fineTuneTarget: FineTuneModel.Target? {
-    if selectedSourceRange != nil { return .pendingSelection }
+    if selection.freeformRange != nil { return .pendingSelection }
     if let activeSliceID { return .slice(activeSliceID) }
     return nil
   }
@@ -736,7 +790,7 @@ final class EditorModel: ViewModel {
   var fineTuneSessionKey: FineTuneSessionKey {
     FineTuneSessionKey(
       activeSliceID: activeSliceID, activeSliceRange: activeSliceRange,
-      selection: selectedSourceRange)
+      selection: selection.freeformRange)
   }
 
   /// True only while an EXISTING slice has an unsaved cut edit — the user must Save or Cancel
@@ -789,36 +843,7 @@ final class EditorModel: ViewModel {
   /// (non-word-aligned) selection highlights the partially-covered words at its edges too. Empty
   /// when there's no selection.
   var selectedWordIDs: Set<Word.ID> {
-    audioSelection.map { Set(wordIDs(anyOverlap: $0, words: editPlan.words)) } ?? []
-  }
-
-  // MARK: - Clip containers (transcript)
-  /// The clip bands the transcript draws as tinted containers: real slices are `approved`
-  /// (green); still-pending cut suggestions are `suggested` (amber). Derived read-only from
-  /// the editor's own state and pushed into `transcript` by the view; the transcript stays
-  /// layout-local and only renders what it's handed.
-  ///
-  /// Precedence: an actual slice wins over a suggestion on any shared word, so a pending
-  /// suggestion is drawn only over the words no slice already claims (green over amber). A
-  /// suggestion fully covered by slices contributes no band.
-  var clipBands: [TranscriptClipBand] {
-    let approved = slices.map { slice in
-      TranscriptClipBand(
-        id: slice.id, wordIDs: draftedWordIDs(forClip: slice.id) ?? slice.wordIDs,
-        kind: .approved)
-    }
-    // The Suggestions panel's show/hide toggle mutes the suggestion overlay without touching the
-    // ranked list: when it's off, no suggested bands are drawn (accepted slices stay put).
-    guard cutSuggestions.showsSuggestionBands else { return approved }
-    let claimed = Set(approved.flatMap(\.wordIDs))
-    let suggested = cutSuggestions.pendingSuggestions.compactMap {
-      suggestion -> TranscriptClipBand? in
-      let words = draftedWordIDs(forSuggestion: suggestion.id) ?? suggestion.wordIDs
-      let unclaimed = words.filter { !claimed.contains($0) }
-      guard !unclaimed.isEmpty else { return nil }
-      return TranscriptClipBand(id: suggestion.id, wordIDs: unclaimed, kind: .suggested)
-    }
-    return approved + suggested
+    selection.freeformRange.map { Set(wordIDs(anyOverlap: $0, words: editPlan.words)) } ?? []
   }
 
   /// Waveform render data, geometry delegated to the edited adapter (the view reads these; it
@@ -834,11 +859,8 @@ final class EditorModel: ViewModel {
   var playheadX: CGFloat? { editedWaveform.playheadX(forEdited: playheadEditedSample) }
 
   // MARK: - Transcript resize items
-  /// Semantic (non-occluded) resizable spans for the transcript overlay: the selection (if any)
-  /// first, then one item per clip, then one per pending suggestion. Suggestion items carry
-  /// their FULL word IDs — never the `clipBands` version with clip-claimed words filtered out —
-  /// so a suggestion's resize handles always reflect its own semantic range. Draft-aware
-  /// substitution is added in the clip/suggestion resize tasks.
+  /// Resize handles follow the same full geometry and foreground ordering as the text bands.
+  /// Freeform selection edges take priority, followed by the selected object.
   var transcriptResizeItems: [TranscriptResizeItem] {
     // Index every transcript position of each word ID ONCE, then order each item by gathering its
     // IDs' positions + sort — O(n) once plus O(m log m) per item — instead of a full O(n)
@@ -858,37 +880,18 @@ final class EditorModel: ViewModel {
     if !selectedWordIDs.isEmpty {
       items.append(.init(identity: .selection, wordOccurrences: ordered(selectedWordIDs)))
     }
-    for slice in slices {
-      items.append(.init(identity: .clip(slice.id), wordOccurrences: ordered(slice.wordIDs)))
-    }
-    if cutSuggestions.showsSuggestionBands {
-      let clipClaimed = Set(slices.flatMap { draftedWordIDs(forClip: $0.id) ?? $0.wordIDs })
-      for suggestion in cutSuggestions.pendingSuggestions {
-        let words = ordered(suggestion.wordIDs)
-        guard words.contains(where: { !clipClaimed.contains($0.wordID) }) else { continue }
-        items.append(.init(identity: .suggestion(suggestion.id), wordOccurrences: words))
+    for object in visibleTranscriptObjects {
+      let identity: TranscriptResizeItemIdentity
+      switch object.id {
+      case .clip(let id): identity = .clip(id)
+      case .suggestion(let id): identity = .suggestion(id)
       }
+      items.append(.init(identity: identity, wordOccurrences: ordered(object.wordIDs)))
     }
     return applyingResizeDraft(to: items)
   }
 
   private func transcriptOrder() -> [Word.ID] { editPlan.words.map(\.id) }
-
-  /// The in-flight drafted word run for clip `id`, or nil when no `.clip` resize of that clip is
-  /// active. Substituted into the clip's approved band (before `claimed` is computed) so both the
-  /// drawn container AND the occlusion of any overlapping suggestions preview the drag.
-  private func draftedWordIDs(forClip id: Slice.ID) -> [Word.ID]? {
-    guard let draft = transcriptResizeDraft, draft.identity == .clip(id) else { return nil }
-    return draft.draftedWordIDs
-  }
-
-  /// The in-flight drafted word run for suggestion `id`, or nil when no `.suggestion` resize of
-  /// that suggestion is active. Mirrors `draftedWordIDs(forClip:)` so a dragged suggestion's amber
-  /// band moves live, before `claimed` is computed.
-  private func draftedWordIDs(forSuggestion id: CutSuggestion.ID) -> [Word.ID]? {
-    guard let draft = transcriptResizeDraft, draft.identity == .suggestion(id) else { return nil }
-    return draft.draftedWordIDs
-  }
 
   private func sourceRange(coveringWordIDs ids: [Word.ID]) -> Range<Int>? {
     let set = Set(ids)
@@ -1172,14 +1175,26 @@ final class EditorModel: ViewModel {
   /// silence-only selection (a marquee over a gap that overlaps no word) also disables it: it would
   /// derive no word IDs, so `addSliceTapped()` would no-op, leaving the button enabled but inert.
   var canAddSlice: Bool {
-    guard let range = selectedSourceRange else { return false }
+    guard let range = selection.freeformRange else { return false }
     return !wordIDs(anyOverlap: range, words: editPlan.words).isEmpty
       && !fineTune.hasUnsavedChange
   }
-  /// Clear is offered whenever a freeform selection exists — including a marquee/edge-drag one that
-  /// never touched the transcript. `audioSelection` is the source of truth; reading it here (not
-  /// `transcript.hasSelection`) is what keeps the bar live for waveform-created selections.
-  var canClearSelection: Bool { audioSelection != nil }
+  /// Clear is available for every main-editor selection, including objects and seams.
+  var canClearSelection: Bool { selection != .none }
+  var canEditSelectionEdges: Bool { selection.freeformRange != nil }
+  var shouldShowRemoveSectionControl: Bool { selection.freeformRange != nil }
+  var shouldShowSelectedClipControls: Bool {
+    if case .object(.clip) = selection { return true }
+    return false
+  }
+  var shouldShowSelectedSuggestionControls: Bool {
+    if case .object(.suggestion) = selection { return true }
+    return false
+  }
+  var selectedSuggestionActionsDisabled: Bool {
+    isExporting || cutSuggestions.candidateActionsDisabled
+  }
+
   /// The bar's word-count readout, derived from the freeform selection so it stays accurate for
   /// every selection path. Counts words the range overlaps (the same set the transcript highlights);
   /// a silence-only selection reads "0 words selected".
@@ -1195,16 +1210,20 @@ final class EditorModel: ViewModel {
   // export is the one being written to disk, and rewinding it mid-run would leave the
   // finished AIFFs stale relative to what the user sees.
   var canUndo: Bool {
-    documentUndo.canUndo && cutSuggestionTitleEdit == nil && !hasUncommittedSliceEdit
+    if let editing = editSlice, editing.target.isDraft { return editing.canUndoDraft }
+    return history.canUndo && cutSuggestionTitleEdit == nil && !hasUncommittedSliceEdit
       && !isExporting
       && (!cutSuggestions.candidateActionsDisabled
-        || documentUndo.undo.last?.cutSuggestions == documentCutSuggestions)
+        || (history.undo.last?.document?.before.cutSuggestions ?? documentCutSuggestions)
+          == documentCutSuggestions)
   }
   var canRedo: Bool {
-    documentUndo.canRedo && cutSuggestionTitleEdit == nil && !hasUncommittedSliceEdit
+    if let editing = editSlice, editing.target.isDraft { return editing.canRedoDraft }
+    return history.canRedo && cutSuggestionTitleEdit == nil && !hasUncommittedSliceEdit
       && !isExporting
       && (!cutSuggestions.candidateActionsDisabled
-        || documentUndo.redo.last?.cutSuggestions == documentCutSuggestions)
+        || (history.redo.last?.document?.after.cutSuggestions ?? documentCutSuggestions)
+          == documentCutSuggestions)
   }
 
   var sliceCountLabel: String {
@@ -1298,7 +1317,7 @@ final class EditorModel: ViewModel {
           // Play shortcut now (no per-slice Stop — the global transport owns Pause/Stop, ruling F).
           isPlaying: transportContext.sliceID == slice.id,
           playButtonLabel: playLabel,
-          isActive: activeSliceID == slice.id,
+          isActive: selection == .object(.clip(slice.id)),
           // The fine-tune button switches the edit target, which `sliceSelected` rejects while
           // another draft is unsaved — disable it then so it doesn't look broken when clicked.
           canFineTune: !fineTune.hasUnsavedChange || activeSliceID == slice.id,
@@ -1501,8 +1520,7 @@ final class EditorModel: ViewModel {
       selectedSeamID = nil
       return
     }
-    selectionAnchorSample = start
-    selectSourceRange(start..<end, snapPlayhead: true)
+    selectSourceRange(start..<end, snapPlayhead: true, anchor: start)
     revealSourceRange(start..<end)
   }
 
@@ -1532,7 +1550,6 @@ final class EditorModel: ViewModel {
     let anchor = clampedSample(editedWaveform.xToSourceSample(startX))
     areaSelectDrag = WaveformAreaSelectDrag(
       anchorSample: anchor, currentX: startX, existingAnchorSample: existingAnchorSample)
-    selectionAnchorSample = existingAnchorSample ?? anchor
     isWaveformAreaSelecting = true
     updateMarqueeSelection()
   }
@@ -1575,7 +1592,8 @@ final class EditorModel: ViewModel {
   /// Live selection during the drag: writes the exact dragged source range to `audioSelection` on
   /// every pointer move — freeform, no word snap.
   private func updateMarqueeSelection() {
-    audioSelection = marqueeSourceRange()
+    guard let range = marqueeSourceRange(), let drag = areaSelectDrag else { return }
+    selection = .range(range, anchor: drag.existingAnchorSample ?? drag.anchorSample)
   }
 
   /// The exact SOURCE range for the current drag: the fixed edge (the drag anchor, or the preserved
@@ -1606,7 +1624,8 @@ final class EditorModel: ViewModel {
   /// clobbering this placement. An empty/degenerate range clears. This is the single write path the
   /// waveform (marquee + click), slice/suggestion reveal, and transcript intents all funnel through.
   func selectSourceRange(
-    _ range: Range<Int>, snapPlayhead: Bool, origin: SelectionOrigin = .external
+    _ range: Range<Int>, snapPlayhead: Bool, origin: SelectionOrigin = .external,
+    anchor: Int? = nil
   ) {
     // A freeform-selection write and a seam selection are mutually exclusive (decision 6): any
     // range write drops the seam. This is the single range-write funnel, so clearing here covers
@@ -1625,7 +1644,7 @@ final class EditorModel: ViewModel {
       clearSelection()
       return
     }
-    audioSelection = lower..<upper
+    selection = .range(lower..<upper, anchor: anchor ?? selectionAnchorSample ?? lower)
     // Keep the Shift-extend pivot on a stored edge. Snap it to the NEAREST stored boundary — not just
     // clamp into range — for two reasons: (1) callers pin the anchor to an *unclamped* selection edge
     // that the range above may have clamped into `[0, durationSamples]` (bad word bounds); (2) a
@@ -1666,17 +1685,16 @@ final class EditorModel: ViewModel {
   /// derived — so we also invalidate it here. Otherwise a later transcript Shift-click would extend
   /// from the anchor of the selection the user just cleared, resurrecting it.
   func clearSelection() {
-    audioSelection = nil
-    selectionAnchorSample = nil
+    transcript.overlapClick = nil
+    transcript.overlap.update([], anchor: nil, selected: nil)
+    selectionPreservesTransport = false
+    selection = .none
     selectionEditingEdge = nil
     transcript.invalidateSelectionAnchor()
   }
 
   /// The Clear button in the mark-clip bar. Drops the freeform selection whatever created it —
   /// transcript click/drag, waveform marquee, or edge drag — since all of them live in `audioSelection`.
-  func clearSelectionTapped() {
-    clearSelection()
-  }
 
   /// Scrolls the transcript to frame a freeform source range by revealing its first overlapping word,
   /// and (when `zoomWaveform`) zooms the waveform to the current selection. The waveform now owns the
@@ -1708,7 +1726,10 @@ final class EditorModel: ViewModel {
   /// A left/right handle grab begins: mark which edge is live so `transportSelectionChanged` stops
   /// churning the playhead for the duration of the drag (mirrors the marquee's `isWaveformAreaSelecting`
   /// suppression). An edge drag is fine-tune, not seek — it never snaps the playhead.
-  func selectionEdgeDragBegan(_ edge: SelectionEdge) { selectionEditingEdge = edge }
+  func selectionEdgeDragBegan(_ edge: SelectionEdge) {
+    guard canEditSelectionEdges else { return }
+    selectionEditingEdge = edge
+  }
 
   /// A handle drag to view-x: map x → source sample and move only that edge, freeform (no silence
   /// snap). The opposite edge stays fixed; the min-duration floor keeps the range from collapsing.
@@ -1719,7 +1740,7 @@ final class EditorModel: ViewModel {
   /// Geometry-free seam behind `selectionEdgeDragged(_:toX:)`: take an exact SOURCE sample directly so
   /// tests exercise the edge math without a viewport (mirrors the marquee's sample-level seams).
   func selectionEdgeDraggedToSource(_ edge: SelectionEdge, _ sourceSample: Int) {
-    guard let range = audioSelection else { return }
+    guard let range = selection.freeformRange else { return }
     // No pre-clamp: `boundaryEditor` already clamps `sourceSample` into the legal window
     // (`0...fileDurationSamples`) via `clampedBoundary`. Clamping here against
     // `waveform.totalSamples` would wrongly couple this geometry-free seam to async waveform load.
@@ -1763,7 +1784,7 @@ final class EditorModel: ViewModel {
   /// Moves one edge of the selection by a signed millisecond delta (the ←/→/⇧←/⇧→ 10 ms nudges),
   /// freeform. No-op with no selection.
   func selectionNudged(_ edge: SelectionEdge, byMs ms: Double) {
-    guard let range = audioSelection else { return }
+    guard let range = selection.freeformRange else { return }
     applyEdgeEdit(
       edge, of: range,
       to: edge == .start
@@ -1859,8 +1880,8 @@ final class EditorModel: ViewModel {
     case .zoomFit: editedWaveform.zoomFitToggled(sourceSelection: selectedSourceRange)
     case .speedUp: transcript.speedUpTapped()
     case .speedDown: transcript.speedDownTapped()
-    case .removeSection:
-      return handleRemoveSectionKey()
+    case .deleteSelection, .removeSection:
+      return handleDeletionKey(key)
     case .escape:
       return handleEscapeKey()
     case .nudgeCutInEarlier, .nudgeCutInLater, .nudgeCutOutEarlier, .nudgeCutOutLater,
@@ -1888,11 +1909,14 @@ final class EditorModel: ViewModel {
     }
   }
 
-  /// Esc handling, split out of `editorKeyDown`'s switch to keep its cyclomatic complexity in
-  /// check. Consumed only when it actually deselects a seam, so a no-op Escape still propagates.
+  /// Escape clears the main selection and propagates when nothing is selected.
   private func handleEscapeKey() -> Bool {
-    guard selectedSeamID != nil else { return false }
-    deselectSeam()
+    if transcriptResizeDraft != nil {
+      transcriptResizeCancelled()
+      return true
+    }
+    guard selection != .none else { return false }
+    clearSelection()
     return true
   }
 
@@ -1907,10 +1931,13 @@ final class EditorModel: ViewModel {
     }
   }
 
-  /// Delete-key arbitration (decision 6), split out of `editorKeyDown`'s switch to keep its
-  /// cyclomatic complexity in check: a selected seam restores its removal; else a removable
-  /// source-range selection removes a section; else fall through (`false`) so the event still
-  /// reaches a focused slice row's List `.onDelete`.
+  private func handleDeletionKey(_ key: EditorKey) -> Bool {
+    if key == .removeSection { return handleRemoveSectionKey() }
+    Task { await deleteSelectionTapped() }
+    return true
+  }
+
+  /// Explicit Remove Section routing retains range removal and seam restoration.
   private func handleRemoveSectionKey() -> Bool {
     if selectedSeamID != nil {
       restoreRemovalTapped()
@@ -1926,7 +1953,8 @@ final class EditorModel: ViewModel {
   /// through unconsumed (`false`) when there is no selection, so the key still reaches a focused slice
   /// row that might handle it.
   private func nudgeSelection(_ key: EditorKey) -> Bool {
-    guard audioSelection != nil else { return false }
+    if selection.objectID != nil { return true }
+    guard selection.freeformRange != nil else { return false }
     switch key {
     case .nudgeCutInEarlier: selectionNudged(.start, byMs: -fineTune.nudgeMs)
     case .nudgeCutInLater: selectionNudged(.start, byMs: fineTune.nudgeMs)
@@ -2001,11 +2029,12 @@ final class EditorModel: ViewModel {
   /// bypasses this — it assigns the fields directly so replaying the stack never records a new
   /// entry.
   func mutateDocument(
-    recordUndo: Bool = true,
+    recordUndo: Bool = true, selectionAfter: EditorSelection? = nil, label: String = "",
     recordingPermanentReservations reservations: [SequenceReservation] = [],
     _ body: (inout EditorDocumentState) -> Void
   ) {
     finishCutSuggestionTitleEdit()
+    let oldSelection = selection
     let old = documentState
     var new = old
     body(&new)
@@ -2023,15 +2052,22 @@ final class EditorModel: ViewModel {
     speakerCountOverride = new.speakerCountOverride
     speakerDisplayNames = new.speakerDisplayNames
     interviewArtist = new.interviewArtist
+    if let selectionAfter { selection = selectionAfter }
+    reconcileSelection()
+    reconcileDraftEditing()
     if recordUndo {
-      documentUndo.record(before: old, after: new)
+      history.record(
+        .init(
+          document: .init(before: old, after: new),
+          selection: selectionAfter.map { _ in .init(before: oldSelection, after: selection) },
+          label: label))
     } else {
       // A non-undoable change (e.g. the background suggestion pass) must land at EVERY point in
       // history, not just the live state: replay it into the stored snapshots so undoing an
       // earlier edit can't rewind to a snapshot that predates it and silently drop it.
-      documentUndo.rebase(body)
+      history.rebase(body)
     }
-    documentUndo.rebase { $0.recordPermanentReservations(reservations) }
+    history.rebase { $0.recordPermanentReservations(reservations) }
     syncEditedTimeline()
     onDocumentStateChanged?(documentState)
   }
@@ -2065,10 +2101,12 @@ final class EditorModel: ViewModel {
     finishCutSuggestionTitleEdit()
   }
 
-  private func finishCutSuggestionTitleEdit() {
+  func finishCutSuggestionTitleEdit() {
     guard let edit = cutSuggestionTitleEdit else { return }
     cutSuggestionTitleEdit = nil
-    documentUndo.record(before: edit.before, after: documentState)
+    history.record(
+      .init(
+        document: .init(before: edit.before, after: documentState), selection: nil, label: ""))
   }
 
   /// `slices`-only convenience over `mutateDocument`, kept so every existing slice
@@ -2093,12 +2131,17 @@ final class EditorModel: ViewModel {
       guard firstAccept else { return }
       let nudged = offsetNudgedClip(validated.slice)
       let reservations = validated.slice.suggestionNaming?.reservation.map { [$0] } ?? []
-      mutateDocument(recordingPermanentReservations: reservations) {
+      let acceptedSelection: EditorSelection? =
+        selection == .object(.suggestion(id)) ? .object(.clip(id)) : nil
+      mutateDocument(
+        selectionAfter: acceptedSelection, recordingPermanentReservations: reservations
+      ) {
         if $0.slices[id: id] == nil { $0.slices.append(nudged) }
         $0.cutSuggestions[id: id] = validated.candidate
         $0.suggestionBatch = validated.batch
       }
       if firstAccept { sliceScrollTarget = id }
+      if acceptedSelection != nil { revealSelectedSidebarObject(.clip(id)) }
     } catch {
       cutSuggestions.actionMessage = error.localizedDescription
     }
@@ -2205,23 +2248,12 @@ final class EditorModel: ViewModel {
   /// Clicking a suggestion selects its words (lighting up the transcript + waveform highlights
   /// and opening the fine-tune pane so Preview/Audition are available) and reveals it in both
   /// panes. A no-op for a suggestion with no words.
-  func cutSuggestionSelected(_ suggestion: CutSuggestion) {
-    revealWords(suggestion.wordIDs)
-  }
-
-  /// Clicking a saved clip reveals it the same way a suggestion does — its words are selected,
-  /// the transcript scrolls to them, and the waveform zooms to frame the clip.
-  func sliceRevealTapped(_ id: Slice.ID) {
-    guard let slice = slices[id: id] else { return }
-    revealWords(slice.wordIDs)
-  }
-
   /// Selects the span covered by `wordIDs` then reveals it across both panes. Endpoints are the
   /// earliest and latest words by transcript position (not the array's first/last), so an
   /// unsorted or sparse `wordIDs` still frames the right range. Reveals only when the selection
   /// actually resolved — a stale item whose words are gone leaves the current view untouched
   /// instead of jumping to the previous selection.
-  private func revealWords(_ wordIDs: [Word.ID]) {
+  func revealWords(_ wordIDs: [Word.ID]) {
     let positions = wordIDs.compactMap { id in
       editPlan.words.firstIndex(where: { $0.id == id })
     }
@@ -2235,8 +2267,7 @@ final class EditorModel: ViewModel {
     // selection-replacing writer (plain click, marquee, transcript select). A reveal that skipped this
     // would leave `selectionAnchorSample` on the *previous* selection, so a later Shift-extend or edge
     // edit would pivot from a boundary this selection no longer has and re-extend over unselected audio.
-    selectionAnchorSample = range.lowerBound
-    selectSourceRange(range, snapPlayhead: true)
+    selectSourceRange(range, snapPlayhead: true, anchor: range.lowerBound)
     // Only frame the reveal if the selection actually resolved. A range built from out-of-file word
     // bounds collapses to no selection in the funnel; scrolling to that phantom word anyway would
     // leave the panes inconsistent (highlight gone, transcript jumped). Matches this method's contract.
@@ -2257,53 +2288,24 @@ final class EditorModel: ViewModel {
   /// Guarded the same way switching the docked pane's target is (`hasUnsavedChange`) so opening
   /// the modal can't silently strand or clobber an in-flight docked-pane edit.
   func editSliceTapped(_ id: Slice.ID) {
-    guard let slice = slices[id: id], !fineTune.hasUnsavedChange else { return }
-    // Opening the modal supersedes any in-progress MAIN playback — the main timeline and its
-    // hidden transcript shouldn't keep running behind the sheet. Snapshot-stop it (covers a PAUSED
-    // main transport too, not just a playing one) so this stop, which may land after the modal's
-    // own Play has started a fresh `.sliceEdit` session, can never kill that newer session.
+    guard let slice = slices[id: id], canOpenClipEditor else { return }
+    presentClipEditor(EditSliceModel(slice: slice, editPlan: editPlan))
+  }
+
+  func presentClipEditor(_ child: EditSliceModel) {
+    if fineTune.target == .pendingSelection { fineTune.clear() }
     stopActiveTransportSnapshotting()
-    let child = EditSliceModel(slice: slice, editPlan: editPlan)
     // Give the sheet its OWN lane, seeded from the already-decoded pyramid so nothing is re-decoded,
     // pinned to this slice (you cannot scroll or zoom past its boundaries). It must not share the
     // main editor's WaveformModel (that one is bound to the main viewport's zoom/scroll/width).
     child.waveform.adopt(
       waveform: waveform.waveform, totalSamples: waveform.totalSamples,
-      sampleRate: waveform.sampleRate, contentRange: slice.startSample..<slice.endSample)
+      sampleRate: waveform.sampleRate, contentRange: child.overviewWindow)
     // Seed the sheet's collapsed lane with the parent's current GLOBAL timeline so any removals
     // already inside the slice render collapsed the moment it opens. `syncEditedTimeline` keeps it
     // in sync for every later removal/undo/redo while the sheet stays up.
     child.syncTimeline(editedTimeline)
-    // Item ①: the modal edits the slice exactly like the main timeline — a marquee removal and a
-    // seam restore route through the SAME funnels the main editor uses, so both surfaces merge
-    // cross-seam removals identically and every edit is one ⌘Z step. `syncEditedTimeline` fans the
-    // result back into the open sheet.
-    child.onRemoveSection = { [weak self] range in await self?.removeSourceRange(range) }
-    child.onRestore = { [weak self] removalID in self?.restoreRemoval(id: removalID) }
-    // A crossfade stretch inside the sheet commits through the SAME `updateCrossfade` funnel the main
-    // editor uses, so a stretch is identical on both surfaces and one ⌘Z step. The sheet drafts the
-    // length against its own (parent-synced) lane and hands the committed length here; the parent
-    // preserves the removal's curve/center and fans the result back into the open sheet.
-    child.onStretchCrossfade = { [weak self] removalID, length in
-      guard let self, var crossfade = timelineRemovals[id: removalID]?.crossfade else { return }
-      crossfade.lengthSamples = length
-      updateCrossfade(id: removalID, crossfade)
-    }
-    child.currentCrossfadeLength = { [weak self] removalID in
-      self?.timelineRemovals[id: removalID]?.crossfade.lengthSamples
-    }
-    wireSliceCutPointCommit(child)
-    // Mirror the main lane's begin-time refusal: `updateCrossfade` is frozen mid-export, so the sheet
-    // must not preview a stretch its release would discard.
-    child.canEditCrossfade = { [weak self] in self?.isExporting == false }
-    // ⌘Z/⌘⇧Z pressed inside the sheet route here: a modal removal lives on this document's undo
-    // stack, and `undoTapped`/`redoTapped` fan the restored timeline back into the open sheet via
-    // `syncEditedTimeline`. The main window's SwiftUI undo shortcut can't fire while the sheet is key.
-    child.onUndo = { [weak self] in await self?.undoTapped() }
-    child.onRedo = { [weak self] in await self?.redoTapped() }
-    child.onCommit = { [weak self] range in self?.commitSliceEdit(id: id, range: range) }
-    child.onSetEditingComplete = { [weak self] value in self?.setSliceEditingComplete(id, to: value)
-    }
+    wireClipEditorActions(child)
     child.onPlay = { [weak self] range in
       // Logic model: Play always plays `range` from the playhead as a fresh, exclusive `.sliceEdit`
       // playback (the child derives `range` from the cursor). Pause merely freezes the cursor; the
@@ -2341,11 +2343,68 @@ final class EditorModel: ViewModel {
       placeCursor(atSource: sample)
       editSlice?.updatePlayback(sample: sample, isPlaying: isTransportPlaying)
     }
-    child.onDismiss = { [weak self] in
-      self?.stopActiveTransportSnapshotting()
-      self?.editSlice = nil
+    child.onDismiss = { [weak self, weak child] in
+      guard let self, let child, editSlice === child else { return }
+      stopActiveTransportSnapshotting()
+      editSlice = nil
     }
     editSlice = child
+  }
+
+  private func wireClipEditorActions(_ child: EditSliceModel) {
+    let id = child.sliceID
+    // Item ①: the modal edits the slice exactly like the main timeline — a marquee removal and a
+    // seam restore route through the SAME funnels the main editor uses, so both surfaces merge
+    // cross-seam removals identically and every edit is one ⌘Z step. `syncEditedTimeline` fans the
+    // result back into the open sheet.
+    child.onRemoveSection = { [weak self, weak child] range in
+      guard child?.canMutateDocument == true else { return }
+      await self?.removeSourceRange(range)
+    }
+    child.onRestore = { [weak self, weak child] removalID in
+      guard child?.canMutateDocument == true else { return }
+      self?.restoreRemoval(id: removalID)
+    }
+    // A crossfade stretch inside the sheet commits through the SAME `updateCrossfade` funnel the main
+    // editor uses, so a stretch is identical on both surfaces and one ⌘Z step. The sheet drafts the
+    // length against its own (parent-synced) lane and hands the committed length here; the parent
+    // preserves the removal's curve/center and fans the result back into the open sheet.
+    child.onStretchCrossfade = { [weak self, weak child] removalID, length in
+      guard child?.canMutateDocument == true, let self,
+        var crossfade = timelineRemovals[id: removalID]?.crossfade
+      else { return }
+      crossfade.lengthSamples = length
+      updateCrossfade(id: removalID, crossfade)
+    }
+    child.currentCrossfadeLength = { [weak self] removalID in
+      self?.timelineRemovals[id: removalID]?.crossfade.lengthSamples
+    }
+    wireSliceCutPointCommit(child)
+    // Mirror the main lane's begin-time refusal: `updateCrossfade` is frozen mid-export, so the sheet
+    // must not preview a stretch its release would discard.
+    child.canEditCrossfade = { [weak self, weak child] in
+      child?.canMutateDocument == true && self?.isExporting == false
+    }
+    // ⌘Z/⌘⇧Z pressed inside the sheet route here: a modal removal lives on this document's undo
+    // stack, and `undoTapped`/`redoTapped` fan the restored timeline back into the open sheet via
+    // `syncEditedTimeline`. The main window's SwiftUI undo shortcut can't fire while the sheet is key.
+    child.onUndo = { [weak self] in await self?.undoTapped() }
+    child.onRedo = { [weak self] in await self?.redoTapped() }
+    child.onCommit = { [weak self, weak child] range in
+      guard let self, let child, editSlice === child else {
+        return .failed("This edit is no longer available.")
+      }
+      if child.target.isDraft { return commitDraftEdit(child, range: range) }
+      return commitSliceEdit(id: id, range: range)
+    }
+    child.onInvalidatePreview = { [weak self, weak child] in
+      guard let self, let child, editSlice === child, transportContext == .sliceEdit else { return }
+      stopActiveTransportSnapshotting()
+    }
+    child.onSetEditingComplete = { [weak self, weak child] value in
+      guard child?.canMutateDocument == true else { return }
+      self?.setSliceEditingComplete(id, to: value)
+    }
   }
 
   /// Wires the sheet's cut-point ⌥-drag through the SAME `updateRemovalRange` funnel the main editor
@@ -2355,7 +2414,8 @@ final class EditorModel: ViewModel {
   /// slice window, delegating the neighbor/cross-cut/non-empty part to the parent's tested
   /// `clampedRemovalRange`. Split out of `editSliceTapped` to keep its body within the linter's limit.
   private func wireSliceCutPointCommit(_ child: EditSliceModel) {
-    child.onMoveCutPoint = { [weak self] removalID, range in
+    child.onMoveCutPoint = { [weak self, weak child] removalID, range in
+      guard child?.canMutateDocument == true else { return }
       self?.updateRemovalRange(id: removalID, removedRange: range)
     }
     child.clampCutPointRange = { [weak self] removalID, proposed in
@@ -2409,7 +2469,7 @@ final class EditorModel: ViewModel {
   /// Bumps the auto-name counter after a clip is added, saturating at `Int.max` so a poisoned
   /// persisted name (`Slice \(Int.max - 1)`) that seeded the counter to the ceiling can't trap on
   /// overflow. A real session never reaches this; at the ceiling the next clip just reuses the name.
-  private func advanceSliceNumber() {
+  func advanceSliceNumber() {
     if nextSliceNumber < Int.max { nextSliceNumber += 1 }
   }
 
@@ -2436,7 +2496,7 @@ final class EditorModel: ViewModel {
   /// The SOURCE range a removal would apply to: the primary selection. Edge drag + nudge now mutate
   /// `audioSelection` directly (see `selectionNudged` / `selectionEdgeDragged`), so there is no
   /// separate fine-tune draft to prefer — the selection is already the (possibly nudged) truth.
-  private var pendingRemovalSourceRange: Range<Int>? { selectedSourceRange }
+  private var pendingRemovalSourceRange: Range<Int>? { selection.freeformRange }
 
   /// Whether `range` can become a removal: non-empty. Cross-seam is now allowed — a range that
   /// overlaps existing removals merges them into one larger removal via `removeSourceRange`
@@ -2889,41 +2949,30 @@ final class EditorModel: ViewModel {
   }
 
   // MARK: - Undo / Redo
-  /// Restores the previous document snapshot (`slices` + `timelineRemovals`), then
-  /// reconciles playback. History stores only the document, so anything derived
-  /// (selection, zoom, export phase, playback) is left as-is except where reconciliation
-  /// demands otherwise. Persists the sidecar only when the restored removals actually
-  /// differ from the current ones — undoing a slice-only edit (rename, reorder, add/delete
-  /// slice) never touches it.
+  /// Applies the next chronological history entry. Pure selection restores never
+  /// write the document or reconcile playback; document entries preserve persistence.
   func undoTapped() async {
-    // Guard here too, not just on `canUndo`: a menu item or keyboard shortcut could fire this
-    // while an existing-slice edit is open, which would rewind `slices` under a live draft —
-    // or mid-export, which would leave the finished AIFFs stale.
-    guard cutSuggestionTitleEdit == nil, !hasUncommittedSliceEdit, !isExporting,
-      !cutSuggestions.candidateActionsDisabled
-        || documentUndo.undo.last?.cutSuggestions == documentCutSuggestions,
-      let restored = documentUndo.undo(current: documentState)
-    else { return }
-    restore(restored)
-    await reconcilePlayback()
+    if let editing = editSlice, editing.target.isDraft {
+      await editing.undoTapped()
+      return
+    }
+    guard canUndo, let entry = history.undoEntry() else { return }
+    await applyHistory(entry, undoing: true)
   }
 
-  /// Reapplies the next document snapshot on the redo branch, then reconciles playback. Same
-  /// persist-only-on-change behavior as `undoTapped`.
   func redoTapped() async {
-    guard cutSuggestionTitleEdit == nil, !hasUncommittedSliceEdit, !isExporting,
-      !cutSuggestions.candidateActionsDisabled
-        || documentUndo.redo.last?.cutSuggestions == documentCutSuggestions,
-      let restored = documentUndo.redo(current: documentState)
-    else { return }
-    restore(restored)
-    await reconcilePlayback()
+    if let editing = editSlice, editing.target.isDraft {
+      await editing.redoTapped()
+      return
+    }
+    guard canRedo, let entry = history.redoEntry() else { return }
+    await applyHistory(entry, undoing: false)
   }
 
   /// Assigns a restored document snapshot back onto the model's fields (bypassing the undo
   /// stack — replaying history must never record a new entry), rebuilds the edited timeline,
   /// and fires the change callback so persistence stays in step with in-memory state.
-  private func restore(_ restored: EditorDocumentState) {
+  func restore(_ restored: EditorDocumentState) {
     var restored = restored
     restored.normalizePendingSuggestionNaming()
     slices = restored.slices
@@ -2938,6 +2987,7 @@ final class EditorModel: ViewModel {
     speakerCountOverride = restored.speakerCountOverride
     speakerDisplayNames = restored.speakerDisplayNames
     interviewArtist = restored.interviewArtist
+    reconcileDraftEditing()
     syncEditedTimeline()
     onDocumentStateChanged?(documentState)
   }
@@ -2946,7 +2996,8 @@ final class EditorModel: ViewModel {
   /// stops playback if the playing slice is gone, and closes the fine-tune pane if the active
   /// slice is gone (clearing its target + draft). Centralized so every removal path behaves
   /// the same.
-  private func reconcilePlayback() async {
+  func reconcilePlayback() async {
+    reconcileDraftEditing()
     // A shared-document undo/redo can pull the Edit Slice sheet's slice out from under it: ⌘Z can
     // delete the slice (rewinding its creation) OR revert its boundaries. The modal's overview
     // window and committed range are seeded once at open and never re-seed, so a survived-but-moved
@@ -2955,7 +3006,9 @@ final class EditorModel: ViewModel {
     if let editing = editSlice, editSliceRangeIsStale(editing) {
       stopActiveTransportSnapshotting()
       editSlice = nil
-    } else if let editing = editSlice, let slice = slices[id: editing.sliceID] {
+    } else if let editing = editSlice, case .savedClip(let id) = editing.target,
+      let slice = slices[id: id]
+    {
       // The sheet survived (boundaries intact) but a shared-document undo/redo can still have
       // flipped this slice's editing-complete flag underneath it. The flag was seeded once at open,
       // so re-sync it here or the sheet shows a stale icon and the next toggle sends a no-op value.
@@ -2988,7 +3041,8 @@ final class EditorModel: ViewModel {
   /// modal committed to at open (the modal never re-seeds its overview window / committed range).
   /// A modal removal leaves the slice's own bounds untouched, so it never reads as stale here.
   private func editSliceRangeIsStale(_ editing: EditSliceModel) -> Bool {
-    guard let slice = slices[id: editing.sliceID] else { return true }
+    guard case .savedClip(let id) = editing.target else { return false }
+    guard let slice = slices[id: id] else { return true }
     return editing.fineTune.committedRange != slice.startSample..<slice.endSample
   }
 
@@ -3392,7 +3446,7 @@ final class EditorModel: ViewModel {
   /// we were stopping (a slice/preview/audition shortcut, which doesn't touch the selection). Either
   /// way the stale task must not snap the cursor over the newer state or into a live playback.
   func transportSelectionChanged(_ newRange: Range<Int>?, cursorToken: Int) async {
-    guard let newRange else { return }
+    guard !selectionPreservesTransport, let newRange, audioSelection == newRange else { return }
     // A marquee drag emits a live selection change on every pointer move; suppress the snap for the
     // duration of the drag so it doesn't churn the transport. `waveformAreaSelectEnded` commits the
     // playhead once, synchronously, when the drag finishes.
@@ -3410,8 +3464,8 @@ final class EditorModel: ViewModel {
       await endTransportPlayback()
       // Re-check across the stop await: a newer selection, a new playback, or a ruler move (which
       // bumps the generation) all invalidate this snap.
-      guard audioSelection == newRange, transportPhase.session == nil,
-        cursorMoveGeneration == cursorToken
+      guard !selectionPreservesTransport, audioSelection == newRange,
+        transportPhase.session == nil, cursorMoveGeneration == cursorToken
       else { return }
     }
     placeCursor(atSource: newRange.lowerBound)
@@ -3492,12 +3546,14 @@ final class EditorModel: ViewModel {
   /// every future selection (found in adversarial review of Task 9). A dirty pending draft is
   /// therefore always free to be abandoned the moment the live selection/target moves on.
   func syncEditSession() {
-    guard let target = fineTuneTarget, let range = activeOrSelectedRange else {
+    guard let target = fineTuneTarget,
+      let range = selection.freeformRange ?? activeSliceRange
+    else {
       // Don't tear down an unsaved SLICE edit just because the target went nil — the user must
       // Save or Cancel first. A dirty PENDING-SELECTION draft has nothing protecting it, so it's
       // discarded right along with a clean one.
       if fineTune.target != nil, !fineTune.isEditingExistingSlice || !fineTune.hasUnsavedChange {
-        cancelPreviewOrAuditionIfNeeded()  // closing the pane removes the region + Stop control
+        if !selectionPreservesTransport { cancelPreviewOrAuditionIfNeeded() }
         fineTune.clear()
       }
       return
@@ -3520,7 +3576,7 @@ final class EditorModel: ViewModel {
     if shouldBegin {
       // Retargeting to a different session must not leave an old preview playing — the new pane
       // would show "Stop preview" and the playhead would follow the stale range.
-      cancelPreviewOrAuditionIfNeeded()
+      if !selectionPreservesTransport { cancelPreviewOrAuditionIfNeeded() }
       // A transcript selection taking over releases the previously active slice, so clearing the
       // selection later doesn't silently reopen the pane on a stale slice.
       if case .pendingSelection = target { activeSliceID = nil }
@@ -3565,11 +3621,16 @@ final class EditorModel: ViewModel {
   /// Commits an existing slice's cut points to `range` as exactly ONE `mutateSlices` (one undo
   /// entry): word IDs, snippet, and warnings are re-derived from the new range. A no-op if the
   /// slice no longer exists (e.g. deleted out from under an in-flight edit).
-  func commitSliceEdit(id: Slice.ID, range: Range<Int>) {
-    guard slices[id: id] != nil else { return }
+  @discardableResult
+  func commitSliceEdit(id: Slice.ID, range: Range<Int>) -> ClipEditCommitResult {
+    guard slices[id: id] != nil else { return .failed("This clip no longer exists.") }
+    guard validClipEditRange(range) else {
+      return .failed("Choose a valid range containing words.")
+    }
     mutateSlices { slices in
       if let slice = slices[id: id] { slices[id: id] = updatedSlice(slice, to: range) }
     }
+    return .committed
   }
 
   /// Commits the draft as exactly ONE `mutateSlices` (one undo entry) for a whole drag: an

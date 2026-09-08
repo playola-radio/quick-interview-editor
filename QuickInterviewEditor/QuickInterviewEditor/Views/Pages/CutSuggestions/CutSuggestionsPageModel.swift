@@ -50,6 +50,9 @@ final class CutSuggestionsPageModel: ViewModel {
   @ObservationIgnored var onSpeakerOverridesChanged: (@MainActor (Int?, [String: String]) -> Void)?
   /// Asks the editor to reveal a suggestion across both panes (select its words, scroll the
   /// transcript, zoom the waveform) when the user clicks a row. Wired by `EditorModel`.
+  var selectedObjectID: TranscriptObjectID?
+  var sidebarReveal: SidebarReveal?
+  @ObservationIgnored var onOpenSuggestion: ((CutSuggestion) -> Void)?
   @ObservationIgnored var onSelectSuggestion: ((CutSuggestion) -> Void)?
 
   init(
@@ -120,9 +123,14 @@ final class CutSuggestionsPageModel: ViewModel {
   /// Whether pending suggestions are drawn as faint outline bands in the transcript. The ranked
   /// list in this panel is unaffected — this only mutes the transcript overlay so the user can
   /// hide the proposals while keeping the list. Session-local: defaults on and resets per load.
-  var showsSuggestionBands = true
+  @ObservationIgnored var onBandsVisibilityChanged: (() -> Void)?
+  var showsSuggestionBands = true {
+    didSet { if showsSuggestionBands != oldValue { onBandsVisibilityChanged?() } }
+  }
   private var editingTitleID: CutSuggestion.ID?
-  var selectedTypeIDs: Set<String>?
+  var selectedTypeIDs: Set<String>? {
+    didSet { if selectedTypeIDs != oldValue { onBandsVisibilityChanged?() } }
+  }
   var catalog: SuggestionConfiguration?
   private var attemptedCatalogLoad = false
   var catalogMessage: String?
@@ -436,6 +444,11 @@ final class CutSuggestionsPageModel: ViewModel {
   /// Clicking a row asks the editor to reveal it (select its words, scroll the transcript, zoom
   /// the waveform) so the user can review — and, with the fine-tune pane open, audition — the
   /// candidate before accepting or rejecting it. A no-op for an unknown ID.
+  func rowOpened(_ id: CutSuggestion.ID) {
+    guard let suggestion = suggestions.first(where: { $0.id == id }) else { return }
+    onOpenSuggestion?(suggestion)
+  }
+
   func rowTapped(_ id: CutSuggestion.ID) {
     guard let suggestion = suggestions.first(where: { $0.id == id }) else { return }
     onSelectSuggestion?(suggestion)

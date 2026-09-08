@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Replaces the Edit menu's Undo/Redo with the focused editor's value-snapshot `UndoStack`
+/// Replaces the Edit menu's Undo/Redo with the focused editor's chronological `EditorHistory`
 /// (spec A7): ⌘Z / ⇧⌘Z route to `EditorModel.undoTapped()/redoTapped()`, never to the
 /// document's `UndoManager` (which only carries dirtiness). All decisions live on the model.
 struct EditUndoCommands: Commands {
@@ -26,12 +26,37 @@ struct EditUndoCommandsModel {
   let project: ProjectModel?
 
   private var editor: EditorModel? { project?.editor }
+  private var textEditor: NSTextView? {
+    guard let responder = NSApp?.keyWindow?.firstResponder as? NSTextView, responder.isEditable
+    else { return nil }
+    return responder
+  }
 
-  var undoLabel: String { editor?.undoLabel ?? "Undo" }
-  var redoLabel: String { editor?.redoLabel ?? "Redo" }
-  var canUndo: Bool { editor?.canUndo ?? false }
-  var canRedo: Bool { editor?.canRedo ?? false }
+  var undoLabel: String {
+    textEditor?.undoManager?.undoMenuItemTitle ?? editor?.undoLabel ?? "Undo"
+  }
+  var redoLabel: String {
+    textEditor?.undoManager?.redoMenuItemTitle ?? editor?.redoLabel ?? "Redo"
+  }
+  var canUndo: Bool {
+    textEditor.map { $0.undoManager?.canUndo ?? false } ?? editor?.canUndo ?? false
+  }
+  var canRedo: Bool {
+    textEditor.map { $0.undoManager?.canRedo ?? false } ?? editor?.canRedo ?? false
+  }
 
-  func undoTapped() async { await editor?.undoTapped() }
-  func redoTapped() async { await editor?.redoTapped() }
+  func undoTapped() async {
+    if let textEditor {
+      textEditor.undoManager?.undo()
+      return
+    }
+    await editor?.undoTapped()
+  }
+  func redoTapped() async {
+    if let textEditor {
+      textEditor.undoManager?.redo()
+      return
+    }
+    await editor?.redoTapped()
+  }
 }

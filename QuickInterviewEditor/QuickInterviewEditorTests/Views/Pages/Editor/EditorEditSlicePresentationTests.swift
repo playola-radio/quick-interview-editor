@@ -459,7 +459,7 @@ struct EditorEditSlicePresentationTests {
     let slice = model.slices[0]
     model.editSliceTapped(slice.id)
     let child = model.editSlice!
-    let depthBefore = model.documentUndo.undo.count
+    let depthBefore = model.history.undo.count
 
     child.fineTune.nudgeCutIn(byMs: 30)
     let draft = child.fineTune.draftRange!
@@ -468,7 +468,7 @@ struct EditorEditSlicePresentationTests {
     expectNoDifference(model.slices[id: slice.id]?.startSample, draft.lowerBound)
     #expect(model.editSlice == nil)
     // Global invariant: commit → exactly one undo entry, even through the modal's save path.
-    expectNoDifference(model.documentUndo.undo.count, depthBefore + 1)
+    expectNoDifference(model.history.undo.count, depthBefore + 1)
   }
 
   @Test func modalCancelDismissesWithoutCommitting() {

@@ -89,7 +89,8 @@ struct EditorView: View {
       model.transcript.highlightedWordIDs = ids
     }
     .onChange(of: model.audioSelection) { _, newRange in
-      // `audioSelection` is now the selection source of truth, so transport-snap tracks it directly.
+      // History restores a visual highlight without seeking or stopping playback.
+      guard !model.selectionPreservesTransport else { return }
       // Capture the cursor token synchronously at the moment the selection changes, so a ruler click
       // landing before this snap runs is seen as the newer cursor action and the snap yields to it.
       let cursorToken = model.cursorMoveToken

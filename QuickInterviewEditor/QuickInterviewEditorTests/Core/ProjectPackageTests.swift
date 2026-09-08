@@ -6,6 +6,17 @@ import Testing
 
 struct ProjectPackageTests {
 
+  @Test func unsupportedFormatExposesReasonInDocumentOpenAlert() {
+    let version = ProjectFile.currentSchemaVersion + 1
+    let error = ProjectPackageError.unsupportedSchema(version) as NSError
+    expectNoDifference(
+      error.localizedFailureReason,
+      "This project (format \(version)) was saved by a newer version of the app.")
+    expectNoDifference(
+      error.localizedRecoverySuggestion,
+      "Open this project with the version of the app that last saved it, or a newer version.")
+  }
+
   @Test func malformedRecoveryChildIsNotSilentlyDropped() throws {
     let root = try ProjectPackage.encode(
       file: Fixtures.projectFile(), plan: Fixtures.editPlan(),

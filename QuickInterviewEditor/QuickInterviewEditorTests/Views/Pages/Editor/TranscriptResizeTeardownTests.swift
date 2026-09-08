@@ -17,8 +17,10 @@ struct TranscriptResizeTeardownTests {
   }
 
   private func clip(_ id: UUID, wordIDs: [Word.ID]) -> Slice {
-    Slice(
-      id: id, name: "A story", startSample: 54772, endSample: 74176,
+    let words = Fixtures.editPlan().words.filter { wordIDs.contains($0.id) }
+    return Slice(
+      id: id, name: "A story", startSample: words.compactMap(\.startSample).min()!,
+      endSample: words.compactMap(\.endSample).max()!,
       wordIDs: wordIDs, snippet: "So a")
   }
 
@@ -53,6 +55,37 @@ struct TranscriptResizeTeardownTests {
 
     expectNoDifference(model.selectedWordIDs, [2, 3])
     expectNoDifference(model.selectionEditingEdge, nil)
+  }
+
+  @Test func escapeCancelsClipResizeWithoutDeselectingOrCommittingOnRelease() {
+    let clipID = Fixtures.uuid(1)
+    let model = editor(slices: [clip(clipID, wordIDs: [1, 2])])
+    model.selectTranscriptObject(.clip(clipID))
+    let before = model.documentState
+    model.transcriptResizeBegan(.clip(clipID), .end)
+    model.transcriptResizeDragged(toWord: 4)
+
+    #expect(model.editorKeyDown(.escape))
+    expectNoDifference(model.transcriptResizeDraft, nil)
+    expectNoDifference(model.selection, .object(.clip(clipID)))
+    model.transcriptResizeDragged(toWord: 5)
+    model.transcriptResizeEnded()
+
+    expectNoDifference(model.documentState, before)
+    #expect(!model.canUndo)
+  }
+
+  @Test func escapeCancelsSelectionResizeAndRestoresItsExactRange() {
+    let model = editor()
+    model.selectSourceRange(60_000..<80_000, snapPlayhead: false)
+    let before = model.selection
+    model.transcriptResizeBegan(.selection, .end)
+    model.transcriptResizeDragged(toWord: 5)
+
+    #expect(model.editorKeyDown(.escape))
+
+    expectNoDifference(model.selection, before)
+    expectNoDifference(model.transcriptResizeDraft, nil)
   }
 
   @Test func draggedWithNoActiveDraftIsNoop() {

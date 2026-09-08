@@ -20,6 +20,10 @@ struct EditSliceView: View {
 
       FineTuneInsets(model: model)
 
+      if let error = model.commitError {
+        Text(error).foregroundStyle(.red)
+      }
+
       HStack(spacing: 8) {
         Button {
           Task { await model.playPauseTapped() }
@@ -28,15 +32,19 @@ struct EditSliceView: View {
         }
         .help(model.playPauseLabel)
         Button(model.stopLabel) { Task { await model.stopTapped() } }
-        Button(model.removeSectionLabel) { Task { await model.removeSelectionTapped() } }
-          .disabled(!model.canRemoveSelection)
-        Button {
-          model.editingCompleteToggled()
-        } label: {
-          Label(model.editingCompleteLabel, systemImage: model.editingCompleteSystemImage)
+        if model.canMutateDocument {
+          Button(model.removeSectionLabel) { Task { await model.removeSelectionTapped() } }
+            .disabled(!model.canRemoveSelection)
+          Button {
+            model.editingCompleteToggled()
+          } label: {
+            Label(model.editingCompleteLabel, systemImage: model.editingCompleteSystemImage)
+          }
+          .foregroundStyle(
+            model.editingComplete ? Color(red: 0.4, green: 0.8, blue: 0.5) : .primary
+          )
+          .help(model.editingCompleteLabel)
         }
-        .foregroundStyle(model.editingComplete ? Color(red: 0.4, green: 0.8, blue: 0.5) : .primary)
-        .help(model.editingCompleteLabel)
         Spacer()
         Button(model.cancelLabel) { model.cancelTapped() }
         Button(model.saveLabel) { model.saveTapped() }
@@ -87,7 +95,7 @@ private struct SliceWaveformLane: View {
         supportsEdgeDrag: false,
         // ⌥-drag the outside audio flanking a bowtie to move that cut point (and a ⌥-click there to
         // select the seam) — the same crossfade editing the main lane offers, scoped to this slice.
-        supportsCutPointDrag: true,
+        supportsCutPointDrag: model.canMutateDocument,
         onSeamStretchBegan: { model.crossfadeStretchBegan(id: $0) },
         onSeamStretched: { model.crossfadeStretched($0, toX: $1) },
         onSeamStretchEnded: { model.crossfadeStretchEnded() },
@@ -152,7 +160,10 @@ private struct FineTuneInsets: View {
         nudgeForwardLabel: model.fineTune.nudgeForwardLabel,
         onNudgeBack: { model.cutInNudgedBack() },
         onNudgeForward: { model.cutInNudgedForward() },
-        onDrag: { model.cutInDragged(toInsetX: $0) })
+        onDrag: { model.cutInDragged(toInsetX: $0) },
+        onDragBegan: { model.boundaryGestureBegan() },
+        onDragEnded: { model.boundaryGestureEnded() },
+        onDragCancelled: { model.boundaryGestureCancelled() })
       BoundaryInset(
         label: model.fineTune.cutOutLabel, timeLabel: model.fineTune.cutOutTimeLabel,
         width: model.fineTune.insetWidthPixels, columns: model.cutOutColumns(),
@@ -163,7 +174,10 @@ private struct FineTuneInsets: View {
         nudgeForwardLabel: model.fineTune.nudgeForwardLabel,
         onNudgeBack: { model.cutOutNudgedBack() },
         onNudgeForward: { model.cutOutNudgedForward() },
-        onDrag: { model.cutOutDragged(toInsetX: $0) })
+        onDrag: { model.cutOutDragged(toInsetX: $0) },
+        onDragBegan: { model.boundaryGestureBegan() },
+        onDragEnded: { model.boundaryGestureEnded() },
+        onDragCancelled: { model.boundaryGestureCancelled() })
       AuditionPreviewPanel(model: model)
       Spacer(minLength: 0)
     }

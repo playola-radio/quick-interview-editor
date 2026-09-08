@@ -27,9 +27,9 @@ struct TranscriptClipStyleTests {
     expectNoDifference(
       TranscriptClipStyle.style(for: .suggested, variant: 0),
       TranscriptClipStyle(
-        fill: ClipStyleColor(red255: 95, green255: 185, blue255: 143, alpha: 0.06),
-        ring: ClipStyleColor(red255: 95, green255: 185, blue255: 143, alpha: 0.45),
-        text: ClipStyleColor(red255: 255, green255: 255, blue255: 255, alpha: 0.5),
+        fill: ClipStyleColor(red255: 95, green255: 185, blue255: 143, alpha: 0.10),
+        ring: ClipStyleColor(red255: 95, green255: 185, blue255: 143, alpha: 0.75),
+        text: ClipStyleColor(red255: 255, green255: 255, blue255: 255, alpha: 1),
         strikethrough: false,
         dashed: true))
   }
@@ -45,8 +45,7 @@ struct TranscriptClipStyleTests {
     expectNoDifference(TranscriptClipStyle.style(for: .rejected).dashed, false)
   }
 
-  /// Approved words are full white; suggested words are a translucent white cloud that recedes
-  /// toward the background. Neither strikes through, at any variant.
+  /// Both live kinds keep fully legible white text; fill and dash distinguish their status.
   @Test func liveVariantTextColours() {
     expectNoDifference(
       TranscriptClipStyle.style(for: .approved, variant: 0).fill,
@@ -59,7 +58,7 @@ struct TranscriptClipStyleTests {
 
       let suggested = TranscriptClipStyle.style(for: .suggested, variant: variant)
       expectNoDifference(
-        suggested.text, ClipStyleColor(red255: 255, green255: 255, blue255: 255, alpha: 0.5))
+        suggested.text, ClipStyleColor(red255: 255, green255: 255, blue255: 255, alpha: 1))
       expectNoDifference(suggested.strikethrough, false)
     }
   }
@@ -84,7 +83,7 @@ struct TranscriptClipStyleTests {
       TranscriptClipStyle.style(for: .selected),
       TranscriptClipStyle(
         fill: ClipStyleColor(red255: 204, green255: 102, blue255: 102, alpha: 0.28),
-        ring: ClipStyleColor(red255: 204, green255: 102, blue255: 102, alpha: 0.60),
+        ring: ClipStyleColor(red255: 204, green255: 102, blue255: 102, alpha: 0.85),
         text: ClipStyleColor(red255: 255, green255: 255, blue255: 255, alpha: 1),
         strikethrough: false))
   }

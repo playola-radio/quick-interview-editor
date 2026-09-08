@@ -43,7 +43,7 @@ struct EditorKeyMonitorTests {
   }
 
   @Test func plainDeleteMapsToRemoveSection() {
-    expectNoDifference(key(51), .removeSection)  // ⌫
+    expectNoDifference(key(51), .deleteSelection)  // ⌫
   }
 
   @Test func modifiedDeleteFallsThrough() {

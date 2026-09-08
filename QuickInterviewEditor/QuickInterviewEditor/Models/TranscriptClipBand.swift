@@ -11,6 +11,14 @@ struct TranscriptClipBand: Equatable, Identifiable {
   let id: UUID
   let wordIDs: [Word.ID]
   let kind: TranscriptClipKind
+  var colorIndex: Int?
+  var isActive = false
+  var isPreviewed = false
+  var isSubdued = false
+
+  var objectID: TranscriptObjectID {
+    kind == .suggested ? .suggestion(id) : .clip(id)
+  }
 }
 
 /// The four clip states the container palette covers. Only `approved` (real slices) and
@@ -56,6 +64,7 @@ struct TranscriptClipStyle: Equatable {
   /// A dashed ring marks a tentative container. Suggestions dash their outline so a proposal
   /// reads instantly differently from a committed slice's solid box; every other state is solid.
   var dashed = false
+  var ringWidth: Double = 1
 
   /// The clip palette. Clip text is white for every live state; a rejected clip dims its words
   /// and strikes them through.
@@ -113,8 +122,8 @@ struct TranscriptClipStyle: Equatable {
     solidClip(red255: $0.red, green255: $0.green, blue255: $0.blue)
   }
 
-  /// Suggestions: the same hues rendered as a fainter outline (barely-there fill, softer ring)
-  /// so a proposal never reads as prominently as a kept slice.
+  /// Suggestions retain the same hue with a lighter fill and a dashed outline.
+  /// Their text and edges stay readable even while another group is selected.
   private static let suggestedPalette = clipHues.map {
     outlineClip(red255: $0.red, green255: $0.green, blue255: $0.blue)
   }
@@ -127,24 +136,19 @@ struct TranscriptClipStyle: Equatable {
   {
     TranscriptClipStyle(
       fill: ClipStyleColor(red255: red255, green255: green255, blue255: blue255, alpha: 0.28),
-      ring: ClipStyleColor(red255: red255, green255: green255, blue255: blue255, alpha: 0.60),
+      ring: ClipStyleColor(red255: red255, green255: green255, blue255: blue255, alpha: 0.85),
       text: ClipStyleColor(red255: 255, green255: 255, blue255: 255, alpha: 1),
       strikethrough: false)
   }
 
-  /// An outline clip style from one base colour: barely-there fill and a softer, DASHED ring so a
-  /// suggestion reads as a light, tentative frame — clearly different from an approved slice's
-  /// solid box, not just a fainter one. Its words are a translucent white so they read like a
-  /// faint cloud that recedes below the body text, blending toward the dark background rather than
-  /// standing out (a suggestion under the playhead/selection still brightens to full white — that
-  /// path is handled by the renderer's selection colour). The suggested palette is built from this.
+  /// A lighter fill and dashed ring distinguish a suggestion without dimming its words.
   private static func outlineClip(red255: Double, green255: Double, blue255: Double)
     -> TranscriptClipStyle
   {
     TranscriptClipStyle(
-      fill: ClipStyleColor(red255: red255, green255: green255, blue255: blue255, alpha: 0.06),
-      ring: ClipStyleColor(red255: red255, green255: green255, blue255: blue255, alpha: 0.45),
-      text: ClipStyleColor(red255: 255, green255: 255, blue255: 255, alpha: 0.5),
+      fill: ClipStyleColor(red255: red255, green255: green255, blue255: blue255, alpha: 0.10),
+      ring: ClipStyleColor(red255: red255, green255: green255, blue255: blue255, alpha: 0.75),
+      text: ClipStyleColor(red255: 255, green255: 255, blue255: 255, alpha: 1),
       strikethrough: false,
       dashed: true)
   }
@@ -164,24 +168,32 @@ struct TranscriptClipContainer: Equatable {
   let range: NSRange
   let kind: TranscriptClipKind
   let colorIndex: Int
+  var objectID: TranscriptObjectID?
+  var isActive = false
+  var isPreviewed = false
+  var isSubdued = false
 
-  /// The containers whose word membership changed between two renders: those in `old` but not
-  /// `new` (their words may need to fall back to another container or the body colour) plus
-  /// those in `new` but not `old` (their words need the new colour). Containers unchanged across
-  /// both renders are omitted — their words already carry the right attributes, so a resize drag
-  /// repaints only the handful of containers it actually moved instead of every clip and
-  /// suggestion on screen.
-  ///
-  /// Precondition: containers are NON-OVERLAPPING (each word maps to exactly one) and emitted in
-  /// transcript-position order — the invariant `TranscriptPageModel.clipContainers` guarantees.
-  /// The diff keys on `(range, kind, colorIndex)` equality alone, so it would MISS a word whose
-  /// winning container changed only by array reordering of two overlapping same-range runs. That
-  /// state is unreachable under the non-overlap invariant (two runs can't share a range, and
-  /// equal ranges can't reorder), so the omission is safe; if that invariant is ever relaxed,
-  /// this helper must be revisited.
+  var style: TranscriptClipStyle {
+    var style = TranscriptClipStyle.style(for: kind, variant: colorIndex)
+    if isSubdued {
+      // Reduce competing fill, but keep boundaries and words fully legible.
+      style.fill.alpha *= 0.75
+    }
+    if isActive || isPreviewed {
+      style.ring.alpha = 1
+      style.ringWidth = 2
+      style.text.alpha = 1
+      style.fill.alpha = max(style.fill.alpha, 0.22)
+    }
+    return style
+  }
+
   static func changed(
     from old: [TranscriptClipContainer], to new: [TranscriptClipContainer]
   ) -> [TranscriptClipContainer] {
-    old.filter { !new.contains($0) } + new.filter { !old.contains($0) }
+    let retainedOld = old.filter { new.contains($0) }
+    let retainedNew = new.filter { old.contains($0) }
+    if retainedOld != retainedNew { return old + new }
+    return old.filter { !new.contains($0) } + new.filter { !old.contains($0) }
   }
 }

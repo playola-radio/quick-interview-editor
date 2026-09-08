@@ -108,32 +108,20 @@ struct TranscriptResizeTests {
     expectNoDifference(model.selectionAnchorSample, 54772)
   }
 
-  /// Regression for the bug FIX 1 closes: a transcript-driven selection resize must invalidate the
-  /// transcript's own private toggle/extend anchor (as `applyEdgeEdit` does), or a later Shift-click
-  /// on an unrelated word silently resurrects the pre-resize anchor and extends a span from it
-  /// instead of starting a fresh single-word selection. Routed through the PUBLIC transcript
-  /// gesture entry points (`selectWords`/`wordClicked`) rather than `selectionAnchorID`/
-  /// `selectionFocusID` directly, since those are `private` on `TranscriptPageModel`.
-  @Test func selectionResizeInvalidatesTranscriptShiftExtendAnchor() {
+  /// Shift-click extends from the resized selection's canonical sample anchor, never the
+  /// transcript gesture's stale pre-resize word anchor.
+  @Test func selectionResizeUpdatesShiftExtendAnchor() {
     let model = editor()
-    // A real transcript drag-select over words 1...2: sets both the transcript's private anchor
-    // (word 1) and `audioSelection` via the `onSelectionIntent` funnel.
-    model.transcript.selectWords(anchorID: 1, focusID: 2)
-    expectNoDifference(model.selectedWordIDs, [1, 2])
-
-    // Resize the END edge outward, past word 2, to word 4.
-    model.transcriptResizeBegan(.selection, .end)
-    model.transcriptResizeDragged(toWord: 4)
+    model.transcript.selectWords(anchorID: 1, focusID: 4)
+    model.transcriptResizeBegan(.selection, .start)
+    model.transcriptResizeDragged(toWord: 3)
     model.transcriptResizeEnded()
-    expectNoDifference(model.selectedWordIDs, [1, 2, 3, 4])
+    expectNoDifference(model.selectedWordIDs, [3, 4])
 
-    // A subsequent Shift-click on an unrelated word (6, non-adjacent to word 1).
     model.transcript.wordClicked(6, extending: true)
 
-    // Fixed: the transcript anchor was invalidated during the resize, so this Shift-click starts a
-    // fresh single-word selection of word 6 alone — NOT a stale span from word 1 to word 6.
-    expectNoDifference(model.selectedWordIDs, [6])
-    expectNoDifference(model.audioSelection, 139488..<150072)
+    expectNoDifference(model.selectedWordIDs, [3, 4, 5, 6])
+    expectNoDifference(model.audioSelection, 77704..<150072)
   }
 
   /// Regression for Codex phase-3 P2 #1: every sibling document-mutation entry point in
