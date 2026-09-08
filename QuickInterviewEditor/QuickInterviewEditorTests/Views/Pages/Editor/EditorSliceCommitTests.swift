@@ -76,11 +76,11 @@ struct EditorSliceCommitTests {
     model.sliceSelected(slice.id)
     model.cutOutNudged(byMs: 10)
     let draft = model.fineTune.draftRange!
-    let depthBefore = model.documentUndo.undo.count
+    let depthBefore = model.history.undo.count
 
     model.commitSliceEdit(id: slice.id, range: draft)
 
-    expectNoDifference(model.documentUndo.undo.count, depthBefore + 1)
+    expectNoDifference(model.history.undo.count, depthBefore + 1)
   }
 
   @Test func sliceEditTransportContextDoesNotHighlightSliceOrFollowTranscript() {

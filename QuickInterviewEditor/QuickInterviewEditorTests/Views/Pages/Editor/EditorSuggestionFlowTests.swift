@@ -123,12 +123,12 @@ struct EditorSuggestionFlowTests {
 
     expectNoDifference(model.documentCutSuggestions[id: suggestion.id]?.title, "Renamed cut")
     expectNoDifference(seen.count, 3)
-    expectNoDifference(model.documentUndo.undo.count, 0)
+    expectNoDifference(model.history.undo.count, 0)
     #expect(!model.canUndo)
 
     model.cutSuggestions.titleFocusChanged(suggestion.id, isFocused: false)
 
-    expectNoDifference(model.documentUndo.undo.count, 1)
+    expectNoDifference(model.history.undo.count, 1)
     #expect(model.canUndo)
 
     await model.undoTapped()
@@ -148,7 +148,7 @@ struct EditorSuggestionFlowTests {
     model.cutSuggestions.acceptTapped(suggestion.id)
 
     expectNoDifference(model.slices[id: suggestion.id]?.name, "My custom clip name")
-    expectNoDifference(model.documentUndo.undo.count, 2)
+    expectNoDifference(model.history.undo.count, 2)
   }
 
   @Test func speakerOverridesFlowThroughTheDocumentAndAreUndoable() async {

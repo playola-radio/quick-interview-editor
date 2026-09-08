@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Replaces the Edit menu's Undo/Redo with the focused editor's value-snapshot `UndoStack`
+/// Replaces the Edit menu's Undo/Redo with the focused editor's chronological `EditorHistory`
 /// (spec A7): ⌘Z / ⇧⌘Z route to `EditorModel.undoTapped()/redoTapped()`, never to the
 /// document's `UndoManager` (which only carries dirtiness). All decisions live on the model.
 struct EditUndoCommands: Commands {

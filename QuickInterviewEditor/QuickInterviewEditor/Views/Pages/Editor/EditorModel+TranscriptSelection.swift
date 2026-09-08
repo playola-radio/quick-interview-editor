@@ -2,6 +2,16 @@ import Foundation
 
 extension EditorModel {
   var transcriptObjects: [TranscriptObject] {
+    // Read the document even on a cache hit so Observation tracks live replacements.
+    _ = slices
+    _ = documentCutSuggestions
+    if let transcriptObjectCache { return transcriptObjectCache }
+    let objects = buildTranscriptObjects()
+    transcriptObjectCache = objects
+    return objects
+  }
+
+  private func buildTranscriptObjects() -> [TranscriptObject] {
     var objects = slices.enumerated().compactMap { index, slice in
       transcriptObject(for: slice, colorIndex: index)
     }
@@ -18,7 +28,7 @@ extension EditorModel {
 
   var selectedTranscriptObject: TranscriptObject? {
     guard let id = selection.objectID else { return nil }
-    return transcriptObject(id)
+    return transcriptObjects.first { $0.id == id }
   }
 
   func selectTranscriptObject(_ id: TranscriptObjectID) {

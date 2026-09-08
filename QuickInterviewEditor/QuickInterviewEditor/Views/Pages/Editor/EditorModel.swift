@@ -191,7 +191,10 @@ final class EditorModel: ViewModel {
   enum AuditionKey: Equatable { case cutIn, cutOut, space }
 
   // MARK: - Properties
-  var slices: IdentifiedArrayOf<Slice> = []
+  var slices: IdentifiedArrayOf<Slice> = [] {
+    didSet { transcriptObjectCache = nil }
+  }
+  @ObservationIgnored var transcriptObjectCache: [TranscriptObject]?
   /// The slice the slices list should scroll into view. Set to a freshly created clip's id so a
   /// new clip appended below the fold becomes visible; the list observes this and scrolls to it.
   var sliceScrollTarget: Slice.ID?
@@ -203,17 +206,18 @@ final class EditorModel: ViewModel {
   /// `cutSuggestions` page model reads (via its injected accessor) and displays. Mutated
   /// only through `mutateDocument` (accept/reject undoably; the background pass with
   /// `recordUndo: false`), so it moves with the rest of the document on undo.
-  var documentCutSuggestions: IdentifiedArrayOf<CutSuggestion> = []
+  var documentCutSuggestions: IdentifiedArrayOf<CutSuggestion> = [] {
+    didSet { transcriptObjectCache = nil }
+  }
   /// Paragraph/speaker spec: per-file `override ?? auto_speaker_count`. Part of the
   /// document so it saves/undoes with everything else; unused by the editor UI yet.
   var speakerCountOverride: Int?
   /// Paragraph/speaker spec: `SPEAKER_00` → "Host" display-name overrides. Part of the
   /// document; unused by the editor UI yet.
   var speakerDisplayNames: [String: String] = [:]
-  /// Undo/redo history over the document (`slices` + `timelineRemovals`) — never
-  /// selection, zoom, playback, or export phase. Every document mutation routes
-  /// through `mutateDocument`, which records here.
-  var documentUndo = UndoStack<EditorDocumentState>()
+  /// Chronological document edits and explicit selection clears. Navigation itself
+  /// is not recorded; deletion may pair its document change with deselection.
+  var history = EditorHistory<EditorDocumentState, EditorSelection>()
   private var cutSuggestionTitleEdit: (id: CutSuggestion.ID, before: EditorDocumentState)?
   /// Fired after every committed document change (mutation, undo, redo) with the new
   /// document — the single dirtiness signal. The tab model wires this to persistence, so
@@ -501,8 +505,14 @@ final class EditorModel: ViewModel {
   let canonicalMissingMessage =
     "The working audio for this file is no longer available — it can be cleared by an app "
     + "update or another window. Re-import the file to export again."
-  let undoLabel = "Undo"
-  let redoLabel = "Redo"
+  var undoLabel: String {
+    guard let label = history.undo.last?.label, !label.isEmpty else { return "Undo" }
+    return "Undo \(label)"
+  }
+  var redoLabel: String {
+    guard let label = history.redo.last?.label, !label.isEmpty else { return "Redo" }
+    return "Redo \(label)"
+  }
   let removedBadgeLabel = "Removed"
   let removedBadgeHelp =
     "This clip's audio is entirely inside a removed section — there is nothing to export."
@@ -533,7 +543,13 @@ final class EditorModel: ViewModel {
   var activeEditingRange: Range<Int>? { fineTune.draftRange ?? activeOrSelectedRange }
 
   // MARK: - Selection (source samples — the single source of truth)
-  var selection: EditorSelection = .none
+  var selection: EditorSelection = .none {
+    didSet {
+      if selection != oldValue { selectionPreservesTransport = false }
+    }
+  }
+  /// Explicit clears and history restore selection without changing transport.
+  var selectionPreservesTransport = false
 
   var audioSelection: Range<Int>? {
     get { selection.freeformRange ?? selectedTranscriptObject?.range }
@@ -885,11 +901,11 @@ final class EditorModel: ViewModel {
   // export is the one being written to disk, and rewinding it mid-run would leave the
   // finished AIFFs stale relative to what the user sees.
   var canUndo: Bool {
-    documentUndo.canUndo && cutSuggestionTitleEdit == nil && !hasUncommittedSliceEdit
+    history.canUndo && cutSuggestionTitleEdit == nil && !hasUncommittedSliceEdit
       && !isExporting
   }
   var canRedo: Bool {
-    documentUndo.canRedo && cutSuggestionTitleEdit == nil && !hasUncommittedSliceEdit
+    history.canRedo && cutSuggestionTitleEdit == nil && !hasUncommittedSliceEdit
       && !isExporting
   }
 
@@ -1348,17 +1364,14 @@ final class EditorModel: ViewModel {
   /// derived — so we also invalidate it here. Otherwise a later transcript Shift-click would extend
   /// from the anchor of the selection the user just cleared, resurrecting it.
   func clearSelection() {
-    audioSelection = nil
-    selectionAnchorSample = nil
+    selectionPreservesTransport = false
+    selection = .none
     selectionEditingEdge = nil
     transcript.invalidateSelectionAnchor()
   }
 
   /// The Clear button in the mark-clip bar. Drops the freeform selection whatever created it —
   /// transcript click/drag, waveform marquee, or edge drag — since all of them live in `audioSelection`.
-  func clearSelectionTapped() {
-    clearSelection()
-  }
 
   /// Scrolls the transcript to frame a freeform source range by revealing its first overlapping word,
   /// and (when `zoomWaveform`) zooms the waveform to the current selection. The waveform now owns the
@@ -1682,8 +1695,12 @@ final class EditorModel: ViewModel {
   /// rewind past it and drop it. Restoring history via `undoTapped`/`redoTapped` deliberately
   /// bypasses this — it assigns the fields directly so replaying the stack never records a new
   /// entry.
-  func mutateDocument(recordUndo: Bool = true, _ body: (inout EditorDocumentState) -> Void) {
+  func mutateDocument(
+    recordUndo: Bool = true, selectionAfter: EditorSelection? = nil, label: String = "",
+    _ body: (inout EditorDocumentState) -> Void
+  ) {
     finishCutSuggestionTitleEdit()
+    let oldSelection = selection
     let old = documentState
     var new = old
     body(&new)
@@ -1693,13 +1710,19 @@ final class EditorModel: ViewModel {
     documentCutSuggestions = new.cutSuggestions
     speakerCountOverride = new.speakerCountOverride
     speakerDisplayNames = new.speakerDisplayNames
+    if let selectionAfter { selection = selectionAfter }
+    reconcileSelection()
     if recordUndo {
-      documentUndo.record(before: old, after: new)
+      history.record(
+        .init(
+          document: .init(before: old, after: new),
+          selection: selectionAfter.map { _ in .init(before: oldSelection, after: selection) },
+          label: label))
     } else {
       // A non-undoable change (e.g. the background suggestion pass) must land at EVERY point in
       // history, not just the live state: replay it into the stored snapshots so undoing an
       // earlier edit can't rewind to a snapshot that predates it and silently drop it.
-      documentUndo.rebase(body)
+      history.rebase(body)
     }
     syncEditedTimeline()
     onDocumentStateChanged?(documentState)
@@ -1729,10 +1752,12 @@ final class EditorModel: ViewModel {
     finishCutSuggestionTitleEdit()
   }
 
-  private func finishCutSuggestionTitleEdit() {
+  func finishCutSuggestionTitleEdit() {
     guard let edit = cutSuggestionTitleEdit else { return }
     cutSuggestionTitleEdit = nil
-    documentUndo.record(before: edit.before, after: documentState)
+    history.record(
+      .init(
+        document: .init(before: edit.before, after: documentState), selection: nil, label: ""))
   }
 
   /// `slices`-only convenience over `mutateDocument`, kept so every existing slice
@@ -2479,37 +2504,22 @@ final class EditorModel: ViewModel {
   }
 
   // MARK: - Undo / Redo
-  /// Restores the previous document snapshot (`slices` + `timelineRemovals`), then
-  /// reconciles playback. History stores only the document, so anything derived
-  /// (selection, zoom, export phase, playback) is left as-is except where reconciliation
-  /// demands otherwise. Persists the sidecar only when the restored removals actually
-  /// differ from the current ones — undoing a slice-only edit (rename, reorder, add/delete
-  /// slice) never touches it.
+  /// Applies the next chronological history entry. Pure selection restores never
+  /// write the document or reconcile playback; document entries preserve persistence.
   func undoTapped() async {
-    // Guard here too, not just on `canUndo`: a menu item or keyboard shortcut could fire this
-    // while an existing-slice edit is open, which would rewind `slices` under a live draft —
-    // or mid-export, which would leave the finished AIFFs stale.
-    guard cutSuggestionTitleEdit == nil, !hasUncommittedSliceEdit, !isExporting,
-      let restored = documentUndo.undo(current: documentState)
-    else { return }
-    restore(restored)
-    await reconcilePlayback()
+    guard canUndo, let entry = history.undoEntry() else { return }
+    await applyHistory(entry, undoing: true)
   }
 
-  /// Reapplies the next document snapshot on the redo branch, then reconciles playback. Same
-  /// persist-only-on-change behavior as `undoTapped`.
   func redoTapped() async {
-    guard cutSuggestionTitleEdit == nil, !hasUncommittedSliceEdit, !isExporting,
-      let restored = documentUndo.redo(current: documentState)
-    else { return }
-    restore(restored)
-    await reconcilePlayback()
+    guard canRedo, let entry = history.redoEntry() else { return }
+    await applyHistory(entry, undoing: false)
   }
 
   /// Assigns a restored document snapshot back onto the model's fields (bypassing the undo
   /// stack — replaying history must never record a new entry), rebuilds the edited timeline,
   /// and fires the change callback so persistence stays in step with in-memory state.
-  private func restore(_ restored: EditorDocumentState) {
+  func restore(_ restored: EditorDocumentState) {
     slices = restored.slices
     timelineRemovals = restored.timelineRemovals
     documentCutSuggestions = restored.cutSuggestions
@@ -2523,7 +2533,7 @@ final class EditorModel: ViewModel {
   /// stops playback if the playing slice is gone, and closes the fine-tune pane if the active
   /// slice is gone (clearing its target + draft). Centralized so every removal path behaves
   /// the same.
-  private func reconcilePlayback() async {
+  func reconcilePlayback() async {
     // A shared-document undo/redo can pull the Edit Slice sheet's slice out from under it: ⌘Z can
     // delete the slice (rewinding its creation) OR revert its boundaries. The modal's overview
     // window and committed range are seeded once at open and never re-seed, so a survived-but-moved
@@ -2969,7 +2979,7 @@ final class EditorModel: ViewModel {
   /// we were stopping (a slice/preview/audition shortcut, which doesn't touch the selection). Either
   /// way the stale task must not snap the cursor over the newer state or into a live playback.
   func transportSelectionChanged(_ newRange: Range<Int>?, cursorToken: Int) async {
-    guard let newRange else { return }
+    guard !selectionPreservesTransport, let newRange, audioSelection == newRange else { return }
     // A marquee drag emits a live selection change on every pointer move; suppress the snap for the
     // duration of the drag so it doesn't churn the transport. `waveformAreaSelectEnded` commits the
     // playhead once, synchronously, when the drag finishes.
@@ -2987,8 +2997,8 @@ final class EditorModel: ViewModel {
       await endTransportPlayback()
       // Re-check across the stop await: a newer selection, a new playback, or a ruler move (which
       // bumps the generation) all invalidate this snap.
-      guard audioSelection == newRange, transportPhase.session == nil,
-        cursorMoveGeneration == cursorToken
+      guard !selectionPreservesTransport, audioSelection == newRange,
+        transportPhase.session == nil, cursorMoveGeneration == cursorToken
       else { return }
     }
     placeCursor(atSource: newRange.lowerBound)
@@ -3076,7 +3086,7 @@ final class EditorModel: ViewModel {
       // Save or Cancel first. A dirty PENDING-SELECTION draft has nothing protecting it, so it's
       // discarded right along with a clean one.
       if fineTune.target != nil, !fineTune.isEditingExistingSlice || !fineTune.hasUnsavedChange {
-        cancelPreviewOrAuditionIfNeeded()  // closing the pane removes the region + Stop control
+        if !selectionPreservesTransport { cancelPreviewOrAuditionIfNeeded() }
         fineTune.clear()
       }
       return
@@ -3099,7 +3109,7 @@ final class EditorModel: ViewModel {
     if shouldBegin {
       // Retargeting to a different session must not leave an old preview playing — the new pane
       // would show "Stop preview" and the playhead would follow the stale range.
-      cancelPreviewOrAuditionIfNeeded()
+      if !selectionPreservesTransport { cancelPreviewOrAuditionIfNeeded() }
       // A transcript selection taking over releases the previously active slice, so clearing the
       // selection later doesn't silently reopen the pane on a stale slice.
       if case .pendingSelection = target { activeSliceID = nil }
