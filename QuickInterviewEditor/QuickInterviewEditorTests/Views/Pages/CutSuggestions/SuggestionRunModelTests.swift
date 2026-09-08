@@ -154,9 +154,9 @@ final class SuggestionRunFixture: Sendable {
     }
   }
 
-  @MainActor func model() -> SuggestionRunModel {
+  @MainActor func model(options: CutSuggestOptions = .freshConfigured) -> SuggestionRunModel {
     let model = SuggestionRunModel(
-      editPlan: Fixtures.editPlan(), sourceFingerprint: owner.sourceFingerprint)
+      editPlan: Fixtures.editPlan(), sourceFingerprint: owner.sourceFingerprint, options: options)
     wire(model)
     return model
   }
@@ -223,22 +223,27 @@ struct SuggestionRunModelTests {
 
   @Test func freshRunUsesConfiguredDiscoveryVersion() {
     let model = SuggestionRunModel(editPlan: Fixtures.editPlan(), sourceFingerprint: "fresh")
-    expectNoDifference(model.options.promptVersion, "configured-v4")
+    expectNoDifference(model.options.promptVersion, "configured-v5")
   }
 
-  @Test func freshSearchCapturesInterviewArtistAndResumeKeepsItAfterProjectEdit() async throws {
+  @Test(arguments: [
+    ("configured-v5", "fields-v3"), ("configured-v4", "fields-v2"), ("configured-v3", "fields-v1"),
+  ])
+  func freshSearchCapturesInterviewArtistAndResumeKeepsItAfterProjectEdit(
+    discoveryVersion: String, extractionVersion: String
+  ) async throws {
     try await withMainSerialExecutor {
       let fixture = SuggestionRunFixture()
       fixture.document.withValue { $0.interviewArtist = "River Vale" }
       try await withDependencies {
         fixture.install(&$0)
       } operation: {
-        let model = fixture.model()
+        let model = fixture.model(options: CutSuggestOptions(promptVersion: discoveryVersion))
         let task = Task { await model.suggestTapped() }
         await fixture.waitForRequests()
         let first = try #require(fixture.state.value.requests.first)
         expectNoDifference(first.snapshot?.interviewArtist, "River Vale")
-        expectNoDifference(first.snapshot?.extractionPromptVersion, "fields-v2")
+        expectNoDifference(first.snapshot?.extractionPromptVersion, extractionVersion)
         fixture.checkpoint(phase: .needsRetry, completed: ["saved"], failed: ["retry"])
         fixture.state.value.continuations[0].yield(
           .recoverableFailure(
@@ -387,7 +392,7 @@ struct SuggestionRunModelTests {
         await task.value
         expectNoDifference(model.message, "One field request failed.")
         let reopened = fixture.model()
-        expectNoDifference(reopened.options.promptVersion, "configured-v4")
+        expectNoDifference(reopened.options.promptVersion, "configured-v5")
         let retry = Task { await reopened.resumeTapped() }
         await fixture.waitForRequests(2)
         expectNoDifference(fixture.state.value.prepared.count, 1)

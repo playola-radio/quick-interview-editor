@@ -642,7 +642,7 @@ struct EditorSuggestionFlowTests {
         let future = model.suggestionStarts
         let firstTask = Task { await model.cutSuggestions.suggestCutsTapped() }
         await fixture.waitForRequests()
-        expectNoDifference(fixture.state.value.requests[0].options.promptVersion, "configured-v4")
+        expectNoDifference(fixture.state.value.requests[0].options.promptVersion, "configured-v5")
         fixture.finish([fixture.candidate(1)])
         await firstTask.value
         let first = try #require(model.documentCutSuggestions.first)

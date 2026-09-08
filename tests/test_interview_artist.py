@@ -113,8 +113,10 @@ def test_fallback_respects_spotlight_presence_and_duration(tmp_path, duration, s
     assert [c['product_type'] for c in result['suggestions']] == expected
 
 
-def test_qualification_fields_not_in_name_still_requested_and_never_leak(tmp_path):
+@pytest.mark.parametrize('versions', [('configured-v4', 'fields-v2'), ('configured-v5', 'fields-v3')])
+def test_qualification_fields_not_in_name_still_requested_and_never_leak(tmp_path, versions):
     req = artist_request(naming=False)
+    req['options'].update(discovery_prompt_version=versions[0], extraction_prompt_version=versions[1])
     provider = ArtistProvider(values={'artist-name': 'River Vale'})
     result = run(req, provider, tmp_path)
     assert provider.extractions == 1
@@ -125,8 +127,10 @@ def test_qualification_fields_not_in_name_still_requested_and_never_leak(tmp_pat
 
 
 @pytest.mark.parametrize('removed', ['artist-name', 'song-title'])
-def test_removed_qualification_definition_does_not_become_null_evidence(tmp_path, removed):
+@pytest.mark.parametrize('versions', [('configured-v4', 'fields-v2'), ('configured-v5', 'fields-v3')])
+def test_removed_qualification_definition_does_not_become_null_evidence(tmp_path, removed, versions):
     req = artist_request(naming=False)
+    req['options'].update(discovery_prompt_version=versions[0], extraction_prompt_version=versions[1])
     req['configuration']['fields'] = [f for f in req['configuration']['fields'] if f['id'] != removed]
     provider = ArtistProvider()
     result = run(req, provider, tmp_path)
@@ -177,8 +181,10 @@ def test_failed_intro_remains_and_hides_spotlight_until_successful_retry(tmp_pat
     assert len(retry.calls) == 1
 
 
-def test_failed_fallback_retries_only_spotlight_naming(tmp_path):
+@pytest.mark.parametrize('versions', [('configured-v4', 'fields-v2'), ('configured-v5', 'fields-v3')])
+def test_failed_fallback_retries_only_spotlight_naming(tmp_path, versions):
     req = artist_request()
+    req['options'].update(discovery_prompt_version=versions[0], extraction_prompt_version=versions[1])
     spotlight_title(req)
     first = run(req, ArtistProvider(fail=[2]), tmp_path)
     assert first['status'] == 'needs_retry'
@@ -190,8 +196,10 @@ def test_failed_fallback_retries_only_spotlight_naming(tmp_path):
 
 
 @pytest.mark.parametrize('stage', [1, 2])
-def test_successful_extraction_survives_checkpoint_failure_at_either_stage(tmp_path, monkeypatch, stage):
+@pytest.mark.parametrize('versions', [('configured-v4', 'fields-v2'), ('configured-v5', 'fields-v3')])
+def test_successful_extraction_survives_checkpoint_failure_at_either_stage(tmp_path, monkeypatch, stage, versions):
     req = artist_request()
+    req['options'].update(discovery_prompt_version=versions[0], extraction_prompt_version=versions[1])
     spotlight_title(req)
     provider = ArtistProvider(values={'descriptive-title': 'Saved title'})
     j = journal(tmp_path, req)
@@ -210,8 +218,10 @@ def test_successful_extraction_survives_checkpoint_failure_at_either_stage(tmp_p
     assert result['suggestions'][0]['fields'] == {'descriptive-title': 'Saved title'}
 
 
-def test_oversized_intro_evidence_is_diagnosed_without_disqualification(tmp_path):
+@pytest.mark.parametrize('versions', [('configured-v4', 'fields-v2'), ('configured-v5', 'fields-v3')])
+def test_oversized_intro_evidence_is_diagnosed_without_disqualification(tmp_path, versions):
     req = artist_request()
+    req['options'].update(discovery_prompt_version=versions[0], extraction_prompt_version=versions[1])
     req['transcript_units'][0]['text'] = 'Long evidence ' * 3000
     result = run(req, ArtistProvider(spotlights=[(0, 9)]), tmp_path)
     assert result['status'] == 'needs_retry'
@@ -229,8 +239,10 @@ def test_qualified_intro_still_hides_restored_spotlight(tmp_path):
         ('intro', 0, 7), ('spotlight', 20, 29)]
 
 
-def test_custom_type_with_null_fields_is_not_qualified(tmp_path):
+@pytest.mark.parametrize('versions', [('configured-v4', 'fields-v2'), ('configured-v5', 'fields-v3')])
+def test_custom_type_with_null_fields_is_not_qualified(tmp_path, versions):
     req = artist_request(10, spotlight=False)
+    req['options'].update(discovery_prompt_version=versions[0], extraction_prompt_version=versions[1])
     intro = req['configuration']['types'][0]
     intro['id'] = 'custom-commentary'
     class CustomProvider(ArtistProvider):
@@ -245,8 +257,10 @@ def test_custom_type_with_null_fields_is_not_qualified(tmp_path):
     assert result['suggestions'][0]['fields'] == {'artist-name': None, 'song-title': None}
 
 
-def test_resume_checkpoint_interruption_preserves_recovered_converted_fields(tmp_path, monkeypatch):
+@pytest.mark.parametrize('versions', [('configured-v4', 'fields-v2'), ('configured-v5', 'fields-v3')])
+def test_resume_checkpoint_interruption_preserves_recovered_converted_fields(tmp_path, monkeypatch, versions):
     req = artist_request()
+    req['options'].update(discovery_prompt_version=versions[0], extraction_prompt_version=versions[1])
     spotlight_title(req)
     first = run(req, ArtistProvider(values={'descriptive-title': 'Already saved'}), tmp_path)
     j = journal(tmp_path, req)
@@ -286,8 +300,10 @@ def test_small_nested_spotlight_does_not_replace_broader_complete_intro(tmp_path
         ('spotlight', 0, 39)]
 
 
-def test_retry_new_fallback_never_repeats_paid_unrelated_spotlight_naming(tmp_path):
+@pytest.mark.parametrize('versions', [('configured-v4', 'fields-v2'), ('configured-v5', 'fields-v3')])
+def test_retry_new_fallback_never_repeats_paid_unrelated_spotlight_naming(tmp_path, versions):
     req = artist_request(30)
+    req['options'].update(discovery_prompt_version=versions[0], extraction_prompt_version=versions[1])
     spotlight_title(req)
     first = run(req, ArtistProvider(spotlights=[(20, 29)], fail=[1],
                                     values={'descriptive-title': 'Saved other story'}), tmp_path)
@@ -312,8 +328,10 @@ def test_many_custom_named_spotlights_keep_twenty_candidate_batches(tmp_path):
     assert provider.extractions == 3
 
 
-def test_changed_spotlight_set_reuses_success_ahead_of_checkpoint(tmp_path, monkeypatch):
+@pytest.mark.parametrize('versions', [('configured-v4', 'fields-v2'), ('configured-v5', 'fields-v3')])
+def test_changed_spotlight_set_reuses_success_ahead_of_checkpoint(tmp_path, monkeypatch, versions):
     req = artist_request(30)
+    req['options'].update(discovery_prompt_version=versions[0], extraction_prompt_version=versions[1])
     spotlight_title(req)
     provider = ArtistProvider(spotlights=[(20, 29)], fail=[1],
                               values={'descriptive-title': 'Already paid story'})

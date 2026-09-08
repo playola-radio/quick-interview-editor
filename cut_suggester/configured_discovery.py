@@ -13,7 +13,10 @@ from collections.abc import Callable, Mapping, Sequence
 
 from .llm import LLMClient
 from .models import Sentence
-from .suggestion_config import BROAD_INTRO_DISCOVERY_VERSIONS, CONFIGURED_DISCOVERY_VERSION, IMAGING_IDS
+from .suggestion_config import (
+    BROAD_INTRO_DISCOVERY_VERSIONS, CONFIGURED_DISCOVERY_VERSION,
+    FOCUSED_INTRO_DISCOVERY_VERSION, IMAGING_IDS,
+)
 
 
 class DiscoveryError(ValueError):
@@ -122,6 +125,20 @@ def _prompt(sentences: list[Sentence], types: dict[str, str], start: int, end: i
             "Preserve complete useful thoughts; reject isolated names, acknowledgments, and incidental mentions. "
             "The configured guidelines control which commentary is useful for the requested Intro type.\n"
         )
+        if discovery_prompt_version == FOCUSED_INTRO_DISCOVERY_VERSION:
+            intro_rule = (
+                "For Intro, require one specific artist or one specific song as the clear central subject of the "
+                "entire clip. A listener should naturally expect that song or music by that artist next. "
+                "No immediate musical handoff or exact song title is required; artist-only commentary and "
+                "self-referential discussion of one song can qualify. Reject general discussion of the industry, "
+                "a genre, a personal story, or influences when artist names are only incidental examples. "
+                "Roundups and comparisons with two or more coequal artists or songs belong in Spotlights. "
+                "Do not pick one recognizable name from a list to manufacture an Intro. A secondary comparison "
+                "is allowed when one subject clearly dominates. Do not count names mechanically; count central subjects. "
+                "The interview subject's identity alone is not subject evidence. Preserve complete useful thoughts "
+                "and reject isolated names or acknowledgments. Within this single-subject requirement, the "
+                "configured guidelines control which commentary is useful for Intro.\n"
+            )
     return f"""{heading}
 
 Configured types and guidelines:

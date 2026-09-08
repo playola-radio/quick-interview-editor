@@ -88,11 +88,18 @@ Suggestions finds three groups of material in your transcript:
 | Song Intros | Song Intro | `Song Title 1, Artist Name` |
 | Audio Images | ID, Pre-commercial, Post-commercial, Promo | `ID 1`, `Pre-Com 1`, `Post-Com 1`, `Promo 1`, … |
 
-Song Intros include complete commentary about a song or artist, even without a lead-in
-to music. When the same passage also fits Spotlight, Intro takes priority for naming.
+Song Intros must have **one specific artist or one specific song as the clear central
+subject of the whole clip**, making a natural transition into that song or music by
+that artist. A discussion of Bob Dylan’s songwriting can qualify; general talk about
+the music industry that uses Dylan, Prince, and Joni Mitchell as examples is a Spotlight.
+Roundups and comparisons of several coequal subjects are not Intros. Secondary references
+are fine when one subject clearly dominates; an explicit handoff or song title is not
+required for an artist-focused clip. The Interview Artist’s identity alone does not
+make a clip an Intro. When uncertain, prefer Spotlight. Eligible Intros retain priority
+when the same passage also fits Spotlight.
 Names remain editable; an Intro with an unknown song title keeps a descriptive name
 when its artist is established. If both song and artist are missing after successful
-extraction, useful complete commentary is kept as a Spotlight when that type is configured;
+extraction (including when no single clear subject is established), useful complete commentary is kept as a Spotlight when that type is configured;
 otherwise the unqualified Intro is omitted. Failed extraction stays available to retry.
 
 Enter an optional **Interview Artist** before importing audio, or edit it later under

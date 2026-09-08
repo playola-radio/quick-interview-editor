@@ -291,10 +291,37 @@ struct SuggestionConfigurationClientTests {
     expectNoDifference(published, legacy)
   }
 
-  @Test func freshSearchUsesBroadIntrosAndHistoricalOptionsRemainUnchanged() {
-    expectNoDifference(CutSuggestOptions.freshConfigured.promptVersion, "configured-v4")
+  @Test func freshSearchUsesFocusedIntrosAndHistoricalOptionsRemainUnchanged() {
+    expectNoDifference(CutSuggestOptions.freshConfigured.promptVersion, "configured-v5")
     expectNoDifference(
       CutSuggestOptions(promptVersion: "configured-v2").promptVersion, "configured-v2")
+  }
+
+  @Test(arguments: [false, true])
+  func latestBroadGuidanceUpgradesOnlyWhenUnedited(isEdited: Bool) async throws {
+    let directory = try makeTemporaryDirectory()
+    defer { try? fileManager.removeItem(at: directory) }
+    let fileURL = directory.appending(component: "SuggestionConfiguration.json")
+    var saved = SuggestionDefaults.configuration
+    saved.revision = 41
+    saved.types[0].guidelines =
+      "a complete, independently usable thought about a song or an artist, including songwriting, "
+      + "history, influence, performance, or reception. A direct lead-in to music is welcome but not "
+      + "required; artist-only commentary can qualify without a named song. Keep the context needed to "
+      + "understand the thought. Exclude isolated names, acknowledgments, and incidental mentions. "
+      + "Prefer Intro naming when the same passage also fits Spotlight."
+    if isEdited { saved.types[0].guidelines += " Only live introductions." }
+    try JSONEncoder().encode(saved).write(to: fileURL)
+    var expected = saved
+    if !isEdited {
+      expected.types[0].guidelines = SuggestionDefaults.types[0].guidelines
+      expected.revision = 42
+    }
+    let store = SuggestionConfigurationStore(fileURL: fileURL)
+    let loaded = try await store.load()
+    expectNoDifference(loaded, expected)
+    let reloaded = try await store.load()
+    expectNoDifference(reloaded, expected)
   }
 
   private func legacyConfiguration() throws -> SuggestionConfiguration {

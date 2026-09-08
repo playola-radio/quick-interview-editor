@@ -9,11 +9,15 @@ enum SuggestionDefaults {
       name: "Song Intro",
       group: .songIntros,
       guidelines:
-        "a complete, independently usable thought about a song or an artist, including songwriting, "
-        + "history, influence, performance, or reception. A direct lead-in to music is welcome but not "
-        + "required; artist-only commentary can qualify without a named song. Keep the context needed to "
-        + "understand the thought. Exclude isolated names, acknowledgments, and incidental mentions. Prefer "
-        + "Intro naming when the same passage also fits Spotlight.",
+        "Find a complete clip whose clear central subject is ONE specific artist OR ONE specific song, "
+        + "so playing that song or music by that artist next would be a natural transition. The subject "
+        + "must dominate the whole clip. General discussions of music, the industry, a genre, influences, "
+        + "or personal experiences are Spotlights when artists or songs are only examples or supporting "
+        + "mentions. Roundups and comparisons of multiple coequal artists or songs are not Intros. Do not "
+        + "pick a name from a list. A secondary reference is allowed only when one subject remains "
+        + "clearly dominant. The speaker or interview artist is not automatically the subject. No "
+        + "explicit handoff or song title is required for an artist-focused clip. When uncertain, prefer "
+        + "Spotlight.",
       template: [
         NamingComponent(kind: .field, value: "song-title"),
         NamingComponent(kind: .literal, value: " "),
@@ -119,7 +123,7 @@ enum SuggestionDefaults {
   ) -> SuggestionConfiguration {
     var updated = configuration
     if let index = updated.types.firstIndex(where: { $0.id == "intro" }),
-      updated.types[index].guidelines == legacyIntroGuidelines,
+      legacyIntroGuidelines.contains(updated.types[index].guidelines),
       let preset = types.first(where: { $0.id == "intro" })
     {
       updated.types[index].guidelines = preset.guidelines
@@ -135,8 +139,14 @@ enum SuggestionDefaults {
     return updated
   }
 
-  private static let legacyIntroGuidelines =
-    "sets up ONE named song and ends on the handoff (~15-45s)"
+  private static let legacyIntroGuidelines: Set<String> = [
+    "sets up ONE named song and ends on the handoff (~15-45s)",
+    "a complete, independently usable thought about a song or an artist, including songwriting, "
+      + "history, influence, performance, or reception. A direct lead-in to music is welcome but not "
+      + "required; artist-only commentary can qualify without a named song. Keep the context needed to "
+      + "understand the thought. Exclude isolated names, acknowledgments, and incidental mentions. "
+      + "Prefer Intro naming when the same passage also fits Spotlight.",
+  ]
 
   private static let legacyFieldInstructions = [
     "song-title":

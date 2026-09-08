@@ -235,7 +235,7 @@ def plan_extraction_batches(
         raise ExtractionError("max_input_characters must be an integer from 1 through 24000")
     types, fields = _type_and_fields(type_definitions, field_definitions)
     artist_context = ""
-    if extraction_prompt_version == "fields-v2":
+    if extraction_prompt_version in {"fields-v2", "fields-v3"}:
         artist_context = (
             "Never emit the literal placeholder SELF. "
             "Use user-provided interview context only when the passage concerns the interview "
@@ -245,6 +245,24 @@ def plan_extraction_batches(
         )
         if interview_artist is not None:
             artist_context += f"User-provided interview artist: {json.dumps(interview_artist, ensure_ascii=False)}\n"
+    if extraction_prompt_version == "fields-v3" and any(
+        isinstance(candidate, Mapping) and candidate.get("product_type") == "intro" for candidate in candidates
+    ):
+        artist_context += (
+            "For candidates with type intro only, apply this single-subject check before extracting the default "
+            "identity fields artist-name and song-title: one specific artist or one specific song must be the "
+            "clear central subject of the entire clip, so a listener would naturally expect that song or music "
+            "by that artist next. General discussion of the industry, a genre, a personal story, or influences "
+            "with incidental artist examples, roundups, and comparisons with two or more coequal subjects fail "
+            "this check. If there is no single clear subject, return null for both artist-name and song-title "
+            "when requested, even with recognizable names, titles, or a supplied interview artist. Do not select "
+            "one name from a list to manufacture a subject. A secondary comparison is allowed when one subject "
+            "clearly dominates. Do not count names mechanically; count central subjects. Artist-only commentary "
+            "and self-referential discussion of one song can qualify, but interview identity alone is not "
+            "subject evidence. When the check passes, extract supported identity values using the field "
+            "instructions and scoped interview context above. Other candidate types and all other fields "
+            "follow their configured field instructions normally.\n"
+        )
     prepared: list[tuple[str, set[str], str, Mapping]] = []
     seen_ids: set[str] = set()
     for candidate in candidates:
@@ -258,7 +276,10 @@ def plan_extraction_batches(
         field_ids = set(required_field_ids(types[type_id]))
         field_ids.update((extra_field_ids_by_type or {}).get(type_id, set()))
         if field_ids:
-            prepared.append((candidate_id, field_ids, _candidate_text(candidate, sentences, speaker_ids), candidate))
+            text = _candidate_text(candidate, sentences, speaker_ids)
+            if extraction_prompt_version == "fields-v3":
+                text = f"Candidate type: {type_id}\n{text}"
+            prepared.append((candidate_id, field_ids, text, candidate))
 
     batches: list[ExtractionBatch] = []
     diagnostics: list[InputSizeDiagnostic] = []

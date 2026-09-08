@@ -13,7 +13,7 @@ from .extraction import (completed_extraction_values, parse_extraction_response,
 from .intro_qualification import QUALIFICATION_FIELD_IDS, qualify_intros
 from .run_journal import JournalRecoveryError, JournalStorageError, RunJournal, canonical_json, digest
 from .suggestion_config import (
-    BROAD_INTRO_DISCOVERY_VERSIONS, CONFIGURED_DISCOVERY_VERSION, QUALIFIED_INTRO_DISCOVERY_VERSION,
+    BROAD_INTRO_DISCOVERY_VERSIONS, CONFIGURED_DISCOVERY_VERSION, QUALIFIED_INTRO_DISCOVERY_VERSIONS,
     _trim_foundation_whitespace,
     split_discovery_types, validate_configuration,
 )
@@ -111,7 +111,7 @@ def run_configured_suggest(request: dict, llm, journal: RunJournal, emit) -> dic
     recovered = journal.checkpoint['suggestions'] if journal.checkpoint else []
     recovered_fields = {c['candidate_id']: c.get('fields', {}) for c in recovered}
     discovery_complete = False
-    qualification_complete = options['discovery_prompt_version'] != QUALIFIED_INTRO_DISCOVERY_VERSION
+    qualification_complete = options['discovery_prompt_version'] not in QUALIFIED_INTRO_DISCOVERY_VERSIONS
 
     def checkpoint(phase):
         saved = journal.write_checkpoint(run_id=run_id, phase=phase,
@@ -130,7 +130,7 @@ def run_configured_suggest(request: dict, llm, journal: RunJournal, emit) -> dic
         return result
 
     broad_intros = options['discovery_prompt_version'] in BROAD_INTRO_DISCOVERY_VERSIONS
-    qualify = options['discovery_prompt_version'] == QUALIFIED_INTRO_DISCOVERY_VERSION
+    qualify = options['discovery_prompt_version'] in QUALIFIED_INTRO_DISCOVERY_VERSIONS
     tuned, generic = split_discovery_types(configuration, discovery_prompt_version=options['discovery_prompt_version'])
     try:
         if tuned:

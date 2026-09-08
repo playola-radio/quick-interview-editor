@@ -277,12 +277,17 @@ final class SuggestionRunModel: ViewModel {
       guard document.unfinishedSuggestionRun == nil,
         mode != .automatic || (self.automaticEnabled && document.cutSuggestions.isEmpty)
       else { throw CancellationError() }
+      let extractionPromptVersion =
+        switch self.options.promptVersion {
+        case "configured-v5": "fields-v3"
+        case "configured-v4": "fields-v2"
+        default: "fields-v1"
+        }
       let snapshot = SuggestionRunSnapshot(
         runID: runID, configuration: configuration,
         configurationHash: try SuggestionRecoveryArchive.configurationHash(configuration),
         model: self.options.model, discoveryPromptVersion: self.options.promptVersion,
-        extractionPromptVersion: self.options.promptVersion == "configured-v4"
-          ? "fields-v2" : "fields-v1",
+        extractionPromptVersion: extractionPromptVersion,
         productSpecVersion: "configured-v1",
         transcriptHash: self.editPlan.transcriptHash, sourceFingerprint: self.sourceFingerprint,
         sampleRate: self.editPlan.source.sampleRate,
