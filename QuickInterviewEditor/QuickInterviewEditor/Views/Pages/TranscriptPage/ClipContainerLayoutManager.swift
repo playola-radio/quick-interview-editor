@@ -64,16 +64,20 @@ final class ClipContainerLayoutManager: NSLayoutManager {
     }
   }
 
+  private struct ContainerSegment {
+    let fill: NSBezierPath
+    let ring: NSBezierPath
+    let run: ClipContainerRun
+  }
+
   private func drawClipContainers(forGlyphRange glyphsToShow: NSRange, at origin: NSPoint) {
     guard !containerRuns.isEmpty, let textContainer = textContainers.first else { return }
 
+    var segments: [ContainerSegment] = []
     for run in containerRuns {
       let fullGlyphRange = glyphRange(forCharacterRange: run.range, actualCharacterRange: nil)
       let visible = NSIntersectionRange(fullGlyphRange, glyphsToShow)
       guard visible.length > 0 else { continue }
-
-      run.fill.setFill()
-      run.ring.setStroke()
 
       enumerateLineFragments(forGlyphRange: visible) {
         [self] lineRect, usedRect, _, lineGlyphRange, _ in
@@ -106,10 +110,21 @@ final class ClipContainerLayoutManager: NSLayoutManager {
           width: max(0, rightX - leftX),
           height: textHeight + verticalPadding * 2)
 
-        drawContainerSegment(
+        let paths = containerPaths(
           in: rect, roundedLeft: roundedLeft, roundedRight: roundedRight, dashed: run.dashed,
           ringWidth: run.ringWidth)
+        segments.append(ContainerSegment(fill: paths.fill, ring: paths.ring, run: run))
       }
+    }
+    // All fills precede all outlines: a foreground fill must not wash out an overlapping
+    // group's boundary. Run order still puts the selected object's outline on top.
+    for segment in segments {
+      segment.run.fill.setFill()
+      segment.fill.fill()
+    }
+    for segment in segments {
+      segment.run.ring.setStroke()
+      segment.ring.stroke()
     }
   }
 
@@ -124,12 +139,12 @@ final class ClipContainerLayoutManager: NSLayoutManager {
       ?? .systemFont(ofSize: NSFont.systemFontSize)
   }
 
-  private func drawContainerSegment(
+  private func containerPaths(
     in rect: CGRect, roundedLeft: Bool, roundedRight: Bool, dashed: Bool, ringWidth: Double
-  ) {
+  ) -> (fill: NSBezierPath, ring: NSBezierPath) {
     let radius = min(cornerRadius, rect.height / 2, rect.width / 2)
-    fillPath(rect: rect, radius: radius, roundedLeft: roundedLeft, roundedRight: roundedRight)
-      .fill()
+    let fill = fillPath(
+      rect: rect, radius: radius, roundedLeft: roundedLeft, roundedRight: roundedRight)
     let ring = ringPath(
       rect: rect, radius: radius, roundedLeft: roundedLeft, roundedRight: roundedRight,
       ringWidth: ringWidth)
@@ -139,7 +154,7 @@ final class ClipContainerLayoutManager: NSLayoutManager {
       // without shimmering into a solid line. Phase 0: dashes start crisp at each segment origin.
       ring.setLineDash([4, 3], count: 2, phase: 0)
     }
-    ring.stroke()
+    return (fill, ring)
   }
 
   /// The closed fill outline: left corners rounded only at a run's start, right corners only
