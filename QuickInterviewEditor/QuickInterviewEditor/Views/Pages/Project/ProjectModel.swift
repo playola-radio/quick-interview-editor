@@ -517,7 +517,10 @@ final class ProjectModel: ViewModel {
       else { return }
       if let unfinished = file.content.unfinishedSuggestionRun, unfinished.snapshot.runID != runID {
         let capture = try await suggestionRecovery.capture(owner, unfinished.snapshot.runID, nil)
-        guard generation == recoveryGeneration else { return }
+        guard generation == recoveryGeneration, recoveryOwner == owner,
+          self.file?.content.lastAppliedSuggestionRunID == runID,
+          self.file?.content.unfinishedSuggestionRun == unfinished
+        else { return }
         try acceptSuggestionRecovery(capture, owner: owner)
       } else {
         recoveryArchive = nil
@@ -556,6 +559,7 @@ final class ProjectModel: ViewModel {
     _ capture: SuggestionRecoveryCapture, owner: SuggestionRecoveryOwner
   ) throws {
     guard !recoveryActionsBlocked, var file, let plan = loadedPlan,
+      capture.checkpoint.snapshot.runID != file.content.lastAppliedSuggestionRunID,
       owner.sourceFingerprint == file.source.originalFingerprint,
       owner.transcriptHash == plan.transcriptHash,
       capture.checkpoint.snapshot.sourceFingerprint == owner.sourceFingerprint,

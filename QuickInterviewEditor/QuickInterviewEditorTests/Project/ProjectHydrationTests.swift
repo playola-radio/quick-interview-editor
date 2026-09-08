@@ -521,3 +521,59 @@ extension ProjectHydrationTests {
     expectNoDifference(archive.retainedAppliedRuns, [])
   }
 }
+
+extension ProjectHydrationTests {
+  @Test(arguments: [false, true])
+  func appliedRunRejectsLateCaptureAndPreservesArchive(suspendedSaveRefresh: Bool) async throws {
+    let gate = LockIsolated<CheckedContinuation<Void, Never>?>(nil)
+    var file = Fixtures.projectFile()
+    let plan = Fixtures.editPlan()
+    let fixture = try RecoveryFixture.matching(file: file, plan: plan)
+    file.content.suggestionRecoveryOwnerID = fixture.owner.id
+    file.content.lastAppliedSuggestionRunID = Fixtures.uuid(87)
+    let capture = SuggestionRecoveryCapture(
+      checkpoint: .init(
+        pythonRevision: 1, controlRevision: 0, snapshot: fixture.snapshot, phase: .ready,
+        candidates: [], completedRequestKeys: [], failedRequestKeys: [], proposedStarts: .init()),
+      archive: Data("accepted ready archive".utf8),
+      journalDirectory: URL(fileURLWithPath: "/journal/run"))
+    let (sink, record) = ProjectDocumentSink.recorder()
+    let model = withDependencies {
+      $0.uuid = .incrementing
+      $0.suggestionRecovery.confirmSaved = { _, _ in }
+      $0.suggestionRecovery.capture = { _, _, _ in
+        await withCheckedContinuation { continuation in gate.setValue(continuation) }
+        return capture
+      }
+    } operation: {
+      ProjectModel(
+        file: file, plan: plan, audio: .sessionFile(URL(fileURLWithPath: "/audio.aiff")),
+        sink: sink)
+    }
+    await model.viewAppeared()
+    try model.acceptSuggestionRecovery(capture, owner: fixture.owner)
+    let editor = try #require(model.editor)
+    let recoveryCount = record.recoveries.count
+    await withMainSerialExecutor {
+      let save = suspendedSaveRefresh ? Task { await model.savedProjectObserved() } : nil
+      while suspendedSaveRefresh && gate.value == nil { await Task.yield() }
+      editor.mutateDocument(recordUndo: false) {
+        $0.unfinishedSuggestionRun = nil
+        $0.lastAppliedSuggestionRunID = fixture.snapshot.runID
+      }
+      if suspendedSaveRefresh {
+        gate.withValue { $0?.resume() }
+        await save?.value
+      } else {
+        #expect(throws: CancellationError.self) {
+          try model.acceptSuggestionRecovery(capture, owner: fixture.owner)
+        }
+      }
+    }
+    expectNoDifference(editor.unfinishedSuggestionRun, nil)
+    expectNoDifference(editor.lastAppliedSuggestionRunID, fixture.snapshot.runID)
+    expectNoDifference(record.recoveries.count, recoveryCount)
+    expectNoDifference(record.recoveries.last?.archive, capture.archive)
+    expectNoDifference(record.commits.last?.file.content.unfinishedSuggestionRun, nil)
+  }
+}
