@@ -1,4 +1,6 @@
+import ConcurrencyExtras
 import CustomDump
+import Dependencies
 import Foundation
 import Testing
 
@@ -291,7 +293,7 @@ struct EditorSuggestionFlowTests {
 
     let first = freshSuggestion(Fixtures.uuid(1), plan: plan)
     let second = freshSuggestion(Fixtures.uuid(2), plan: plan)
-    model.cutSuggestions.onSuggestionsProduced?([first, second])
+    model.mutateDocument(recordUndo: false) { $0.cutSuggestions = [first, second] }
 
     expectNoDifference(model.documentCutSuggestions.count, 2)
     expectNoDifference(seen.count, 1)
@@ -302,7 +304,7 @@ struct EditorSuggestionFlowTests {
     let plan = Fixtures.editPlan()
     let model = editor(plan)
     let suggestion = freshSuggestion(Fixtures.uuid(1), plan: plan)
-    model.cutSuggestions.onSuggestionsProduced?([suggestion])
+    model.mutateDocument(recordUndo: false) { $0.cutSuggestions = [suggestion] }
     #expect(!model.canUndo)
 
     var seen: [EditorDocumentState] = []
@@ -333,7 +335,7 @@ struct EditorSuggestionFlowTests {
 
     // Then a background pass stores suggestions non-undoably.
     let suggestion = freshSuggestion(Fixtures.uuid(1), plan: plan)
-    model.cutSuggestions.onSuggestionsProduced?([suggestion])
+    model.mutateDocument(recordUndo: false) { $0.cutSuggestions = [suggestion] }
     expectNoDifference(model.documentCutSuggestions.count, 1)
 
     // Undoing the slice must NOT rewind to the pre-suggestion snapshot and erase them.
@@ -351,7 +353,7 @@ struct EditorSuggestionFlowTests {
     let plan = Fixtures.editPlan()
     let model = editor(plan)
     let suggestion = freshSuggestion(Fixtures.uuid(1), plan: plan)
-    model.cutSuggestions.onSuggestionsProduced?([suggestion])
+    model.mutateDocument(recordUndo: false) { $0.cutSuggestions = [suggestion] }
 
     model.cutSuggestions.rejectTapped(suggestion.id)
 
@@ -427,9 +429,156 @@ struct EditorSuggestionFlowTests {
     let plan = Fixtures.editPlan()
     let model = editor(plan)
     let suggestion = freshSuggestion(Fixtures.uuid(1), plan: plan)
-    model.cutSuggestions.onSuggestionsProduced?([suggestion])
+    model.mutateDocument(recordUndo: false) { $0.cutSuggestions = [suggestion] }
 
     let suggestedBands = model.clipBands.filter { $0.kind == .suggested }
     expectNoDifference(suggestedBands.map(\.id), [suggestion.id])
   }
+  @Test func runningAndNumberingLockDirectCandidateActionsButAllowSavedClipEdits() async {
+    await withMainSerialExecutor {
+      let fixture = SuggestionRunFixture()
+      await withDependencies {
+        fixture.install(&$0)
+      } operation: {
+        let model = EditorModel(
+          sourceURL: URL(fileURLWithPath: "/clip.m4a"),
+          canonicalAudioURL: Fixtures.canonicalAudioURL,
+          editPlan: Fixtures.editPlan(), sourceFingerprint: fixture.owner.sourceFingerprint)
+        fixture.wireEditor(model)
+        var old = fixture.candidate()
+        old.provenance.sourceFingerprint = fixture.owner.sourceFingerprint
+        old.provenance.transcriptHash = model.editPlan.transcriptHash
+        model.mutateDocument(recordUndo: false) { $0.cutSuggestions = [old] }
+        await model.cutSuggestions.suggestCutsTapped()
+        let task = Task { await model.cutSuggestions.run.replaceConfirmed() }
+        await fixture.waitForRequests()
+        let before = model.documentCutSuggestions
+        model.cutSuggestions.acceptTapped(old.id)
+        model.acceptCutSuggestion(Fixtures.slice(), id: old.id)
+        model.cutSuggestions.rejectTapped(old.id)
+        model.cutSuggestions.onReject?(old.id)
+        expectNoDifference(model.documentCutSuggestions, before)
+        expectNoDifference(model.slices.count, 0)
+        model.mutateDocument { $0.slices.append(Fixtures.slice(id: Fixtures.uuid(90))) }
+        expectNoDifference(model.slices.count, 1)
+        model.cutSuggestions.run.cancelSearchTapped()
+        await model.cutSuggestions.run.waitUntilStopped()
+        await task.value
+        model.cutSuggestions.rejectTapped(old.id)
+        expectNoDifference(model.documentCutSuggestions.first?.status, .rejected)
+        let paused = model.cutSuggestions.run.phase
+        model.cutSuggestions.run.phase = .needsNumbering(
+          runID: Fixtures.uuid(500), message: "Choose a number")
+        model.cutSuggestions.acceptTapped(old.id)
+        model.acceptCutSuggestion(Fixtures.slice(), id: old.id)
+        expectNoDifference(model.slices.count, 1)
+        model.mutateDocument { $0.slices[id: Fixtures.uuid(90)]?.name = "Renamed while numbering" }
+        expectNoDifference(model.slices.first?.name, "Renamed while numbering")
+        model.cutSuggestions.run.phase = paused
+      }
+    }
+  }
+
+  @Test func readyApplicationRebasesAtomicBatchAndRunMetadataWithoutChangingClipsOrFutureStarts()
+    async throws
+  {
+    try await withMainSerialExecutor {
+      let fixture = SuggestionRunFixture()
+      try await withDependencies {
+        fixture.install(&$0)
+      } operation: {
+        let model = EditorModel(
+          sourceURL: URL(fileURLWithPath: "/clip.m4a"),
+          canonicalAudioURL: Fixtures.canonicalAudioURL,
+          editPlan: Fixtures.editPlan(), sourceFingerprint: fixture.owner.sourceFingerprint)
+        fixture.wireEditor(model)
+        model.mutateDocument { $0.slices.append(Fixtures.slice(id: Fixtures.uuid(90))) }
+        let task = Task { await model.cutSuggestions.suggestCutsTapped() }
+        await fixture.waitForRequests()
+        var changes: [EditorDocumentState] = []
+        model.onDocumentStateChanged = { changes.append($0) }
+        fixture.finish([fixture.candidate()])
+        await task.value
+        let applied = try #require(model.suggestionBatch)
+        expectNoDifference(model.lastAppliedSuggestionRunID, applied.snapshot.runID)
+        expectNoDifference(model.unfinishedSuggestionRun, nil)
+        expectNoDifference(changes.last?.suggestionBatch, applied)
+        expectNoDifference(changes.last?.unfinishedSuggestionRun, nil)
+        expectNoDifference(model.suggestionStarts, SuggestionStarts())
+        expectNoDifference(model.slices.count, 1)
+        await model.undoTapped()
+        expectNoDifference(model.slices.count, 0)
+        expectNoDifference(model.suggestionBatch, applied)
+        expectNoDifference(model.lastAppliedSuggestionRunID, applied.snapshot.runID)
+        expectNoDifference(model.unfinishedSuggestionRun, nil)
+        await model.redoTapped()
+        expectNoDifference(model.slices.count, 1)
+        expectNoDifference(model.suggestionBatch, applied)
+      }
+    }
+  }
+
+  @Test func finalEditorApplyRevalidatesAnExplicitStartAgainstTheLatestIssuedLedger() async throws {
+    try await withMainSerialExecutor {
+      let fixture = SuggestionRunFixture()
+      try await withDependencies {
+        fixture.install(&$0)
+      } operation: {
+        let model = EditorModel(
+          sourceURL: URL(fileURLWithPath: "/clip.m4a"),
+          canonicalAudioURL: Fixtures.canonicalAudioURL,
+          editPlan: Fixtures.editPlan(), sourceFingerprint: fixture.owner.sourceFingerprint)
+        fixture.wireEditor(model)
+        model.mutateDocument(recordUndo: false) {
+          $0.suggestionStarts.types["spotlight"] = .init(number: 1, isExplicit: true)
+        }
+        let type = try #require(SuggestionDefaults.types.first { $0.id == "spotlight" })
+        model.cutSuggestions.run.onApply = { candidates, batch in
+          model.mutateDocument(recordUndo: false) {
+            $0.issuedSuggestionNumbers.append(
+              .init(
+                candidateID: Fixtures.uuid(90),
+                key: suggestionSequenceKey(type: type, values: [:], candidateID: Fixtures.uuid(90)),
+                number: 5, canonicalValues: [:]))
+          }
+          try model.applySuggestionRun(candidates: candidates, batch: batch)
+        }
+        let task = Task { await model.cutSuggestions.suggestCutsTapped() }
+        await fixture.waitForRequests()
+        fixture.finish([fixture.candidate()])
+        await task.value
+        expectNoDifference(model.documentCutSuggestions.elements, [])
+        expectNoDifference(model.suggestionBatch, nil)
+        expectNoDifference(model.lastAppliedSuggestionRunID, nil)
+        expectNoDifference(
+          model.cutSuggestions.run.message, "Choose a starting number of at least 6.")
+      }
+    }
+  }
+
+  @Test func readyCheckpointWithoutBaselineCanApplyWhenCurrentCandidatesAreEmpty() async {
+    let fixture = SuggestionRunFixture()
+    await withDependencies {
+      fixture.install(&$0)
+    } operation: {
+      let model = EditorModel(
+        sourceURL: URL(fileURLWithPath: "/clip.m4a"), canonicalAudioURL: Fixtures.canonicalAudioURL,
+        editPlan: Fixtures.editPlan(), sourceFingerprint: fixture.owner.sourceFingerprint)
+      fixture.wireEditor(model)
+      let prepare = model.cutSuggestions.run.prepare
+      model.cutSuggestions.run.prepare = { preparation in
+        var original = preparation
+        original.control.originalBatchFingerprint = nil
+        return try await prepare(original)
+      }
+      let task = Task { await model.cutSuggestions.suggestCutsTapped() }
+      await fixture.waitForRequests()
+      fixture.finish([fixture.candidate()])
+      await task.value
+      expectNoDifference(model.documentCutSuggestions.count, 1)
+      expectNoDifference(model.cutSuggestions.run.phase, .idle)
+      expectNoDifference(model.unfinishedSuggestionRun, nil)
+    }
+  }
+
 }

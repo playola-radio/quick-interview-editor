@@ -164,12 +164,19 @@ final class EditorModel: ViewModel {
   /// analysis run stores its candidates non-undoably (a background pass must not fill the undo
   /// stack). Accepting also lands the derived slice, idempotently, through the same funnel.
   private func wireCutSuggestions() {
+    cutSuggestions.run.currentDocument = { [weak self] in self?.documentState ?? .init() }
+    cutSuggestions.run.onApply = { [weak self] candidates, batch in
+      guard let self else { throw CancellationError() }
+      try self.applySuggestionRun(candidates: candidates, batch: batch)
+    }
+    cutSuggestions.run.synchronizeDocument()
     cutSuggestions.currentSuggestions = { [weak self] in self?.documentCutSuggestions ?? [] }
     cutSuggestions.onAccept = { [weak self] slice, id in
       self?.acceptCutSuggestion(slice, id: id)
     }
     cutSuggestions.onReject = { [weak self] id in
-      self?.mutateDocument { $0.cutSuggestions[id: id]?.reject() }
+      guard let self, !self.cutSuggestions.candidateActionsDisabled else { return }
+      self.mutateDocument { $0.cutSuggestions[id: id]?.reject() }
     }
     cutSuggestions.onTitleEditingBegan = { [weak self] id in
       self?.cutSuggestionTitleEditingBegan(id)
@@ -179,11 +186,6 @@ final class EditorModel: ViewModel {
     }
     cutSuggestions.onTitleEditingEnded = { [weak self] id in
       self?.cutSuggestionTitleEditingEnded(id)
-    }
-    cutSuggestions.onSuggestionsProduced = { [weak self] produced in
-      self?.mutateDocument(recordUndo: false) {
-        $0.cutSuggestions = IdentifiedArray(produced, uniquingIDsWith: { first, _ in first })
-      }
     }
     cutSuggestions.onSpeakerOverridesChanged = { [weak self] count, names in
       self?.mutateDocument {
@@ -1168,12 +1170,14 @@ final class EditorModel: ViewModel {
   // export is the one being written to disk, and rewinding it mid-run would leave the
   // finished AIFFs stale relative to what the user sees.
   var canUndo: Bool {
-    documentUndo.canUndo && cutSuggestionTitleEdit == nil && !hasUncommittedSliceEdit
-      && !isExporting
+    documentUndo.canUndo && cutSuggestionTitleEdit == nil && !hasUncommittedSliceEdit && !isExporting
+      && (!cutSuggestions.candidateActionsDisabled
+        || documentUndo.undo.last?.cutSuggestions == documentCutSuggestions)
   }
   var canRedo: Bool {
-    documentUndo.canRedo && cutSuggestionTitleEdit == nil && !hasUncommittedSliceEdit
-      && !isExporting
+    documentUndo.canRedo && cutSuggestionTitleEdit == nil && !hasUncommittedSliceEdit && !isExporting
+      && (!cutSuggestions.candidateActionsDisabled
+        || documentUndo.redo.last?.cutSuggestions == documentCutSuggestions)
   }
 
   var sliceCountLabel: String {
@@ -2043,6 +2047,7 @@ final class EditorModel: ViewModel {
   /// mutations would leave between undos. The derived slice shares the suggestion's id, so
   /// re-accepting is a no-op on the slice while still (re)confirming the status.
   func acceptCutSuggestion(_: Slice, id: CutSuggestion.ID) {
+    guard !cutSuggestions.candidateActionsDisabled else { return }
     do {
       let validated = try suggestionSliceForAcceptance(
         id: id, state: documentState, plan: editPlan, sourceFingerprint: sourceFingerprint)
@@ -2070,10 +2075,43 @@ final class EditorModel: ViewModel {
   func replaceSuggestionBatch(
     candidates: [CutSuggestion], batch: SuggestionBatch, recordUndo: Bool = false
   ) throws {
+    guard !cutSuggestions.candidateActionsDisabled else { throw CancellationError() }
     try validateSuggestionRunApplication(candidates: candidates, batch: batch)
     mutateDocument(recordUndo: recordUndo) {
       $0.cutSuggestions = IdentifiedArray(candidates, uniquingIDsWith: { first, _ in first })
       $0.suggestionBatch = batch
+    }
+  }
+
+  func applySuggestionRun(candidates: [CutSuggestion], batch: SuggestionBatch) throws {
+    let snapshot = batch.snapshot
+    guard !cutSuggestions.recoveryBlocksSuggestions,
+      snapshot.sourceFingerprint == sourceFingerprint,
+      snapshot.transcriptHash == editPlan.transcriptHash,
+      snapshot.sampleRate == editPlan.source.sampleRate,
+      let checkpoint = unfinishedSuggestionRun,
+      checkpoint.snapshot == snapshot,
+      checkpoint.snapshot.runID != lastAppliedSuggestionRunID,
+      try suggestionBaselineMatches(checkpoint, document: documentState)
+    else {
+      throw SuggestionRecoveryError.conflict(
+        "The source or current suggestions changed. Resume the search.")
+    }
+    try validateSuggestionRunApplication(candidates: candidates, batch: batch)
+    guard checkpoint.phase == .ready || checkpoint.phase == .needsNumbering else {
+      throw SuggestionRecoveryError.invalid("The search does not have complete saved results.")
+    }
+    let validated = try numberSuggestions(
+      checkpoint.candidates, snapshot: snapshot, starts: checkpoint.proposedStarts,
+      issued: issuedSuggestionNumbers, retained: [])
+    guard validated.candidates == candidates, validated.batch == batch else {
+      throw SuggestionRecoveryError.conflict("The issued numbers changed. Apply numbering again.")
+    }
+    mutateDocument(recordUndo: false) {
+      $0.cutSuggestions = IdentifiedArray(uniqueElements: candidates)
+      $0.suggestionBatch = batch
+      $0.lastAppliedSuggestionRunID = snapshot.runID
+      $0.unfinishedSuggestionRun = nil
     }
   }
 
@@ -2811,6 +2849,8 @@ final class EditorModel: ViewModel {
     // while an existing-slice edit is open, which would rewind `slices` under a live draft —
     // or mid-export, which would leave the finished AIFFs stale.
     guard cutSuggestionTitleEdit == nil, !hasUncommittedSliceEdit, !isExporting,
+      !cutSuggestions.candidateActionsDisabled
+        || documentUndo.undo.last?.cutSuggestions == documentCutSuggestions,
       let restored = documentUndo.undo(current: documentState)
     else { return }
     restore(restored)
@@ -2821,6 +2861,8 @@ final class EditorModel: ViewModel {
   /// persist-only-on-change behavior as `undoTapped`.
   func redoTapped() async {
     guard cutSuggestionTitleEdit == nil, !hasUncommittedSliceEdit, !isExporting,
+      !cutSuggestions.candidateActionsDisabled
+        || documentUndo.redo.last?.cutSuggestions == documentCutSuggestions,
       let restored = documentUndo.redo(current: documentState)
     else { return }
     restore(restored)

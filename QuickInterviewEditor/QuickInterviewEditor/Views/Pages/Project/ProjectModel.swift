@@ -43,6 +43,7 @@ final class ProjectModel: ViewModel {
   @ObservationIgnored private var recoveryGeneration = 0
   @ObservationIgnored var invalidateSuggestionAttempt: () -> Void = {}
   @ObservationIgnored var cancelSuggestionAttempt: () async -> Void = {}
+  private(set) var recoverableSuggestionOwners: [SuggestionRecoveryOwner] = []
   private(set) var recoveryOwner: SuggestionRecoveryOwner?
   private(set) var staleRecovery: SuggestionRecoveryError?
   private(set) var recoveryErrorMessage: String?
@@ -649,9 +650,14 @@ final class ProjectModel: ViewModel {
           archivedOwner: portable?.manifest.owner, instanceID: recoveryInstanceID))
       guard generation == recoveryGeneration else { return }
       guard let owner else {
+        let choices = try await suggestionRecovery.recoverableOrphans(
+          initialFile.source.originalFingerprint, plan.transcriptHash)
+        guard generation == recoveryGeneration, !Task.isCancelled else { return }
+        recoverableSuggestionOwners = choices
         recoveryActionsBlocked = false
         return
       }
+      recoverableSuggestionOwners = []
       if let recoveryArchive { try await suggestionRecovery.restore(owner, recoveryArchive) }
       let capture = try await loadRecoveryCapture(
         owner, required: initialFile.content.unfinishedSuggestionRun != nil)
@@ -665,6 +671,44 @@ final class ProjectModel: ViewModel {
     } catch {
       guard generation == recoveryGeneration else { return }
       recoveryFailed(error)
+    }
+  }
+
+  func cancelOrphanRecoveryTapped() {
+    recoverableSuggestionOwners = []
+    synchronizeRecoveryEditor()
+  }
+
+  func selectOrphanRecoveryTapped(_ selected: SuggestionRecoveryOwner) async {
+    guard recoverableSuggestionOwners.contains(selected), recoveryOwner == nil,
+      let file, let plan = loadedPlan, !recoveryActionsBlocked
+    else { return }
+    let generation = recoveryGeneration
+    recoveryActionsBlocked = true
+    synchronizeRecoveryEditor()
+    do {
+      let isolated = SuggestionRecoveryOwner(
+        id: uuid(), documentURL: packageURL,
+        sourceFingerprint: file.source.originalFingerprint, transcriptHash: plan.transcriptHash)
+      try await suggestionRecovery.duplicate(selected, isolated)
+      guard generation == recoveryGeneration, !Task.isCancelled else { return }
+      let owner = try await suggestionRecovery.claimOwner(isolated, recoveryInstanceID)
+      guard generation == recoveryGeneration, !Task.isCancelled else { return }
+      let capture = try await loadRecoveryCapture(owner, required: true)
+      guard generation == recoveryGeneration, !Task.isCancelled else { return }
+      guard
+        publishRecovered(
+          owner: owner, capture: capture, generation: generation,
+          sourceFingerprint: file.source.originalFingerprint, transcriptHash: plan.transcriptHash)
+      else { return }
+      recoverableSuggestionOwners = []
+      synchronizeRecoveryEditor()
+      await editor?.cutSuggestions.run.resumeTapped()
+    } catch {
+      guard generation == recoveryGeneration else { return }
+      recoveryErrorMessage = error.localizedDescription
+      recoveryActionsBlocked = false
+      synchronizeRecoveryEditor()
     }
   }
 
@@ -722,12 +766,15 @@ final class ProjectModel: ViewModel {
       $0.lastAppliedSuggestionRunID = file.content.lastAppliedSuggestionRunID
     }
     editor.cutSuggestions.recoveryBlocksSuggestions =
-      recoveryActionsBlocked || file.content.unfinishedSuggestionRun != nil
+      recoveryActionsBlocked
     editor.cutSuggestions.automaticSuggestionsEnabled =
       file.schemaVersion != 1
       && file.content.unfinishedSuggestionRun == nil && recoveryArchive == nil
       && !recoveryActionsBlocked
+    editor.cutSuggestions.run.staleDiscardAvailable = staleRecovery != nil
     editor.cutSuggestions.actionMessage = recoveryErrorMessage
+    editor.cutSuggestions.orphanChoices = recoverableSuggestionOwners
+    editor.cutSuggestions.run.synchronizeDocument()
   }
 
   /// The document a new editor starts from. Re-running the same source (retry, re-import) keeps
@@ -795,8 +842,12 @@ final class ProjectModel: ViewModel {
       && file?.content.unfinishedSuggestionRun == nil && recoveryArchive == nil
       && !recoveryActionsBlocked
     editor.cutSuggestions.recoveryBlocksSuggestions =
-      recoveryActionsBlocked || file?.content.unfinishedSuggestionRun != nil
+      recoveryActionsBlocked
+    editor.cutSuggestions.run.staleDiscardAvailable = staleRecovery != nil
     editor.cutSuggestions.actionMessage = recoveryErrorMessage
+    editor.cutSuggestions.orphanChoices = recoverableSuggestionOwners
+    editor.cutSuggestions.run.synchronizeDocument()
+    wireSuggestionRecovery(editor)
     editor.cutSuggestions.onExplicitSuggest = { [weak self, weak editor] in
       guard let self, let editor, self.editor === editor, var file = self.file,
         file.schemaVersion < ProjectFile.currentSchemaVersion
@@ -822,6 +873,35 @@ final class ProjectModel: ViewModel {
       self.sink.registerChange()
       self.synchronizeRecoveryEditor()
     }
+  }
+
+  private func wireSuggestionRecovery(_ editor: EditorModel) {
+    editor.cutSuggestions.onOrphanSelected = { [weak self, weak editor] owner in
+      guard let self, let editor, self.editor === editor else { return }
+      await self.selectOrphanRecoveryTapped(owner)
+    }
+    editor.cutSuggestions.onOrphanCancelled = { [weak self] in self?.cancelOrphanRecoveryTapped() }
+    let run = editor.cutSuggestions.run
+    run.currentOwner = { [weak self, weak editor] in
+      guard let self, let editor, self.editor === editor else { return nil }
+      return self.recoveryOwner
+    }
+    run.prepare = { [weak self, weak editor] preparation in
+      guard let self, let editor, self.editor === editor else { throw CancellationError() }
+      return try await self.prepareSuggestionRecovery(preparation)
+    }
+    run.onCheckpoint = { [weak self, weak editor] capture in
+      guard let self, let editor, self.editor === editor, let owner = self.recoveryOwner else {
+        throw CancellationError()
+      }
+      try self.acceptSuggestionRecovery(capture, owner: owner)
+    }
+    run.onDiscard = { [weak self, weak editor] in
+      guard let self, let editor, self.editor === editor else { throw CancellationError() }
+      try await self.discardSuggestionRecovery()
+    }
+    invalidateSuggestionAttempt = { [weak run] in run?.invalidateAttempt() }
+    cancelSuggestionAttempt = { [weak run] in await run?.stopForOwnershipTransition() }
   }
 
   /// The `ProjectSource` for a completed run. A fresh import builds it from the imported file; a

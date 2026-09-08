@@ -10,6 +10,34 @@ import Testing
 @MainActor
 struct CutSuggestionsPageTests {
 
+  @Test func replacementRequiresConfirmationBeforePreparingOrCallingProvider() async {
+    let calls = LockIsolated(0)
+    let preparations = LockIsolated(0)
+    let existing = Fixtures.cutSuggestion(id: Fixtures.uuid(1), wordIDs: [10, 11, 12])
+    let store = LockIsolated<IdentifiedArrayOf<CutSuggestion>>([existing])
+    await withDependencies {
+      $0.uuid = .incrementing
+      $0.keychain = .inMemory("test-key")
+      $0.suggestionConfiguration = .inMemory()
+      $0.suggestionRecovery.prepare = { _, _ in
+        preparations.withValue { $0 += 1 }
+        return URL(fileURLWithPath: "/unused")
+      }
+      $0.cutSuggest = CutSuggestClient { _, _ in
+        calls.withValue { $0 += 1 }
+        return AsyncThrowingStream { $0.finish() }
+      }
+    } operation: {
+      let model = CutSuggestionsPageModel(
+        editPlan: Fixtures.editPlan(), sourceFingerprint: "confirmation")
+      wire(model, to: store)
+      await model.suggestCutsTapped()
+      expectNoDifference(calls.value, 0)
+      expectNoDifference(preparations.value, 0)
+      expectNoDifference(store.value, [existing])
+    }
+  }
+
   // MARK: - Helpers
 
   /// A fixture cutter: optionally captures the request + key it was handed, emits progress
@@ -32,7 +60,7 @@ struct CutSuggestionsPageTests {
   }
 
   /// Stands in for the editor's document: the model reads its candidates through
-  /// `currentSuggestions` and its intents (`onAccept`/`onReject`/`onSuggestionsProduced`)
+  /// `currentSuggestions` and its intents (`onAccept`/`onReject`)
   /// mutate it, exactly as `EditorModel.mutateDocument` would. `LockIsolated` so the fixture
   /// cutter (a `@Sendable` closure) can also land suggestions mid-flight.
   private func wire(
@@ -43,184 +71,70 @@ struct CutSuggestionsPageTests {
     model.onAccept = { _, id in store.withValue { $0[id: id]?.accept() } }
     model.onReject = { id in store.withValue { $0[id: id]?.reject() } }
     model.onTitleChanged = { id, title in store.withValue { $0[id: id]?.title = title } }
-    model.onSuggestionsProduced = { produced in
-      store.withValue { $0 = IdentifiedArray(produced, uniquingIDsWith: { first, _ in first }) }
-    }
   }
 
-  private func stampedProvenance(
-    transcriptHash: String, fingerprint: String
-  ) -> CutSuggestion.Provenance {
-    CutSuggestion.Provenance(
-      model: "claude-sonnet-5", promptVersion: "v2", productSpecVersion: "v1",
-      transcriptHash: transcriptHash, sourceFingerprint: fingerprint, diarizationHash: nil)
-  }
-
-  /// Returns a copy of `suggestion` with provenance stamped — kept a pure `let`-producing
-  /// helper so callers avoid a mutable `var` that a `@Sendable` `LockIsolated` autoclosure
-  /// would refuse to capture.
   private func stamped(
     _ suggestion: CutSuggestion, transcriptHash: String, fingerprint: String
   ) -> CutSuggestion {
     var copy = suggestion
-    copy.provenance = stampedProvenance(transcriptHash: transcriptHash, fingerprint: fingerprint)
+    copy.provenance = .init(
+      model: "claude-sonnet-5", promptVersion: "v2", productSpecVersion: "v1",
+      transcriptHash: transcriptHash, sourceFingerprint: fingerprint, diarizationHash: nil)
     return copy
   }
 
-  // MARK: - Request building
-
-  @Test func buildsRequestAndThreadsTheResolvedKeyToTheClient() async {
-    let fingerprint = "fp-request"
-    let plan = Fixtures.editPlan()
-    let capture = LockIsolated<CutSuggestRequest?>(nil)
-    let capturedKey = LockIsolated<String?>(nil)
-
-    await withDependencies {
-      $0.keychain = .inMemory("sk-keychain")
-      $0.cutSuggest = fixtureClient(completed: [], capture: capture, captureKey: capturedKey)
-    } operation: {
-      let model = CutSuggestionsPageModel(editPlan: plan, sourceFingerprint: fingerprint)
-      await model.suggestCutsTapped()
-    }
-
-    let request = capture.value
-    expectNoDifference(request?.transcriptUnits, plan.transcriptUnits)
-    expectNoDifference(request?.transcriptHash, plan.transcriptHash)
-    expectNoDifference(request?.sourceFingerprint, fingerprint)
-    expectNoDifference(request?.productSpecs, ProductSpec.defaults)
-    expectNoDifference(request?.options, CutSuggestOptions())
-    #expect(request?.diarization == nil)
-    // The Keychain key is threaded in memory to the client (never inside the request).
-    expectNoDifference(capturedKey.value, "sk-keychain")
-  }
-
-  // MARK: - Completion → document
-
-  @Test func completedRunStampsProvenanceAndEmitsSuggestionsToTheDocument() async {
-    let fingerprint = "fp-complete"
-    let plan = Fixtures.editPlan()
-    var raw = Fixtures.cutSuggestion(id: Fixtures.uuid(1), wordIDs: [10, 11, 12])
-    raw.provenance.transcriptHash = "stale-hash"
-    raw.provenance.sourceFingerprint = "some-other-file"
-    let store = LockIsolated<IdentifiedArrayOf<CutSuggestion>>([])
-
-    await withDependencies {
-      $0.keychain = .inMemory("sk-keychain")
-      $0.cutSuggest = fixtureClient(completed: [raw])
-    } operation: {
-      let model = CutSuggestionsPageModel(editPlan: plan, sourceFingerprint: fingerprint)
-      wire(model, to: store)
-      await model.suggestCutsTapped()
-    }
-
-    var expected = raw
-    expected.provenance = stampedProvenance(
-      transcriptHash: plan.transcriptHash, fingerprint: fingerprint)
-    expectNoDifference(store.value.elements, [expected])
-  }
-
-  @Test func completedWithDuplicateSuggestionIDsDoesNotCrashAndKeepsTheFirst() async {
-    let fingerprint = "fp-dup"
-    let plan = Fixtures.editPlan()
-    let first = Fixtures.cutSuggestion(id: Fixtures.uuid(1), title: "first", wordIDs: [10, 11, 12])
-    let second = Fixtures.cutSuggestion(
-      id: Fixtures.uuid(1), title: "second", wordIDs: [13, 14, 15])
-    let store = LockIsolated<IdentifiedArrayOf<CutSuggestion>>([])
-
-    await withDependencies {
-      $0.keychain = .inMemory("sk-keychain")
-      $0.cutSuggest = fixtureClient(completed: [first, second])
-    } operation: {
-      let model = CutSuggestionsPageModel(editPlan: plan, sourceFingerprint: fingerprint)
-      wire(model, to: store)
-      await model.suggestCutsTapped()
-    }
-
-    expectNoDifference(store.value.count, 1)
-    expectNoDifference(store.value[id: Fixtures.uuid(1)]?.title, "first")
-  }
-
-  @Test func emptyCompletionSucceedsAndReplacesExistingSuggestions() async {
-    let fingerprint = "fp-empty"
-    let existing = Fixtures.cutSuggestion(id: Fixtures.uuid(1), wordIDs: [10, 11, 12])
-    let store = LockIsolated<IdentifiedArrayOf<CutSuggestion>>([existing])
-
-    await withDependencies {
-      $0.keychain = .inMemory("sk-keychain")
-      $0.cutSuggest = CutSuggestClient { _, _ in
-        AsyncThrowingStream { continuation in
-          continuation.yield(.diagnostic("0 raw clips."))
-          continuation.yield(.completed([]))
-          continuation.finish()
-        }
-      }
-    } operation: {
-      let model = CutSuggestionsPageModel(
-        editPlan: Fixtures.editPlan(), sourceFingerprint: fingerprint)
-      wire(model, to: store)
-      await model.suggestCutsTapped()
-
-      expectNoDifference(model.phase, .idle)
-      expectNoDifference(model.lastRunDiagnostic, "0 raw clips.")
-      await withDependencies {
-        $0.cutSuggest = fixtureClient(completed: [])
+  @Test func pageUsesConfiguredDurableRunAndKeychainBeforeEnvironment() async throws {
+    try await withMainSerialExecutor {
+      let fixture = SuggestionRunFixture()
+      try await withDependencies {
+        fixture.install(&$0)
+        $0.keychain = .inMemory("keychain-value")
+        $0.environment = .constant([anthropicAPIKeyEnvVar: "env-value"])
       } operation: {
-        let freshModel = CutSuggestionsPageModel(
-          editPlan: Fixtures.editPlan(), sourceFingerprint: fingerprint)
-        freshModel.lastRunDiagnostic = "Previous diagnostic"
-        await freshModel.suggestCutsTapped()
-        expectNoDifference(freshModel.lastRunDiagnostic, nil)
+        let model = CutSuggestionsPageModel(
+          editPlan: Fixtures.editPlan(), sourceFingerprint: fixture.owner.sourceFingerprint)
+        fixture.wirePage(model)
+        let task = Task { await model.suggestCutsTapped() }
+        await fixture.waitForRequests()
+        let request = try #require(fixture.state.value.requests.first)
+        expectNoDifference(request.snapshot?.configuration, SuggestionDefaults.configuration)
+        expectNoDifference(request.transcriptUnits, Fixtures.editPlan().transcriptUnits)
+        expectNoDifference(request.mode, .fresh)
+        expectNoDifference(fixture.state.value.keys.first!, "keychain-value")
+        fixture.finish([fixture.candidate()])
+        await task.value
+        expectNoDifference(model.phase, .idle)
+        expectNoDifference(model.suggestions.first?.title, "Spotlight 1")
+        expectNoDifference(
+          model.suggestions.first?.provenance.sourceFingerprint, fixture.owner.sourceFingerprint)
+        #expect(model.suggestions.first?.naming != nil)
       }
-    }
-
-    expectNoDifference(store.value.elements, [])
-  }
-
-  @Test func streamFinishingWithoutCompletionSurfacesFailure() async {
-    let fingerprint = "fp-nocomplete"
-    await withDependencies {
-      $0.keychain = .inMemory("sk-keychain")
-      $0.cutSuggest = CutSuggestClient { _, _ in
-        AsyncThrowingStream { continuation in
-          continuation.yield(.progress("Analyzing transcript…"))
-          continuation.finish()
-        }
-      }
-    } operation: {
-      let model = CutSuggestionsPageModel(
-        editPlan: Fixtures.editPlan(), sourceFingerprint: fingerprint)
-      await model.suggestCutsTapped()
-
-      expectNoDifference(
-        model.phase,
-        .failed("The cut-suggester stopped before returning results."))
-      #expect(!model.isSuggesting)
     }
   }
 
-  // MARK: - Error handling
-
-  @Test func streamErrorSurfacesTheMessageAndLeavesTheDocumentEmpty() async {
-    let fingerprint = "fp-error"
-    let error = CutSuggestClientError.unimplemented("suggestCuts")
-    let store = LockIsolated<IdentifiedArrayOf<CutSuggestion>>([])
-
-    await withDependencies {
-      $0.keychain = .inMemory("sk-keychain")
-      $0.cutSuggest = CutSuggestClient { _, _ in
-        AsyncThrowingStream { $0.finish(throwing: error) }
+  @Test func emptyReadyRendersDiagnosticAfterReplacementConfirmation() async throws {
+    try await withMainSerialExecutor {
+      let fixture = SuggestionRunFixture()
+      fixture.document.withValue { $0.cutSuggestions = [fixture.candidate()] }
+      try await withDependencies {
+        fixture.install(&$0)
+      } operation: {
+        let model = CutSuggestionsPageModel(
+          editPlan: Fixtures.editPlan(), sourceFingerprint: fixture.owner.sourceFingerprint)
+        fixture.wirePage(model)
+        await model.suggestCutsTapped()
+        expectNoDifference(model.run.phase, .confirmingReplacement)
+        let task = Task { await model.run.replaceConfirmed() }
+        await fixture.waitForRequests()
+        let stream = try #require(fixture.state.value.continuations.first)
+        stream.yield(.diagnostic("0 raw clips."))
+        fixture.finish()
+        await task.value
+        expectNoDifference(model.lastRunDiagnostic, "0 raw clips.")
+        expectNoDifference(model.suggestions, [])
+        expectNoDifference(model.phase, .idle)
       }
-    } operation: {
-      let model = CutSuggestionsPageModel(
-        editPlan: Fixtures.editPlan(), sourceFingerprint: fingerprint)
-      wire(model, to: store)
-      await model.suggestCutsTapped()
-
-      expectNoDifference(model.errorMessage, error.errorDescription)
-      expectNoDifference(model.phase, .failed(error.errorDescription ?? ""))
     }
-
-    #expect(store.value.isEmpty)
   }
 
   // MARK: - Key resolution & onboarding
@@ -479,13 +393,13 @@ struct CutSuggestionsPageTests {
       expectNoDifference(model.errorMessage, nil)
       expectNoDifference(model.showsEmptyState, true)
 
-      model.phase = .suggesting("Working…")
+      model.run.phase = .running(runID: Fixtures.uuid(1), message: "Working…")
       expectNoDifference(model.isSuggesting, true)
       expectNoDifference(model.progressMessage, "Working…")
       expectNoDifference(model.showsProgress, true)
       expectNoDifference(model.showsEmptyState, false)
 
-      model.phase = .failed("boom")
+      model.run.phase = .failed(message: "boom")
       expectNoDifference(model.errorMessage, "boom")
       expectNoDifference(model.isSuggesting, false)
     }
@@ -529,24 +443,24 @@ struct CutSuggestionsPageTests {
 
   // MARK: - Auto-suggest on load
 
-  @Test func autoSuggestRunsAndEmitsWhenEmptyWithAKey() async {
-    let fingerprint = "fp-auto-empty"
-    let plan = Fixtures.editPlan()
-    let raw = Fixtures.cutSuggestion(id: Fixtures.uuid(1), wordIDs: [10, 11, 12])
-    let store = LockIsolated<IdentifiedArrayOf<CutSuggestion>>([])
-
-    await withDependencies {
-      $0.keychain = .inMemory("sk-keychain")
-      $0.cutSuggest = fixtureClient(completed: [raw])
-    } operation: {
-      let model = CutSuggestionsPageModel(editPlan: plan, sourceFingerprint: fingerprint)
-      wire(model, to: store)
-      await model.autoSuggestCutsIfNeeded()
-
-      expectNoDifference(model.phase, .idle)
+  @Test func autoSuggestRunsAndEmitsWhenEmptyWithAKey() async throws {
+    try await withMainSerialExecutor {
+      let fixture = SuggestionRunFixture()
+      try await withDependencies {
+        fixture.install(&$0)
+      } operation: {
+        let model = CutSuggestionsPageModel(
+          editPlan: Fixtures.editPlan(), sourceFingerprint: fixture.owner.sourceFingerprint)
+        fixture.wirePage(model)
+        let task = Task { await model.autoSuggestCutsIfNeeded() }
+        await fixture.waitForRequests()
+        expectNoDifference(fixture.state.value.requests.first?.mode, .automatic)
+        _ = try #require(fixture.state.value.continuations.first)
+        fixture.finish([fixture.candidate()])
+        await task.value
+        expectNoDifference(model.suggestions.count, 1)
+      }
     }
-
-    expectNoDifference(store.value[id: raw.id]?.id, raw.id)
   }
 
   @Test func autoSuggestSkipsWhenSuggestionsAlreadyExist() async {
@@ -594,37 +508,6 @@ struct CutSuggestionsPageTests {
 
     #expect(capture.value == nil)
     #expect(store.value.isEmpty)
-  }
-
-  @Test func autoSuggestDoesNotClobberSuggestionsThatLandMidFlight() async {
-    let fingerprint = "fp-auto-race"
-    let plan = Fixtures.editPlan()
-    // A suggestion the user has already accepted, landing while the background pass runs.
-    let decided = Fixtures.cutSuggestion(id: Fixtures.uuid(7), wordIDs: [1, 2], status: .accepted)
-    let autoCandidate = Fixtures.cutSuggestion(id: Fixtures.uuid(9), wordIDs: [3, 4])
-    let store = LockIsolated<IdentifiedArrayOf<CutSuggestion>>([])
-
-    await withDependencies {
-      $0.keychain = .inMemory("sk-keychain")
-      $0.cutSuggest = CutSuggestClient { _, _ in
-        AsyncThrowingStream { continuation in
-          // Simulate suggestions (with a user decision) landing in the document while the
-          // background pass is in flight, before it completes.
-          store.withValue { $0 = [decided] }
-          continuation.yield(.completed([autoCandidate]))
-          continuation.finish()
-        }
-      }
-    } operation: {
-      let model = CutSuggestionsPageModel(editPlan: plan, sourceFingerprint: fingerprint)
-      wire(model, to: store)
-      await model.autoSuggestCutsIfNeeded()
-
-      expectNoDifference(model.phase, .idle)
-    }
-
-    // The mid-flight suggestion and its accepted status survive; the auto candidate is dropped.
-    expectNoDifference(store.value.elements, [decided])
   }
 
   // MARK: - Show/hide suggestions toggle

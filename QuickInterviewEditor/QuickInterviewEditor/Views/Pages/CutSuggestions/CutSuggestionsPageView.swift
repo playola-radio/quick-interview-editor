@@ -7,11 +7,12 @@ struct CutSuggestionsPageView: View {
   @Bindable var model: CutSuggestionsPageModel
 
   var body: some View {
+    @Bindable var run = model.run
     VStack(alignment: .leading, spacing: 12) {
       Button(model.suggestButtonLabel) {
         Task { await model.suggestCutsTapped() }
       }
-      .disabled(model.isSuggesting)
+      .disabled(model.suggestDisabled)
 
       if model.showsSuggestionsToggle {
         Toggle(model.showSuggestionsToggleLabel, isOn: $model.showsSuggestionBands)
@@ -21,9 +22,39 @@ struct CutSuggestionsPageView: View {
         HStack(spacing: 8) {
           ProgressView()
           Text(model.progressMessage)
+          Button(model.run.cancelButtonTitle) { model.run.cancelSearchTapped() }
         }
       }
 
+      if model.showsOrphanChoices {
+        Text(model.orphanTitle).font(.headline)
+        Text(model.orphanMessage)
+        ForEach(model.orphanRows) { row in
+          Button(row.title) { Task { await model.orphanSelected(row.id) } }
+        }
+        Button(model.run.cancelButtonTitle) { model.orphanCancelled() }
+      }
+      if let recoveryMessage = model.recoveryMessage { Text(recoveryMessage) }
+      if model.showsRecoveryActions {
+        HStack {
+          if model.run.canResume {
+            Button(model.run.resumeButtonTitle) { Task { await model.run.resumeTapped() } }
+          }
+          if model.run.canDiscard {
+            Button(model.run.discardButtonTitle) { Task { await model.run.discardSearchTapped() } }
+          }
+        }
+      }
+      if model.run.showsNumbering {
+        Text(model.run.numberingTitle).font(.headline)
+        ForEach($run.numberingEntries) { $entry in
+          TextField(entry.title, value: $entry.number, format: .number)
+        }
+        Button(model.run.applyNumberingTitle) { Task { await model.run.numberingApplyTapped() } }
+      }
+      if let diagnostic = model.lastRunDiagnostic {
+        Text(diagnostic).foregroundStyle(.secondary).textSelection(.enabled)
+      }
       if let errorMessage = model.errorMessage {
         Text(errorMessage)
           .foregroundStyle(.red)
@@ -50,6 +81,14 @@ struct CutSuggestionsPageView: View {
     .padding()
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     .onAppear { model.viewAppeared() }
+    .confirmationDialog(model.run.replaceTitle, isPresented: $run.isConfirmingReplacement) {
+      Button(model.run.replaceButtonTitle, role: .destructive) {
+        model.run.replacementButtonTapped()
+      }
+      Button(model.run.cancelButtonTitle, role: .cancel) { model.run.cancelReplacementTapped() }
+    } message: {
+      Text(model.run.replaceMessage)
+    }
     .sheet(item: $model.keyEntry) { entry in
       SettingsView(model: entry)
     }
@@ -126,11 +165,11 @@ private struct SuggestionCard: View {
       HStack {
         if row.showsAcceptButton {
           Button(model.acceptLabel) { model.acceptTapped(row.id) }
-            .disabled(!row.canAccept)
+            .disabled(!row.canAccept || model.candidateActionsDisabled)
         }
         if row.showsRejectButton {
           Button(model.rejectLabel) { model.rejectTapped(row.id) }
-            .disabled(!row.canReject)
+            .disabled(!row.canReject || model.candidateActionsDisabled)
         }
       }
     }

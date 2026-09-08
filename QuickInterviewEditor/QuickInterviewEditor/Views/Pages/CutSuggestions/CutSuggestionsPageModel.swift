@@ -10,14 +10,13 @@ import Observation
 ///
 /// Owns no persisted state: the candidates it displays are read through
 /// `currentSuggestions` (the editor's document is the source of truth), and every edit is
-/// emitted as an intent (`onAccept`/`onReject`/`onTitleChanged`/`onSuggestionsProduced`/
+/// emitted as an intent (`onAccept`/`onReject`/`onTitleChanged`/
 /// `onSpeakerOverridesChanged`) that the editor funnels through `mutateDocument`.
 @MainActor
 @Observable
 final class CutSuggestionsPageModel: ViewModel {
 
   // MARK: - Dependencies
-  @ObservationIgnored @Dependency(\.cutSuggest) var cutSuggest
   @ObservationIgnored @Dependency(\.keychain) var keychain
   @ObservationIgnored @Dependency(\.environment) var environment
 
@@ -42,9 +41,6 @@ final class CutSuggestionsPageModel: ViewModel {
   @ObservationIgnored var onTitleChanged: (@MainActor (CutSuggestion.ID, String) -> Void)?
   @ObservationIgnored var onTitleEditingBegan: (@MainActor (CutSuggestion.ID) -> Void)?
   @ObservationIgnored var onTitleEditingEnded: (@MainActor (CutSuggestion.ID) -> Void)?
-  /// Hands a completed run's stamped candidates to the editor to store in the document
-  /// (non-undoably — a background analysis pass must not pollute the undo stack).
-  @ObservationIgnored var onSuggestionsProduced: (@MainActor ([CutSuggestion]) -> Void)?
   /// Emits per-file speaker overrides for the editor to fold into the document. Wired now;
   /// the paragraph/speaker UI that drives it lands in a later PR.
   @ObservationIgnored var onSpeakerOverridesChanged: (@MainActor (Int?, [String: String]) -> Void)?
@@ -59,12 +55,20 @@ final class CutSuggestionsPageModel: ViewModel {
     productSpecs: [ProductSpec] = ProductSpec.defaults,
     onSelectSuggestion: ((CutSuggestion) -> Void)? = nil
   ) {
+    self.run = SuggestionRunModel(
+      editPlan: editPlan, sourceFingerprint: sourceFingerprint, options: options)
     self.editPlan = editPlan
     self.sourceFingerprint = sourceFingerprint
     self.options = options
     self.productSpecs = productSpecs
     self.onSelectSuggestion = onSelectSuggestion
     super.init()
+    run.currentDocument = { [weak self] in
+      EditorDocumentState(cutSuggestions: self?.currentSuggestions() ?? [])
+    }
+    run.resolveAPIKey = { [weak self] in self?.resolvedAPIKey() }
+    run.onMissingAPIKey = { [weak self] in self?.addAPIKeyTapped() }
+    run.onExplicitStart = { [weak self] in self?.onExplicitSuggest?() }
   }
 
   // MARK: - Phase
@@ -75,16 +79,32 @@ final class CutSuggestionsPageModel: ViewModel {
   }
 
   // MARK: - Properties
-  var phase: Phase = .idle
+  var orphanChoices: [SuggestionRecoveryOwner] = []
+  var onOrphanSelected: @MainActor (SuggestionRecoveryOwner) async -> Void = { _ in }
+  var onOrphanCancelled: @MainActor () -> Void = {}
+  let run: SuggestionRunModel
+  var phase: Phase {
+    switch run.phase {
+    case .running(_, let message): .suggesting(message)
+    case .failed(let message), .needsRetry(_, let message): .failed(message)
+    default: .idle
+    }
+  }
   /// Whether a usable Anthropic key resolved (Keychain or env). Refreshed on appear and
   /// after key entry; drives onboarding vs the live suggest flow.
   private(set) var hasAPIKey = false
-  var automaticSuggestionsEnabled = true
+  var automaticSuggestionsEnabled: Bool {
+    get { run.automaticEnabled }
+    set { run.automaticEnabled = newValue }
+  }
   var onExplicitSuggest: (() -> Void)?
   /// The message shown when accepting a suggestion failed (stale / invalid). Cleared on a
   /// successful accept or a new run.
   var actionMessage: String?
-  var lastRunDiagnostic: String?
+  var lastRunDiagnostic: String? {
+    get { run.diagnostic }
+    set { run.diagnostic = newValue }
+  }
   /// The API-key entry sheet, presented when onboarding or when the user taps to add a key.
   var keyEntry: SettingsModel?
   /// Whether pending suggestions are drawn as faint outline bands in the transcript. The ranked
@@ -94,6 +114,8 @@ final class CutSuggestionsPageModel: ViewModel {
   private var editingTitleID: CutSuggestion.ID?
 
   // MARK: - Display Text
+  let orphanTitle = "Recover an unfinished search"
+  let orphanMessage = "Choose a saved search for this transcript to resume."
   let startingMessage = "Analyzing transcript…"
   let emptyStateMessage =
     "No suggestions yet. Tap \u{201c}Suggest Cuts\u{201d} to find product cuts."
@@ -114,6 +136,15 @@ final class CutSuggestionsPageModel: ViewModel {
   }
 
   // MARK: - View Helpers
+  var orphanRows: [SuggestionOrphanRow] {
+    orphanChoices.map {
+      .init(
+        id: $0.id,
+        title: ($0.documentURL?.lastPathComponent ?? "Untitled project") + " · "
+          + $0.id.uuidString.prefix(8))
+    }
+  }
+  var showsOrphanChoices: Bool { !orphanChoices.isEmpty }
   /// The candidates to show, in ranked order, read from the editor's document.
   var suggestions: [CutSuggestion] { currentSuggestions().ranked }
 
@@ -172,9 +203,27 @@ final class CutSuggestionsPageModel: ViewModel {
   }
 
   // MARK: - User Actions
-  var recoveryBlocksSuggestions = false
+  var recoveryBlocksSuggestions: Bool {
+    get { run.ownershipBlocked }
+    set { run.ownershipBlocked = newValue }
+  }
+  var candidateActionsDisabled: Bool { run.candidatesLocked }
+  var suggestDisabled: Bool { !run.canStart || showsOrphanChoices }
+  var showsRecoveryActions: Bool { run.canResume || run.canDiscard }
+  var recoveryMessage: String? {
+    switch run.phase {
+    case .paused, .needsNumbering: run.message
+    default: nil
+    }
+  }
 
   func viewAppeared() { refreshKeyState() }
+
+  func orphanSelected(_ id: UUID) async {
+    guard let owner = orphanChoices.first(where: { $0.id == id }) else { return }
+    await onOrphanSelected(owner)
+  }
+  func orphanCancelled() { onOrphanCancelled() }
 
   /// Clicking a row asks the editor to reveal it (select its words, scroll the transcript, zoom
   /// the waveform) so the user can review — and, with the fine-tune pane open, audition — the
@@ -185,77 +234,14 @@ final class CutSuggestionsPageModel: ViewModel {
   }
 
   func suggestCutsTapped() async {
-    guard !recoveryBlocksSuggestions, !isSuggesting else { return }
-    // No key resolved → don't call the LLM; take the user to key entry instead.
-    guard let apiKey = resolvedAPIKey() else {
-      addAPIKeyTapped()
-      return
-    }
-    onExplicitSuggest?()
-    await runSuggest(apiKey: apiKey)
-  }
-
-  /// Fired once when the editor loads a file, so the user lands on suggestions already in
-  /// flight instead of having to press a button. It's deliberately quiet: it does nothing when
-  /// suggestions already exist (so it never clobbers prior results or accept/reject decisions),
-  /// and, unlike the manual button, it does NOT open the key-entry sheet when no key resolves —
-  /// a background pass must never nag. The button remains the way to add a key and run by hand.
-  func autoSuggestCutsIfNeeded() async {
-    guard !recoveryBlocksSuggestions, automaticSuggestionsEnabled, !isSuggesting,
-      suggestions.isEmpty
-    else { return }
-    guard let apiKey = resolvedAPIKey() else { return }
-    await runSuggest(apiKey: apiKey, isBackgroundPass: true)
-  }
-
-  /// The shared run: stream the cutter and fold its events into `phase`/the sidecar. Both the
-  /// manual button and the background auto-pass funnel through here so they behave identically
-  /// once a key is in hand. `isBackgroundPass` is the one difference: a background pass refuses
-  /// to overwrite suggestions that appeared while it was in flight (see the completion handler).
-  private func runSuggest(apiKey: String, isBackgroundPass: Bool = false) async {
     actionMessage = nil
-    lastRunDiagnostic = nil
-    phase = .suggesting(startingMessage)
-    let request = buildRequest()
-    do {
-      for try await event in cutSuggest.suggestCuts(request, apiKey) {
-        switch event {
-        case .progress(let message):
-          phase = .suggesting(message)
-        case .diagnostic(let message):
-          lastRunDiagnostic = message
-        case .checkpoint:
-          break
-        case .recoverableFailure(_, _, let message):
-          phase = .failed(message)
-          return
-        case .completed(let candidates):
-          let stamped = candidates.map { stampProvenance(on: $0, from: request) }
-          // A background pass guards emptiness at start, but suggestions can land while it's in
-          // flight (a manual run, or a decision the user just made). Re-check right before
-          // emitting — the check and the emit are synchronous on the main actor, so nothing can
-          // slip between them: a background pass commits only if the document is still empty
-          // (else it would silently wipe the user's accept/reject decisions); a manual run always
-          // replaces — an explicit re-run is meant to overwrite. The editor de-dupes on store.
-          guard !isBackgroundPass || currentSuggestions().isEmpty else {
-            phase = .idle
-            return
-          }
-          onSuggestionsProduced?(stamped)
-          phase = .idle
-          return
-        }
-      }
-      // The stream finished without ever completing (a degenerate run): don't hang on the
-      // spinner, but fail visibly so the user sees the missing subprocess result.
-      if isSuggesting {
-        phase = .failed("The cut-suggester stopped before returning results.")
-      }
-    } catch is CancellationError {
-      phase = .idle
-    } catch {
-      phase = .failed(error.localizedDescription)
-    }
+    guard !showsOrphanChoices else { return }
+    await run.suggestTapped()
+  }
+
+  func autoSuggestCutsIfNeeded() async {
+    guard !showsOrphanChoices else { return }
+    await run.automaticSearchIfNeeded()
   }
 
   /// Accepts a suggestion: validates it against the current plan, then — on success —
@@ -265,6 +251,7 @@ final class CutSuggestionsPageModel: ViewModel {
   /// fingerprint, and `actionMessage`) keeps the outcome message local; the editor owns
   /// the undoable document write.
   func acceptTapped(_ id: CutSuggestion.ID) {
+    guard !candidateActionsDisabled else { return }
     finishTitleEditing(id)
     switch acceptCutSuggestion(
       id, in: ProjectState(cutSuggestions: currentSuggestions()), plan: editPlan,
@@ -281,9 +268,10 @@ final class CutSuggestionsPageModel: ViewModel {
   }
 
   func rejectTapped(_ id: CutSuggestion.ID) {
+    guard !candidateActionsDisabled else { return }
     finishTitleEditing(id)
-    onReject?(id)
     actionMessage = nil
+    onReject?(id)
   }
 
   /// Renames a suggestion as the user types in its title field. Routed to the editor so the
@@ -331,32 +319,9 @@ final class CutSuggestionsPageModel: ViewModel {
       env: environment.value(anthropicAPIKeyEnvVar))
   }
 
-  private func buildRequest() -> CutSuggestRequest {
-    CutSuggestRequest(
-      transcriptUnits: editPlan.transcriptUnits,
-      diarization: nil,
-      productSpecs: productSpecs,
-      options: options,
-      transcriptHash: editPlan.transcriptHash,
-      sourceFingerprint: sourceFingerprint,
-      sampleRate: editPlan.source.sampleRate)
-  }
+}
 
-  /// Provenance is bookkeeping the model owns authoritatively: it knows the current
-  /// transcript hash, source fingerprint, and pinned versions this run used. Stamping it
-  /// here (rather than trusting the client) guarantees every persisted suggestion carries
-  /// the hash the accept-time staleness gate compares against.
-  private func stampProvenance(on suggestion: CutSuggestion, from request: CutSuggestRequest)
-    -> CutSuggestion
-  {
-    var stamped = suggestion
-    stamped.provenance = CutSuggestion.Provenance(
-      model: request.options.model,
-      promptVersion: request.options.promptVersion,
-      productSpecVersion: request.options.productSpecVersion,
-      transcriptHash: request.transcriptHash,
-      sourceFingerprint: request.sourceFingerprint,
-      diarizationHash: request.diarization?.diarizationHash)
-    return stamped
-  }
+struct SuggestionOrphanRow: Identifiable {
+  var id: UUID
+  var title: String
 }

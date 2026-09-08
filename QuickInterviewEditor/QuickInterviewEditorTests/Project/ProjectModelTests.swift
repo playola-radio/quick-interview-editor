@@ -55,24 +55,50 @@ struct ProjectModelTests {
     var file = Fixtures.projectFile(content: EditorDocumentState())
     file.schemaVersion = 1
     let (sink, record) = ProjectDocumentSink.recorder()
+    let fixture = SuggestionRunFixture()
     try await withDependencies {
-      $0.keychain = .inMemory("fixture-key")
-      $0.cutSuggest = CutSuggestClient { _, _ in
-        AsyncThrowingStream {
-          $0.yield(.completed([]))
-          $0.finish()
-        }
-      }
+      fixture.install(&$0)
     } operation: {
       let model = ProjectModel(
         file: file, plan: Fixtures.editPlan(),
-        audio: .packageChild(sessionCopy: Fixtures.canonicalAudioURL),
-        sink: sink)
+        audio: .packageChild(sessionCopy: Fixtures.canonicalAudioURL), sink: sink)
       await model.viewAppeared()
       let editor = try #require(model.editor)
-      await editor.cutSuggestions.suggestCutsTapped()
+      let task = Task { await editor.cutSuggestions.suggestCutsTapped() }
+      await fixture.waitForRequests()
       expectNoDifference(record.commits.last?.file.schemaVersion, 2)
-      expectNoDifference(record.registerChangeCount, 1)
+      #expect(editor.unfinishedSuggestionRun != nil)
+      fixture.finish()
+      await task.value
+      expectNoDifference(editor.cutSuggestions.run.phase, .idle)
+      #expect(editor.lastAppliedSuggestionRunID != nil)
+      expectNoDifference(editor.unfinishedSuggestionRun, nil)
+    }
+  }
+
+  @Test func cancellingReplacementLeavesOpenedV1UntouchedAndDoesNotPrepareRecovery() async throws {
+    var file = Fixtures.projectFile()
+    file.schemaVersion = 1
+    let (sink, record) = ProjectDocumentSink.recorder()
+    let fixture = SuggestionRunFixture()
+    try await withDependencies {
+      fixture.install(&$0)
+    } operation: {
+      let model = ProjectModel(
+        file: file, plan: Fixtures.editPlan(),
+        audio: .packageChild(sessionCopy: Fixtures.canonicalAudioURL), sink: sink)
+      await model.viewAppeared()
+      let editor = try #require(model.editor)
+      let before = editor.documentState
+      await editor.cutSuggestions.suggestCutsTapped()
+      expectNoDifference(editor.cutSuggestions.run.phase, .confirmingReplacement)
+      editor.cutSuggestions.run.cancelReplacementTapped()
+      expectNoDifference(editor.documentState, before)
+      expectNoDifference(record.registerChangeCount, 0)
+      expectNoDifference(record.commits.count, 0)
+      expectNoDifference(fixture.state.value.requests.count, 0)
+      expectNoDifference(fixture.state.value.prepared.count, 0)
+      expectNoDifference(editor.cutSuggestions.automaticSuggestionsEnabled, false)
     }
   }
 

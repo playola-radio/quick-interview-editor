@@ -64,7 +64,8 @@ struct ProjectHydrationTests {
     #expect(model.staleRecovery != nil)
     expectNoDifference(model.editor?.unfinishedSuggestionRun, nil)
     expectNoDifference(model.editor?.cutSuggestions.recoveryBlocksSuggestions, true)
-    try await model.discardSuggestionRecovery()
+    #expect(model.editor?.cutSuggestions.run.canDiscard == true)
+    await model.editor?.cutSuggestions.run.discardSearchTapped()
     expectNoDifference(model.staleRecovery, nil)
     expectNoDifference(model.recoveryActionsBlocked, false)
     expectNoDifference(record.recoveries.last?.archive, nil)
@@ -576,4 +577,122 @@ extension ProjectHydrationTests {
     expectNoDifference(record.recoveries.last?.archive, capture.archive)
     expectNoDifference(record.commits.last?.file.content.unfinishedSuggestionRun, nil)
   }
+  @Test(arguments: [1, 2])
+  func matchingOrphansRequireExplicitChoiceAndCancelPreservesDocument(count: Int) async throws {
+    let root = FileManager.default.temporaryDirectory.appending(component: UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let file = Fixtures.projectFile()
+    let plan = Fixtures.editPlan()
+    let store = SuggestionRecoveryStore(root: root, uuid: { UUID() })
+    for index in 0..<count {
+      var fixture = try RecoveryFixture.matching(file: file, plan: plan)
+      fixture.owner.id = Fixtures.uuid(700 + index)
+      fixture.preparation.control.isPaused = true
+      _ = try await store.prepare(fixture.owner, preparation: fixture.preparation)
+    }
+    let (sink, record) = ProjectDocumentSink.recorder()
+    let model = withDependencies {
+      $0.uuid = .incrementing
+      $0.suggestionRecovery = .store(store)
+    } operation: {
+      ProjectModel(
+        file: file, plan: plan, audio: .sessionFile(root.appending(component: "audio.aiff")),
+        sink: sink)
+    }
+    await model.viewAppeared()
+    expectNoDifference(model.recoverableSuggestionOwners.count, count)
+    expectNoDifference(model.editor?.cutSuggestions.orphanRows.count, count)
+    expectNoDifference(model.editor?.unfinishedSuggestionRun, nil)
+    expectNoDifference(model.recoveryOwner, nil)
+    let before = model.editor?.documentState
+    let changes = record.registerChangeCount
+    model.cancelOrphanRecoveryTapped()
+    expectNoDifference(model.editor?.documentState, before)
+    expectNoDifference(model.recoverableSuggestionOwners, [])
+    expectNoDifference(record.registerChangeCount, changes)
+  }
+
+  @Test func orphanChoiceCopiesAStillOpenOriginalOwnerBeforeResume() async throws {
+    let root = FileManager.default.temporaryDirectory.appending(component: UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let file = Fixtures.projectFile()
+    let plan = Fixtures.editPlan()
+    var fixture = try RecoveryFixture.matching(file: file, plan: plan)
+    fixture.preparation.control.isPaused = true
+    let store = SuggestionRecoveryStore(root: root, uuid: { UUID() })
+    _ = try await store.prepare(fixture.owner, preparation: fixture.preparation)
+    _ = try await store.claimOwner(fixture.owner, instanceID: Fixtures.uuid(800))
+    let original = try await store.capture(
+      fixture.owner, runID: fixture.snapshot.runID, minimumPythonRevision: nil)
+    let (sink, _) = ProjectDocumentSink.recorder()
+    let model = withDependencies {
+      $0.uuid = .incrementing
+      $0.suggestionRecovery = .store(store)
+      $0.keychain = .inMemory(nil)
+      $0.environment = .constant([:])
+    } operation: {
+      ProjectModel(
+        file: file, plan: plan, audio: .sessionFile(root.appending(component: "audio.aiff")),
+        sink: sink)
+    }
+    await model.viewAppeared()
+    expectNoDifference(model.recoverableSuggestionOwners.count, 1)
+    await model.editor?.cutSuggestions.orphanSelected(fixture.owner.id)
+    let isolated = try #require(model.recoveryOwner)
+    #expect(isolated.id != fixture.owner.id)
+    expectNoDifference(
+      model.editor?.unfinishedSuggestionRun?.snapshot.runID, fixture.snapshot.runID)
+    expectNoDifference(model.recoverableSuggestionOwners, [])
+    let retained = try await store.capture(
+      fixture.owner, runID: fixture.snapshot.runID, minimumPythonRevision: nil)
+    expectNoDifference(retained.checkpoint, original.checkpoint)
+    expectNoDifference(
+      try SuggestionRecoveryArchive.decode(retained.archive),
+      try SuggestionRecoveryArchive.decode(original.archive))
+    expectNoDifference(model.editor?.cutSuggestions.run.phase, .confirmingReplacement)
+  }
+
+  @Test func locationChangePausesActiveSearchBeforeForkingItsOwner() async throws {
+    let root = FileManager.default.temporaryDirectory.appending(component: UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let oldURL = root.appending(component: "Original.pie")
+    let newURL = root.appending(component: "Copy.pie")
+    try FileManager.default.createDirectory(at: oldURL, withIntermediateDirectories: true)
+    let store = SuggestionRecoveryStore(
+      root: root.appending(component: "recovery"), uuid: { UUID() })
+    let stream = SuggestionRunFixture()
+    let model = withDependencies {
+      $0.uuid = .incrementing
+      $0.suggestionRecovery = .store(store)
+      $0.suggestionConfiguration = .inMemory()
+      $0.keychain = .inMemory("ephemeral-key")
+      $0.cutSuggest = stream.client
+    } operation: {
+      ProjectModel(
+        file: Fixtures.projectFile(content: .init()), plan: Fixtures.editPlan(),
+        audio: .sessionFile(root.appending(component: "audio.aiff")), packageURL: oldURL,
+        sink: ProjectDocumentSink.recorder().sink)
+    }
+    await model.viewAppeared()
+    let editor = try #require(model.editor)
+    let task = Task { await editor.cutSuggestions.suggestCutsTapped() }
+    await stream.waitForRequests()
+    let originalOwner = try #require(model.recoveryOwner)
+    model.documentURLChanged(newURL)
+    expectNoDifference(editor.cutSuggestions.run.activeAttemptID, nil)
+    stream.state.value.continuations[0].yield(.completed([]))
+    await model.documentLocationObserved()
+    await task.value
+    let copiedOwner = try #require(model.recoveryOwner)
+    #expect(copiedOwner.id != originalOwner.id)
+    expectNoDifference(copiedOwner.documentURL, newURL)
+    let originalCheckpoint = try await store.load(originalOwner)
+    let copiedCheckpoint = try await store.load(copiedOwner)
+    expectNoDifference(originalCheckpoint?.phase, .paused)
+    expectNoDifference(copiedCheckpoint?.phase, .paused)
+    expectNoDifference(editor.unfinishedSuggestionRun?.phase, .paused)
+    expectNoDifference(editor.lastAppliedSuggestionRunID, nil)
+    #expect(editor.cutSuggestions.run.canResume)
+  }
+
 }
