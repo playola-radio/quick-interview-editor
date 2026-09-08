@@ -18,6 +18,11 @@ struct TranscriptTextView: NSViewRepresentable {
   let scrollTarget: Word.ID?
   let followMode: TranscriptFollowMode
   let reveal: TranscriptReveal?
+  var overlapPresentation: String = ""
+
+  static func dismantleNSView(_ nsView: NSScrollView, coordinator: Coordinator) {
+    coordinator.overlapPresenter.dismantle()
+  }
 
   func makeCoordinator() -> Coordinator { Coordinator(model: model) }
 
@@ -76,10 +81,12 @@ struct TranscriptTextView: NSViewRepresentable {
       text: text, fontSize: fontSize, selected: selected, clipContainers: clipContainers,
       removedWordIDs: removedWordIDs, currentWordID: currentWordID, scrollTarget: scrollTarget,
       followMode: followMode, reveal: reveal)
+    context.coordinator.updateOverlap()
   }
 
   @MainActor
   final class Coordinator: NSObject {
+    let overlapPresenter: TranscriptOverlapPresenter
     var model: TranscriptPageModel
     weak var textView: NSTextView?
     weak var scrollView: NSScrollView?
@@ -100,7 +107,15 @@ struct TranscriptTextView: NSViewRepresentable {
     private var scrollStartedAt = Date()
     private let scrollDuration: TimeInterval = 0.3
 
-    init(model: TranscriptPageModel) { self.model = model }
+    init(model: TranscriptPageModel) {
+      self.model = model
+      overlapPresenter = TranscriptOverlapPresenter(model: model.overlap)
+    }
+
+    func updateOverlap() {
+      guard let textView else { return }
+      overlapPresenter.update(textView: textView, document: model.document)
+    }
 
     // The reveal scroll timer isn't invalidated here (a nonisolated deinit can't touch the
     // non-Sendable Timer): it self-invalidates when the 0.3s animation completes or the scroll
@@ -341,6 +356,11 @@ struct TranscriptTextView: NSViewRepresentable {
           range: container.range, fill: Self.nsColor(style.fill), ring: Self.nsColor(style.ring),
           dashed: style.dashed, ringWidth: style.ringWidth)
       }
+      layoutManager.containerRuns += new.filter(\.isPreviewed).map { container in
+        ClipContainerRun(
+          range: container.range, fill: .clear, ring: Self.nsColor(container.style.ring),
+          dashed: container.style.dashed, ringWidth: 2)
+      }
       storage.beginEditing()
       for container in affected {
         for wordRange in model.document.wordRanges
@@ -397,12 +417,20 @@ struct TranscriptTextView: NSViewRepresentable {
     // changes after a programmatic auto-scroll, so bounds are NOT a reliable user signal.
     func observeScroll() {
       guard let scrollView else { return }
+      scrollView.contentView.postsBoundsChangedNotifications = true
+      NotificationCenter.default.addObserver(
+        self, selector: #selector(viewportChanged),
+        name: NSView.boundsDidChangeNotification, object: scrollView.contentView)
       NotificationCenter.default.addObserver(
         self, selector: #selector(userDidLiveScroll),
         name: NSScrollView.willStartLiveScrollNotification, object: scrollView)
     }
 
+    @objc private func viewportChanged() { updateOverlap() }
+
     @objc private func userDidLiveScroll() {
+      model.overlap.dismiss()
+      updateOverlap()
       model.transcriptUserScrolled()
     }
 
@@ -446,6 +474,14 @@ final class HitTestingTextView: NSTextView {
   private var anchorOffset: Int?
   private var pointer = TranscriptPointerGesture()
   private var beganWordDrag = false
+
+  override func accessibilityChildren() -> [Any]? {
+    var children = super.accessibilityChildren() ?? []
+    if let button = coordinator?.overlapPresenter.button, !button.isHidden {
+      children.append(button)
+    }
+    return children
+  }
 
   override func mouseDown(with event: NSEvent) {
     endActiveTextEditing()
@@ -516,6 +552,8 @@ final class HitTestingTextView: NSTextView {
 
   override func scrollWheel(with event: NSEvent) {
     coordinator?.model.transcriptUserScrolled()
+    coordinator?.model.overlap.dismiss()
     super.scrollWheel(with: event)
+    coordinator?.updateOverlap()
   }
 }

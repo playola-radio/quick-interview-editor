@@ -54,6 +54,7 @@ struct SlicesPanelView: View {
           List {
             ForEach(model.visibleSliceRows) { row in
               SliceCard(model: model, row: row)
+                .id(row.id)
                 .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
                 .listRowSeparator(.hidden)
                 .listRowBackground(Color.clear)
@@ -67,8 +68,8 @@ struct SlicesPanelView: View {
           .listStyle(.plain)
           .scrollContentBackground(.hidden)
           .animation(.default, value: model.visibleSliceRows.map(\.id))
-          .onChange(of: model.sliceScrollTarget) { _, target in
-            guard let target else { return }
+          .onChange(of: model.sidebarReveal) { _, reveal in
+            guard case .clip(let target) = reveal?.objectID else { return }
             withAnimation { proxy.scrollTo(target, anchor: .bottom) }
           }
           // A clip accepted from the Suggestions tab sets the target while this panel is
@@ -155,6 +156,11 @@ private struct SliceCard: View {
       }
       .buttonStyle(.plain)
       .accessibilityLabel(model.revealClipLabel)
+      .simultaneousGesture(
+        TapGesture(count: 2).onEnded {
+          model.sliceRevealTapped(row.id)
+          model.openSelectionTapped()
+        })
       HStack(spacing: 8) {
         // A pure Play shortcut into the global transport (ruling F: no per-slice Stop — the
         // transport panel owns Pause/Stop). The row highlights below while this slice plays.
@@ -195,9 +201,7 @@ private struct SliceCard: View {
           Color(red: 0.4, green: 0.8, blue: 0.5).opacity(0.5),
           lineWidth: row.editingComplete ? 1 : 0)
     )
-    .simultaneousGesture(
-      TapGesture(count: 2).onEnded { model.editSliceTapped(row.id) }
-    )
+
   }
 }
 

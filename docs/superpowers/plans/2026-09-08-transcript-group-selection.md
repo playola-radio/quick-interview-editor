@@ -493,7 +493,7 @@ and `CutSuggestionsPageView.swift`. Add reveal data to `Models/EditorSelection.s
 Tests: `QuickInterviewEditor/QuickInterviewEditorTests/Views/Pages/TranscriptPage/TranscriptOverlapTests.swift`
 and `QuickInterviewEditor/QuickInterviewEditorTests/Views/Pages/Editor/EditorObjectRevealTests.swift`.
 
-- [ ] Introduce a tokenized reveal value and keep a counter per editor:
+- [x] Introduce a tokenized reveal value and keep a counter per editor:
 
 ```swift
 struct SidebarReveal: Equatable {
@@ -506,40 +506,40 @@ Every request increments the token, including the same object requested twice.
 Pass the relevant request to each sidebar. Both panels handle changes and initial
 mounting, use explicit object IDs on rows, and scroll the selected row into view.
 
-- [ ] Define `TranscriptOverlapModel` as an observable model with full candidate
+- [x] Define `TranscriptOverlapModel` as an observable model with full candidate
   rows, current selected ID, optional preview ID, and callbacks for selection and
   dismissal. A row exposes type label, resolved duration, title, selected flag,
   and accessibility label. Its candidates come from `objectsCovering` at the
   clicked word, not from visible containers or clipped runs. Filter invalidated
   candidates whenever the editor projection changes.
-- [ ] Expose the overlay control only for two or more object candidates at the hit.
+- [x] Expose the overlay control only for two or more object candidates at the hit.
   Anchor it beside the clicked line within the viewport; avoid covering the clicked
   word and keep text metrics fixed. Present an `NSPopover` containing the SwiftUI
   chooser through the AppKit coordinator, using the model to decide visibility
   and selection. Close it on scroll/zoom if its anchor leaves the viewport; keep
   the selected object. Hover/focus preview is separate draw-only state.
-- [ ] Selecting a row calls `selectTranscriptObject`, clears preview, closes the
+- [x] Selecting a row calls `selectTranscriptObject`, clears preview, closes the
   chooser, and reveals the sidebar card. Escape only dismisses. Disable underlying
   Delete/arrows while the chooser has focus; provide keyboard traversal/activation.
-- [ ] Update sidebar card selection surfaces to call the same object-selection
+- [x] Update sidebar card selection surfaces to call the same object-selection
   path. A sidebar origin also reveals the transcript and frames the waveform;
   a transcript origin keeps transcript scroll/zoom and only pans waveform as
   needed. Re-clicking unchanged selection issues a sidebar reveal without any
   `snapPlayhead` call. A changed selection keeps existing stop/place-cursor policy.
-- [ ] Clips ↔ Suggestions switches retain width 302; Both remains Both at width
+- [x] Clips ↔ Suggestions switches retain width 302; Both remains Both at width
   604. A filtered-out clip switches the clip filter to All. Selecting a hidden
   pending suggestion from its sidebar enables suggestion bands. Selecting a
   historical accepted/rejected row resolves its existing clip or falls back to a
   freeform word range without creating a new object.
-- [ ] Move the whole-card double-tap onto the dedicated selection surface.
+- [x] Move the whole-card double-tap onto the dedicated selection surface.
   Task 6 connects suggestion double-click/Open to its draft-open action.
   Fields and control clusters must not inherit that gesture.
-- [ ] Test each overlap combination with candidate count/order, stable selected
+- [x] Test each overlap combination with candidate count/order, stable selected
   identity after repeated clicks, preview clearing on dismiss, invalidated rows,
   identical-range promotion, freeform precedence, and hidden suggestion overlays.
   Test token changes on repeated reveal, filter correction, panel-width stability,
   historical suggestion fallback, and unchanged-selection playback preservation.
-- [ ] Run the new suites plus `EditorRevealTests`, `TranscriptRevealTests`,
+- [x] Run the new suites plus `EditorRevealTests`, `TranscriptRevealTests`,
   `EditorTransportTests`, and `CutSuggestionsPageTests`.
   Commit: `feat: reveal selected objects and choose overlapping alternatives`.
 
@@ -554,7 +554,7 @@ Tests: `QuickInterviewEditor/QuickInterviewEditorTests/Views/Pages/Editor/EditSl
 existing `EditSliceTests.swift`, `EditorEditSlicePresentationTests.swift`,
 `SliceEditKeyMonitorTests.swift`.
 
-- [ ] Introduce these target/outcome types. Snapshot the original suggestion to
+- [x] Introduce these target/outcome types. Snapshot the original suggestion to
   validate a draft against regeneration; the freeform ID is allocated once with
   `@Dependency(\.uuid)` when opening, so repeat Save cannot create another clip.
 
@@ -587,20 +587,20 @@ enum ClipEditCommitResult: Equatable {
 }
 ```
 
-- [ ] Add `EditSliceModel.init(target:title:range:editPlan:)` and retain the current
+- [x] Add `EditSliceModel.init(target:title:range:editPlan:)` and retain the current
   `init(slice:editPlan:)` as a convenience for saved clips. Accept an optional
   explicit scoped word set: saved clips preserve their stored `slice.wordIDs`,
   while new drafts use words overlapping the range. Keep a session-local model identity
   for `.sheet(item:)`, distinct from the resulting clip's document ID.
   The saved initializer retains saved editing-complete state; drafts hide it.
-- [ ] Replace `onCommit: (Range<Int>) -> Void` with a result-bearing callback:
+- [x] Replace `onCommit: (Range<Int>) -> Void` with a result-bearing callback:
   `(Range<Int>) -> ClipEditCommitResult`. Default to a visible unavailable error,
   never success. Update saved-clip wiring/tests to return `.committed` only after
   the existing update succeeds. Keep `errorMessage` and `invalidationMessage`
   observable on the sheet model. Make `commitSliceEdit` return the validated
   outcome; a missing clip or weak parent returns failure and leaves the sheet open.
   Add a saved-clip regression for this failure path.
-- [ ] Add `canCommitRange` validation for valid file bounds and at least one
+- [x] Add `canCommitRange` validation for valid file bounds and at least one
   overlapping word; preserve boundary movement clamps. Set `canSave` to
   valid-and-not-invalidated for drafts, and changed-and-valid for saved clips.
   Use the following Save control flow, with `didCommit` initially false:
@@ -619,7 +619,7 @@ func saveTapped() {
 }
 ```
 
-- [ ] Add the first draft regression before the model changes:
+- [x] Add the first draft regression before the model changes:
 
 ```swift
 @Test func unchangedDraftCanSaveAndFailedCommitKeepsItOpen() {
@@ -641,24 +641,24 @@ func saveTapped() {
 }
 ```
 
-- [ ] Add `openSelectionTapped()` in the editor. Saved objects use the existing
+- [x] Add `openSelectionTapped()` in the editor. Saved objects use the existing
   guarded clip editor; suggestions and freeform selections create draft sessions.
   Resolve historical rows before opening. Apply configured boundary offsets once
   before constructing drafts, never saved-clip sessions. Reuse waveform data and
   existing transport handoff. Do not recursively wire sheet transcript Open.
-- [ ] Add model capabilities for global mutation controls. Drafts omit/remove
+- [x] Add model capabilities for global mutation controls. Drafts omit/remove
   callbacks for timeline deletion/restore, seam stretching/cut-point dragging,
   and editing-complete. Enforce these capabilities in model actions as well as
   view visibility and key/context-menu routes. Draft waveform playback still
   reads the current edited timeline and previews the draft's final boundaries.
-- [ ] Show invalidation/error messages in the sheet. An invalidated draft keeps
+- [x] Show invalidation/error messages in the sheet. An invalidated draft keeps
   its boundary values/history, disables commit, and never binds to another target.
   Replace saved-only `sliceID` cleanup consumers with explicit target branches,
   particularly `editSliceRangeIsStale`: absence of a saved slice must not close
   an unsaved draft.
   Show the spec's save/cancel-current-edit message when opening is blocked by an
   existing unsaved saved-clip session.
-- [ ] Run new draft tests plus the existing saved-sheet presentation, playback,
+- [x] Run new draft tests plus the existing saved-sheet presentation, playback,
   removal and cut-point suites to preserve their existing capabilities.
   Commit: `feat: open suggestions and selections as unsaved clip drafts`.
 
@@ -672,7 +672,7 @@ Tests: `QuickInterviewEditor/QuickInterviewEditorTests/Views/Pages/Editor/EditSl
 `QuickInterviewEditor/QuickInterviewEditorTests/Views/Pages/Editor/EditorDraftCommitTests.swift`,
 `EditorClipOffsetTests.swift`, `EditorSuggestionFlowTests.swift`, and menu/key tests.
 
-- [ ] Give draft sessions `UndoStack<Range<Int>>` and an optional boundary-gesture
+- [x] Give draft sessions `UndoStack<Range<Int>>` and an optional boundary-gesture
   starting range. Add model actions `boundaryDragBegan()`, `boundaryDragEnded()`,
   `undoBoundaryTapped()`, and `redoBoundaryTapped()`; use the following history core:
 
@@ -708,7 +708,7 @@ callbacks. Store history only for ranges produced by the same session's validate
 boundary editor. If the source invalidates, history remains inspectable but
 commit stays disabled; it must not clamp silently into a new source.
 
-- [ ] Add `onDragBegan`/`onDragEnded` callbacks to `BoundaryInset`. Its changed
+- [x] Add `onDragBegan`/`onDragEnded` callbacks to `BoundaryInset`. Its changed
   callback calls `onDragBegan` idempotently then `onDrag`; ended calls
   `onDragEnded`. Default lifecycle closures are no-ops for the dormant
   `FineTuneView` so its behavior is preserved. A cancelled drag restores the
@@ -717,15 +717,15 @@ commit stays disabled; it must not clamp silently into a new source.
   `.onEnded` and cancellation must yield exactly one terminal callback. A stale
   begin range must never absorb later nudges. Preserve the committed initial
   offset-adjusted range as the inset anchor throughout history changes.
-- [ ] Wrap each draft nudge in one before/after range record. No-op clamps do
+- [x] Wrap each draft nudge in one before/after range record. No-op clamps do
   not add history. On local undo/redo stop/reconcile active draft preview through
   existing scoped transport hooks before changing boundaries; stale asynchronous
   stop continuations must not overwrite a newer playback action.
-- [ ] Route both menu and keyboard Undo/Redo to local history for draft targets,
+- [x] Route both menu and keyboard Undo/Redo to local history for draft targets,
   consuming empty history. Saved-clip targets retain their current routing.
   Keep text-field undo native. Add tests that local history never calls parent
   `onUndo`, `onRedo`, or `onDocumentStateChanged`.
-- [ ] For draft commit, revalidate file bounds, nonempty word membership, source
+- [x] For draft commit, revalidate file bounds, nonempty word membership, source
   identity and live target status synchronously on the main actor before mutation.
   For suggestions, require the current suggestion still pending with the opening
   word IDs/provenance, then call the pure validator:
@@ -749,20 +749,20 @@ Here `target`, `title`, and `finalRange` are the explicit session inputs to
 `EditorModel+DraftEditing.swift`. Validate the original candidate separately;
 do not compare the edited clip's membership to the original suggestion's words.
 
-- [ ] Insert `finalSlice` and accept its suggestion in one `mutateDocument`
+- [x] Insert `finalSlice` and accept its suggestion in one `mutateDocument`
   transaction. For a freeform draft insert one clip using the preallocated ID.
   Do not call the current `appendNewClip` or `acceptCutSuggestion(slice:id:)`
   insertion helpers, which apply offsets. Share their persistence/selection
   helpers only after extracting an explicit exact-bounds insertion path. Leave
   immediate Mark/Accept offset behavior unchanged. Duplicate commit attempts
   produce no second clip/history step. Select and reveal the committed clip.
-- [ ] Add tests: one drag with many updates is one undo; two nudges are two;
+- [x] Add tests: one drag with many updates is one undo; two nudges are two;
   undo/redo retains committed inset anchors; unchanged drafts save; save failures
   keep range/history/sheet; cancel and invalidation leave the document unchanged;
   nonzero offsets apply once; edited suggestion membership may differ; stale,
   rejected, missing and replaced candidates cannot commit; accept/create each
   undo and redo atomically. Test previewed samples equal saved samples exactly.
-- [ ] Run `ClipDraftHistoryTests`, `EditorDraftCommitTests`, `EditorClipOffsetTests`,
+- [x] Run `ClipDraftHistoryTests`, `EditorDraftCommitTests`, `EditorClipOffsetTests`,
   `EditorSuggestionFlowTests`, `SliceEditKeyMonitorTests`, `EditUndoCommandsTests`,
   and existing `FineTuneTests`. Commit:
   `feat: isolate draft undo and save exact previewed clip boundaries`.
@@ -777,33 +777,33 @@ Tests: `QuickInterviewEditor/QuickInterviewEditorTests/Views/Pages/Editor/Editor
 `EditorDocumentMutationTests.swift`, `EditorTransportTests.swift`, and
 `Project/ProjectHydrationTests.swift` under the same test root.
 
-- [ ] Reconcile selected identity and chooser state after every document mutation
+- [x] Reconcile selected identity and chooser state after every document mutation
   and history restore, including non-undoable background suggestion production.
   Promote a selected accepted suggestion to its resulting clip; clear missing
   objects; keep rejected/accepted-without-clip rows historical. Recompute an
   object's range from live bounds; never infer its identity from equal ranges.
-- [ ] Invalidate open drafts when their source identity or originating suggestion
+- [x] Invalidate open drafts when their source identity or originating suggestion
   no longer matches. Preserve local adjustments and provide an explicit reason.
   Stop invalidated draft playback using existing generation-safe handoff methods.
   Cancel pending double-click captures for invalidated targets. Dismiss empty
   choosers without switching to an unrelated candidate.
-- [ ] Ensure history selection restoration updates highlights/reveals but does
+- [x] Ensure history selection restoration updates highlights/reveals but does
   not trigger ordinary selection-change playback policy for a pure highlight
   clear. A shared model method should identify whether a transition places the
   cursor, rather than relying only on `EditorView.onChange(audioSelection)`.
   Include selection origin/revision in deferred work so equal-range objects and
   later user actions cannot be confused.
-- [ ] Update all direct range writers: waveform click/marquee, edge adjustment,
+- [x] Update all direct range writers: waveform click/marquee, edge adjustment,
   transcript click/drag/Shift, sidebar reveal, explicit Clear, seam select, and
   history restore. Each chooses a selection kind deliberately and reconciles
   stale transcript anchors. Preserve waveform marquee's single placement on
   release and generation checks for concurrent playback actions.
-- [ ] Test two editors sharing the same plan with independent selections/history;
+- [x] Test two editors sharing the same plan with independent selections/history;
   delete selected clip during playback; background regeneration while chooser
   or draft is open; undo accept back to pending; delete an accepted clip without
   reactivating its suggestion; pure highlight undo during playback; source change;
   and stale first-click capture followed by a different equal-range object.
-- [ ] Run the named suites plus `EditorAreaSelectTests`, `EditorEditedCursorTests`,
+- [x] Run the named suites plus `EditorAreaSelectTests`, `EditorEditedCursorTests`,
   `EditorSlicePlaybackTests`, and `EditorEditSlicePresentationTests`.
   Commit: `fix: reconcile transcript selection across edits and playback`.
 
@@ -813,7 +813,7 @@ Tests: `QuickInterviewEditor/QuickInterviewEditorTests/Views/Pages/Editor/Editor
 regressions to their owning suites. Record results in
 `.context/transcript-selection-verification.md`.
 
-- [ ] Run each new focused suite after its owning task. At integration, run:
+- [x] Run each new focused suite after its owning task. At integration, run:
 
 ```sh
 make test-fast
@@ -827,7 +827,7 @@ inspect the diff for unrelated churn, and rerun checks affected by the edits.
 If pushing later, run repository-required `make test` for CI parity before push.
 No Python changes are expected, so do not run engine tests without a relevant change.
 
-- [ ] Build/run the native app and prepare a local project with two overlapping
+- [x] Build/run the native app and prepare a local project with two overlapping
   clips, an identical-range suggestion, a nested suggestion, and a freeform range
   covering all of them. Use fixture data; do not spend API calls regenerating
   suggestions simply to exercise interaction.
@@ -882,3 +882,23 @@ Implementation is sequential: identity precedes history/keyboard and rendering;
 those precede the chooser and draft integration; reconciliation and native
 verification finish the feature. Model decisions are tested without rendering;
 real AppKit double-click timing and hit geometry also receive native verification.
+
+
+### Implementation verification (2026-09-08)
+
+Tasks 1–8 are implemented. The final suite passes 1,461 tests across 124 suites
+with the same 13 baseline known issues. `make format-check`, `make lint`, and
+`git diff --check` pass. New draft tests are consolidated in `DraftEditingTests`;
+chooser tests in `TranscriptOverlapTests` include a real AppKit window/button/popover
+activation check. Review findings were corrected and re-reviewed.
+
+Native smoke using `.context/Selection Smoke.pie` confirmed whole-object selection,
+sidebar highlighting, double-clicking a saved clip, choosing a fully hidden lower
+clip with the keyboard then double-clicking to open that clip, and opening a
+suggestion as an unsaved draft with document/audio-removal controls absent.
+The exhaustive physical-gesture/VoiceOver checklist above remains for a manual
+pass; native automation did not maintain exclusive foreground focus for all
+sequences. Automated tests cover drag classification/cancellation, Delete/Undo,
+draft boundaries/history, transport ownership, offsets, and atomic persistence.
+Detailed logs and screenshots are listed in
+`.context/transcript-selection-verification.md`.

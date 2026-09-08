@@ -27,6 +27,150 @@ struct EditorGroupSelectionTests {
       timestamp: time, doubleClickInterval: 0.5)
   }
 
+  @Test func externalRangeChangeReordersRetainedOverlapCandidates() {
+    let model = editor()
+    let first = Fixtures.slice(id: Fixtures.uuid(1), start: 70_648, end: 119_202)
+    let second = Fixtures.slice(id: Fixtures.uuid(2), start: 70_648, end: 119_202)
+    model.slices = [first, second]
+    model.selectTranscriptObject(.clip(second.id))
+    click(model)
+    expectNoDifference(model.transcript.overlap.candidates.first?.id, .clip(second.id))
+    model.selectSourceRange(70_648..<119_202, snapPlayhead: false)
+    expectNoDifference(
+      model.transcript.overlap.candidates.map(\.id), [.clip(first.id), .clip(second.id)])
+  }
+
+  @Test func acceptingSelectedSuggestionPromotesIdentityAndUndoRestoresPendingSelection() async {
+    let model = editor()
+    let candidate = suggestion(model)
+    model.documentCutSuggestions = [candidate]
+    model.selectTranscriptObject(.suggestion(candidate.id))
+    model.acceptSelectedSuggestionTapped()
+    expectNoDifference(model.selection, .object(.clip(candidate.id)))
+    #expect(model.documentCutSuggestions[id: candidate.id]?.isAccepted == true)
+    let reveal = model.sidebarReveal?.token
+    await model.undoTapped()
+    expectNoDifference(model.selection, .object(.suggestion(candidate.id)))
+    #expect(model.documentCutSuggestions[id: candidate.id]?.isPending == true)
+    #expect(model.sidebarReveal?.token != reveal)
+    await model.redoTapped()
+    expectNoDifference(model.selection, .object(.clip(candidate.id)))
+    await model.deleteSelectionTapped()
+    #expect(model.documentCutSuggestions[id: candidate.id]?.isAccepted == true)
+    #expect(model.visibleTranscriptObjects.isEmpty)
+  }
+
+  @Test func historicalAcceptedRowUsesExistingClipThenFreeformAfterDeletion() async {
+    let model = editor()
+    var candidate = suggestion(model)
+    candidate.status = .accepted
+    let clip = Fixtures.slice(id: candidate.id, start: 78_000, end: 110_000)
+    model.documentCutSuggestions = [candidate]
+    model.slices = [clip]
+    model.cutSuggestionSelected(candidate)
+    expectNoDifference(model.selection, .object(.clip(clip.id)))
+    expectNoDifference(model.audioSelection, 78_000..<110_000)
+    await model.deleteSelectionTapped()
+    model.cutSuggestionSelected(candidate)
+    expectNoDifference(model.audioSelection, 70_648..<119_202)
+    #expect(model.selection.freeformRange != nil)
+    #expect(model.slices.isEmpty)
+  }
+
+  @Test func independentEditorsDoNotShareSelectionOrHistory() async {
+    let first = editor()
+    let second = editor()
+    let clip = Fixtures.slice(start: 70_648, end: 119_202)
+    first.slices = [clip]
+    second.slices = [clip]
+    first.selectTranscriptObject(.clip(clip.id))
+    await first.deleteSelectionTapped()
+    #expect(second.slices.count == 1)
+    #expect(second.selection == .none)
+    #expect(!second.canUndo)
+    await first.undoTapped()
+    expectNoDifference(first.selection, .object(.clip(clip.id)))
+    #expect(second.selection == .none)
+  }
+
+  @Test func hidingBandsRemovesSuggestionFromOpenChooser() {
+    let model = editor()
+    let clip = Fixtures.slice(start: 70_648, end: 119_202)
+    model.slices = [clip]
+    model.documentCutSuggestions = [suggestion(model)]
+    click(model)
+    model.transcript.overlap.present()
+    #expect(model.transcript.overlap.candidates.count == 2)
+    model.cutSuggestions.showsSuggestionBands = false
+    expectNoDifference(model.transcript.overlap.candidates.map(\.id), [.clip(clip.id)])
+    #expect(!model.transcript.overlap.isPresented)
+  }
+
+  @Test func freeformAndClearRemoveSidebarSelectedRing() {
+    let model = editor()
+    let candidate = suggestion(model)
+    model.documentCutSuggestions = [candidate]
+    model.selectTranscriptObject(.suggestion(candidate.id))
+    expectNoDifference(model.cutSuggestions.selectedObjectID, .suggestion(candidate.id))
+    model.selectSourceRange(70_648..<119_202, snapPlayhead: false)
+    #expect(model.cutSuggestions.selectedObjectID == nil)
+    model.selectTranscriptObject(.suggestion(candidate.id))
+    model.clearSelection()
+    #expect(model.cutSuggestions.selectedObjectID == nil)
+  }
+
+  @Test func chooserSelectsHiddenClipThenDoubleClickOpensIt() {
+    let model = editor()
+    let first = Fixtures.slice(id: Fixtures.uuid(1), start: 70_648, end: 119_202)
+    let second = Fixtures.slice(id: Fixtures.uuid(2), start: 70_648, end: 119_202)
+    model.slices = [first, second]
+    click(model)
+    expectNoDifference(
+      model.transcript.overlap.candidates.map(\.id), [.clip(first.id), .clip(second.id)])
+    model.transcript.overlap.present()
+    model.transcript.overlap.preview(.clip(second.id))
+    expectNoDifference(model.selection, .object(.clip(first.id)))
+    expectNoDifference(model.visibleTranscriptObjects.first?.id, .clip(first.id))
+    #expect(model.clipBands.last?.isPreviewed == true)
+    model.transcript.overlap.choose(.clip(second.id))
+    click(model, time: 2)
+    click(model, count: 2, time: 2.1)
+    expectNoDifference(model.editSlice?.sliceID, second.id)
+  }
+
+  @Test func sidebarUnhidesFiltersAndSuggestionsPreservingBothPanel() {
+    let model = editor()
+    let clip = Fixtures.slice(start: 70_648, end: 119_202)
+    model.slices = [clip]
+    model.sliceFilter = .complete
+    model.rightPanelTab = .both
+    model.sliceRevealTapped(clip.id)
+    expectNoDifference(model.sliceFilter, .all)
+    expectNoDifference(model.rightPanelTab, .both)
+    #expect(model.sliceRows.first?.isActive == true)
+    let candidate = suggestion(model)
+    model.documentCutSuggestions = [candidate]
+    model.cutSuggestions.showsSuggestionBands = false
+    model.cutSuggestionSelected(candidate)
+    expectNoDifference(model.selection, .object(.suggestion(candidate.id)))
+    #expect(model.cutSuggestions.showsSuggestionBands)
+    expectNoDifference(model.rightPanelTab, .both)
+  }
+
+  @Test func deletingCandidateReconcilesChooserWithoutStalePreview() {
+    let model = editor()
+    let first = Fixtures.slice(id: Fixtures.uuid(1), start: 70_648, end: 119_202)
+    let second = Fixtures.slice(id: Fixtures.uuid(2), start: 70_648, end: 119_202)
+    model.slices = [first, second]
+    click(model)
+    model.transcript.overlap.present()
+    model.transcript.overlap.preview(.clip(second.id))
+    model.mutateDocument { $0.slices.remove(id: second.id) }
+    #expect(!model.transcript.overlap.showsControl)
+    #expect(model.transcript.overlap.previewID == nil)
+    expectNoDifference(model.selection, .object(.clip(first.id)))
+  }
+
   @Test func clickSelectsWholeClipAndRepeatedClickPreservesIt() {
     let model = editor()
     let clip = Fixtures.slice(start: 70_648, end: 119_202)

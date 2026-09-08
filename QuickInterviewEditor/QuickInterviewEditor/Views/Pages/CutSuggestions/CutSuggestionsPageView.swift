@@ -64,15 +64,25 @@ struct CutSuggestionsPageView: View {
   }
 
   private var suggestionList: some View {
-    ScrollView {
-      VStack(alignment: .leading, spacing: 16) {
-        ForEach(model.sections) { section in
-          VStack(alignment: .leading, spacing: 8) {
-            Text(section.title).font(.headline)
-            ForEach(section.rows) { row in
-              SuggestionCard(model: model, row: row)
+    ScrollViewReader { proxy in
+      ScrollView {
+        VStack(alignment: .leading, spacing: 16) {
+          ForEach(model.sections) { section in
+            VStack(alignment: .leading, spacing: 8) {
+              Text(section.title).font(.headline)
+              ForEach(section.rows) { row in
+                SuggestionCard(model: model, row: row).id(row.id)
+              }
             }
           }
+        }
+      }
+      .onChange(of: model.sidebarReveal) { _, reveal in
+        if case .suggestion(let id) = reveal?.objectID { proxy.scrollTo(id, anchor: .center) }
+      }
+      .onAppear {
+        if case .suggestion(let id) = model.sidebarReveal?.objectID {
+          proxy.scrollTo(id, anchor: .center)
         }
       }
     }
@@ -123,6 +133,7 @@ private struct SuggestionCard: View {
       }
       .buttonStyle(.plain)
       .accessibilityLabel(model.revealSuggestionLabel)
+      .simultaneousGesture(TapGesture(count: 2).onEnded { model.rowOpened(row.id) })
       HStack {
         if row.showsAcceptButton {
           Button(model.acceptLabel) { model.acceptTapped(row.id) }
@@ -138,6 +149,10 @@ private struct SuggestionCard: View {
     .frame(maxWidth: .infinity, alignment: .leading)
     .background(Color(white: 0.1))
     .clipShape(RoundedRectangle(cornerRadius: 6))
+    .overlay(
+      RoundedRectangle(cornerRadius: 6)
+        .stroke(
+          Color.accentColor, lineWidth: model.selectedObjectID == .suggestion(row.id) ? 1.5 : 0))
   }
 
   private func header<Title: View>(@ViewBuilder title: () -> Title) -> some View {

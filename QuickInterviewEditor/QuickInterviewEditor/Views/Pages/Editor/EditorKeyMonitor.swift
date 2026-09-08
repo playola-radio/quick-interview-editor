@@ -41,6 +41,11 @@ struct EditorKeyMonitor: NSViewRepresentable {
       // `@Sendable` closure and `NSEvent` is not `Sendable`. Read every value we need here (all
       // `Sendable`) and hop to the main actor carrying only those — the event never crosses.
       monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+        let overlapConsumed = MainActor.assumeIsolated {
+          guard let self, self.host?.window?.isKeyWindow == true else { return false }
+          return self.model?.transcript.overlap.keyDown(event.keyCode) ?? false
+        }
+        if overlapConsumed { return nil }
         guard
           let key = Self.editorKey(
             forKeyCode: event.keyCode,

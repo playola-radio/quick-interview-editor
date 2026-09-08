@@ -18,7 +18,8 @@ struct TranscriptPageView: View {
         currentWordID: model.currentWordID,
         scrollTarget: model.scrollTargetWordID,
         followMode: model.followMode,
-        reveal: model.reveal
+        reveal: model.reveal,
+        overlapPresentation: model.overlap.presentationToken
       )
       .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

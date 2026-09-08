@@ -2,20 +2,29 @@ import Foundation
 
 extension EditorModel {
   func wireTranscriptInteractions() {
+    transcript.overlap.sampleRate = editPlan.source.sampleRate
+    transcript.overlap.onChoose = { [weak self] id in self?.selectTranscriptObject(id) }
+    cutSuggestions.onBandsVisibilityChanged = { [weak self] in self?.reconcileTranscriptOverlap() }
+    cutSuggestions.onOpenSuggestion = { [weak self] suggestion in
+      self?.cutSuggestionSelected(suggestion)
+      self?.openSelectionTapped()
+    }
     transcript.onGroupClick = { [weak self] click in self?.transcriptClicked(click) }
   }
 
   func cutSuggestionSelected(_ suggestion: CutSuggestion) {
-    revealWords(suggestion.wordIDs)
+    if suggestion.isPending {
+      selectTranscriptObject(.suggestion(suggestion.id), fromSidebar: true)
+    } else if suggestion.isAccepted, slices[id: suggestion.id] != nil {
+      selectTranscriptObject(.clip(suggestion.id), fromSidebar: true)
+    } else {
+      revealWords(suggestion.wordIDs)
+    }
   }
 
-  /// Clicking a saved clip reveals it the same way a suggestion does — its words are selected,
-  /// the transcript scrolls to them, and the waveform zooms to frame the clip.
   func sliceRevealTapped(_ id: Slice.ID) {
-    guard let slice = slices[id: id] else { return }
-    revealWords(slice.wordIDs)
+    selectTranscriptObject(.clip(id), fromSidebar: true)
   }
-
 
   var transcriptObjects: [TranscriptObject] {
     // Read the document even on a cache hit so Observation tracks live replacements.
@@ -47,7 +56,7 @@ extension EditorModel {
     return transcriptObjects.first { $0.id == id }
   }
 
-  func selectTranscriptObject(_ id: TranscriptObjectID) {
+  func selectTranscriptObject(_ id: TranscriptObjectID, fromSidebar: Bool = false) {
     guard let object = transcriptObjects.first(where: { $0.id == id }) else { return }
     if selection != .object(id) {
       selectSourceRange(object.range, snapPlayhead: true)
@@ -55,14 +64,55 @@ extension EditorModel {
     }
     selectionEditingEdge = nil
     transcript.invalidateSelectionAnchor()
+    revealSelectedSidebarObject(id)
+    if fromSidebar {
+      revealSourceRange(object.range, zoomWaveform: true)
+    } else {
+      panWaveformToObject(object.range)
+    }
+  }
+
+  func revealSelectedSidebarObject(_ id: TranscriptObjectID) {
     sidebarReveal = SidebarReveal(objectID: id, token: (sidebarReveal?.token ?? 0) &+ 1)
     switch id {
     case .clip(let clipID):
       if rightPanelTab != .both { rightPanelTab = .slices }
+      if !visibleSliceRows.contains(where: { $0.id == clipID }) { sliceFilter = .all }
       sliceScrollTarget = clipID
     case .suggestion:
+      cutSuggestions.showsSuggestionBands = true
       if rightPanelTab != .both { rightPanelTab = .suggestions }
     }
+    cutSuggestions.sidebarReveal = sidebarReveal
+    reconcileTranscriptOverlap()
+  }
+
+  private func panWaveformToObject(_ range: Range<Int>) {
+    guard editedWaveform.viewportWidth > 0,
+      let start = editedTimeline.sourceToEdited(range.lowerBound, bias: .rightEdge),
+      let end = editedTimeline.sourceToEdited(range.upperBound, bias: .leftEdge)
+    else { return }
+    let visibleStart = editedWaveform.visibleStartSample
+    let count = editedWaveform.visibleSampleCount
+    if start < visibleStart || start >= visibleStart + count {
+      editedWaveform.scrolled(toStartEditedSample: start)
+    } else if end > visibleStart + count, end - start <= count {
+      editedWaveform.scrolled(toStartEditedSample: end - count)
+    }
+  }
+
+  func reconcileTranscriptOverlap() {
+    let click = transcript.overlapClick
+    let candidates: [TranscriptObject]
+    if let click, let id = click.wordID {
+      candidates = visibleTranscriptObjects.filter {
+        $0.wordIDs.contains(id) && transcriptHit(click, belongsTo: $0.wordIDs)
+      }
+    } else {
+      candidates = []
+    }
+    transcript.overlap.update(candidates, anchor: click?.wordID, selected: selection.objectID)
+    cutSuggestions.selectedObjectID = selection.objectID
   }
 
   var visibleTranscriptObjects: [TranscriptObject] {
@@ -88,6 +138,7 @@ extension EditorModel {
       return TranscriptClipBand(
         id: id, wordIDs: object.wordIDs.sorted(), kind: kind,
         colorIndex: object.colorIndex, isActive: object.id == selection.objectID,
+        isPreviewed: object.id == transcript.overlap.previewID,
         isSubdued: selection.objectID != nil && object.id != selection.objectID)
     }
   }
@@ -99,6 +150,8 @@ extension EditorModel {
     }
     guard click.count == 1 else { return }
     transcript.clickCapture = nil
+    transcript.overlapClick = click.extending ? nil : click
+    defer { reconcileTranscriptOverlap() }
     guard let wordID = click.wordID else {
       clearSelection()
       return

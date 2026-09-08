@@ -71,34 +71,47 @@ extension EditorModel {
     }
     reconcileSelection()
     selectionPreservesTransport = true
+    if let id = selection.objectID { revealSelectedSidebarObject(id) }
     if documentChanged { await reconcilePlayback() }
   }
 
   /// History can outlive a background suggestion replacement. Never restore a
   /// missing identity or an out-of-source range as the active selection.
   func reconcileSelection() {
+    transcript.clickCapture = nil
+    defer { reconcileTranscriptOverlap() }
     switch selection {
-    case .object:
+    case .object(.suggestion(let id)):
+      if documentCutSuggestions[id: id]?.isAccepted == true, slices[id: id] != nil {
+        selection = .object(.clip(id))
+      } else if selectedTranscriptObject == nil {
+        clearSelection()
+      }
+    case .object(.clip):
       if selectedTranscriptObject == nil { clearSelection() }
     case .seam(let id):
       if timelineRemovals[id: id] == nil { clearSelection() }
     case .range(let range, let anchor):
-      let lower = max(0, range.lowerBound)
-      let upper = min(editPlan.source.durationSamples, range.upperBound)
-      guard lower < upper else {
-        clearSelection()
-        return
-      }
-      let clampedAnchor: Int
-      if anchor <= lower {
-        clampedAnchor = lower
-      } else if anchor >= upper {
-        clampedAnchor = upper
-      } else {
-        clampedAnchor = anchor - lower <= upper - anchor ? lower : upper
-      }
-      selection = .range(lower..<upper, anchor: clampedAnchor)
+      reconcileFreeformRange(range, anchor: anchor)
     case .none: break
     }
   }
+  private func reconcileFreeformRange(_ range: Range<Int>, anchor: Int) {
+    let lower = max(0, range.lowerBound)
+    let upper = min(editPlan.source.durationSamples, range.upperBound)
+    guard lower < upper else {
+      clearSelection()
+      return
+    }
+    let clampedAnchor: Int
+    if anchor <= lower {
+      clampedAnchor = lower
+    } else if anchor >= upper {
+      clampedAnchor = upper
+    } else {
+      clampedAnchor = anchor - lower <= upper - anchor ? lower : upper
+    }
+    selection = .range(lower..<upper, anchor: clampedAnchor)
+  }
+
 }

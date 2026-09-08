@@ -292,8 +292,9 @@ struct EditorSelectionTests {
 
     // Revealing a later suggestion (words 4..5) replaces the selection; the extend anchor must move to
     // the revealed range's start, not linger on word 2 (which a later Shift-extend would resurrect).
-    model.cutSuggestionSelected(
-      Fixtures.cutSuggestion(id: Fixtures.uuid(1), wordIDs: [4, 5]))
+    var historical = Fixtures.cutSuggestion(id: Fixtures.uuid(1), wordIDs: [4, 5])
+    historical.status = .rejected
+    model.cutSuggestionSelected(historical)
     expectNoDifference(model.selectionAnchorSample, word4.startSample!)
   }
 

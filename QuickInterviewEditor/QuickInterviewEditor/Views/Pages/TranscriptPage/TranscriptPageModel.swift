@@ -63,6 +63,8 @@ class TranscriptPageModel: ViewModel {
   /// Installed only in the main transcript; scoped editor transcripts keep word gestures.
   @ObservationIgnored var onGroupClick: ((TranscriptClick) -> Void)?
   var clickCapture: TranscriptClickCapture?
+  let overlap = TranscriptOverlapModel()
+  var overlapClick: TranscriptClick?
 
   /// What a transcript selection gesture resolved to, in transcript terms (word IDs). `EditorModel`
   /// turns each into a source-sample range on the authoritative `audioSelection`.
@@ -373,6 +375,9 @@ class TranscriptPageModel: ViewModel {
 
   @discardableResult
   func transcriptDragBegan(atUTF16Offset offset: Int?) -> Bool {
+    overlap.dismiss()
+    overlapClick = nil
+    overlap.update([], anchor: nil, selected: nil)
     clickCapture = nil
     guard let offset, let id = document.wordID(atUTF16Offset: offset) else { return false }
     selectionAnchorID = id

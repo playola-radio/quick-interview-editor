@@ -558,6 +558,7 @@ final class EditorModel: ViewModel {
         transcript.overlap.dismiss()
         cutSuggestions.selectedObjectID = selection.objectID
         transcript.overlap.selectedID = selection.objectID
+        reconcileTranscriptOverlap()
       }
     }
   }
@@ -1878,7 +1879,6 @@ final class EditorModel: ViewModel {
   func presentClipEditor(_ child: EditSliceModel) {
     if fineTune.target == .pendingSelection { fineTune.clear() }
     stopActiveTransportSnapshotting()
-    let id = child.sliceID
     // Give the sheet its OWN lane, seeded from the already-decoded pyramid so nothing is re-decoded,
     // pinned to this slice (you cannot scroll or zoom past its boundaries). It must not share the
     // main editor's WaveformModel (that one is bound to the main viewport's zoom/scroll/width).
@@ -1889,6 +1889,54 @@ final class EditorModel: ViewModel {
     // already inside the slice render collapsed the moment it opens. `syncEditedTimeline` keeps it
     // in sync for every later removal/undo/redo while the sheet stays up.
     child.syncTimeline(editedTimeline)
+    wireClipEditorActions(child)
+    child.onPlay = { [weak self] range in
+      // Logic model: Play always plays `range` from the playhead as a fresh, exclusive `.sliceEdit`
+      // playback (the child derives `range` from the cursor). Pause merely freezes the cursor; the
+      // next Play re-plays from it, and seeking mid-play passes a new range here to re-anchor. There
+      // is no bespoke resume/drift branch — `beginTransportPlayback` supersedes any prior (playing or
+      // paused) session cleanly.
+      //
+      // Item ①: `.slice` (not `.sourceRange`) so the sheet PREVIEWS the collapsed audio — a removal
+      // inside the slice is skipped on playback exactly as it collapses on the lane and exports, so
+      // what you hear matches what you see. With no removal intersecting, `.slice` resolves to the
+      // plain source range (identical audio), so removal-free slices are unchanged.
+      await self?.beginTransportPlayback(.slice(range), context: .sliceEdit)
+    }
+    child.onPause = { [weak self] in
+      guard let self else { return }
+      await transportPauseTapped()
+      // Publish the frozen cursor back to the sheet so its "play from the playhead" uses the exact
+      // pause point (the position loop stops ticking once paused, so it won't otherwise learn it).
+      editSlice?.updatePlayback(sample: playheadSourceSample, isPlaying: isTransportPlaying)
+    }
+    child.onStop = { [weak self] in
+      guard let self else { return }
+      await transportStopTapped()
+      // Stop returns the cursor to the play origin; publish it so the sheet's next "play from the
+      // playhead" starts there rather than from a stale last-tick sample.
+      editSlice?.updatePlayback(sample: playheadSourceSample, isPlaying: isTransportPlaying)
+    }
+    // R4: the transport always plays a whole range, never from an arbitrary point. This callback is
+    // the CURSOR-ONLY path — it repositions the persistent cursor and starts nothing. A seek taken
+    // WHILE playing on the waveform body does not reach here: `EditSliceModel.waveformSeeked` routes
+    // that case to `onPlay`, which re-anchors playback from the click to the cut-out.
+    child.onSeek = { [weak self] sample in
+      guard let self else { return }
+      // The modal reasons in SOURCE samples; the persistent cursor lives on the EDITED axis.
+      placeCursor(atSource: sample)
+      editSlice?.updatePlayback(sample: sample, isPlaying: isTransportPlaying)
+    }
+    child.onDismiss = { [weak self, weak child] in
+      guard let self, let child, editSlice === child else { return }
+      stopActiveTransportSnapshotting()
+      editSlice = nil
+    }
+    editSlice = child
+  }
+
+  private func wireClipEditorActions(_ child: EditSliceModel) {
+    let id = child.sliceID
     // Item ①: the modal edits the slice exactly like the main timeline — a marquee removal and a
     // seam restore route through the SAME funnels the main editor uses, so both surfaces merge
     // cross-seam removals identically and every edit is one ⌘Z step. `syncEditedTimeline` fans the
@@ -1941,49 +1989,6 @@ final class EditorModel: ViewModel {
       guard child?.canMutateDocument == true else { return }
       self?.setSliceEditingComplete(id, to: value)
     }
-    child.onPlay = { [weak self] range in
-      // Logic model: Play always plays `range` from the playhead as a fresh, exclusive `.sliceEdit`
-      // playback (the child derives `range` from the cursor). Pause merely freezes the cursor; the
-      // next Play re-plays from it, and seeking mid-play passes a new range here to re-anchor. There
-      // is no bespoke resume/drift branch — `beginTransportPlayback` supersedes any prior (playing or
-      // paused) session cleanly.
-      //
-      // Item ①: `.slice` (not `.sourceRange`) so the sheet PREVIEWS the collapsed audio — a removal
-      // inside the slice is skipped on playback exactly as it collapses on the lane and exports, so
-      // what you hear matches what you see. With no removal intersecting, `.slice` resolves to the
-      // plain source range (identical audio), so removal-free slices are unchanged.
-      await self?.beginTransportPlayback(.slice(range), context: .sliceEdit)
-    }
-    child.onPause = { [weak self] in
-      guard let self else { return }
-      await transportPauseTapped()
-      // Publish the frozen cursor back to the sheet so its "play from the playhead" uses the exact
-      // pause point (the position loop stops ticking once paused, so it won't otherwise learn it).
-      editSlice?.updatePlayback(sample: playheadSourceSample, isPlaying: isTransportPlaying)
-    }
-    child.onStop = { [weak self] in
-      guard let self else { return }
-      await transportStopTapped()
-      // Stop returns the cursor to the play origin; publish it so the sheet's next "play from the
-      // playhead" starts there rather than from a stale last-tick sample.
-      editSlice?.updatePlayback(sample: playheadSourceSample, isPlaying: isTransportPlaying)
-    }
-    // R4: the transport always plays a whole range, never from an arbitrary point. This callback is
-    // the CURSOR-ONLY path — it repositions the persistent cursor and starts nothing. A seek taken
-    // WHILE playing on the waveform body does not reach here: `EditSliceModel.waveformSeeked` routes
-    // that case to `onPlay`, which re-anchors playback from the click to the cut-out.
-    child.onSeek = { [weak self] sample in
-      guard let self else { return }
-      // The modal reasons in SOURCE samples; the persistent cursor lives on the EDITED axis.
-      placeCursor(atSource: sample)
-      editSlice?.updatePlayback(sample: sample, isPlaying: isTransportPlaying)
-    }
-    child.onDismiss = { [weak self, weak child] in
-      guard let self, let child, editSlice === child else { return }
-      stopActiveTransportSnapshotting()
-      editSlice = nil
-    }
-    editSlice = child
   }
 
   /// Wires the sheet's cut-point ⌥-drag through the SAME `updateRemovalRange` funnel the main editor
