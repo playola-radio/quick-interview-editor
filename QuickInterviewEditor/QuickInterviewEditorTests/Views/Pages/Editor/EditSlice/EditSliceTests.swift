@@ -1818,6 +1818,38 @@ struct EditSliceTests {
     expectNoDifference(previewNeighborFade, 1_500)  // stored basis restores the full fade; no jump
   }
 
+  /// Regression (Greptile P1 "Slice Preview Seam Drifts"): in a scenario where the global and slice-
+  /// local effective fades diverge (an earlier removal OUTSIDE the slice + a slice edge that shortens
+  /// the local fade to 2_000 vs the global 2_500), a cut-point drag must not drift the rendered
+  /// bowtie. The bowtie's left edge is its crossfade START (`editedCrossfadeStart`), which the
+  /// viewport compensation pins; it holds its screen position across the drag even though the fade
+  /// renders shorter locally than globally (the width shrinks, the anchor does not move).
+  @Test func cutPointDragDoesNotDriftTheBowtieWhenGlobalAndLocalFadesDiverge() throws {
+    let model = laneModel()  // slice 10_000..<20_000, spp 10, visibleStart 10_000
+    let id = UUID()
+    let outside = TimelineRemoval(
+      id: UUID(), removedRange: 2_000..<9_000, crossfade: Crossfade(lengthSamples: 0))
+    let interior = TimelineRemoval(
+      id: id, removedRange: 12_000..<15_000, crossfade: Crossfade(lengthSamples: 2_500))
+    model.currentCrossfadeLength = { $0 == id ? 2_500 : nil }
+    model.currentStoredRemovals = { [outside, interior] }
+    model.syncTimeline(
+      EditedTimeline(sourceDurationSamples: 100_000, removals: [outside, interior]))
+    let globalLen = model.editedWaveform.timeline.seams.first { $0.id == id }?.crossfadeLength
+    let localLen = SliceRenderPlanBuilder.localTimeline(
+      sliceRange: 10_000..<20_000, removals: [outside, interior]
+    ).seams.first { $0.id == id }?.crossfadeLength
+    expectNoDifference(globalLen, 2_500)  // global renders the full stored fade
+    expectNoDifference(localLen, 2_000)  // the slice edge shortens the local fade — the divergence
+
+    let before = try #require(model.seamOverlays.first { $0.id == id }?.span.positionX)
+    model.crossfadeCutPointDragBegan(id: id, edge: .lower, atX: 300)
+    model.crossfadeCutPointDragged(toX: 340)  // slide cL by a real delta
+    let during = try #require(model.seamOverlays.first { $0.id == id }?.span.positionX)
+
+    #expect(abs(during - before) < 1)  // crossfade start holds its screen position — no drift
+  }
+
   /// A plain body click landing on a bowtie selects that crossfade — the "clicking within the X on the
   /// crossfade does nothing" fix. Before this, the sheet's body click only seeked; the main editor
   /// selects a crossfade on click, so the clip editor must too.
