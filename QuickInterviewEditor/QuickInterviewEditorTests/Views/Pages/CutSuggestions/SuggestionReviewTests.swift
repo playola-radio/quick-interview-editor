@@ -8,6 +8,35 @@ import Testing
 
 @MainActor
 struct SuggestionReviewTests {
+  @Test func cleanReviewFollowsUndoAndApplyMatchesVisibleFields() async throws {
+    let editor = try fixture()
+    let model = review(editor)
+    let original = editor.documentState
+    model.fieldChanged("artist-name", value: "Stevie Nicks")
+    model.applyFieldsTapped()
+    await editor.undoTapped()
+    expectNoDifference(editor.documentState, original)
+    expectNoDifference(model[field: "artist-name"], "Tom Petty")
+    expectNoDifference(model.previewNames.first?.after, original.cutSuggestions[0].title)
+    model.applyFieldsTapped()
+    expectNoDifference(editor.documentState, original)
+    expectNoDifference(model[field: "artist-name"], "Tom Petty")
+  }
+
+  @Test func dirtyFieldSurvivesExternalEditWhileUntouchedFieldsFollowDocument() throws {
+    let editor = try fixture()
+    let model = review(editor)
+    model.fieldChanged("artist-name", value: "Stevie Nicks")
+    let otherReview = review(editor)
+    otherReview.fieldChanged("song-title", value: "Dreams")
+    otherReview.applyFieldsTapped()
+    expectNoDifference(model[field: "artist-name"], "Stevie Nicks")
+    expectNoDifference(model[field: "song-title"], "Dreams")
+    expectNoDifference(model.previewNames.first?.after, "Dreams 1, Stevie Nicks")
+    model.applyFieldsTapped()
+    expectNoDifference(editor.documentCutSuggestions[0].title, "Dreams 1, Stevie Nicks")
+  }
+
   @Test func repeatedFieldApplyCanReturnToOriginalAndPreservesUnrelatedCurrentEdits() throws {
     let editor = try fixture()
     let model = review(editor)

@@ -47,11 +47,6 @@ final class SuggestionReviewModel: ViewModel, Identifiable {
         batch.flatMap { reviewSequenceKey(candidate, batch: $0) }
       }
     let naming = candidate?.naming
-    let effectiveFields = (naming?.extractedValues ?? [:]).merging(naming?.correctedValues ?? [:]) {
-      _, value in value
-    }
-    fieldBaseline = effectiveFields
-    fieldValues = effectiveFields
     let typeID = naming?.typeID ?? sequenceKey?.typeID
     let type = batch?.snapshot.configuration.types.first { $0.id == typeID }
     let referenced = Set(type?.template.compactMap { $0.kind == .field ? $0.value : nil } ?? [])
@@ -88,8 +83,7 @@ final class SuggestionReviewModel: ViewModel, Identifiable {
   let fields: [SuggestionReviewField]
   let groupingFields: [SuggestionReviewField]
   let display: SuggestionStarts.GroupDisplay
-  @ObservationIgnored private var fieldBaseline: [String: String]
-  private var fieldValues: [String: String]
+  private var fieldDraftValues: [String: String] = [:]
   private var canonicalValues: [String: String]
   var startText: String
   private(set) var errorMessage: String?
@@ -124,7 +118,7 @@ final class SuggestionReviewModel: ViewModel, Identifiable {
   var showsGroup: Bool { candidateID == nil && sequenceKey != nil }
   var canEdit: Bool { !isLocked() }
   var canApplyFields: Bool {
-    canEdit
+    canEdit && !fieldDraftValues.isEmpty
       && fieldsIntent.flatMap { try? suggestionReviewChange($0, document: currentDocument()) }
         != nil
   }
@@ -188,7 +182,7 @@ final class SuggestionReviewModel: ViewModel, Identifiable {
 
   // MARK: - User Actions
   func fieldChanged(_ id: String, value: String) {
-    fieldValues[id] = value
+    fieldDraftValues[id] = value == (currentFieldValues[id] ?? "") ? nil : value
     errorMessage = nil
   }
   func startChanged(_ value: String) {
@@ -200,13 +194,8 @@ final class SuggestionReviewModel: ViewModel, Identifiable {
     errorMessage = nil
   }
   func applyFieldsTapped() {
-    guard apply(fieldsIntent), let candidateID,
-      let naming = currentDocument().cutSuggestions[id: candidateID]?.naming
-    else { return }
-    let effectiveFields = naming.extractedValues.merging(naming.correctedValues) { _, value in value
-    }
-    fieldBaseline = effectiveFields
-    fieldValues = effectiveFields
+    guard !fieldDraftValues.isEmpty, apply(fieldsIntent) else { return }
+    fieldDraftValues = [:]
   }
   func renumberTapped() { apply(renumberIntent) }
   func applyGroupSpellingTapped() { apply(spellingIntent) }
@@ -225,11 +214,19 @@ final class SuggestionReviewModel: ViewModel, Identifiable {
   func cancelTapped() { onCancelled() }
 
   // MARK: - Private Helpers
+  private var currentFieldValues: [String: String] {
+    guard let candidateID, let naming = currentDocument().cutSuggestions[id: candidateID]?.naming
+    else { return [:] }
+    return naming.extractedValues.merging(naming.correctedValues) { _, value in value }
+  }
+  private var fieldValues: [String: String] {
+    currentFieldValues.merging(fieldDraftValues) { _, draft in draft }
+  }
   private var fieldsIntent: SuggestionReviewIntent? {
     guard let candidateID, let runID else { return nil }
     return .fields(
       candidateID: candidateID, runID: runID,
-      values: fieldValues.filter { fieldBaseline[$0.key] != $0.value })
+      values: fieldDraftValues)
   }
   private var renumberIntent: SuggestionReviewIntent? {
     guard let sequenceKey, let runID, let start = try? parseSuggestionStartingNumber(startText)
