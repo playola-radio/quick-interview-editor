@@ -1,8 +1,13 @@
 require "minitest/autorun"
+require "open3"
 require "rexml/document"
+require "rbconfig"
+require "tmpdir"
 require_relative "../release_notes"
 
 class ReleaseNotesTest < Minitest::Test
+  SCRIPT = File.expand_path("../release_notes.rb", __dir__)
+
   CHANGELOG = <<~MARKDOWN
     # Changelog
 
@@ -19,6 +24,31 @@ class ReleaseNotesTest < Minitest::Test
 
     - Older work.
   MARKDOWN
+
+  APPCAST = <<~XML
+    <?xml version="1.0" encoding="utf-8"?>
+    <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+      <channel>
+        <title>PlayolaInterviewEditor</title>
+        <item>
+          <title>Version 2.0.0</title>
+          <pubDate>Mon, 08 Sep 2026 12:00:00 +0000</pubDate>
+          <sparkle:version>4</sparkle:version>
+          <sparkle:shortVersionString>2.0.0</sparkle:shortVersionString>
+          <description>See the changelog.</description>
+          <enclosure url="https://example.com/app-2.0.0.dmg" length="42" type="application/octet-stream" sparkle:edSignature="signed-2" />
+        </item>
+        <item>
+          <title>Version 1.9.0</title>
+          <pubDate>Fri, 01 Aug 2026 12:00:00 +0000</pubDate>
+          <sparkle:version>3</sparkle:version>
+          <sparkle:shortVersionString>1.9.0</sparkle:shortVersionString>
+          <description>Older notes.</description>
+          <enclosure url="https://example.com/app-1.9.0.dmg" length="41" type="application/octet-stream" sparkle:edSignature="signed-1" />
+        </item>
+      </channel>
+    </rss>
+  XML
 
   def test_extracts_only_the_exact_release_body
     assert_equal <<~MARKDOWN.strip, ReleaseNotes.extract(CHANGELOG, "2.0.0")
@@ -119,5 +149,123 @@ class ReleaseNotesTest < Minitest::Test
     end
 
     assert_match(/empty/, error.message)
+  end
+
+  def test_backfill_updates_only_the_requested_items_description
+    original = REXML::Document.new(APPCAST)
+    original_items = original.elements.to_a("rss/channel/item")
+    original_target = original_items.fetch(0)
+    original_other = original_items.fetch(1)
+    notes = "- Audio & export <work> safely.\n- A CDATA edge: ]]>"
+
+    output = ReleaseNotes.backfill_appcast(APPCAST, "2.0.0", notes)
+
+    updated = REXML::Document.new(output)
+    items = updated.elements.to_a("rss/channel/item")
+    target = items.fetch(0)
+    other = items.fetch(1)
+    assert_equal notes, target.elements["description"].text
+    assert_equal "markdown", target.elements["description"].attribute("sparkle:format").value
+    assert_equal original_target.elements["title"].text, target.elements["title"].text
+    assert_equal original_target.elements["pubDate"].text, target.elements["pubDate"].text
+    assert_equal original_target.elements["sparkle:version"].text, target.elements["sparkle:version"].text
+    assert_equal element_attributes(original_target.elements["enclosure"]),
+      element_attributes(target.elements["enclosure"])
+    assert_equal original_other.elements["description"].text, other.elements["description"].text
+    assert_equal element_attributes(original_other.elements["enclosure"]),
+      element_attributes(other.elements["enclosure"])
+  end
+
+  def test_backfill_rejects_a_missing_appcast_item
+    error = assert_raises(ReleaseNotes::Error) do
+      ReleaseNotes.backfill_appcast(APPCAST, "3.0.0", "- Notes.")
+    end
+
+    assert_match(/missing/, error.message)
+  end
+
+  def test_backfill_rejects_duplicate_appcast_items
+    duplicate_item = <<~XML
+      <item>
+        <sparkle:shortVersionString>2.0.0</sparkle:shortVersionString>
+      </item>
+    XML
+    duplicate = APPCAST.sub("</channel>", "#{duplicate_item}</channel>")
+
+    error = assert_raises(ReleaseNotes::Error) do
+      ReleaseNotes.backfill_appcast(duplicate, "2.0.0", "- Notes.")
+    end
+
+    assert_match(/more than once/, error.message)
+  end
+
+  def test_extract_cli_writes_only_the_selected_notes
+    Dir.mktmpdir do |directory|
+      changelog = File.join(directory, "CHANGELOG.md")
+      output = File.join(directory, "dist", "notes.md")
+      File.write(changelog, CHANGELOG)
+
+      _stdout, stderr, status = run_cli("extract", changelog, "2.0.0", output)
+
+      assert status.success?, stderr
+      assert_equal "- Save and reopen `.pie` projects.\n- Review suggestions before export.\n",
+        File.read(output)
+    end
+  end
+
+  def test_backfill_cli_replaces_the_local_appcast
+    Dir.mktmpdir do |directory|
+      changelog = File.join(directory, "CHANGELOG.md")
+      appcast = File.join(directory, "appcast.xml")
+      File.write(changelog, CHANGELOG)
+      File.write(appcast, APPCAST)
+
+      _stdout, stderr, status = run_cli("backfill", appcast, changelog, "2.0.0")
+
+      assert status.success?, stderr
+      document = REXML::Document.new(File.read(appcast))
+      description = document.elements["rss/channel/item/description"]
+      assert_equal ReleaseNotes.extract(CHANGELOG, "2.0.0"), description.text
+      assert_equal "markdown", description.attribute("sparkle:format").value
+    end
+  end
+
+  def test_backfill_cli_leaves_the_appcast_unchanged_when_notes_are_missing
+    Dir.mktmpdir do |directory|
+      changelog = File.join(directory, "CHANGELOG.md")
+      appcast = File.join(directory, "appcast.xml")
+      File.write(changelog, CHANGELOG)
+      File.write(appcast, APPCAST)
+
+      _stdout, stderr, status = run_cli("backfill", appcast, changelog, "3.0.0")
+
+      refute status.success?
+      assert_match(/missing/, stderr)
+      assert_equal APPCAST, File.read(appcast)
+    end
+  end
+
+  def test_cli_rejects_an_unknown_command
+    _stdout, stderr, status = run_cli("publish")
+
+    refute status.success?
+    assert_match(/usage:/, stderr)
+  end
+
+  def test_cli_rejects_the_wrong_argument_count
+    _stdout, stderr, status = run_cli("extract", "CHANGELOG.md")
+
+    refute status.success?
+    assert_match(/usage:/, stderr)
+  end
+
+  private
+
+  def element_attributes(element)
+    element.attributes.to_a.to_h { |attribute| [attribute.expanded_name, attribute.value] }
+  end
+
+  def run_cli(*arguments)
+    Open3.capture3(RbConfig.ruby, SCRIPT, *arguments)
   end
 end
