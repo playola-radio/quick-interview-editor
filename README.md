@@ -35,6 +35,13 @@ The first WhisperX run downloads the transcription + alignment models
 (~hundreds of MB); after that it's cached and fast. Run everything through
 `.venv/bin/python`.
 
+For Xcode development, the shared scheme sets `QIE_ENGINE_REPO` to the current
+checkout so the app and Python helpers use the same branch. Each worktree needs
+a `.venv`; you can reuse an existing environment with
+`ln -s /absolute/path/to/existing/.venv .venv`. This shares installed dependencies
+while loading the helper source from the current worktree. After changing the
+scheme's environment, stop and run the app again in Xcode.
+
 ## Usage
 
 The tool uses local WhisperX (forced alignment) by default; the venv it needs is

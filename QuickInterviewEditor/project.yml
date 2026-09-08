@@ -144,6 +144,11 @@ schemes:
       targets:
         PlayolaInterviewEditor: all
         PlayolaInterviewEditorTests: [test]
+    run:
+      environmentVariables:
+        # Keep the Swift app and Python helpers on the same worktree, even when
+        # Xcode inherits an override pointing at another checkout.
+        QIE_ENGINE_REPO: "$(SRCROOT)/.."
     test:
       targets:
         - PlayolaInterviewEditorTests

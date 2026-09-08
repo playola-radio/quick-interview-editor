@@ -88,6 +88,13 @@
             ReferencedContainer = "container:PlayolaInterviewEditor.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
+      <EnvironmentVariables>
+         <EnvironmentVariable
+            key = "QIE_ENGINE_REPO"
+            value = "$(SRCROOT)/.."
+            isEnabled = "YES">
+         </EnvironmentVariable>
+      </EnvironmentVariables>
    </LaunchAction>
    <ProfileAction
       buildConfiguration = "Release"
