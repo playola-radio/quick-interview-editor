@@ -191,12 +191,16 @@ Before bumping, move finished entries from `Unreleased` in the root
 - Describe a meaningful user-facing change.
 ```
 
-Commit that changelog section before releasing, then run:
+Commit that changelog section before releasing, then run from the repository
+root. Fastlane changes into its own directory while it runs, so invoke it from
+`QuickInterviewEditor`, where the Gemfile lives:
 
 ```bash
+cd QuickInterviewEditor
 export NOTARY_PROFILE=qie-notary
 bundle exec fastlane mac bump version:2.0.1   # or: bump   (build integer only)
 bundle exec fastlane mac release              # build → sign → notarize → DMG → appcast → S3
+cd ..
 ```
 
 `bump` edits the version single-source in `project.yml`
@@ -229,10 +233,12 @@ and validates the complete XML before atomically replacing the local file. It
 does not alter the DMG enclosure URL, length, or EdDSA signature, and it never
 downloads from or uploads to S3.
 
-To backfill the published 2.0.0 item, deliberately download, inspect, and upload
-the feed:
+To backfill the published 2.0.0 item, run from the repository root and
+deliberately download, inspect, and upload the feed:
 
 ```bash
+mkdir -p .context packaging/dist
+
 aws --profile default s3 cp \
   s3://playola-static/downloads/PlayolaInterviewEditor/appcast.xml \
   packaging/dist/appcast.xml

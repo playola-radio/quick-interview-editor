@@ -84,6 +84,10 @@ jobs:
         with:
           persist-credentials: false
 
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+
       # Cheap release-pipeline guards only — CI never builds/signs/notarizes the
       # DMG (Decision 3: the multi-GB engine freeze runs locally).
       - name: Ruby syntax-check the release tools
