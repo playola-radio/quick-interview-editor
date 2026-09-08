@@ -8,6 +8,11 @@ track word-by-word.
 ingests our marker chunks. Once validated, the plan is a SwiftUI Mac app built
 on the same marker layout.
 
+## Release notes
+
+See [CHANGELOG.md](CHANGELOG.md) for user-facing Playola Interview Editor
+release history.
+
 ## How it works
 
 1. Send the original file to Whisper (`whisper-1`, word-level timestamps).
