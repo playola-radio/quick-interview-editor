@@ -88,7 +88,7 @@ struct SuggestionSettingsView: View {
       Picker(model.groupLabel, selection: $model.typeGroup) {
         ForEach(model.groupOptions) { option in Text(option.title).tag(option.id) }
       }
-      if model.isBuiltInType { Text(model.builtInHelp).foregroundStyle(.secondary) }
+      if model.showsTunedDiscoveryHelp { Text(model.builtInHelp).foregroundStyle(.secondary) }
       Text(model.guidelinesLabel).font(.headline)
       Text(model.guidelinesHelp).foregroundStyle(.secondary)
       TextEditor(text: $model.typeGuidelines)

@@ -79,7 +79,9 @@ final class SuggestionSettingsModel: ViewModel, Identifiable {
   let helpText =
     "Saved changes apply to future searches. Removing a type keeps its existing suggestions visible in your projects."
   let builtInHelp =
-    "This built-in type uses tuned discovery behavior. Its name, output name, and numbering fields remain editable."
+    "Song Intro and Spotlight use tuned discovery. Editing their discovery guidelines or removing either type "
+    + "changes the default discovery configuration. The original discovery prompt is preserved only while both keep "
+    + "their default guidelines. Naming, fields, and imaging/custom types do not change that prompt."
   let guidelinesHelp =
     "Describe the complete clips this type should find, including useful context and exclusions."
   let instructionsHelp =
@@ -111,7 +113,7 @@ final class SuggestionSettingsModel: ViewModel, Identifiable {
   var showsRestore: Bool { !missingPresets.isEmpty }
   var showsTypeEditor: Bool { typeIndex != nil }
   var showsFieldEditor: Bool { fieldIndex != nil }
-  var isBuiltInType: Bool { SuggestionDefaults.types.contains { $0.id == selectedTypeID } }
+  var showsTunedDiscoveryHelp: Bool { selectedTypeID == "intro" || selectedTypeID == "spotlight" }
   var isBusy: Bool { isSaving || isLoading }
   var canEdit: Bool { hasLoaded && !isBusy }
   var canSave: Bool { canEdit }

@@ -208,4 +208,19 @@ struct SuggestionSettingsTests {
     expectNoDifference(saved?.types[0].template.first, NamingComponent(kind: .literal, value: " "))
     expectNoDifference(saved?.types[0].sequenceFieldIDs, ["artist-name"])
   }
+
+  @Test func onlyTunedTypesExplainDiscoveryConfigurationChanges() {
+    let model = SuggestionSettingsModel(configuration: SuggestionDefaults.configuration)
+    for id in ["intro", "spotlight"] {
+      model.typeSelected(id)
+      #expect(model.showsTunedDiscoveryHelp)
+    }
+    for id in ["image-id", "image-pre-commercial", "image-post-commercial", "image-promo"] {
+      model.typeSelected(id)
+      #expect(!model.showsTunedDiscoveryHelp)
+    }
+    #expect(
+      model.builtInHelp.contains("Editing their discovery guidelines or removing either type"))
+    #expect(model.builtInHelp.contains("only while both keep their default guidelines"))
+  }
 }
