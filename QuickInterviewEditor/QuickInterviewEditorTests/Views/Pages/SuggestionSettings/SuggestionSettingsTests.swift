@@ -8,6 +8,20 @@ import Testing
 
 @MainActor
 struct SuggestionSettingsTests {
+  @Test func repeatedInvalidLiteralsProduceOneSaveDiagnosticAndKeepDraftInvalid() async throws {
+    let model = SuggestionSettingsModel(configuration: SuggestionDefaults.configuration)
+    let template = try #require(model.namingTemplate)
+    template.addLiteralTapped()
+    template.addLiteralTapped()
+    await model.saveTapped()
+    expectNoDifference(model.validationMessages.count, 1)
+    expectNoDifference(model.loadedRevision, 0)
+    template.literalChanged(at: template.components.count - 1, text: "Suffix")
+    await model.saveTapped()
+    expectNoDifference(model.validationMessages.count, 1)
+    expectNoDifference(model.loadedRevision, 0)
+  }
+
   @Test func referencedArtistFieldCannotBeRemoved() {
     let model = SuggestionSettingsModel(configuration: SuggestionDefaults.configuration)
     let originalIDs = model.draft.fields.map(\.id)

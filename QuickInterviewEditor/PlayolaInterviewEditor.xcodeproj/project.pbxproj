@@ -301,6 +301,8 @@
 		B61600000000000000000001 /* ExportCopyClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61600000000000000000001 /* ExportCopyClient.swift */; };
 		B61600000000000000000002 /* ExportReviewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61600000000000000000002 /* ExportReviewModel.swift */; };
 		B61600000000000000000003 /* ExportReviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61600000000000000000003 /* ExportReviewView.swift */; };
+		A30000000000000000000017 /* suggestion-integration-request-v2.json in Resources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000017 /* suggestion-integration-request-v2.json */; };
+		A30000000000000000000018 /* suggestion-integration-response-v2.json in Resources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000018 /* suggestion-integration-response-v2.json */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -604,6 +606,8 @@
 		A61600000000000000000001 /* ExportCopyClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportCopyClient.swift; sourceTree = "<group>"; };
 		A61600000000000000000002 /* ExportReviewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportReviewModel.swift; sourceTree = "<group>"; };
 		A61600000000000000000003 /* ExportReviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportReviewView.swift; sourceTree = "<group>"; };
+		A40000000000000000000017 /* suggestion-integration-request-v2.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "suggestion-integration-request-v2.json"; sourceTree = "<group>"; };
+		A40000000000000000000018 /* suggestion-integration-response-v2.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "suggestion-integration-response-v2.json"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -659,6 +663,8 @@
 				F1390189440139BA8C94615C /* suggestion-contract-v2.json */,
 				A62200000000000000000006 /* suggestion-recovery-python.json */,
 				A40000000000000000000010 /* suggestion-result-v2.json */,
+				A40000000000000000000018 /* suggestion-integration-response-v2.json */,
+				A40000000000000000000017 /* suggestion-integration-request-v2.json */,
 			);
 			name = fixtures;
 			path = ../tests/fixtures;
@@ -1363,6 +1369,8 @@
 				1D4C6374AD132FAACB81DEF8 /* suggestion-contract-v2.json in Resources */,
 				A61200000000000000000006 /* suggestion-recovery-python.json in Resources */,
 				A30000000000000000000010 /* suggestion-result-v2.json in Resources */,
+				A30000000000000000000018 /* suggestion-integration-response-v2.json in Resources */,
+				A30000000000000000000017 /* suggestion-integration-request-v2.json in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

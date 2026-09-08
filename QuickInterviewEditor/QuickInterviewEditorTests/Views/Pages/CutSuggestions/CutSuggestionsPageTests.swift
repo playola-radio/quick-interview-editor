@@ -9,6 +9,12 @@ import Testing
 
 @MainActor
 struct CutSuggestionsPageTests {
+  @Test func freshPageUsesConfiguredDiscoveryWhileLegacyOptionsStayPinned() {
+    let page = CutSuggestionsPageModel(editPlan: Fixtures.editPlan(), sourceFingerprint: "fresh")
+    expectNoDifference(page.options.promptVersion, "configured-v2")
+    expectNoDifference(page.run.options.promptVersion, "configured-v2")
+    expectNoDifference(CutSuggestOptions().promptVersion, "v2")
+  }
 
   @Test func actualStartLabelsUseResolvedGroupsRatherThanFutureTypePreference() throws {
     let editor = try SuggestionReviewTests().fixture()

@@ -12,7 +12,8 @@ final class SuggestionRunModel: ViewModel {
   @ObservationIgnored @Dependency(\.uuid) var uuid
 
   // MARK: - Initialization
-  init(editPlan: EditPlan, sourceFingerprint: String, options: CutSuggestOptions = .init()) {
+  init(editPlan: EditPlan, sourceFingerprint: String, options: CutSuggestOptions = .freshConfigured)
+  {
     self.editPlan = editPlan
     self.sourceFingerprint = sourceFingerprint
     self.options = options
@@ -279,7 +280,7 @@ final class SuggestionRunModel: ViewModel {
       let snapshot = SuggestionRunSnapshot(
         runID: runID, configuration: configuration,
         configurationHash: try SuggestionRecoveryArchive.configurationHash(configuration),
-        model: self.options.model, discoveryPromptVersion: "configured-v1",
+        model: self.options.model, discoveryPromptVersion: self.options.promptVersion,
         extractionPromptVersion: "fields-v1", productSpecVersion: "configured-v1",
         transcriptHash: self.editPlan.transcriptHash, sourceFingerprint: self.sourceFingerprint,
         sampleRate: self.editPlan.source.sampleRate,

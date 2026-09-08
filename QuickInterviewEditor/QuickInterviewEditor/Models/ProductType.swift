@@ -1,8 +1,7 @@
 import Foundation
 
-/// The two Playola radio deliverables a cut suggestion targets. Raw values mirror
-/// the Python cut-suggester contract (`cut_suggester/models.py`) so Swift and the
-/// eval agree on the wire label.
+/// A stable deliverable identifier, including custom and historical suggestion types.
+/// Raw values match the Python cut-suggester wire contract.
 struct ProductType: RawRepresentable, Hashable, Codable, Sendable {
   let rawValue: String
 

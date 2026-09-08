@@ -11,7 +11,8 @@ struct SuggestionConfigurationClientTests {
   @Test func loadingMissingStorageProvidesSixDefaultsAndPublishes() async throws {
     let directory = try makeTemporaryDirectory()
     defer { try? fileManager.removeItem(at: directory) }
-    @Shared(.suggestionConfiguration) var published: SuggestionConfiguration?
+    // swiftlint:disable:next implicit_optional_initialization
+    @Shared(.suggestionConfiguration) var published: SuggestionConfiguration? = nil
     let store = SuggestionConfigurationStore(
       fileURL: directory.appending(component: "SuggestionConfiguration.json"))
 
@@ -25,7 +26,8 @@ struct SuggestionConfigurationClientTests {
   @Test func successfulSavePublishesThePersistedConfiguration() async throws {
     let directory = try makeTemporaryDirectory()
     defer { try? fileManager.removeItem(at: directory) }
-    @Shared(.suggestionConfiguration) var published: SuggestionConfiguration?
+    // swiftlint:disable:next implicit_optional_initialization
+    @Shared(.suggestionConfiguration) var published: SuggestionConfiguration? = nil
     let fileURL = directory.appending(component: "SuggestionConfiguration.json")
     let store = SuggestionConfigurationStore(fileURL: fileURL)
     let original = try await store.load()
@@ -71,8 +73,8 @@ struct SuggestionConfigurationClientTests {
 
     for bytes in [missingSchemaVersion, invalidSchema, invalidJSON] {
       try bytes.write(to: fileURL)
-      @Shared(.suggestionConfiguration) var published: SuggestionConfiguration?
-      published = nil
+      // swiftlint:disable:next implicit_optional_initialization
+      @Shared(.suggestionConfiguration) var published: SuggestionConfiguration? = nil
       let store = SuggestionConfigurationStore(fileURL: fileURL)
 
       await #expect(throws: (any Error).self) {
@@ -110,7 +112,8 @@ struct SuggestionConfigurationClientTests {
     configuration.revision = .max
     let originalBytes = try JSONEncoder().encode(configuration)
     try originalBytes.write(to: fileURL)
-    @Shared(.suggestionConfiguration) var published: SuggestionConfiguration?
+    // swiftlint:disable:next implicit_optional_initialization
+    @Shared(.suggestionConfiguration) var published: SuggestionConfiguration? = nil
     let store = SuggestionConfigurationStore(fileURL: fileURL)
     let loaded = try await store.load()
     var draft = loaded
@@ -128,11 +131,13 @@ struct SuggestionConfigurationClientTests {
     let directory = try makeTemporaryDirectory()
     defer { try? fileManager.removeItem(at: directory) }
     let fileURL = directory.appending(component: "SuggestionConfiguration.json")
-    let seedStore = SuggestionConfigurationStore(fileURL: fileURL)
-    let original = try await seedStore.load()
-    let saved = try await seedStore.save(original, expectedRevision: original.revision)
-    let originalBytes = try Data(contentsOf: fileURL)
-    @Shared(.suggestionConfiguration) var published: SuggestionConfiguration? = saved
+    var saved = SuggestionDefaults.configuration
+    saved.revision = 1
+    let originalBytes = try JSONEncoder().encode(saved)
+    try originalBytes.write(to: fileURL)
+    var publicationSeed = saved
+    publicationSeed.types[0].name = "Published separately"
+    @Shared(.suggestionConfiguration) var published: SuggestionConfiguration? = publicationSeed
     let failingStore = SuggestionConfigurationStore(
       fileURL: fileURL,
       write: { _, _ in throw CocoaError(.fileWriteUnknown) })
@@ -144,7 +149,7 @@ struct SuggestionConfigurationClientTests {
     }
 
     expectNoDifference(try Data(contentsOf: fileURL), originalBytes)
-    expectNoDifference(published, saved)
+    expectNoDifference(published, publicationSeed)
   }
 
   @Test func previewImplementationsAreIsolated() async throws {
@@ -162,9 +167,15 @@ struct SuggestionConfigurationClientTests {
   }
 
   @Test func testValueReportsAndThrowsWithoutAnOverride() async {
+    var caught: (any Error)?
     await withKnownIssue {
-      _ = try await SuggestionConfigurationClient.testValue.load()
+      do {
+        _ = try await SuggestionConfigurationClient.testValue.load()
+      } catch {
+        caught = error
+      }
     }
+    expectNoDifference(caught as? SuggestionConfigurationStoreError, .unimplemented("load"))
   }
 
   private func makeTemporaryDirectory() throws -> URL {

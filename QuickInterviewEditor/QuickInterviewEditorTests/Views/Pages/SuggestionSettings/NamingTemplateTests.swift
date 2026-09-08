@@ -6,6 +6,17 @@ import Testing
 
 @MainActor
 struct NamingTemplateTests {
+  @Test func repeatedInvalidLiteralsHaveUniqueDisplayMessagesUntilBothAreFixed() {
+    let model = NamingTemplateModel(components: [.init(kind: .sequence, value: nil)], fields: [])
+    model.addLiteralTapped()
+    model.addLiteralTapped()
+    expectNoDifference(model.validationMessages.count, 1)
+    model.literalChanged(at: 1, text: "First")
+    expectNoDifference(model.validationMessages.count, 1)
+    model.literalChanged(at: 2, text: "Second")
+    expectNoDifference(model.validationMessages, [])
+  }
+
   @Test func literalEditUpdatesPreview() {
     let model = NamingTemplateModel(
       components: [

@@ -273,3 +273,40 @@ extension CutSuggestionWireTests {
     }
   }
 }
+
+extension CutSuggestionWireTests {
+  @Test func scriptedAllTypesFixtureDecodesAndAppliesConfiguredNames() throws {
+    let requestData = try suggestionContractFixture("suggestion-integration-request-v2")
+    let request = try #require(JSONSerialization.jsonObject(with: requestData) as? [String: Any])
+    let configuration = try JSONDecoder().decode(
+      SuggestionConfiguration.self,
+      from: JSONSerialization.data(withJSONObject: try #require(request["configuration"])))
+    let runIDString = try #require(request["run_id"] as? String)
+    let runID = try #require(UUID(uuidString: runIDString))
+    let snapshot = SuggestionRunSnapshot(
+      runID: runID, configuration: configuration, configurationHash: "scripted-fixture",
+      model: "fixture-model", discoveryPromptVersion: "configured-v2",
+      extractionPromptVersion: "fields-v1", productSpecVersion: "configured-v1",
+      transcriptHash: try #require(request["transcript_hash"] as? String),
+      sourceFingerprint: try #require(request["source_fingerprint"] as? String), sampleRate: 44100)
+    let result = try SuggestionRunWireResult.decode(
+      from: suggestionContractFixture("suggestion-integration-response-v2"), snapshot: snapshot)
+    expectNoDifference(result.status, .ready)
+    expectNoDifference(result.checkpointRevision, 20)
+    expectNoDifference(result.candidates.count, 10)
+    let numbered = try numberSuggestions(
+      result.candidates, snapshot: snapshot, starts: .init(), issued: [], retained: [])
+    expectNoDifference(
+      numbered.candidates.map(\.title),
+      [
+        "Paper Lanterns 1, River Vale", "ID 1", "ID 2", "Promo 1", "ID 3", "Post-Com 1",
+        "Harbor Lights 1, Nova Reed", "Pre-Com 1", "Neighbors build a shared studio", "Spotlight 1",
+      ])
+    expectNoDifference(numbered.candidates.map(\.id), result.candidates.map(\.id))
+    expectNoDifference(numbered.candidates.map(\.wordIDs), result.candidates.map(\.wordIDs))
+    expectNoDifference(
+      numbered.candidates.map { $0.naming?.extractedValues },
+      result.candidates.map { $0.naming?.extractedValues })
+    expectNoDifference(numbered.batch.snapshot, snapshot)
+  }
+}

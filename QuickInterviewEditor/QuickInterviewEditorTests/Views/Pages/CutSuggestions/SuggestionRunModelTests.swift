@@ -204,6 +204,28 @@ final class SuggestionRunFixture: Sendable {
 @MainActor
 @Suite(.serialized)
 struct SuggestionRunModelTests {
+  @Test func resumedRequestKeepsCapturedVersionsInsteadOfFreshConfiguredDefaults() {
+    let model = SuggestionRunModel(editPlan: Fixtures.editPlan(), sourceFingerprint: "fresh")
+    var captured = suggestionResultSnapshot()
+    captured.model = "captured-model"
+    captured.discoveryPromptVersion = "configured-v1"
+    captured.extractionPromptVersion = "captured-fields"
+    captured.stage1Window = 70
+    captured.stage1Step = 60
+    let request = model.makeRequest(captured, .resume, nil)
+    expectNoDifference(request.snapshot, captured)
+    expectNoDifference(
+      request.options,
+      CutSuggestOptions(
+        model: "captured-model", promptVersion: "configured-v1",
+        productSpecVersion: captured.productSpecVersion, stage1Window: 70, stage1Step: 60))
+  }
+
+  @Test func freshRunUsesConfiguredDiscoveryVersion() {
+    let model = SuggestionRunModel(editPlan: Fixtures.editPlan(), sourceFingerprint: "fresh")
+    expectNoDifference(model.options.promptVersion, "configured-v2")
+  }
+
   @Test func confirmationCancelPreservesTheExactDocumentWithoutPreparing() async {
     let fixture = SuggestionRunFixture()
     fixture.document.withValue {
@@ -315,7 +337,10 @@ struct SuggestionRunModelTests {
       try await withDependencies {
         fixture.install(&$0)
       } operation: {
-        let model = fixture.model()
+        let model = SuggestionRunModel(
+          editPlan: Fixtures.editPlan(), sourceFingerprint: fixture.owner.sourceFingerprint,
+          options: .init(model: "captured-model", promptVersion: "configured-v1"))
+        fixture.wire(model)
         let task = Task { await model.suggestTapped() }
         await fixture.waitForRequests()
         let runID = try #require(model.activeRunID)
@@ -329,17 +354,22 @@ struct SuggestionRunModelTests {
         fixture.state.value.continuations[0].finish()
         await task.value
         expectNoDifference(model.message, "One field request failed.")
-        let retry = Task { await model.resumeTapped() }
+        let reopened = fixture.model()
+        expectNoDifference(reopened.options.promptVersion, "configured-v2")
+        let retry = Task { await reopened.resumeTapped() }
         await fixture.waitForRequests(2)
         expectNoDifference(fixture.state.value.prepared.count, 1)
         expectNoDifference(fixture.state.value.requests.count, 2)
         expectNoDifference(fixture.state.value.requests.last?.mode, .resume)
+        expectNoDifference(
+          fixture.state.value.requests.last?.options.promptVersion, "configured-v1")
+        expectNoDifference(fixture.state.value.requests.last?.options.model, "captured-model")
         expectNoDifference(fixture.state.value.requests.last?.snapshot?.runID, runID)
         expectNoDifference(fixture.state.value.requests.last?.journalDirectory, fixture.directory)
         expectNoDifference(
           fixture.document.value.unfinishedSuggestionRun?.completedRequestKeys,
           ["one", "two", "three", "four"])
-        #expect(model.activeAttemptID != firstAttempt)
+        #expect(reopened.activeAttemptID != firstAttempt)
         fixture.finish([fixture.candidate()], attempt: 1)
         await retry.value
         expectNoDifference(fixture.document.value.cutSuggestions.count, 1)

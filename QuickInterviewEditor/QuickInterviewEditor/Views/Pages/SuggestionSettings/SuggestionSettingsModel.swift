@@ -48,7 +48,7 @@ final class SuggestionSettingsModel: ViewModel, Identifiable {
   private(set) var loadedRevision: Int
   private(set) var selectedTypeID: String?
   private(set) var selectedFieldID: String?
-  private(set) var validationMessages: [String] = []
+  private var validationErrors: [String] = []
   private(set) var statusMessage: String?
   private(set) var isSaving = false
   private(set) var isLoading = false
@@ -60,6 +60,11 @@ final class SuggestionSettingsModel: ViewModel, Identifiable {
   @ObservationIgnored private var onCancelled: (() -> Void)?
 
   // MARK: - View Helpers
+  var validationMessages: [String] {
+    var seen = Set<String>()
+    return validationErrors.filter { seen.insert($0).inserted }
+  }
+
   let title = "Suggestion Rules"
   let typesTitle = "Types"
   let fieldsTitle = "Fields"
@@ -193,18 +198,18 @@ final class SuggestionSettingsModel: ViewModel, Identifiable {
   func removeTypeTapped(_ id: String) {
     guard draft.types.contains(where: { $0.id == id }) else { return }
     guard canRemoveType else {
-      validationMessages = ["Keep at least one suggestion type."]
+      validationErrors = ["Keep at least one suggestion type."]
       return
     }
     draft.types.removeAll { $0.id == id }
-    validationMessages = []
+    validationErrors = []
     if selectedTypeID == id, let first = draft.types.first { typeSelected(first.id) }
   }
 
   func restoreBuiltInTapped(_ id: String) {
     switch draft.restoreBuiltInType(id: id) {
     case .restored:
-      validationMessages = []
+      validationErrors = []
       statusMessage = "Restored the missing preset. Save to use it in future searches."
       typeSelected(id)
     case .alreadyPresent:
@@ -212,11 +217,11 @@ final class SuggestionSettingsModel: ViewModel, Identifiable {
     case .unknownBuiltIn:
       statusMessage = "This preset is unavailable."
     case .typeNameConflict:
-      validationMessages = [
+      validationErrors = [
         "A type already uses this preset's name in its display group. Rename it before restoring."
       ]
     case .fieldNameConflict:
-      validationMessages = [
+      validationErrors = [
         "A field already uses a name needed by this preset. Rename it before restoring."
       ]
     }
@@ -230,7 +235,7 @@ final class SuggestionSettingsModel: ViewModel, Identifiable {
 
   func removeFieldTapped(_ id: String) {
     let references = draft.removeField(id: id)
-    validationMessages = references.map {
+    validationErrors = references.map {
       "This field is used by \($0). Remove its naming and numbering references first."
     }
     if references.isEmpty, selectedFieldID == id {
@@ -247,7 +252,7 @@ final class SuggestionSettingsModel: ViewModel, Identifiable {
 
   func saveTapped() async {
     guard canSave else { return }
-    validationMessages = draft.validationMessages()
+    validationErrors = draft.validationMessages()
     guard validationMessages.isEmpty else {
       statusMessage = "Resolve the issues below before saving."
       return
@@ -283,7 +288,7 @@ final class SuggestionSettingsModel: ViewModel, Identifiable {
     loadedConfiguration = configuration
     loadedRevision = configuration.revision
     hasLoaded = markLoaded
-    validationMessages = []
+    validationErrors = []
     if let id = selectedFieldID, configuration.fields.contains(where: { $0.id == id }) {
       fieldSelected(id)
     } else {

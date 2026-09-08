@@ -581,4 +581,205 @@ struct EditorSuggestionFlowTests {
     }
   }
 
+  @Test func explicitSevenDeletionRerunUndoAndExactExportRemainProjectLocal() async throws {
+    try await withMainSerialExecutor {
+      let fixture = SuggestionRunFixture()
+      let destination = FileManager.default.temporaryDirectory.appending(
+        component: UUID().uuidString)
+      try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+      defer { try? FileManager.default.removeItem(at: destination) }
+      try await withDependencies {
+        fixture.install(&$0)
+        $0.exportRender.renderSlice = { try writeStubAIFF($0) }
+        $0.engine.injectMarkers = { _ in }
+        $0.workspace.reveal = { _ in }
+      } operation: {
+        let model = EditorModel(
+          sourceURL: URL(fileURLWithPath: "/Tape Two.m4a"),
+          canonicalAudioURL: Fixtures.canonicalAudioURL, editPlan: Fixtures.editPlan(),
+          sourceFingerprint: fixture.owner.sourceFingerprint)
+        fixture.wireEditor(model)
+        model.cutSuggestions[futureStart: "spotlight"] = "7"
+        model.cutSuggestions.applyTypeStartTapped("spotlight")
+        let future = model.suggestionStarts
+        let firstTask = Task { await model.cutSuggestions.suggestCutsTapped() }
+        await fixture.waitForRequests()
+        expectNoDifference(fixture.state.value.requests[0].options.promptVersion, "configured-v2")
+        fixture.finish([fixture.candidate(1)])
+        await firstTask.value
+        let first = try #require(model.documentCutSuggestions.first)
+        expectNoDifference(first.title, "Spotlight 7")
+        model.cutSuggestions.acceptTapped(first.id)
+        let originalClip = try #require(model.slices.first)
+        let issuedSeven = model.documentState.issuedSuggestionNumbers
+        expectNoDifference(issuedSeven.count, 1)
+        await model.deleteSlice(first.id)
+        expectNoDifference(model.slices.count, 0)
+        expectNoDifference(model.documentState.issuedSuggestionNumbers, issuedSeven)
+
+        try await applySecondRunResolvingExplicitSevenConflict(model, fixture: fixture)
+        expectNoDifference(model.suggestionStarts, future)
+        await model.undoTapped()
+        expectNoDifference(model.slices.elements, [originalClip])
+        expectNoDifference(model.documentState.issuedSuggestionNumbers, issuedSeven)
+        expectNoDifference(model.documentCutSuggestions.first?.title, "Spotlight 8")
+        model.cutSuggestions.acceptTapped(Fixtures.uuid(2))
+        expectNoDifference(model.documentState.issuedSuggestionNumbers.map(\.number), [7, 8])
+        try await assertExactExportRequiresReview(
+          model, slice: originalClip, destination: destination)
+
+        try await assertIndependentProjectStartsAtOne(destination: destination)
+      }
+    }
+  }
+
+  @Test(arguments: ["empty", "provider", "extraction", "cancel", "invalidCandidate", "prepare"])
+  func replacementOutcomesPreserveAcceptedClipsAndIssuedNumbers(outcome: String) async throws {
+    try await withMainSerialExecutor {
+      let fixture = SuggestionRunFixture()
+      try await withDependencies {
+        fixture.install(&$0)
+      } operation: {
+        let model = EditorModel(
+          sourceURL: URL(fileURLWithPath: "/clip.m4a"),
+          canonicalAudioURL: Fixtures.canonicalAudioURL, editPlan: Fixtures.editPlan(),
+          sourceFingerprint: fixture.owner.sourceFingerprint)
+        fixture.wireEditor(model)
+        let initial = Task { await model.cutSuggestions.suggestCutsTapped() }
+        await fixture.waitForRequests()
+        fixture.finish([fixture.candidate()])
+        await initial.value
+        model.cutSuggestions.acceptTapped(Fixtures.uuid(1))
+        let savedClips = model.slices
+        let ledger = model.documentState.issuedSuggestionNumbers
+        let previous = model.documentCutSuggestions
+        await model.cutSuggestions.suggestCutsTapped()
+        model.cutSuggestions.run.cancelReplacementTapped()
+        expectNoDifference(model.slices, savedClips)
+        expectNoDifference(model.documentCutSuggestions, previous)
+        await model.cutSuggestions.suggestCutsTapped()
+        if outcome == "prepare" {
+          model.cutSuggestions.run.prepare = { _ in throw CocoaError(.fileWriteUnknown) }
+          await model.cutSuggestions.run.replaceConfirmed()
+        } else {
+          let task = Task { await model.cutSuggestions.run.replaceConfirmed() }
+          await fixture.waitForRequests(2)
+          try await finishReplacement(outcome, fixture: fixture, model: model)
+          await task.value
+        }
+        expectNoDifference(model.slices, savedClips)
+        expectNoDifference(model.documentState.issuedSuggestionNumbers, ledger)
+        if outcome == "empty" {
+          expectNoDifference(model.documentCutSuggestions.elements, [])
+          expectNoDifference(
+            model.cutSuggestions.emptyStateMessage, "No matching suggestions found.")
+        } else {
+          expectNoDifference(model.documentCutSuggestions, previous)
+        }
+      }
+    }
+  }
+
+  private func assertIndependentProjectStartsAtOne(destination: URL) async throws {
+    let independentFixture = SuggestionRunFixture()
+    try await withDependencies {
+      independentFixture.install(&$0)
+    } operation: {
+      let independent = EditorModel(
+        sourceURL: URL(fileURLWithPath: "/Another Tape.m4a"),
+        canonicalAudioURL: Fixtures.canonicalAudioURL, editPlan: Fixtures.editPlan(),
+        sourceFingerprint: independentFixture.owner.sourceFingerprint)
+      independentFixture.wireEditor(independent)
+      independent.cutSuggestions[futureStart: "spotlight"] = "1"
+      independent.cutSuggestions.applyTypeStartTapped("spotlight")
+      let task = Task { await independent.cutSuggestions.suggestCutsTapped() }
+      await independentFixture.waitForRequests()
+      independentFixture.finish([independentFixture.candidate(3)])
+      await task.value
+      independent.cutSuggestions.acceptTapped(Fixtures.uuid(3))
+      expectNoDifference(independent.slices.first?.name, "Spotlight 1")
+      expectNoDifference(independent.documentState.issuedSuggestionNumbers.map(\.number), [1])
+      let existing = destination.appending(component: "Spotlight 1.aiff")
+      try Data("Another project's export".utf8).write(to: existing)
+      independent.destinationURL = destination
+      independent.exportAllTapped()
+      await independent.exportTask?.value
+      let collision = try #require(independent.exportReview)
+      expectNoDifference(collision.mappings.map(\.proposedName), ["Spotlight 1 2.aiff"])
+      expectNoDifference(independent.slices.first?.name, "Spotlight 1")
+      expectNoDifference(independent.documentState.issuedSuggestionNumbers.map(\.number), [1])
+      collision.reviewNamesTapped()
+      await independent.awaitExportTeardown()
+    }
+  }
+
+  private func assertExactExportRequiresReview(
+    _ model: EditorModel, slice: Slice, destination: URL
+  ) async throws {
+    model.destinationURL = destination
+    model.exportSliceTapped(slice.id)
+    await model.exportTask?.value
+    expectNoDifference(model.exportPhase, .done(count: 1))
+    expectNoDifference(
+      try FileManager.default.contentsOfDirectory(atPath: destination.path),
+      ["Spotlight 7.aiff"])
+    let originalBytes = try Data(
+      contentsOf: destination.appending(component: "Spotlight 7.aiff"))
+    model.exportSliceTapped(slice.id)
+    await model.exportTask?.value
+    let review = try #require(model.exportReview)
+    expectNoDifference(review.mappings.map(\.requestedName), ["Spotlight 7.aiff"])
+    expectNoDifference(review.mappings.map(\.proposedName), ["Spotlight 7 2.aiff"])
+    review.reviewNamesTapped()
+    await model.awaitExportTeardown()
+    expectNoDifference(
+      try Data(contentsOf: destination.appending(component: "Spotlight 7.aiff")), originalBytes)
+    expectNoDifference(model.slices[id: slice.id], slice)
+    expectNoDifference(model.documentState.issuedSuggestionNumbers.map(\.number), [7, 8])
+  }
+
+  private func finishReplacement(
+    _ outcome: String, fixture: SuggestionRunFixture, model: EditorModel
+  ) async throws {
+    switch outcome {
+    case "empty": fixture.finish([], attempt: 1)
+    case "provider":
+      fixture.state.value.continuations[1].finish(
+        throwing: CutSuggestClientError.suggestFailed("Provider failed"))
+    case "extraction":
+      fixture.checkpoint(
+        phase: .needsRetry, candidates: [fixture.candidate(2)], failed: ["naming"],
+        message: "Naming failed")
+      let runID = try #require(fixture.state.value.checkpoint?.snapshot.runID)
+      fixture.state.value.continuations[1].yield(
+        .recoverableFailure(
+          runID: runID, failedRequestKeys: ["naming"], message: "Naming failed"))
+      fixture.state.value.continuations[1].finish()
+    case "cancel":
+      model.cutSuggestions.run.cancelSearchTapped()
+      await model.cutSuggestions.run.waitUntilStopped()
+    default:
+      var invalid = fixture.candidate(2)
+      invalid.productType = ProductType(rawValue: "unrequested-type")!
+      fixture.finish([invalid], attempt: 1)
+    }
+  }
+
+  private func applySecondRunResolvingExplicitSevenConflict(
+    _ model: EditorModel, fixture: SuggestionRunFixture
+  ) async throws {
+    await model.cutSuggestions.suggestCutsTapped()
+    let replacement = Task { await model.cutSuggestions.run.replaceConfirmed() }
+    await fixture.waitForRequests(2)
+    fixture.finish([fixture.candidate(2)], attempt: 1)
+    await replacement.value
+    expectNoDifference(
+      model.cutSuggestions.run.message, "Choose a starting number of at least 8.")
+    expectNoDifference(model.documentCutSuggestions.first?.id, Fixtures.uuid(1))
+    await model.cutSuggestions.run.applyNumberingTapped(
+      .init(types: ["spotlight": .init(number: 8, isExplicit: true)]))
+    expectNoDifference(fixture.state.value.requests.count, 2)
+    expectNoDifference(model.documentCutSuggestions.first?.title, "Spotlight 8")
+  }
+
 }

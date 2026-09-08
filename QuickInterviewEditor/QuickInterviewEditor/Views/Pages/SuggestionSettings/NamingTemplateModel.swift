@@ -99,13 +99,15 @@ final class NamingTemplateModel: ViewModel {
   }
 
   var validationMessages: [String] {
-    SuggestionConfiguration(
+    let messages = SuggestionConfiguration(
       types: [
         SuggestionTypeDefinition(
           id: "preview", name: title, group: .audioImages, guidelines: "Preview",
           template: components, sequenceFieldIDs: selectedGroupingFieldIDs)
       ], fields: availableFields
     ).validationMessages()
+    var seen = Set<String>()
+    return messages.filter { seen.insert($0).inserted }
   }
 
   subscript(literalAt index: Int) -> String {

@@ -54,7 +54,7 @@ final class CutSuggestionsPageModel: ViewModel {
   init(
     editPlan: EditPlan,
     sourceFingerprint: String,
-    options: CutSuggestOptions = CutSuggestOptions(),
+    options: CutSuggestOptions = .freshConfigured,
     productSpecs: [ProductSpec] = ProductSpec.defaults,
     onSelectSuggestion: ((CutSuggestion) -> Void)? = nil
   ) {
