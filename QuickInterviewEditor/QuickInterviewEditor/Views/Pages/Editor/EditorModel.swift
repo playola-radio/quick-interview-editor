@@ -195,6 +195,7 @@ final class EditorModel: ViewModel {
   /// The slice the slices list should scroll into view. Set to a freshly created clip's id so a
   /// new clip appended below the fold becomes visible; the list observes this and scrolls to it.
   var sliceScrollTarget: Slice.ID?
+  var sidebarReveal: SidebarReveal?
   /// Removed source ranges (with their crossfades) that collapse the timeline. Mutated
   /// only through `mutateDocument`, alongside `slices`, so the two move together on undo.
   var timelineRemovals: IdentifiedArrayOf<TimelineRemoval> = []
@@ -532,23 +533,46 @@ final class EditorModel: ViewModel {
   var activeEditingRange: Range<Int>? { fineTune.draftRange ?? activeOrSelectedRange }
 
   // MARK: - Selection (source samples — the single source of truth)
-  /// The freeform selected range in SOURCE samples. Plain @Observable — not @Shared, not in the
-  /// undo stack. During migration it is SEEDED from the transcript selection; later tasks flip the
-  /// writers so this becomes authoritative and the transcript derives from it.
-  var audioSelection: Range<Int>?
-  /// The fixed edge held during a marquee / shift-extend (set in Task 6).
-  var selectionAnchorSample: Int?
+  var selection: EditorSelection = .none
+
+  var audioSelection: Range<Int>? {
+    get { selection.freeformRange ?? selectedTranscriptObject?.range }
+    set {
+      guard let range = newValue, !range.isEmpty else {
+        if selectedSeamID == nil { selection = .none }
+        return
+      }
+      selection = .range(range, anchor: selectionAnchorSample ?? range.lowerBound)
+    }
+  }
+
+  var selectionAnchorSample: Int? {
+    get {
+      if case .range(_, let anchor) = selection { return anchor }
+      return selectedTranscriptObject?.range.lowerBound
+    }
+    set {
+      guard case .range(let range, _) = selection else { return }
+      selection = .range(range, anchor: newValue ?? range.lowerBound)
+    }
+  }
   /// The edge currently being drag-edited (set in Task 8).
   var selectionEditingEdge: SelectionEdge?
 
   // MARK: - Seam selection
-  /// The crossfade seam currently selected, identified by its removal's id (a `TimelineSeam`'s id
-  /// IS its `TimelineRemoval`'s id). A peer of `audioSelection` and MUTUALLY EXCLUSIVE with it
-  /// (decision 6): selecting a seam clears the freeform selection, and any freeform-selection write
-  /// clears the seam. Plain @Observable transient view state — like `audioSelection`, it is not part
-  /// of the undo-tracked document. Kept valid by `syncEditedTimeline`, which drops it when the
-  /// removal it points at no longer exists (restore, undo, redo).
-  var selectedSeamID: TimelineRemoval.ID?
+  var selectedSeamID: TimelineRemoval.ID? {
+    get {
+      guard case .seam(let id) = selection else { return nil }
+      return id
+    }
+    set {
+      if let newValue {
+        selection = .seam(newValue)
+      } else if case .seam = selection {
+        selection = .none
+      }
+    }
+  }
 
   /// Selects the crossfade seam for removal `id`, mutually exclusive with the range selection:
   /// clears any freeform selection first, then records the seam. A no-op if that removal doesn't
@@ -593,9 +617,9 @@ final class EditorModel: ViewModel {
   /// ordered by transcript position) becomes an exact source range and seeds the freeform selection.
   func selectWords(anchorID: Word.ID, focusID: Word.ID) {
     guard let range = sourceRange(coveringWords: anchorID, focusID) else { return }
-    selectionAnchorSample =
-      anchorHoldSample(anchorID: anchorID, focusID: focusID) ?? range.lowerBound
-    selectSourceRange(range, snapPlayhead: true, origin: .transcript)
+    selectSourceRange(
+      range, snapPlayhead: true, origin: .transcript,
+      anchor: anchorHoldSample(anchorID: anchorID, focusID: focusID) ?? range.lowerBound)
   }
 
   /// The anchor word's far-from-focus edge, so a later Shift-extend pivots from where the drag began
@@ -620,8 +644,8 @@ final class EditorModel: ViewModel {
         min(anchor, wordRange.lowerBound)..<max(anchor, wordRange.upperBound), snapPlayhead: false,
         origin: .transcript)
     } else if let wordRange = sourceRange(ofWord: id) {
-      selectionAnchorSample = wordRange.lowerBound
-      selectSourceRange(wordRange, snapPlayhead: true, origin: .transcript)
+      selectSourceRange(
+        wordRange, snapPlayhead: true, origin: .transcript, anchor: wordRange.lowerBound)
     }
   }
 
@@ -646,7 +670,7 @@ final class EditorModel: ViewModel {
   /// selection is a new-slice intent that retargets the pane), else the active slice.
   /// `sliceSelected` clears the selection so an edited slice cleanly becomes the driver.
   var fineTuneTarget: FineTuneModel.Target? {
-    if selectedSourceRange != nil { return .pendingSelection }
+    if selection.freeformRange != nil { return .pendingSelection }
     if let activeSliceID { return .slice(activeSliceID) }
     return nil
   }
@@ -678,7 +702,7 @@ final class EditorModel: ViewModel {
   var fineTuneSessionKey: FineTuneSessionKey {
     FineTuneSessionKey(
       activeSliceID: activeSliceID, activeSliceRange: activeSliceRange,
-      selection: selectedSourceRange)
+      selection: selection.freeformRange)
   }
 
   /// True only while an EXISTING slice has an unsaved cut edit — the user must Save or Cancel
@@ -1159,8 +1183,7 @@ final class EditorModel: ViewModel {
       selectedSeamID = nil
       return
     }
-    selectionAnchorSample = start
-    selectSourceRange(start..<end, snapPlayhead: true)
+    selectSourceRange(start..<end, snapPlayhead: true, anchor: start)
     revealSourceRange(start..<end)
   }
 
@@ -1190,7 +1213,6 @@ final class EditorModel: ViewModel {
     let anchor = clampedSample(editedWaveform.xToSourceSample(startX))
     areaSelectDrag = WaveformAreaSelectDrag(
       anchorSample: anchor, currentX: startX, existingAnchorSample: existingAnchorSample)
-    selectionAnchorSample = existingAnchorSample ?? anchor
     isWaveformAreaSelecting = true
     updateMarqueeSelection()
   }
@@ -1233,7 +1255,8 @@ final class EditorModel: ViewModel {
   /// Live selection during the drag: writes the exact dragged source range to `audioSelection` on
   /// every pointer move — freeform, no word snap.
   private func updateMarqueeSelection() {
-    audioSelection = marqueeSourceRange()
+    guard let range = marqueeSourceRange(), let drag = areaSelectDrag else { return }
+    selection = .range(range, anchor: drag.existingAnchorSample ?? drag.anchorSample)
   }
 
   /// The exact SOURCE range for the current drag: the fixed edge (the drag anchor, or the preserved
@@ -1264,7 +1287,8 @@ final class EditorModel: ViewModel {
   /// clobbering this placement. An empty/degenerate range clears. This is the single write path the
   /// waveform (marquee + click), slice/suggestion reveal, and transcript intents all funnel through.
   func selectSourceRange(
-    _ range: Range<Int>, snapPlayhead: Bool, origin: SelectionOrigin = .external
+    _ range: Range<Int>, snapPlayhead: Bool, origin: SelectionOrigin = .external,
+    anchor: Int? = nil
   ) {
     // A freeform-selection write and a seam selection are mutually exclusive (decision 6): any
     // range write drops the seam. This is the single range-write funnel, so clearing here covers
@@ -1283,7 +1307,7 @@ final class EditorModel: ViewModel {
       clearSelection()
       return
     }
-    audioSelection = lower..<upper
+    selection = .range(lower..<upper, anchor: anchor ?? selectionAnchorSample ?? lower)
     // Keep the Shift-extend pivot on a stored edge. Snap it to the NEAREST stored boundary — not just
     // clamp into range — for two reasons: (1) callers pin the anchor to an *unclamped* selection edge
     // that the range above may have clamped into `[0, durationSamples]` (bad word bounds); (2) a
@@ -1802,8 +1826,7 @@ final class EditorModel: ViewModel {
     // selection-replacing writer (plain click, marquee, transcript select). A reveal that skipped this
     // would leave `selectionAnchorSample` on the *previous* selection, so a later Shift-extend or edge
     // edit would pivot from a boundary this selection no longer has and re-extend over unselected audio.
-    selectionAnchorSample = range.lowerBound
-    selectSourceRange(range, snapPlayhead: true)
+    selectSourceRange(range, snapPlayhead: true, anchor: range.lowerBound)
     // Only frame the reveal if the selection actually resolved. A range built from out-of-file word
     // bounds collapses to no selection in the funnel; scrolling to that phantom word anyway would
     // leave the panes inconsistent (highlight gone, transcript jumped). Matches this method's contract.
@@ -3046,7 +3069,9 @@ final class EditorModel: ViewModel {
   /// every future selection (found in adversarial review of Task 9). A dirty pending draft is
   /// therefore always free to be abandoned the moment the live selection/target moves on.
   func syncEditSession() {
-    guard let target = fineTuneTarget, let range = activeOrSelectedRange else {
+    guard let target = fineTuneTarget,
+      let range = selection.freeformRange ?? activeSliceRange
+    else {
       // Don't tear down an unsaved SLICE edit just because the target went nil — the user must
       // Save or Cancel first. A dirty PENDING-SELECTION draft has nothing protecting it, so it's
       // discarded right along with a clean one.

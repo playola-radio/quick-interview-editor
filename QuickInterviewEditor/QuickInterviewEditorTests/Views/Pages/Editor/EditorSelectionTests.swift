@@ -314,6 +314,7 @@ struct EditorSelectionTests {
   @Test func selectSourceRangeSnapsExtendAnchorOntoStoredBoundary() {
     let model = editor()
     let duration = model.editPlan.source.durationSamples
+    model.audioSelection = (duration - 10_000)..<(duration + 50_000)
     model.selectionAnchorSample = duration + 50_000
     model.selectSourceRange((duration - 10_000)..<(duration + 50_000), snapPlayhead: false)
     expectNoDifference(model.audioSelection, (duration - 10_000)..<duration)
