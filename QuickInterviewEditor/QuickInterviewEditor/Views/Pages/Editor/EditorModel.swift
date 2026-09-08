@@ -1600,7 +1600,7 @@ final class EditorModel: ViewModel {
   /// Escape clears the main selection and propagates when nothing is selected.
   private func handleEscapeKey() -> Bool {
     guard selection != .none else { return false }
-    clearSelectionTapped()
+    clearSelection()
     return true
   }
 

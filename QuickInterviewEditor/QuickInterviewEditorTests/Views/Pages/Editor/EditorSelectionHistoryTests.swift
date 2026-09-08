@@ -293,6 +293,30 @@ struct EditorSelectionHistoryTests {
     #expect(!model.editorKeyDown(.escape))
   }
 
+  @Test func escapePreservesUndoAndRedoHistory() async {
+    let model = editor()
+    let clip = Fixtures.slice(id: Fixtures.uuid(31), start: 70_648, end: 119_202)
+    model.mutateDocument(recordUndo: false) { $0.slices.append(clip) }
+    model.renameSlice(clip.id, to: "First name")
+    model.renameSlice(clip.id, to: "Second name")
+    await model.undoTapped()
+    model.selectTranscriptObject(.clip(clip.id))
+    let undoBefore = model.history.undo
+    let redoBefore = model.history.redo
+
+    #expect(model.editorKeyDown(.escape))
+
+    expectNoDifference(model.selection, .none)
+    expectNoDifference(model.history.undo, undoBefore)
+    expectNoDifference(model.history.redo, redoBefore)
+    await model.redoTapped()
+    expectNoDifference(model.slices[id: clip.id]?.name, "Second name")
+    await model.undoTapped()
+    await model.undoTapped()
+    expectNoDifference(model.slices[id: clip.id]?.name, clip.name)
+    #expect(!model.canUndo)
+  }
+
   @Test func deleteIsBlockedWhileExporting() async {
     let model = editor()
     let clip = Fixtures.slice(id: Fixtures.uuid(31), start: 70_648, end: 119_202)
