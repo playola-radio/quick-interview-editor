@@ -47,10 +47,11 @@ final class SuggestionReviewModel: ViewModel, Identifiable {
         batch.flatMap { reviewSequenceKey(candidate, batch: $0) }
       }
     let naming = candidate?.naming
-    originalFields = (naming?.extractedValues ?? [:]).merging(naming?.correctedValues ?? [:]) {
+    let effectiveFields = (naming?.extractedValues ?? [:]).merging(naming?.correctedValues ?? [:]) {
       _, value in value
     }
-    fieldValues = originalFields
+    fieldBaseline = effectiveFields
+    fieldValues = effectiveFields
     let typeID = naming?.typeID ?? sequenceKey?.typeID
     let type = batch?.snapshot.configuration.types.first { $0.id == typeID }
     let referenced = Set(type?.template.compactMap { $0.kind == .field ? $0.value : nil } ?? [])
@@ -87,7 +88,7 @@ final class SuggestionReviewModel: ViewModel, Identifiable {
   let fields: [SuggestionReviewField]
   let groupingFields: [SuggestionReviewField]
   let display: SuggestionStarts.GroupDisplay
-  private let originalFields: [String: String]
+  @ObservationIgnored private var fieldBaseline: [String: String]
   private var fieldValues: [String: String]
   private var canonicalValues: [String: String]
   var startText: String
@@ -147,10 +148,9 @@ final class SuggestionReviewModel: ViewModel, Identifiable {
         reviewSequenceKey($0, batch: batch) == sequenceKey
       })
     else { return "This group has no suggestions in the current search." }
-    let start =
-      document.suggestionBatch?.actualStarts.groups.first { $0.key == sequenceKey }?.start.number
-      ?? sequenceKey.flatMap { document.suggestionBatch?.actualStarts.types[$0.typeID]?.number }
-      ?? 1
+    guard
+      let start = batch.actualStarts.groups.first(where: { $0.key == sequenceKey })?.start.number
+    else { return "This group has no recorded starting number in this search." }
     return "This search started at: \(start)"
   }
   var missingFieldsMessage: String? {
@@ -199,7 +199,15 @@ final class SuggestionReviewModel: ViewModel, Identifiable {
     canonicalValues[id] = value
     errorMessage = nil
   }
-  func applyFieldsTapped() { apply(fieldsIntent) }
+  func applyFieldsTapped() {
+    guard apply(fieldsIntent), let candidateID,
+      let naming = currentDocument().cutSuggestions[id: candidateID]?.naming
+    else { return }
+    let effectiveFields = naming.extractedValues.merging(naming.correctedValues) { _, value in value
+    }
+    fieldBaseline = effectiveFields
+    fieldValues = effectiveFields
+  }
   func renumberTapped() { apply(renumberIntent) }
   func applyGroupSpellingTapped() { apply(spellingIntent) }
   func applyFutureStartTapped() {
@@ -221,7 +229,7 @@ final class SuggestionReviewModel: ViewModel, Identifiable {
     guard let candidateID, let runID else { return nil }
     return .fields(
       candidateID: candidateID, runID: runID,
-      values: fieldValues.filter { originalFields[$0.key] != $0.value })
+      values: fieldValues.filter { fieldBaseline[$0.key] != $0.value })
   }
   private var renumberIntent: SuggestionReviewIntent? {
     guard let sequenceKey, let runID, let start = try? parseSuggestionStartingNumber(startText)
@@ -232,7 +240,8 @@ final class SuggestionReviewModel: ViewModel, Identifiable {
     guard let sequenceKey, let runID else { return nil }
     return .spelling(key: sequenceKey, runID: runID, values: canonicalValues)
   }
-  private func apply(_ intent: SuggestionReviewIntent?) {
+  @discardableResult
+  private func apply(_ intent: SuggestionReviewIntent?) -> Bool {
     do {
       guard canEdit else { throw SuggestionReviewError.locked }
       guard let intent else { throw SuggestionReviewError.unavailable }
@@ -240,7 +249,11 @@ final class SuggestionReviewModel: ViewModel, Identifiable {
       try onApply(intent)
       errorMessage = nil
       statusMessage = "Applied. You can undo this change in the editor."
-    } catch { errorMessage = reviewErrorMessage(error) }
+      return true
+    } catch {
+      errorMessage = reviewErrorMessage(error)
+      return false
+    }
   }
   private func validationError(_ intent: SuggestionReviewIntent?) -> String? {
     do {

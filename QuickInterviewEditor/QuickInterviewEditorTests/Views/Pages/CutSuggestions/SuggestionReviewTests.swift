@@ -8,6 +8,62 @@ import Testing
 
 @MainActor
 struct SuggestionReviewTests {
+  @Test func repeatedFieldApplyCanReturnToOriginalAndPreservesUnrelatedCurrentEdits() throws {
+    let editor = try fixture()
+    let model = review(editor)
+    model.fieldChanged("artist-name", value: "Stevie Nicks")
+    model.applyFieldsTapped()
+    expectNoDifference(
+      editor.documentCutSuggestions[0].naming?.correctedValues["artist-name"], "Stevie Nicks")
+    let otherReview = review(editor)
+    otherReview.fieldChanged("song-title", value: "Dreams")
+    otherReview.applyFieldsTapped()
+    model.fieldChanged("artist-name", value: "Tom Petty")
+    model.applyFieldsTapped()
+    expectNoDifference(editor.documentCutSuggestions[0].title, "Dreams 1, Tom Petty")
+    expectNoDifference(model[field: "song-title"], "Dreams")
+    expectNoDifference(model[field: "artist-name"], "Tom Petty")
+    model.fieldChanged("artist-name", value: "Stevie Nicks")
+    model.applyFieldsTapped()
+    expectNoDifference(
+      editor.documentCutSuggestions[0].naming?.correctedValues["artist-name"], "Stevie Nicks")
+  }
+
+  @Test func failedFieldApplyRetainsDraftAndComparisonBaselineForRetry() throws {
+    let editor = try fixture()
+    var fail = true
+    let model = SuggestionReviewModel(
+      candidateID: Fixtures.uuid(1), currentDocument: { editor.documentState }, isLocked: { false },
+      onApply: { intent in
+        if fail { throw SuggestionReviewError.locked }
+        try editor.applySuggestionReviewIntent(intent)
+      })
+    let before = editor.documentState
+    model.fieldChanged("artist-name", value: "Stevie Nicks")
+    model.applyFieldsTapped()
+    expectNoDifference(editor.documentState, before)
+    expectNoDifference(model[field: "artist-name"], "Stevie Nicks")
+    fail = false
+    model.applyFieldsTapped()
+    expectNoDifference(
+      editor.documentCutSuggestions[0].naming?.correctedValues["artist-name"], "Stevie Nicks")
+  }
+
+  @Test func correctionIntoNewGroupDoesNotClaimCapturedTypeStartWasApplied() throws {
+    let editor = try fixture()
+    editor.suggestionBatch?.actualStarts.types["intro"] = .init(number: 7, isExplicit: true)
+    let model = review(editor)
+    model.fieldChanged("song-title", value: "Dreams")
+    model.applyFieldsTapped()
+    expectNoDifference(editor.documentCutSuggestions[0].naming?.reservation?.number, 1)
+    let key = try #require(editor.documentCutSuggestions[0].naming?.reservation?.key)
+    let group = SuggestionReviewModel(
+      sequenceKey: key, currentDocument: { editor.documentState }, isLocked: { false },
+      onApply: { try editor.applySuggestionReviewIntent($0) })
+    expectNoDifference(
+      group.thisSearchStart, "This group has no recorded starting number in this search.")
+  }
+
   func fixture(
     values: [[String: String]] = [
       ["song-title": "Wildflowers", "artist-name": "Tom Petty"],
