@@ -71,11 +71,63 @@ in their gap. Drag the AIFFs into Logic — markers travel with each file.
 python3 -m pytest -q
 ```
 
+## Configurable Suggestions
+
+Suggestions finds three groups of material in your transcript:
+
+| Group | Default types | Default naming |
+| --- | --- | --- |
+| Spotlights | Spotlight | `Spotlight 1`, `Spotlight 2`, … |
+| Song Intros | Song Intro | `Song Title 1, Artist Name` |
+| Audio Images | ID, Pre-commercial, Post-commercial, Promo | `ID 1`, `Pre-Com 1`, `Post-Com 1`, `Promo 1`, … |
+
+Use **Types** to show any combination of groups or individual types. Filtering changes
+what you see; it does not delete suggestions or change their numbers. Saved clips remain
+available independently of this filter.
+
+Open **Configure Suggestions** to edit the app-wide rules. Each type has discovery
+guidelines and a naming template built from text, extracted fields, and an optional
+sequence number. You can add types and fields, with instructions explaining how to
+extract each field from the transcript. The default Intro fields identify the song and
+its performing artist, not the station DJ. Saving rules affects future searches;
+existing suggestions keep the rules captured when they were found. Cancel leaves the
+saved rules unchanged. A stale settings draft must reload before it can replace newer
+saved rules.
+
+Review extracted fields before accepting a suggestion. Missing values are identified for
+correction. Correcting a pending suggestion updates its name using that search's
+template. A canonical spelling change can update pending names in the same numbering
+group; it does not rename clips you already accepted.
+
+**Start next search at** belongs to the current project. Leave it Automatic to choose
+the next safe count, or enter a starting number when continuing across source tapes or
+`.pie` files. Intros can also have per-song starting numbers. These settings do not
+share a counter across projects. Explicit numbers that would reuse an issued count
+require correction rather than silently advancing. Changing future starts does not
+rename the current batch; use the separate previewed renumber action for pending
+suggestions.
+
+Accepting a suggestion permanently reserves its sequence number in that project.
+Deleting a clip, undoing acceptance, or running a new search does not release an issued
+number. This prevents later clips from accidentally reusing it.
+
+Running a new search asks before replacing existing suggestions and explains that saved
+clips are safe. **Resume** continues an unfinished search using its captured rules and
+saved successful responses. **Discard** removes that unfinished search. These differ
+from starting a fresh search under the current rules.
+
+New suggestion-derived clips export using their current clip names, such as `ID 7.aiff`,
+without a source-tape prefix. If a filename is already present or duplicated within the
+export, review the proposed filenames before allowing suffixes. Export suffixes do not
+change clip names or editorial sequence numbers. A new collision during copying pauses
+for another review, retaining the remaining rendered clips and identifying files already
+exported. Older and manually created clips retain their existing source-prefixed export
+naming.
+
 ## Cut Suggestions — API key setup
 
-The macOS app can suggest product-shaped cut points (Artist Spotlight / Intro)
-by sending the transcript to a hosted Claude model. This is **bring-your-own-key**:
-usage is billed to your own Anthropic account.
+The macOS app finds suggestions by sending the transcript to a hosted Claude model. This
+is **bring-your-own-key**: usage is billed to your own Anthropic account.
 
 1. Get an Anthropic API key at
    <https://console.anthropic.com/settings/keys>.
