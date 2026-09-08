@@ -222,7 +222,8 @@ struct TranscriptResizeTests {
     expectNoDifference(model.hasUncommittedSliceEdit, true)
     let before = model.slices
 
-    model.transcriptResizeBegan(.clip(clipID), .end)
+    let accepted = model.transcriptResizeBegan(.clip(clipID), .end)
+    expectNoDifference(accepted, false)
     expectNoDifference(model.transcriptResizeDraft, nil)
 
     model.transcriptResizeDragged(toWord: 4)
@@ -239,12 +240,52 @@ struct TranscriptResizeTests {
     let before = model.slices
 
     model.exportPhase = .exporting(current: 0, total: 1)
-    model.transcriptResizeBegan(.clip(clipID), .end)
+    let accepted = model.transcriptResizeBegan(.clip(clipID), .end)
+    expectNoDifference(accepted, false)
     expectNoDifference(model.transcriptResizeDraft, nil)
 
     model.transcriptResizeDragged(toWord: 4)
     model.transcriptResizeEnded()
     expectNoDifference(model.slices, before)
+  }
+
+  @Test func clipResizeRejectsDraftWithMissingWordBound() {
+    let clipID = Fixtures.uuid(1)
+    var plan = Fixtures.editPlan()
+    plan.words[3].startSample = nil
+    let model = EditorModel(
+      sourceURL: URL(fileURLWithPath: "/clip.m4a"),
+      canonicalAudioURL: Fixtures.canonicalAudioURL,
+      editPlan: plan,
+      initialDocument: EditorDocumentState(slices: [clip(clipID, wordIDs: [1, 2])]))
+    let before = model.slices
+
+    expectNoDifference(model.transcriptResizeBegan(.clip(clipID), .end), true)
+    model.transcriptResizeDragged(toWord: 4)
+    model.transcriptResizeEnded()
+
+    expectNoDifference(model.slices, before)
+    expectNoDifference(model.transcriptResizeDraft, nil)
+  }
+
+  @Test func clipResizeRejectsDraftWithInvertedWordBound() {
+    let clipID = Fixtures.uuid(1)
+    var plan = Fixtures.editPlan()
+    plan.words[3].startSample = 120_000
+    plan.words[3].endSample = 119_000
+    let model = EditorModel(
+      sourceURL: URL(fileURLWithPath: "/clip.m4a"),
+      canonicalAudioURL: Fixtures.canonicalAudioURL,
+      editPlan: plan,
+      initialDocument: EditorDocumentState(slices: [clip(clipID, wordIDs: [1, 2])]))
+    let before = model.slices
+
+    expectNoDifference(model.transcriptResizeBegan(.clip(clipID), .end), true)
+    model.transcriptResizeDragged(toWord: 4)
+    model.transcriptResizeEnded()
+
+    expectNoDifference(model.slices, before)
+    expectNoDifference(model.transcriptResizeDraft, nil)
   }
 
   // MARK: - FIX D: selection-resize cancel restores the Shift-extend anchor

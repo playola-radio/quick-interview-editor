@@ -105,12 +105,10 @@ struct TranscriptTextView: NSViewRepresentable {
     // `resizeZones()` forces TextKit glyph geometry for every resize item and is called from the
     // overlay's `hitTest`/`cursorUpdate` — i.e. on every mouse-move and, as content scrolls under a
     // stationary pointer, on every scroll tick. Memoize it: zones are in document-view coordinates
-    // (scroll-independent), so they only change when `apply(...)` reassigns `resizeItems` (which
-    // `didSet` drops the cache for, covering text/font/item changes) or when the container rewraps
-    // on a width change (checked live in `resizeZones()`).
-    private var resizeItems: [TranscriptResizeItem] = [] {
-      didSet { cachedResizeZones = nil }
-    }
+    // (scroll-independent), so they only change when `apply(...)` receives changed resize items,
+    // when text/font changes, or when the container rewraps on a width change (checked live in
+    // `resizeZones()`).
+    private var resizeItems: [TranscriptResizeItem] = []
     private var cachedResizeZones: [TranscriptResizeHandleZone]?
     private var cachedResizeZonesWidth: CGFloat?
     private var scrollTimer: Timer?
@@ -185,10 +183,10 @@ struct TranscriptTextView: NSViewRepresentable {
       resizeItems: [TranscriptResizeItem]
     ) {
       guard let storage = textView?.textStorage, let textView else { return }
-      self.resizeItems = resizeItems
 
       let didRebuild = text != lastText
       if didRebuild {
+        updateResizeItems(resizeItems)
         rebuildText(
           text: text, fontSize: fontSize, selected: selected, clipContainers: clipContainers,
           removedWordIDs: removedWordIDs)
@@ -210,7 +208,10 @@ struct TranscriptTextView: NSViewRepresentable {
           .font, value: NSFont.systemFont(ofSize: fontSize),
           range: NSRange(location: 0, length: storage.length))
         lastFontSize = fontSize
+        cachedResizeZones = nil
       }
+
+      updateResizeItems(resizeItems)
 
       if clipContainers != lastClipContainers {
         applyClipContainers(clipContainers)
@@ -227,20 +228,24 @@ struct TranscriptTextView: NSViewRepresentable {
       lastSelected = selected
       applySelection(added: selAdded, removed: selRemoved)
 
-      // Resuming follow (userPaused → following) must re-scroll to the current target
-      // even if its ID is unchanged: playback can stop and restart while the playhead
-      // sits in the same word, and without this the view would stay parked where the
-      // user left it. Clearing `lastScrollTarget` lets the guard below re-apply.
+      applyScrollTarget(scrollTarget: scrollTarget, followMode: followMode, reveal: reveal)
+    }
+
+    private func updateResizeItems(_ newItems: [TranscriptResizeItem]) {
+      guard newItems != resizeItems else { return }
+      resizeItems = newItems
+      cachedResizeZones = nil
+    }
+
+    private func applyScrollTarget(
+      scrollTarget: Word.ID?, followMode: TranscriptFollowMode, reveal: TranscriptReveal?
+    ) {
+      guard let textView else { return }
       if followMode == .following, lastFollowMode == .userPaused {
         lastScrollTarget = nil
       }
       lastFollowMode = followMode
 
-      // An explicit reveal (scroll-to-current-word, clicking a suggestion or clip) OWNS the
-      // scroll this cycle: it animates from the current position to the centred focus word. The
-      // instant follow-scroll below is suppressed for the cycle (its target is synced so it
-      // won't fire), otherwise it would snap to the stale follow target before the animation.
-      // The token in `TranscriptReveal` changes on every request, so re-revealing re-scrolls.
       let hasNewReveal = reveal != nil && reveal != lastReveal
       if hasNewReveal {
         lastScrollTarget = scrollTarget
@@ -312,6 +317,13 @@ struct TranscriptTextView: NSViewRepresentable {
 
     private func range(for id: Word.ID) -> NSRange? {
       model.document.wordRanges.first { $0.wordID == id }?.range
+    }
+
+    private func range(for occurrence: TranscriptWordOccurrence) -> NSRange? {
+      guard model.document.wordRanges.indices.contains(occurrence.transcriptIndex),
+        model.document.wordRanges[occurrence.transcriptIndex].wordID == occurrence.wordID
+      else { return nil }
+      return model.document.wordRanges[occurrence.transcriptIndex].range
     }
 
     /// The single source of truth for a word's text colour: selected wins (white), then a
@@ -468,10 +480,13 @@ struct TranscriptTextView: NSViewRepresentable {
       let inset = textView.textContainerInset
       var zones: [TranscriptResizeHandleZone] = []
       for item in resizeItems {
-        guard let first = item.wordIDs.first, let last = item.wordIDs.last,
+        guard let first = item.wordOccurrences.first, let last = item.wordOccurrences.last,
           let firstRange = range(for: first), let lastRange = range(for: last)
         else { continue }
-        func zone(_ nsRange: NSRange, _ edge: TranscriptResizeEdge) -> TranscriptResizeHandleZone? {
+        func zone(
+          _ nsRange: NSRange, _ edge: TranscriptResizeEdge,
+          _ occurrence: TranscriptWordOccurrence
+        ) -> TranscriptResizeHandleZone? {
           let glyphRange = layoutManager.glyphRange(
             forCharacterRange: nsRange, actualCharacterRange: nil)
           var rect = layoutManager.boundingRect(forGlyphRange: glyphRange, in: textContainer)
@@ -482,10 +497,11 @@ struct TranscriptTextView: NSViewRepresentable {
             x: edgeX - TranscriptResizeMetrics.grabTolerance, y: rect.minY,
             width: TranscriptResizeMetrics.grabTolerance * 2, height: rect.height)
           return TranscriptResizeHandleZone(
-            identity: item.identity, edge: edge, rect: grab, priority: item.identity.priority)
+            identity: item.identity, edge: edge, occurrence: occurrence, rect: grab,
+            priority: item.identity.priority)
         }
-        if let handleZone = zone(firstRange, .start) { zones.append(handleZone) }
-        if let handleZone = zone(lastRange, .end) { zones.append(handleZone) }
+        if let handleZone = zone(firstRange, .start, first) { zones.append(handleZone) }
+        if let handleZone = zone(lastRange, .end, last) { zones.append(handleZone) }
       }
       cachedResizeZones = zones
       cachedResizeZonesWidth = width
@@ -495,7 +511,7 @@ struct TranscriptTextView: NSViewRepresentable {
     /// D2 priority resolution among the zones containing `point` (highest `priority` wins,
     /// ties by nearest edge-x, then a deterministic key). Pure logic lives in
     /// `TranscriptResizeMath.resolveHandle`; the coordinator only supplies the live zone geometry.
-    func resizeHandle(at point: NSPoint) -> (TranscriptResizeItemIdentity, TranscriptResizeEdge)? {
+    func resizeHandle(at point: NSPoint) -> TranscriptResizeHandleTarget? {
       TranscriptResizeMath.resolveHandle(hitting: point, in: resizeZones())
     }
 
@@ -503,7 +519,7 @@ struct TranscriptTextView: NSViewRepresentable {
     /// "point inside the used line rect" rejection, clamping x into the resolved line
     /// fragment before resolving the character index. This lets a drag that strays above/
     /// below/beyond the exact glyph bounds still resolve to the nearest word on that line.
-    func wordIDForResize(at point: NSPoint) -> Word.ID? {
+    func wordOccurrenceForResize(at point: NSPoint) -> TranscriptWordOccurrence? {
       guard let textView, let layoutManager = textView.layoutManager,
         let textContainer = textView.textContainer
       else { return nil }
@@ -519,7 +535,26 @@ struct TranscriptTextView: NSViewRepresentable {
       let clamped = NSPoint(x: clampedX, y: lineRect.midY)
       let idx = layoutManager.glyphIndex(for: clamped, in: textContainer)
       let charIndex = layoutManager.characterIndexForGlyph(at: idx)
-      return model.document.wordID(atUTF16Offset: charIndex)
+      return wordOccurrence(atUTF16Offset: charIndex)
+    }
+
+    private func wordOccurrence(atUTF16Offset offset: Int) -> TranscriptWordOccurrence? {
+      guard let first = model.document.wordRanges.first else { return nil }
+      var low = 0
+      var high = model.document.wordRanges.count - 1
+      var candidate = -1
+      while low <= high {
+        let mid = (low + high) / 2
+        if model.document.wordRanges[mid].range.location <= offset {
+          candidate = mid
+          low = mid + 1
+        } else {
+          high = mid - 1
+        }
+      }
+      let index = candidate >= 0 ? candidate : 0
+      let wordID = candidate >= 0 ? model.document.wordRanges[index].wordID : first.wordID
+      return TranscriptWordOccurrence(wordID: wordID, transcriptIndex: index)
     }
   }
 }

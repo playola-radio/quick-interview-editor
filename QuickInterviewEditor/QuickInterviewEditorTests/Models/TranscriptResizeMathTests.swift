@@ -47,6 +47,20 @@ struct TranscriptResizeMathTests {
     expectNoDifference(result, nil)
   }
 
+  @Test func startEdgeUsesLaterDuplicateOccurrence() {
+    let item = TranscriptResizeItem(
+      identity: .selection,
+      wordOccurrences: [
+        TranscriptWordOccurrence(wordID: 2, transcriptIndex: 1),
+        TranscriptWordOccurrence(wordID: 1, transcriptIndex: 2),
+      ])
+    let result = TranscriptResizeMath.resized(
+      item: item, edge: .start,
+      toTarget: TranscriptWordOccurrence(wordID: 1, transcriptIndex: 2),
+      transcriptOrder: [1, 2, 1, 3])
+    expectNoDifference(result, [1])
+  }
+
   @Test func identityPriorityOrder() {
     expectNoDifference(TranscriptResizeItemIdentity.selection.priority, 3)
     expectNoDifference(TranscriptResizeItemIdentity.clip(UUID()).priority, 2)
@@ -61,6 +75,7 @@ struct TranscriptResizeMathTests {
   ) -> TranscriptResizeHandleZone {
     TranscriptResizeHandleZone(
       identity: identity, edge: edge,
+      occurrence: TranscriptWordOccurrence(wordID: 1, transcriptIndex: 0),
       rect: CGRect(x: minX, y: 0, width: width, height: 10), priority: identity.priority)
   }
 
@@ -78,8 +93,8 @@ struct TranscriptResizeMathTests {
       zone(.selection, .start, minX: 0),
     ]
     let result = TranscriptResizeMath.resolveHandle(hitting: CGPoint(x: 10, y: 5), in: zones)
-    expectNoDifference(result?.0, .selection)
-    expectNoDifference(result?.1, .start)
+    expectNoDifference(result?.identity, .selection)
+    expectNoDifference(result?.edge, .start)
   }
 
   /// D2: a clip outranks a suggestion at the same point.
@@ -90,8 +105,8 @@ struct TranscriptResizeMathTests {
       zone(.clip(clipID), .end, minX: 0),
     ]
     let result = TranscriptResizeMath.resolveHandle(hitting: CGPoint(x: 10, y: 5), in: zones)
-    expectNoDifference(result?.0, .clip(clipID))
-    expectNoDifference(result?.1, .end)
+    expectNoDifference(result?.identity, .clip(clipID))
+    expectNoDifference(result?.edge, .end)
   }
 
   /// Equal priority (two clips): the nearer edge-x breaks the tie. midX 10 vs midX 15,
@@ -103,7 +118,7 @@ struct TranscriptResizeMathTests {
       zone(.clip(UUID()), .start, minX: 5),  // midX 15
     ]
     let result = TranscriptResizeMath.resolveHandle(hitting: CGPoint(x: 9, y: 5), in: zones)
-    expectNoDifference(result?.0, .clip(nearID))
+    expectNoDifference(result?.identity, .clip(nearID))
   }
 
   /// Same item (selection), start and end zones equidistant from the point: the edge tie-break
@@ -114,8 +129,8 @@ struct TranscriptResizeMathTests {
       zone(.selection, .end, minX: 16, width: 24),  // midX 28
     ]
     let result = TranscriptResizeMath.resolveHandle(hitting: CGPoint(x: 20, y: 5), in: zones)
-    expectNoDifference(result?.0, .selection)
-    expectNoDifference(result?.1, .end)
+    expectNoDifference(result?.identity, .selection)
+    expectNoDifference(result?.edge, .end)
   }
 
   /// Full tie (same priority, same edge-distance): resolution is deterministic — the same
@@ -128,7 +143,7 @@ struct TranscriptResizeMathTests {
     let point = CGPoint(x: 10, y: 5)
     let first = TranscriptResizeMath.resolveHandle(hitting: point, in: zones)
     let second = TranscriptResizeMath.resolveHandle(hitting: point, in: zones)
-    expectNoDifference(first?.0, second?.0)
-    expectNoDifference(first?.1, second?.1)
+    expectNoDifference(first?.identity, second?.identity)
+    expectNoDifference(first?.edge, second?.edge)
   }
 }

@@ -45,12 +45,33 @@ enum TranscriptResizeItemIdentity: Equatable, Hashable, Sendable {
 struct TranscriptResizeItem: Equatable, Sendable {
   var identity: TranscriptResizeItemIdentity
   var wordIDs: [Word.ID]
+  var wordOccurrences: [TranscriptWordOccurrence]
+
+  init(identity: TranscriptResizeItemIdentity, wordIDs: [Word.ID]) {
+    self.identity = identity
+    self.wordIDs = wordIDs
+    self.wordOccurrences = wordIDs.enumerated().map {
+      TranscriptWordOccurrence(wordID: $0.element, transcriptIndex: $0.offset)
+    }
+  }
+
+  init(identity: TranscriptResizeItemIdentity, wordOccurrences: [TranscriptWordOccurrence]) {
+    self.identity = identity
+    self.wordIDs = wordOccurrences.map(\.wordID)
+    self.wordOccurrences = wordOccurrences
+  }
+}
+
+struct TranscriptWordOccurrence: Equatable, Hashable, Sendable {
+  var wordID: Word.ID
+  var transcriptIndex: Int
 }
 
 /// A grab zone published by the coordinator to the overlay.
 struct TranscriptResizeHandleZone: Equatable {
   var identity: TranscriptResizeItemIdentity
   var edge: TranscriptResizeEdge
+  var occurrence: TranscriptWordOccurrence
   var rect: CGRect
   var priority: Int
 }
@@ -61,7 +82,9 @@ struct TranscriptResizeDraft: Equatable, Sendable {
   var identity: TranscriptResizeItemIdentity
   var edge: TranscriptResizeEdge
   var originalWordIDs: [Word.ID]
+  var originalWordOccurrences: [TranscriptWordOccurrence]
   var draftedWordIDs: [Word.ID]
+  var draftedWordOccurrences: [TranscriptWordOccurrence]
   /// The exact `audioSelection` at grab time, captured only for `.selection` drafts so cancel
   /// restores it precisely instead of expanding a freeform selection to whole-word bounds.
   var originalSelectionRange: Range<Int>?
@@ -104,6 +127,50 @@ enum TranscriptResizeMath {
     return Array(transcriptOrder[lo...hi])
   }
 
+  static func resized(
+    item: TranscriptResizeItem,
+    edge: TranscriptResizeEdge,
+    toTarget target: TranscriptWordOccurrence,
+    transcriptOrder: [Word.ID]
+  ) -> [Word.ID]? {
+    resizedOccurrences(item: item, edge: edge, toTarget: target, transcriptOrder: transcriptOrder)?
+      .map(\.wordID)
+  }
+
+  static func resizedOccurrences(
+    item: TranscriptResizeItem,
+    edge: TranscriptResizeEdge,
+    toTarget target: TranscriptWordOccurrence,
+    transcriptOrder: [Word.ID]
+  ) -> [TranscriptWordOccurrence]? {
+    guard !item.wordOccurrences.isEmpty,
+      transcriptOrder.indices.contains(target.transcriptIndex),
+      transcriptOrder[target.transcriptIndex] == target.wordID
+    else { return nil }
+    let itemIndices = item.wordOccurrences.map(\.transcriptIndex)
+    guard
+      item.wordOccurrences.allSatisfy({
+        transcriptOrder.indices.contains($0.transcriptIndex)
+          && transcriptOrder[$0.transcriptIndex] == $0.wordID
+      }),
+      let first = itemIndices.min(), let last = itemIndices.max()
+    else { return nil }
+
+    let lo: Int
+    let hi: Int
+    switch edge {
+    case .start:
+      lo = min(max(target.transcriptIndex, 0), last)
+      hi = last
+    case .end:
+      lo = first
+      hi = max(min(target.transcriptIndex, transcriptOrder.count - 1), first)
+    }
+    return (lo...hi).map {
+      TranscriptWordOccurrence(wordID: transcriptOrder[$0], transcriptIndex: $0)
+    }
+  }
+
   /// D2 hit resolution: among the zones whose `rect` contains `point`, the highest `priority`
   /// wins (Selection > Clip > Suggestion); ties break by nearest edge-x, then by a stable
   /// identity/edge key so hit-testing never flickers between equally-eligible zones. `nil` when
@@ -111,7 +178,7 @@ enum TranscriptResizeMath {
   /// resolution over it.
   static func resolveHandle(
     hitting point: CGPoint, in zones: [TranscriptResizeHandleZone]
-  ) -> (TranscriptResizeItemIdentity, TranscriptResizeEdge)? {
+  ) -> TranscriptResizeHandleTarget? {
     let hits = zones.filter { $0.rect.contains(point) }
     guard
       let best = hits.max(by: { lhs, rhs in
@@ -123,6 +190,13 @@ enum TranscriptResizeMath {
           > (rhs.identity.tieBreakDescriptor, rhs.edge.tieBreakOrdinal)
       })
     else { return nil }
-    return (best.identity, best.edge)
+    return TranscriptResizeHandleTarget(
+      identity: best.identity, edge: best.edge, occurrence: best.occurrence)
   }
+}
+
+struct TranscriptResizeHandleTarget: Equatable {
+  var identity: TranscriptResizeItemIdentity
+  var edge: TranscriptResizeEdge
+  var occurrence: TranscriptWordOccurrence
 }

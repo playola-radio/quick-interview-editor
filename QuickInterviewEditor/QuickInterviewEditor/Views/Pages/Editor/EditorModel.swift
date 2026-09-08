@@ -134,11 +134,11 @@ final class EditorModel: ViewModel {
     // Transcript edge-resize gestures are intents too: the overlay resolves the grabbed item/edge
     // and the dragged-over word and hands them here, and THIS model runs the resize state machine
     // (live selection repaint, clip container preview, single commit on release).
-    transcript.onTranscriptResizeBegan = { [weak self] id, edge in
-      self?.transcriptResizeBegan(id, edge)
+    transcript.onTranscriptResizeBegan = { [weak self] id, edge, occurrence in
+      self?.transcriptResizeBegan(id, edge, occurrence: occurrence) ?? false
     }
-    transcript.onTranscriptResizeDragged = { [weak self] wordID in
-      self?.transcriptResizeDragged(toWord: wordID)
+    transcript.onTranscriptResizeDragged = { [weak self] occurrence in
+      self?.transcriptResizeDragged(to: occurrence)
     }
     transcript.onTranscriptResizeEnded = { [weak self] in self?.transcriptResizeEnded() }
     transcript.onTranscriptResizeCancelled = { [weak self] in self?.transcriptResizeCancelled() }
@@ -778,22 +778,24 @@ final class EditorModel: ViewModel {
     let order = transcriptOrder()
     var positions: [Word.ID: [Int]] = [:]
     for (index, id) in order.enumerated() { positions[id, default: []].append(index) }
-    func ordered(_ ids: some Sequence<Word.ID>) -> [Word.ID] {
-      Set(ids).flatMap { positions[$0] ?? [] }.sorted().map { order[$0] }
+    func ordered(_ ids: some Sequence<Word.ID>) -> [TranscriptWordOccurrence] {
+      Set(ids).flatMap { positions[$0] ?? [] }.sorted().map {
+        TranscriptWordOccurrence(wordID: order[$0], transcriptIndex: $0)
+      }
     }
     var items: [TranscriptResizeItem] = []
     if !selectedWordIDs.isEmpty {
-      items.append(.init(identity: .selection, wordIDs: ordered(selectedWordIDs)))
+      items.append(.init(identity: .selection, wordOccurrences: ordered(selectedWordIDs)))
     }
     for slice in slices {
-      items.append(.init(identity: .clip(slice.id), wordIDs: ordered(slice.wordIDs)))
+      items.append(.init(identity: .clip(slice.id), wordOccurrences: ordered(slice.wordIDs)))
     }
     if cutSuggestions.showsSuggestionBands {
       let clipClaimed = Set(slices.flatMap { draftedWordIDs(forClip: $0.id) ?? $0.wordIDs })
       for suggestion in documentCutSuggestions.pending {
         let words = ordered(suggestion.wordIDs)
-        guard words.contains(where: { !clipClaimed.contains($0) }) else { continue }
-        items.append(.init(identity: .suggestion(suggestion.id), wordIDs: words))
+        guard words.contains(where: { !clipClaimed.contains($0.wordID) }) else { continue }
+        items.append(.init(identity: .suggestion(suggestion.id), wordOccurrences: words))
       }
     }
     return applyingResizeDraft(to: items)
@@ -821,9 +823,35 @@ final class EditorModel: ViewModel {
     let set = Set(ids)
     let words = editPlan.words.filter { set.contains($0.id) }
     guard !words.isEmpty else { return nil }
-    let starts = words.compactMap(\.startSample)
-    let ends = words.compactMap(\.endSample)
-    guard let lo = starts.min(), let hi = ends.max(), lo < hi else { return nil }
+    var lo: Int?
+    var hi: Int?
+    for word in words {
+      guard let start = word.startSample, let end = word.endSample, start < end else {
+        return nil
+      }
+      lo = min(lo ?? start, start)
+      hi = max(hi ?? end, end)
+    }
+    guard let lo, let hi else { return nil }
+    return lo..<hi
+  }
+
+  private func sourceRange(coveringWordOccurrences occurrences: [TranscriptWordOccurrence])
+    -> Range<Int>?
+  {
+    guard !occurrences.isEmpty else { return nil }
+    var lo: Int?
+    var hi: Int?
+    for occurrence in occurrences {
+      guard editPlan.words.indices.contains(occurrence.transcriptIndex) else { return nil }
+      let word = editPlan.words[occurrence.transcriptIndex]
+      guard word.id == occurrence.wordID,
+        let start = word.startSample, let end = word.endSample, start < end
+      else { return nil }
+      lo = min(lo ?? start, start)
+      hi = max(hi ?? end, end)
+    }
+    guard let lo, let hi else { return nil }
     return lo..<hi
   }
 
@@ -831,11 +859,12 @@ final class EditorModel: ViewModel {
   /// drafted words' bounds (never audio overlap), so a resize can only ever land on word
   /// boundaries already present in the transcript.
   private func updatedSuggestion(
-    _ suggestion: CutSuggestion, toWordIDs ids: [Word.ID]
+    _ suggestion: CutSuggestion, toWordOccurrences occurrences: [TranscriptWordOccurrence]
   ) -> CutSuggestion {
     var updated = suggestion
+    let ids = occurrences.map(\.wordID)
     updated.wordIDs = ids
-    if let range = sourceRange(coveringWordIDs: ids) {
+    if let range = sourceRange(coveringWordOccurrences: occurrences) {
       let rate = Double(editPlan.source.sampleRate)
       updated.startSample = range.lowerBound
       updated.endSample = range.upperBound
@@ -853,7 +882,8 @@ final class EditorModel: ViewModel {
     guard let draft = transcriptResizeDraft, draft.identity != .selection else { return items }
     return items.map { item in
       guard item.identity == draft.identity else { return item }
-      return TranscriptResizeItem(identity: item.identity, wordIDs: draft.draftedWordIDs)
+      return TranscriptResizeItem(
+        identity: item.identity, wordOccurrences: draft.draftedWordOccurrences)
     }
   }
 
@@ -866,10 +896,10 @@ final class EditorModel: ViewModel {
 
   /// The word the last `transcriptResizeDragged` tick resolved to. The overlay fires a drag tick per
   /// mouse-move (60-120 Hz), but resizes snap to whole words (D1), so every tick between two word
-  /// boundaries maps to the same word and would otherwise re-run `resized()` + reassign the
+  /// boundaries maps to the same occurrence and would otherwise re-run `resized()` + reassign the
   /// `@Observable` draft (re-rendering the whole transcript preview) for zero visible change.
   /// Deduping on it makes intra-word ticks a no-op; nil between drags so the first tick always runs.
-  @ObservationIgnored private var lastResizeTargetWord: Word.ID?
+  @ObservationIgnored private var lastResizeTargetWord: TranscriptWordOccurrence?
 
   private func selectionEdge(for edge: TranscriptResizeEdge) -> SelectionEdge {
     switch edge {
@@ -881,18 +911,23 @@ final class EditorModel: ViewModel {
   /// A resize handle grab began: seed the draft from the item's committed word run. For a selection
   /// mark which edge is live (so transport-snap backs off, mirroring `selectionEdgeDragBegan`); a
   /// clip stops the transport before the edit, mirroring `crossfadeStretchBegan`.
-  func transcriptResizeBegan(_ identity: TranscriptResizeItemIdentity, _ edge: TranscriptResizeEdge)
-  {
-    switch identity {
-    case .selection: break
-    case .clip: guard !isExporting, !hasUncommittedSliceEdit else { return }
-    case .suggestion: guard !isExporting else { return }
+  @discardableResult
+  func transcriptResizeBegan(
+    _ identity: TranscriptResizeItemIdentity, _ edge: TranscriptResizeEdge,
+    occurrence: TranscriptWordOccurrence? = nil
+  ) -> Bool {
+    guard canBeginTranscriptResize(identity) else { return false }
+    guard let item = transcriptResizeItems.first(where: { $0.identity == identity }) else {
+      return false
     }
-    guard let item = transcriptResizeItems.first(where: { $0.identity == identity }) else { return }
+    if let occurrence {
+      guard item.wordOccurrences.contains(occurrence) else { return false }
+    }
     lastResizeTargetWord = nil
     transcriptResizeDraft = TranscriptResizeDraft(
       identity: identity, edge: edge,
-      originalWordIDs: item.wordIDs, draftedWordIDs: item.wordIDs,
+      originalWordIDs: item.wordIDs, originalWordOccurrences: item.wordOccurrences,
+      draftedWordIDs: item.wordIDs, draftedWordOccurrences: item.wordOccurrences,
       originalSelectionRange: identity == .selection ? audioSelection : nil,
       originalAnchorID: identity == .selection ? transcript.selectionAnchorSnapshot.anchor : nil,
       originalFocusID: identity == .selection ? transcript.selectionAnchorSnapshot.focus : nil)
@@ -900,6 +935,15 @@ final class EditorModel: ViewModel {
     case .selection: selectionEditingEdge = selectionEdge(for: edge)
     case .clip: stopPlaybackForTimelineEdit()
     case .suggestion: break
+    }
+    return true
+  }
+
+  private func canBeginTranscriptResize(_ identity: TranscriptResizeItemIdentity) -> Bool {
+    switch identity {
+    case .selection: true
+    case .clip: !isExporting && !hasUncommittedSliceEdit
+    case .suggestion: !isExporting
     }
   }
 
@@ -909,23 +953,31 @@ final class EditorModel: ViewModel {
   /// invalidated, exactly as a waveform edge drag behaves; for a clip/suggestion the preview flows
   /// through the draft-aware computed spans, and the document is committed only on release.
   func transcriptResizeDragged(toWord id: Word.ID) {
+    guard let index = transcriptOrder().firstIndex(of: id) else { return }
+    transcriptResizeDragged(to: TranscriptWordOccurrence(wordID: id, transcriptIndex: index))
+  }
+
+  func transcriptResizeDragged(to occurrence: TranscriptWordOccurrence) {
     guard var draft = transcriptResizeDraft else { return }
     // Dedup on the snapped target word only: resizes snap to whole words (D1), so ticks that stay
     // inside the same word are pure re-renders. Do NOT also dedup on an unchanged word run — a
     // freeform selection's edge must still snap to the word boundary via `applyEdgeEdit` even when
     // the covered word run is unchanged (its sample range still moves).
-    guard id != lastResizeTargetWord else { return }
-    lastResizeTargetWord = id
+    guard occurrence != lastResizeTargetWord else { return }
+    lastResizeTargetWord = occurrence
     guard
-      let newWords = TranscriptResizeMath.resized(
-        itemWordIDs: draft.originalWordIDs, edge: draft.edge,
-        toTargetWord: id, transcriptOrder: transcriptOrder())
+      let newOccurrences = TranscriptResizeMath.resizedOccurrences(
+        item: TranscriptResizeItem(
+          identity: draft.identity, wordOccurrences: draft.originalWordOccurrences),
+        edge: draft.edge, toTarget: occurrence, transcriptOrder: transcriptOrder())
     else { return }
+    let newWords = newOccurrences.map(\.wordID)
     draft.draftedWordIDs = newWords
+    draft.draftedWordOccurrences = newOccurrences
     transcriptResizeDraft = draft
     if case .selection = draft.identity,
       let old = audioSelection,
-      let updated = sourceRange(coveringWordIDs: newWords)
+      let updated = sourceRange(coveringWordOccurrences: newOccurrences)
     {
       applyEdgeEdit(selectionEdge(for: draft.edge), of: old, to: updated)
     }
@@ -947,16 +999,17 @@ final class EditorModel: ViewModel {
     case .clip(let id):
       guard !isExporting,
         draft.draftedWordIDs != draft.originalWordIDs,
-        let range = sourceRange(coveringWordIDs: draft.draftedWordIDs),
+        let range = sourceRange(coveringWordOccurrences: draft.draftedWordOccurrences),
         let current = slices[id: id]
       else { return }
       mutateSlices { $0[id: id] = updatedSlice(current, to: range) }
     case .suggestion(let id):
       guard !isExporting,
         let current = documentCutSuggestions[id: id], current.isPending,
-        sourceRange(coveringWordIDs: draft.draftedWordIDs) != nil
+        sourceRange(coveringWordOccurrences: draft.draftedWordOccurrences) != nil
       else { return }
-      let updated = updatedSuggestion(current, toWordIDs: draft.draftedWordIDs)
+      let updated = updatedSuggestion(
+        current, toWordOccurrences: draft.draftedWordOccurrences)
       guard updated != current else { return }
       mutateDocument { $0.cutSuggestions[id: id] = updated }
     }

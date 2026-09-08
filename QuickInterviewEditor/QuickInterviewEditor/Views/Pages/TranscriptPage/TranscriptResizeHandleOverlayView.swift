@@ -11,7 +11,7 @@ import AppKit
 final class TranscriptResizeHandleOverlayView: NSView {
   weak var coordinator: TranscriptTextView.Coordinator?
 
-  private var activeHandle: (TranscriptResizeItemIdentity, TranscriptResizeEdge)?
+  private var activeHandle: TranscriptResizeHandleTarget?
   private var downPoint: NSPoint?
   private var didBeginResize = false
   private var trackingArea: NSTrackingArea?
@@ -62,11 +62,16 @@ final class TranscriptResizeHandleOverlayView: NSView {
     let point = convert(event.locationInWindow, from: nil)
     if !didBeginResize {
       guard abs(point.x - down.x) >= TranscriptResizeMetrics.dragThreshold else { return }
+      guard
+        coordinator.model.transcriptResizeBegan(
+          handle.identity, handle.edge, occurrence: handle.occurrence)
+      else {
+        return
+      }
       didBeginResize = true
-      coordinator.model.transcriptResizeBegan(handle.0, handle.1)
     }
-    if let wordID = coordinator.wordIDForResize(at: point) {
-      coordinator.model.transcriptResizeDragged(toWord: wordID)
+    if let occurrence = coordinator.wordOccurrenceForResize(at: point) {
+      coordinator.model.transcriptResizeDragged(to: occurrence)
     }
   }
 

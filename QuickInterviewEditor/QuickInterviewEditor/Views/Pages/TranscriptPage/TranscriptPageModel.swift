@@ -421,15 +421,20 @@ class TranscriptPageModel: ViewModel {
   /// Fired by the resize-handle overlay once a drag crosses `TranscriptResizeMetrics.dragThreshold`.
   /// No-op until `EditorModel` wires the closure (a later task's resize state machine).
   @ObservationIgnored var onTranscriptResizeBegan:
-    ((TranscriptResizeItemIdentity, TranscriptResizeEdge) -> Void)?
-  @ObservationIgnored var onTranscriptResizeDragged: ((Word.ID) -> Void)?
+    ((TranscriptResizeItemIdentity, TranscriptResizeEdge, TranscriptWordOccurrence) -> Bool)?
+  @ObservationIgnored var onTranscriptResizeDragged: ((TranscriptWordOccurrence) -> Void)?
   @ObservationIgnored var onTranscriptResizeEnded: (() -> Void)?
   @ObservationIgnored var onTranscriptResizeCancelled: (() -> Void)?
 
-  func transcriptResizeBegan(_ id: TranscriptResizeItemIdentity, _ edge: TranscriptResizeEdge) {
-    onTranscriptResizeBegan?(id, edge)
+  func transcriptResizeBegan(
+    _ id: TranscriptResizeItemIdentity, _ edge: TranscriptResizeEdge,
+    occurrence: TranscriptWordOccurrence
+  ) -> Bool {
+    onTranscriptResizeBegan?(id, edge, occurrence) ?? false
   }
-  func transcriptResizeDragged(toWord id: Word.ID) { onTranscriptResizeDragged?(id) }
+  func transcriptResizeDragged(to occurrence: TranscriptWordOccurrence) {
+    onTranscriptResizeDragged?(occurrence)
+  }
   func transcriptResizeEnded() { onTranscriptResizeEnded?() }
   func transcriptResizeCancelled() { onTranscriptResizeCancelled?() }
 
