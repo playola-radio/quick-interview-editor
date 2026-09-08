@@ -129,6 +129,15 @@ platform :mac do
       UI.user_error!("RELEASE_DOWNLOAD_HOST must be a plain https URL with no shell metacharacters: #{host.inspect}")
     end
 
+    # Fail before the expensive freeze/sign/notarize steps if this release has no
+    # user-facing notes. The strict semver capture also makes release_short safe to
+    # interpolate into the shell command and generated filename below.
+    release_project_yml = File.read(File.expand_path("../project.yml", __dir__))
+    release_short = release_project_yml[/MARKETING_VERSION:\s*"(\d+\.\d+\.\d+)"/, 1]
+    UI.user_error!("MARKETING_VERSION not found in project.yml") unless release_short
+    notes = "packaging/dist/release-notes-#{release_short}.md"
+    sh("cd ../.. && ruby packaging/release_notes.rb extract CHANGELOG.md '#{release_short}' '#{notes}'")
+
     sh("cd ../.. && packaging/package-engine.sh")
     sh("cd ../.. && packaging/package-cut-suggester.sh")
     sh("cd ../.. && packaging/build-app.sh")
@@ -139,6 +148,9 @@ platform :mac do
     plist = "packaging/dist/PlayolaInterviewEditor.app/Contents/Info.plist"
     short = sh("cd ../.. && /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' #{plist}").strip
     build = sh("cd ../.. && /usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' #{plist}").strip
+    unless short == release_short
+      UI.user_error!("built version #{short} does not match release notes #{release_short}")
+    end
     name = "PlayolaInterviewEditor-#{short}-#{build}.dmg"     # matches make-dmg.sh
     dmg  = "packaging/dist/#{name}"
     url  = "#{host}/#{prefix}/#{name}"
@@ -174,7 +186,7 @@ platform :mac do
       fi
     SH
 
-    sh("cd ../.. && ruby packaging/appcast.rb '#{dmg}' '#{url}' '#{sign_update}'")
+    sh("cd ../.. && ruby packaging/appcast.rb '#{dmg}' '#{url}' '#{sign_update}' '#{notes}'")
 
     # Keep old DMGs (no --delete). Upload the DMG, then the appended appcast last.
     sh("cd ../.. && aws --profile #{profile} s3 cp '#{dmg}' 's3://#{bucket}/#{prefix}/'")
