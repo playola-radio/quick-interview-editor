@@ -128,3 +128,25 @@ def test_character_bound_splits_batches_and_oversized_later_proposal_spends_noth
         refine_intro_clips(source, [proposal(0, 0), proposal(1, 1)], llm,
                            guidance='Complete handoff.', max_input_characters=4500)
     assert llm.calls == []
+
+
+@pytest.mark.parametrize('title', ['Me', 'The', 'Of Me'])
+def test_stopword_only_song_title_supported_by_exact_take_evidence_is_valid(title):
+    from cut_suggester.intro_refinement import refine_intro_clips
+    from cut_suggester.postprocess import verify_song
+    source = [replace(sentences(1)[0], text=f'Here is "{title}".')]
+    final_take = dict(start=0, end=0, label='A complete song handoff', song=title)
+    llm = Provider([{'results': [{'proposal_id': 'p0', 'takes': [final_take]}]}])
+    assert refine_intro_clips(source, [proposal(0, 0)], llm, guidance='Complete handoff.') == [
+        dict(type='intro', **final_take)]
+    assert not verify_song(title, source[0].text)  # Legacy verifier remains unchanged.
+
+
+@pytest.mark.parametrize('title,text', [('Me', 'Here is Theme.'), ('Of Me', 'Of course, listen to me.')])
+def test_stopword_title_requires_whole_words_in_the_exact_phrase(title, text):
+    from cut_suggester.intro_refinement import IntroRefinementError, refine_intro_clips
+    source = [replace(sentences(1)[0], text=text)]
+    llm = Provider([{'results': [{'proposal_id': 'p0', 'takes': [
+        dict(start=0, end=0, label='Song handoff', song=title)]}]}])
+    with pytest.raises(IntroRefinementError, match='supported by that take'):
+        refine_intro_clips(source, [proposal(0, 0)], llm, guidance='Complete handoff.')

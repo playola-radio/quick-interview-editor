@@ -11,7 +11,7 @@ from collections.abc import Callable
 
 from .llm import LLMClient
 from .models import Sentence
-from .postprocess import validate_clip, verify_song
+from .postprocess import _norm_tokens, validate_clip, verify_song
 
 
 class IntroRefinementError(ValueError):
@@ -49,6 +49,17 @@ def _unique_keys(pairs):
     return result
 
 
+def _song_supported(song: str, evidence: str) -> bool:
+    if verify_song(song, evidence):
+        return True
+    # The legacy verifier treats all-stopword titles as unverified. An exact
+    # all-word phrase still establishes source evidence for titles such as Me.
+    title = [token for token in _norm_tokens(song) if token]
+    words = [token for token in _norm_tokens(evidence) if token]
+    return bool(title) and any(words[i:i + len(title)] == title
+                               for i in range(len(words) - len(title) + 1))
+
+
 def _parse(text: str, proposals: dict[str, dict], sentences: list[Sentence]) -> dict[str, list[dict]]:
     try:
         decoded = json.loads(text, object_pairs_hook=_unique_keys)
@@ -75,7 +86,7 @@ def _parse(text: str, proposals: dict[str, dict], sentences: list[Sentence]) -> 
                 raise IntroRefinementError("invalid take bounds or label")
             song = take['song']
             evidence = " ".join(s.text for s in sentences[take['start']:take['end'] + 1])
-            if song is not None and (not isinstance(song, str) or not song.strip() or not verify_song(song, evidence)):
+            if song is not None and (not isinstance(song, str) or not song.strip() or not _song_supported(song, evidence)):
                 raise IntroRefinementError("take song must be null or supported by that take")
             validated.append({**clip, 'label': take['label'].strip(), 'song': song.strip() if song else None})
         validated.sort(key=lambda clip: (clip['start'], clip['end']))
