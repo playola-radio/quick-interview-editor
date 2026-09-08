@@ -115,6 +115,16 @@ final class EditedWaveformAdapter {
     visibleStartSample = clampedStart(targetVisibleStart)
   }
 
+  /// Installs a live cut-point-move preview: renders `previewTimeline` (one removal's `removedRange`
+  /// moved, its fade length frozen) at the drag's frozen viewport. Sibling to `previewStretch`, but
+  /// with NO viewport shift — a cut move slides downstream content past a fixed left edge rather than
+  /// growing a seam about a center, so holding `visibleStart` keeps the reflow legible. The document
+  /// stays untouched; only this adapter timeline reflows until commit.
+  func previewCutPoint(timeline previewTimeline: EditedTimeline, visibleStart: Int) {
+    timeline = previewTimeline
+    visibleStartSample = clampedStart(visibleStart)
+  }
+
   // MARK: - Rendering
   /// One min/max column per horizontal pixel on the EDITED axis. Each pixel's EDITED sample
   /// window is translated to one or more SOURCE ranges via `timeline.sourceRanges(forEdited:)`

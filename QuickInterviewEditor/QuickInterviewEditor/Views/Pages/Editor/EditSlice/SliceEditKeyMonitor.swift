@@ -181,7 +181,8 @@ struct SliceEditKeyMonitor: NSViewRepresentable {
         return true
       case .speedUp, .speedDown, .escape, .nudgeCutInEarlier, .nudgeCutInLater,
         .nudgeCutOutEarlier, .nudgeCutOutLater, .showClipsPanel, .showSuggestionsPanel,
-        .showBothPanels, .returnToLastPlayStart:
+        .showBothPanels, .returnToLastPlayStart, .nudgeLeftCutEarlier, .nudgeLeftCutLater,
+        .nudgeRightCutEarlier, .nudgeRightCutLater:
         return false
       }
     }

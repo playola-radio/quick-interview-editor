@@ -94,4 +94,14 @@ struct EditorKeyMonitorTests {
     expectNoDifference(key(19, .option, characters: "2"), nil)
     expectNoDifference(key(20, [.command, .shift], characters: "3"), nil)
   }
+
+  @Test func optionArrowsNudgeSelectedSeamLeftCut() {
+    expectNoDifference(key(123, .option), .nudgeLeftCutEarlier)  // ⌥←
+    expectNoDifference(key(124, .option), .nudgeLeftCutLater)  // ⌥→
+  }
+
+  @Test func optionShiftArrowsNudgeSelectedSeamRightCut() {
+    expectNoDifference(key(123, [.option, .shift]), .nudgeRightCutEarlier)  // ⌥⇧←
+    expectNoDifference(key(124, [.option, .shift]), .nudgeRightCutLater)  // ⌥⇧→
+  }
 }

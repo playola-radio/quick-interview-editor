@@ -71,7 +71,9 @@ private struct SliceWaveformLane: View {
         playhead: { model.laneCursorSample },
         highlightRange: model.waveformHighlightRange,
         onRulerMove: { positionX in Task { await model.waveformDragged(toX: positionX) } },
-        onBodyClick: { positionX, _ in Task { await model.waveformSeeked(toX: positionX) } },
+        onBodyClick: { positionX, extending in
+          Task { await model.waveformBodyClicked(atX: positionX, extending: extending) }
+        },
         onAreaSelectBegan: { positionX, extending in
           model.waveformAreaSelectBegan(atX: positionX, extending: extending)
         },
@@ -83,10 +85,18 @@ private struct SliceWaveformLane: View {
         // its edges here; leaving this off also keeps the no-op edge layer from shadowing the seam
         // stretch handles below.
         supportsEdgeDrag: false,
+        // ⌥-drag the outside audio flanking a bowtie to move that cut point (and a ⌥-click there to
+        // select the seam) — the same crossfade editing the main lane offers, scoped to this slice.
+        supportsCutPointDrag: true,
         onSeamStretchBegan: { model.crossfadeStretchBegan(id: $0) },
         onSeamStretched: { model.crossfadeStretched($0, toX: $1) },
         onSeamStretchEnded: { model.crossfadeStretchEnded() },
         onSeamStretchCancelled: { model.crossfadeStretchCancelled() },
+        onCutPointDragBegan: { model.crossfadeCutPointDragBegan(id: $0, edge: $1, atX: $2) },
+        onCutPointDragged: { model.crossfadeCutPointDragged(toX: $0) },
+        onCutPointDragEnded: { model.crossfadeCutPointDragEnded() },
+        onCutPointDragCancelled: { model.crossfadeCutPointDragCancelled() },
+        onCutPointSelect: { model.cutPointSeamSelected($0) },
         // No on-lane audition buttons here — pinned to the band edges they read as in/out
         // markers, not transport. The sheet's audition controls live in ``AuditionPreviewPanel``
         // beside the boundary insets instead.

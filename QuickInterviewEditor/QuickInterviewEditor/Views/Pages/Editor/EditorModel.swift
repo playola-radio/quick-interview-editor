@@ -29,6 +29,13 @@ enum EditorKey {
   /// Seeks the playhead to where free transport last started (the cursor if nothing has played
   /// yet) and plays from there, superseding any live/paused playback. Bound to plain `R`.
   case returnToLastPlayStart
+  /// Nudge a SELECTED crossfade seam's cut points by `FineTuneModel.nudgeMs`: ⌥←/→ move the left
+  /// cut (`cL`) earlier/later, ⌥⇧←/→ move the right cut (`cR`). Consumed only when a seam is
+  /// selected, so they fall through otherwise.
+  case nudgeLeftCutEarlier
+  case nudgeLeftCutLater
+  case nudgeRightCutEarlier
+  case nudgeRightCutLater
 }
 
 @MainActor
@@ -398,6 +405,19 @@ final class EditorModel: ViewModel {
       self.crossfadeStretchDraft = nil
     }
     let newTimeline = editedTimeline
+    // Same guard for a live cut-point draft: drop it when the committed timeline no longer matches the
+    // one frozen at drag begin. The drafted range was clamped against that exact layout, so ANY change
+    // to it — the dragged removal's own range (undo/redo/nudge of this cut), its effective fade length,
+    // OR a NEIGHBOR removal reflowing this seam's clamp bounds while leaving its own range and length
+    // unchanged — makes the draft stale; releasing would write it over the newer state. Comparing the
+    // whole `newTimeline` catches the neighbor-only case that a per-seam range/length check misses.
+    // (Our own commit clears the draft before mutating, so this never fires on the normal drag reflow.)
+    // Undo the preview's viewport compensation first so the rebuild below re-clamps from the pre-drag
+    // scroll position.
+    if let crossfadeCutPointDraft, newTimeline != crossfadeCutPointDraft.frozenCommittedTimeline {
+      editedWaveform.visibleStartSample = crossfadeCutPointDraft.frozenVisibleStart
+      self.crossfadeCutPointDraft = nil
+    }
     guard newTimeline != editedWaveform.timeline else { return }
     // Captured BEFORE `resetTransportState` clears `transportContext` to `.free` below — it's the
     // only way to know, after the reset, whether the session we just killed belonged to the sheet.
@@ -561,6 +581,10 @@ final class EditorModel: ViewModel {
   /// the duration of a drag. The document is untouched while it lives — `seamOverlays` previews the
   /// bowtie from it, and `crossfadeStretchEnded` is the one place that commits.
   private(set) var crossfadeStretchDraft: CrossfadeStretchDraft?
+
+  /// Transient cut-point drag state; non-nil only during an active ⌥-drag. Like `crossfadeStretchDraft`
+  /// it is plain @Observable view state, never in the undo stack.
+  var crossfadeCutPointDraft: CrossfadeCutPointDraft?
 
   /// Read facade every downstream reader migrates onto (spec §6). Backed by `audioSelection`.
   var selectedSourceRange: Range<Int>? { audioSelection }
@@ -1497,14 +1521,29 @@ final class EditorModel: ViewModel {
       return handleRemoveSectionKey()
     case .escape:
       return handleEscapeKey()
-    case .nudgeCutInEarlier, .nudgeCutInLater, .nudgeCutOutEarlier, .nudgeCutOutLater:
-      return nudgeSelection(key)
+    case .nudgeCutInEarlier, .nudgeCutInLater, .nudgeCutOutEarlier, .nudgeCutOutLater,
+      .nudgeLeftCutEarlier, .nudgeLeftCutLater, .nudgeRightCutEarlier, .nudgeRightCutLater:
+      return handleNudgeKey(key)
     case .showClipsPanel, .showSuggestionsPanel, .showBothPanels:
       switchRightPanel(key)
     case .returnToLastPlayStart:
       Task { await returnToLastPlayStartTapped() }
     }
     return true
+  }
+
+  /// Routes an arrow-nudge key, split out of `editorKeyDown`'s switch to keep its cyclomatic
+  /// complexity in check: ⌥-less cut-in/out nudges act on the marquee selection, while the ⌥/⌥⇧
+  /// left/right-cut nudges act on the selected crossfade seam.
+  private func handleNudgeKey(_ key: EditorKey) -> Bool {
+    switch key {
+    case .nudgeCutInEarlier, .nudgeCutInLater, .nudgeCutOutEarlier, .nudgeCutOutLater:
+      return nudgeSelection(key)
+    case .nudgeLeftCutEarlier, .nudgeLeftCutLater, .nudgeRightCutEarlier, .nudgeRightCutLater:
+      return nudgeSeamCut(key)
+    default:
+      return true
+    }
   }
 
   /// Esc handling, split out of `editorKeyDown`'s switch to keep its cyclomatic complexity in
@@ -1553,6 +1592,58 @@ final class EditorModel: ViewModel {
     case .nudgeCutOutLater: selectionNudged(.end, byMs: fineTune.nudgeMs)
     default: return false
     }
+    return true
+  }
+
+  /// Nudges one cut of the SELECTED crossfade seam (⌥←/→ = left cut, ⌥⇧←/→ = right cut) by
+  /// `FineTuneModel.nudgeMs`, freezing the fade length and clamping like a drag. Split out of
+  /// `editorKeyDown`'s switch (as one combined case delegating here) to keep its cyclomatic
+  /// complexity in check. Falls through unconsumed (`false`) when no seam is selected, so the key
+  /// still reaches whatever else might handle it. A clamped no-op still consumes the key (a
+  /// selected seam owns the ⌥-arrow).
+  private func nudgeSeamCut(_ key: EditorKey) -> Bool {
+    guard let id = selectedSeamID, let removal = timelineRemovals[id: id] else { return false }
+    let edge: RemovalBoundary
+    let ms: Double
+    switch key {
+    case .nudgeLeftCutEarlier:
+      edge = .lower
+      ms = -fineTune.nudgeMs
+    case .nudgeLeftCutLater:
+      edge = .lower
+      ms = fineTune.nudgeMs
+    case .nudgeRightCutEarlier:
+      edge = .upper
+      ms = -fineTune.nudgeMs
+    case .nudgeRightCutLater:
+      edge = .upper
+      ms = fineTune.nudgeMs
+    default: return false
+    }
+    let delta = Int((ms / 1000 * Double(editPlan.source.sampleRate)).rounded())
+    // Constructible range (see Task 3): a nudge on a removal shorter than the nudge distance could
+    // otherwise invert the `Range` literal and trap. Cap the moving bound against the opposite one;
+    // `clampedRemovalRange` applies the real clamp.
+    let proposed: Range<Int>
+    switch edge {
+    case .lower:
+      let proposedCL = min(removal.removedRange.lowerBound + delta, removal.removedRange.upperBound)
+      proposed = proposedCL..<removal.removedRange.upperBound
+    case .upper:
+      let proposedCR = max(removal.removedRange.upperBound + delta, removal.removedRange.lowerBound)
+      proposed = removal.removedRange.lowerBound..<proposedCR
+    }
+    let clamped = clampedRemovalRange(id: id, proposed: proposed)
+    guard clamped != removal.removedRange else { return true }
+    // Reflows the edited axis under the transport exactly like a cut-point drag, so stop playback
+    // before committing (only when the range is actually moving — `syncEditedTimeline` also stops it
+    // on the resulting document change, but making it explicit here keeps the two commit paths in
+    // sync with `crossfadeCutPointDragBegan`'s intent).
+    stopPlaybackForTimelineEdit()
+    // A nudge moves a cut point and must never rewrite the stored fade duration (Option C:
+    // non-destructive), exactly like a cut-point drag release — `updateRemovalRange` writes only the
+    // range.
+    updateRemovalRange(id: id, removedRange: clamped)
     return true
   }
 
@@ -1768,6 +1859,7 @@ final class EditorModel: ViewModel {
     child.currentCrossfadeLength = { [weak self] removalID in
       self?.timelineRemovals[id: removalID]?.crossfade.lengthSamples
     }
+    wireSliceCutPointCommit(child)
     // Mirror the main lane's begin-time refusal: `updateCrossfade` is frozen mid-export, so the sheet
     // must not preview a stretch its release would discard.
     child.canEditCrossfade = { [weak self] in self?.isExporting == false }
@@ -1821,6 +1913,24 @@ final class EditorModel: ViewModel {
       self?.editSlice = nil
     }
     editSlice = child
+  }
+
+  /// Wires the sheet's cut-point ⌥-drag through the SAME `updateRemovalRange` funnel the main editor
+  /// uses (moved range only — the stored fade is never rewritten, so the move is non-destructive), so
+  /// it is identical on both surfaces and one ⌘Z step; the parent fans the result back into the open
+  /// sheet via `syncEditedTimeline`. The sheet drafts against its own lane and narrows the clamp to the
+  /// slice window, delegating the neighbor/cross-cut/non-empty part to the parent's tested
+  /// `clampedRemovalRange`. Split out of `editSliceTapped` to keep its body within the linter's limit.
+  private func wireSliceCutPointCommit(_ child: EditSliceModel) {
+    child.onMoveCutPoint = { [weak self] removalID, range in
+      self?.updateRemovalRange(id: removalID, removedRange: range)
+    }
+    child.clampCutPointRange = { [weak self] removalID, proposed in
+      self?.clampedRemovalRange(id: removalID, proposed: proposed) ?? proposed
+    }
+    // The sheet's cut-point preview reflows from these STORED removals (not its lane's effective ones)
+    // so the live bowtie matches what `updateRemovalRange`'s commit renders — no jump on release.
+    child.currentStoredRemovals = { [weak self] in self.map { Array($0.timelineRemovals) } ?? [] }
   }
 
   /// Stops whatever playback the transport currently owns, capturing its session SYNCHRONOUSLY so
@@ -1998,6 +2108,53 @@ final class EditorModel: ViewModel {
     }
   }
 
+  /// Commits a cut-point move as one undo step: writes ONLY the moved `removedRange`, never touching
+  /// the stored `crossfade.lengthSamples` (Option C: non-destructive — a cut-point move must not
+  /// rewrite the stored fade duration). The render still clamps the fade to what geometry allows.
+  /// Preserves the removal's `id` (does NOT route through `removeSourceRange`, which mints a new
+  /// UUID). Guarded mid-export like `updateCrossfade`.
+  func updateRemovalRange(id: TimelineRemoval.ID, removedRange: Range<Int>) {
+    guard !isExporting, timelineRemovals[id: id] != nil else { return }
+    mutateDocument { doc in
+      doc.timelineRemovals[id: id]?.removedRange = removedRange
+    }
+  }
+
+  /// Clamps a proposed `removedRange` for a cut-point move so it stays non-empty, never crosses the
+  /// other cut, and never overlaps a NEIGHBOR removal. Reads the COMMITTED, normalized `editedTimeline`
+  /// (unchanged mid-drag). Only the moving edge changes; the other is held. Returns the committed
+  /// range unchanged if the removal isn't found (defensive; unreachable in normal flow).
+  ///
+  /// The moving cut may run all the way to the source edge OR flush against a neighbor removal — this
+  /// clamp reserves NO fade room, neither the removal's own nor the neighbor's (Option C "reach the
+  /// edge": a neighbor removal is just another edge). `EditedTimeline` already clamps every effective
+  /// crossfade to its kept-material handle and allocates seams left-to-right, so crowding a cut toward
+  /// a neighbor simply renders BOTH shared fades shorter (down to hard cuts) while the STORED lengths
+  /// are preserved; any fade reservation here would only wall the cut off with no rendering benefit —
+  /// and a `nextF` reservation is a no-op regardless, since the left seam claims the shared island first.
+  func clampedRemovalRange(
+    id: TimelineRemoval.ID, proposed: Range<Int>
+  ) -> Range<Int> {
+    let timeline = editedTimeline
+    guard let index = timeline.removals.firstIndex(where: { $0.id == id }) else { return proposed }
+    let removals = timeline.removals
+    let cL = removals[index].removedRange.lowerBound
+    let cR = removals[index].removedRange.upperBound
+    let prevUpper = index > 0 ? removals[index - 1].removedRange.upperBound : 0
+    let nextLower =
+      index + 1 < removals.count
+      ? removals[index + 1].removedRange.lowerBound : editPlan.source.durationSamples
+
+    if proposed.lowerBound != cL {
+      // The floor is the previous removal's cut-out (removals stay disjoint); `min` with `cR - 1`
+      // keeps the removal non-empty.
+      let newCL = min(max(proposed.lowerBound, prevUpper), cR - 1)
+      return newCL..<cR
+    }
+    let newCR = max(min(proposed.upperBound, nextLower), cL + 1)
+    return cL..<newCR
+  }
+
   // MARK: - Crossfade stretch (edge drag)
   /// Begins an edge-drag stretch of seam `id`: selects it and seeds the draft with its current
   /// length. A no-op for an unknown removal OR one with no derivable seam (an invalid timeline —
@@ -2117,6 +2274,127 @@ final class EditorModel: ViewModel {
   func crossfadeStretchCancelled() {
     guard let draft = crossfadeStretchDraft else { return }
     crossfadeStretchDraft = nil
+    editedWaveform.timeline = editedTimeline
+    editedWaveform.visibleStartSample = draft.frozenVisibleStart
+    editedWaveform.samplesPerPixel = draft.frozenSamplesPerPixel
+  }
+
+  // MARK: - Crossfade cut-point drag (⌥-drag the outside waveform)
+
+  /// Begins a cut-point drag of seam `id`'s `edge`: selects the seam, stops playback (the edited axis
+  /// reflows under the transport), and seeds the draft with the committed range, the seam's EFFECTIVE
+  /// fade length (pinned), and the viewport geometry + press position frozen for stable drag math. A
+  /// no-op mid-export (the commit would refuse, so the lane must not preview a discarded reflow) or for
+  /// an unknown removal / one with no derivable seam.
+  func crossfadeCutPointDragBegan(
+    id: TimelineRemoval.ID, edge: RemovalBoundary, atX posX: CGFloat
+  ) {
+    guard !isExporting, let removal = timelineRemovals[id: id],
+      let seam = editedWaveform.timeline.seams.first(where: { $0.id == id })
+    else { return }
+    stopPlaybackForTimelineEdit()
+    selectSeam(id)
+    let dragStartEdited = WaveformViewport.xToSample(
+      posX, visibleStartSample: editedWaveform.visibleStartSample,
+      samplesPerPixel: editedWaveform.samplesPerPixel)
+    crossfadeCutPointDraft = CrossfadeCutPointDraft(
+      id: id, edge: edge, committedRange: removal.removedRange, draftedRange: removal.removedRange,
+      frozenCrossfadeLength: seam.crossfadeLength, frozenCommittedTimeline: editedTimeline,
+      dragStartEditedSample: dragStartEdited,
+      frozenVisibleStart: editedWaveform.visibleStartSample,
+      frozenSamplesPerPixel: editedWaveform.samplesPerPixel)
+  }
+
+  /// A cut-point drag to view-x: map x → edited sample against the FROZEN viewport, derive the source
+  /// delta (1:1 with edited samples in the kept outside zone), apply it to the moving bound
+  /// (`committed − delta`), clamp against the committed timeline, hold it as the draft, and reflow the
+  /// preview timeline live. The document stays untouched — commit is on release.
+  func crossfadeCutPointDragged(toX posX: CGFloat) {
+    guard var draft = crossfadeCutPointDraft else { return }
+    let editedNow = WaveformViewport.xToSample(
+      posX, visibleStartSample: draft.frozenVisibleStart,
+      samplesPerPixel: draft.frozenSamplesPerPixel)
+    let delta = editedNow - draft.dragStartEditedSample
+    // Build a CONSTRUCTIBLE range: Swift traps on a `Range` literal whose lowerBound exceeds its
+    // upperBound, and a large drag can push the moving cut past the fixed one. Cap the moving bound
+    // against the opposite bound here (min/max); `clampedRemovalRange` then applies the real
+    // neighbor-aware clamp and the non-empty (`cR-1` / `cL+1`) guarantee.
+    let proposed: Range<Int>
+    switch draft.edge {
+    case .lower:
+      let proposedCL = min(draft.committedRange.lowerBound - delta, draft.committedRange.upperBound)
+      proposed = proposedCL..<draft.committedRange.upperBound
+    case .upper:
+      let proposedCR = max(draft.committedRange.upperBound - delta, draft.committedRange.lowerBound)
+      proposed = draft.committedRange.lowerBound..<proposedCR
+    }
+    let clamped = clampedRemovalRange(id: draft.id, proposed: proposed)
+    draft.draftedRange = clamped
+    crossfadeCutPointDraft = draft
+    // Preview with the removal's STORED length (constant while the draft lives — any document change
+    // invalidates it), NOT the frozen EFFECTIVE length: the commit pins stored, so building the
+    // preview from stored lets `EditedTimeline` clamp it to the live handle exactly as the release
+    // will, keeping preview == commit (no fade-pop on release when a drag grows the binding handle).
+    let storedLength =
+      timelineRemovals[id: draft.id]?.crossfade.lengthSamples ?? draft.frozenCrossfadeLength
+    let preview = previewCutPointTimeline(
+      id: draft.id, removedRange: clamped, length: storedLength)
+    // Re-anchor the viewport so the CROSSFADE stays pinned to its start-of-drag screen position and
+    // the moving side slides under it — the intuitive read: the cut you're editing moves, the fade
+    // holds still. Anchor on the seam's actual edited position (`editedCrossfadeStart`) in the preview
+    // vs. the frozen committed timeline: shifting `visibleStart` by that delta keeps the crossfade
+    // screen-fixed. When the fade renders at its full length this reduces to ΔcL, but near an edge the
+    // effective length shrinks, so ΔcL alone would drift — the seam's own edited position accounts for
+    // both. A right-cut (`.upper`) drag leaves `cL` (and the seam) put → shift 0. One expression
+    // covers both edges; a missing seam (degenerate timeline) falls back to no shift.
+    let previewSeamStart =
+      preview.seams.first(where: { $0.id == draft.id })?.editedCrossfadeStart
+    let frozenSeamStart =
+      draft.frozenCommittedTimeline.seams.first(where: { $0.id == draft.id })?.editedCrossfadeStart
+    let crossfadeShift = (previewSeamStart ?? 0) - (frozenSeamStart ?? 0)
+    editedWaveform.previewCutPoint(
+      timeline: preview, visibleStart: draft.frozenVisibleStart + crossfadeShift)
+  }
+
+  /// The edited timeline as it will render with removal `id`'s range set to `removedRange` and its
+  /// fade pinned to `length` — built exactly the way the commit builds it, so releasing repositions
+  /// nothing. Falls back to the committed timeline for an unknown id.
+  private func previewCutPointTimeline(
+    id: TimelineRemoval.ID, removedRange: Range<Int>, length: Int
+  ) -> EditedTimeline {
+    var removals = Array(timelineRemovals)
+    guard let index = removals.firstIndex(where: { $0.id == id }) else { return editedTimeline }
+    removals[index].removedRange = removedRange
+    removals[index].crossfade.lengthSamples = length
+    return EditedTimeline(
+      sourceDurationSamples: editPlan.source.durationSamples, removals: removals)
+  }
+
+  /// Release: rewind the adapter to the committed timeline (so `syncEditedTimeline`'s equality guard
+  /// can't short-circuit the reconciliation the live preview would otherwise have masked), then commit
+  /// the drafted range once. A drag that netted no range change pushes no entry. A no-op if no drag is
+  /// live or the removal vanished mid-drag.
+  ///
+  /// Commits ONLY the drafted range — moving a cut never rewrites the stored fade duration (Option C:
+  /// non-destructive); `updateRemovalRange` leaves `crossfade.lengthSamples` untouched. The rendered
+  /// fade still clamps to what geometry allows (`EditedTimeline`), so a stored-overlong fade renders
+  /// shorter near an edge and returns in full when the cut is pulled back.
+  func crossfadeCutPointDragEnded() {
+    guard let draft = crossfadeCutPointDraft else { return }
+    crossfadeCutPointDraft = nil
+    editedWaveform.timeline = editedTimeline
+    guard let removal = timelineRemovals[id: draft.id],
+      draft.draftedRange != removal.removedRange
+    else { return }
+    updateRemovalRange(id: draft.id, removedRange: draft.draftedRange)
+  }
+
+  /// Aborts an in-flight cut-point drag without committing: drops the draft and restores the committed
+  /// timeline/viewport the live preview replaced. For a drag torn down before mouse-up (sheet
+  /// dismissed, tab switched, lane removed). A no-op if no drag is live.
+  func crossfadeCutPointDragCancelled() {
+    guard let draft = crossfadeCutPointDraft else { return }
+    crossfadeCutPointDraft = nil
     editedWaveform.timeline = editedTimeline
     editedWaveform.visibleStartSample = draft.frozenVisibleStart
     editedWaveform.samplesPerPixel = draft.frozenSamplesPerPixel
