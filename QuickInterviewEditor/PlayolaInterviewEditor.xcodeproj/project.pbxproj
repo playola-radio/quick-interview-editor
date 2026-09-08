@@ -288,6 +288,12 @@
 		FD54F31D91D655D951DE6242 /* SuggestionNaming.swift in Sources */ = {isa = PBXBuildFile; fileRef = 112E01B5A6A1BF5DC6759841 /* SuggestionNaming.swift */; };
 		FDCA2310513AAE1E26E1387C /* CutSuggesterResolution.swift in Sources */ = {isa = PBXBuildFile; fileRef = AEDFB606BB8225A945F32ECB /* CutSuggesterResolution.swift */; };
 		FF6357F7F6B359C81D9B673D /* ProjectFile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 666CEF372F6DCEFFB5275DE0 /* ProjectFile.swift */; };
+		B61400000000000000000001 /* SuggestionSettingsModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61400000000000000000001 /* SuggestionSettingsModel.swift */; };
+		B61400000000000000000002 /* SuggestionSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61400000000000000000002 /* SuggestionSettingsView.swift */; };
+		B61400000000000000000003 /* NamingTemplateModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61400000000000000000003 /* NamingTemplateModel.swift */; };
+		B61400000000000000000004 /* NamingTemplateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61400000000000000000004 /* NamingTemplateView.swift */; };
+		B61400000000000000000005 /* SuggestionSettingsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61400000000000000000005 /* SuggestionSettingsTests.swift */; };
+		B61400000000000000000006 /* NamingTemplateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61400000000000000000006 /* NamingTemplateTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -578,6 +584,12 @@
 		FE2F8D7555D9E16BB2C72B39 /* WordRangePredicatesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WordRangePredicatesTests.swift; sourceTree = "<group>"; };
 		FEB88CCE607D4755B2D1CF5A /* EditedWaveformAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditedWaveformAdapter.swift; sourceTree = "<group>"; };
 		FFEF0E04EF6DFBEA0BC9BD9D /* SeamCutPointHandleLayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeamCutPointHandleLayer.swift; sourceTree = "<group>"; };
+		A61400000000000000000001 /* SuggestionSettingsModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickInterviewEditor/Views/Pages/SuggestionSettings/SuggestionSettingsModel.swift; sourceTree = SOURCE_ROOT; };
+		A61400000000000000000002 /* SuggestionSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickInterviewEditor/Views/Pages/SuggestionSettings/SuggestionSettingsView.swift; sourceTree = SOURCE_ROOT; };
+		A61400000000000000000003 /* NamingTemplateModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickInterviewEditor/Views/Pages/SuggestionSettings/NamingTemplateModel.swift; sourceTree = SOURCE_ROOT; };
+		A61400000000000000000004 /* NamingTemplateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickInterviewEditor/Views/Pages/SuggestionSettings/NamingTemplateView.swift; sourceTree = SOURCE_ROOT; };
+		A61400000000000000000005 /* SuggestionSettingsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickInterviewEditorTests/Views/Pages/SuggestionSettings/SuggestionSettingsTests.swift; sourceTree = SOURCE_ROOT; };
+		A61400000000000000000006 /* NamingTemplateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickInterviewEditorTests/Views/Pages/SuggestionSettings/NamingTemplateTests.swift; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -643,6 +655,8 @@
 			children = (
 				3CE7BB4374ECFBE9EB999CAB /* ClipBoundarySettingsModelTests.swift */,
 				2F1A62119CA8777196BE29E8 /* SettingsModelTests.swift */,
+				A61400000000000000000006 /* NamingTemplateTests.swift */,
+				A61400000000000000000005 /* SuggestionSettingsTests.swift */,
 			);
 			path = Settings;
 			sourceTree = "<group>";
@@ -1186,6 +1200,10 @@
 				DD4AA9D2064FA600DB5C7E15 /* ClipBoundarySettingsModel.swift */,
 				1F258A3C5942E0CA6A969108 /* ClipBoundarySettingsView.swift */,
 				AC39B191FE84B6CF577830EC /* SettingsModel.swift */,
+				A61400000000000000000004 /* NamingTemplateView.swift */,
+				A61400000000000000000003 /* NamingTemplateModel.swift */,
+				A61400000000000000000002 /* SuggestionSettingsView.swift */,
+				A61400000000000000000001 /* SuggestionSettingsModel.swift */,
 				C002864903B4CD94592A20BA /* SettingsView.swift */,
 			);
 			path = Settings;
@@ -1348,6 +1366,10 @@
 				C62F1F0B78F82F4E056CA38D /* ClipBoundaryOffset.swift in Sources */,
 				BAD10C17AB7194E2C72E6342 /* ClipBoundaryOffsetKeys.swift in Sources */,
 				4D9DB274FCDD6151381DA5B6 /* ClipBoundarySettingsModel.swift in Sources */,
+				B61400000000000000000004 /* NamingTemplateView.swift in Sources */,
+				B61400000000000000000003 /* NamingTemplateModel.swift in Sources */,
+				B61400000000000000000002 /* SuggestionSettingsView.swift in Sources */,
+				B61400000000000000000001 /* SuggestionSettingsModel.swift in Sources */,
 				6666C742658024C76CE5B701 /* ClipBoundarySettingsView.swift in Sources */,
 				922506FA51BE2B16C0453D63 /* ClipContainerLayoutManager.swift in Sources */,
 				2F9C119F68EE76435812531E /* CrossfadeCutPointDraft.swift in Sources */,
@@ -1484,6 +1506,8 @@
 				2416F8D93AE0F81661636AA9 /* CanonicalAudioStoreTests.swift in Sources */,
 				F5373A0F137049A1118CFCBF /* ClipBoundaryOffsetTests.swift in Sources */,
 				2EE162E90AFA66571839F26E /* ClipBoundarySettingsModelTests.swift in Sources */,
+				B61400000000000000000006 /* NamingTemplateTests.swift in Sources */,
+				B61400000000000000000005 /* SuggestionSettingsTests.swift in Sources */,
 				B460D374BF10B225D98287A6 /* CrossfadeRendererTests.swift in Sources */,
 				2AB5719F9A60E584F4DE1185 /* CutSuggestClientTests.swift in Sources */,
 				A61200000000000000000001 /* SuggestionRecoveryClientTests.swift in Sources */,

@@ -14,6 +14,8 @@ struct CutSuggestionsPageView: View {
       }
       .disabled(model.suggestDisabled)
 
+      Button(model.configureSuggestionsLabel) { model.configureSuggestionsTapped() }
+
       if model.showsSuggestionsToggle {
         Toggle(model.showSuggestionsToggleLabel, isOn: $model.showsSuggestionBands)
       }
@@ -88,6 +90,9 @@ struct CutSuggestionsPageView: View {
       Button(model.run.cancelButtonTitle, role: .cancel) { model.run.cancelReplacementTapped() }
     } message: {
       Text(model.run.replaceMessage)
+    }
+    .sheet(item: $model.suggestionSettings) { settings in
+      SuggestionSettingsView(model: settings)
     }
     .sheet(item: $model.keyEntry) { entry in
       SettingsView(model: entry)

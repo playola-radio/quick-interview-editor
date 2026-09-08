@@ -107,6 +107,7 @@ final class CutSuggestionsPageModel: ViewModel {
   }
   /// The API-key entry sheet, presented when onboarding or when the user taps to add a key.
   var keyEntry: SettingsModel?
+  var suggestionSettings: SuggestionSettingsModel?
   /// Whether pending suggestions are drawn as faint outline bands in the transcript. The ranked
   /// list in this panel is unaffected — this only mutes the transcript overlay so the user can
   /// hide the proposals while keeping the list. Session-local: defaults on and resets per load.
@@ -114,6 +115,7 @@ final class CutSuggestionsPageModel: ViewModel {
   private var editingTitleID: CutSuggestion.ID?
 
   // MARK: - Display Text
+  let configureSuggestionsLabel = "Configure Suggestions…"
   let orphanTitle = "Recover an unfinished search"
   let orphanMessage = "Choose a saved search for this transcript, then resume or discard it."
   let startingMessage = "Analyzing transcript…"
@@ -299,6 +301,14 @@ final class CutSuggestionsPageModel: ViewModel {
         self?.refreshKeyState()
         self?.keyEntry = nil
       })
+    }
+  }
+
+  func configureSuggestionsTapped() {
+    suggestionSettings = withDependencies(from: self) {
+      SuggestionSettingsModel(
+        onSaved: { [weak self] in self?.suggestionSettings = nil },
+        onCancelled: { [weak self] in self?.suggestionSettings = nil })
     }
   }
 
