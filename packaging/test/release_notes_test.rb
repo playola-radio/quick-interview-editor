@@ -6,6 +6,7 @@ require "tmpdir"
 require_relative "../release_notes"
 
 class ReleaseNotesTest < Minitest::Test
+  APPCAST_SCRIPT = File.expand_path("../appcast.rb", __dir__)
   SCRIPT = File.expand_path("../release_notes.rb", __dir__)
 
   CHANGELOG = <<~MARKDOWN
@@ -156,6 +157,7 @@ class ReleaseNotesTest < Minitest::Test
     original_items = original.elements.to_a("rss/channel/item")
     original_target = original_items.fetch(0)
     original_other = original_items.fetch(1)
+    original_child_order = original_target.elements.to_a.map(&:expanded_name)
     notes = "- Audio & export <work> safely.\n- A CDATA edge: ]]>"
 
     output = ReleaseNotes.backfill_appcast(APPCAST, "2.0.0", notes)
@@ -169,6 +171,7 @@ class ReleaseNotesTest < Minitest::Test
     assert_equal original_target.elements["title"].text, target.elements["title"].text
     assert_equal original_target.elements["pubDate"].text, target.elements["pubDate"].text
     assert_equal original_target.elements["sparkle:version"].text, target.elements["sparkle:version"].text
+    assert_equal original_child_order, target.elements.to_a.map(&:expanded_name)
     assert_equal element_attributes(original_target.elements["enclosure"]),
       element_attributes(target.elements["enclosure"])
     assert_equal original_other.elements["description"].text, other.elements["description"].text
@@ -259,6 +262,44 @@ class ReleaseNotesTest < Minitest::Test
     assert_match(/usage:/, stderr)
   end
 
+  def test_appcast_script_embeds_the_required_markdown_notes
+    Dir.mktmpdir do |directory|
+      dmg = File.join(directory, "PlayolaInterviewEditor-2.0.1-5.dmg")
+      notes_file = File.join(directory, "notes.md")
+      signer = File.join(directory, "sign_update")
+      plist_buddy = File.join(directory, "plist_buddy")
+      File.write(dmg, "disk image")
+      File.write(notes_file, "- Visible & useful.\n")
+      write_executable(signer, <<~SH)
+        #!/bin/sh
+        printf '%s\n' 'sparkle:edSignature="test-signature" length="10"'
+      SH
+      write_executable(plist_buddy, <<~SH)
+        #!/bin/sh
+        case "$2" in
+          "Print :CFBundleVersion") printf '5\n' ;;
+          "Print :CFBundleShortVersionString") printf '2.0.1\n' ;;
+          *) exit 1 ;;
+        esac
+      SH
+      url = "https://example.com/#{File.basename(dmg)}"
+
+      _stdout, stderr, status = Open3.capture3(
+        { "PLIST_BUDDY" => plist_buddy },
+        RbConfig.ruby, APPCAST_SCRIPT, dmg, url, signer, notes_file
+      )
+
+      assert status.success?, stderr
+      appcast = REXML::Document.new(File.read(File.join(directory, "appcast.xml")))
+      item = appcast.elements["rss/channel/item"]
+      assert_equal "5", item.elements["sparkle:version"].text
+      assert_equal "2.0.1", item.elements["sparkle:shortVersionString"].text
+      assert_equal "- Visible & useful.\n", item.elements["description"].text
+      assert_equal "markdown", item.elements["description"].attribute("sparkle:format").value
+      assert_equal "test-signature", item.elements["enclosure"].attribute("sparkle:edSignature").value
+    end
+  end
+
   private
 
   def element_attributes(element)
@@ -267,5 +308,10 @@ class ReleaseNotesTest < Minitest::Test
 
   def run_cli(*arguments)
     Open3.capture3(RbConfig.ruby, SCRIPT, *arguments)
+  end
+
+  def write_executable(path, contents)
+    File.write(path, contents)
+    File.chmod(0o755, path)
   end
 end

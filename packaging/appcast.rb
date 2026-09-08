@@ -18,13 +18,15 @@ abort "notes file not found: #{notes_file}" unless File.file?(notes_file)
 app = File.join(File.dirname(dmg), "PlayolaInterviewEditor.app")
 # Read plist keys via argv (no shell) so an app path with spaces/quotes/metacharacters
 # can't break or inject — matches the Open3 handling used for sign_update below.
-def plist(app, key)
-  out, _ = Open3.capture2("/usr/libexec/PlistBuddy", "-c", "Print :#{key}",
-                          File.join(app, "Contents", "Info.plist"))
+def plist(plist_buddy, app, key)
+  out, status = Open3.capture2(plist_buddy, "-c", "Print :#{key}",
+                               File.join(app, "Contents", "Info.plist"))
+  abort "cannot read #{key} from built app" unless status.success?
   out.strip
 end
-version    = plist(app, "CFBundleVersion")            # sparkle:version (integer)
-short      = plist(app, "CFBundleShortVersionString") # display
+plist_buddy = ENV.fetch("PLIST_BUDDY", "/usr/libexec/PlistBuddy")
+version    = plist(plist_buddy, app, "CFBundleVersion")            # sparkle:version (integer)
+short      = plist(plist_buddy, app, "CFBundleShortVersionString") # display
 min_os     = "15.0.0"                                # 3-component, Sparkle requirement
 notes      = File.read(notes_file)
 abort "release notes are empty: #{notes_file}" if notes.strip.empty?

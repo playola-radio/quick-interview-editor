@@ -40,10 +40,12 @@ module ReleaseNotes
   def self.set_description(item, notes)
     raise Error, "release notes are empty" if notes.strip.empty?
 
-    item.delete_element("description") while item.elements["description"]
-    description = item.add_element("description")
+    descriptions = item.elements.to_a("description")
+    description = descriptions.shift || item.add_element("description")
+    descriptions.each { |duplicate| item.delete(duplicate) }
+    description.children.to_a.each { |child| description.delete(child) }
     description.add_attribute("sparkle:format", "markdown")
-    description.text = notes
+    description.add_text(notes)
     description
   end
 
