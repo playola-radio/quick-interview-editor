@@ -1,4 +1,4 @@
-"""Discovery for configured imaging and custom suggestion types.
+"""Discovery for broad Intros, configured imaging, and custom suggestion types.
 
 Unlike the tuned cutter products, configured types are open strings.  This
 module keeps their provider input and returned records deliberately plain so
@@ -13,7 +13,7 @@ from collections.abc import Callable, Mapping, Sequence
 
 from .llm import LLMClient
 from .models import Sentence
-from .suggestion_config import CONFIGURED_DISCOVERY_VERSION, IMAGING_IDS
+from .suggestion_config import BROAD_INTRO_DISCOVERY_VERSION, CONFIGURED_DISCOVERY_VERSION, IMAGING_IDS
 
 
 class DiscoveryError(ValueError):
@@ -90,32 +90,45 @@ def _prompt(sentences: list[Sentence], types: dict[str, str], start: int, end: i
         if any(type_id in IMAGING_IDS for type_id in types) else ""
     )
     take_rule = ""
+    broad_intro = discovery_prompt_version == BROAD_INTRO_DISCOVERY_VERSION and 'intro' in types
+    repeated_takes = discovery_prompt_version in (CONFIGURED_DISCOVERY_VERSION, BROAD_INTRO_DISCOVERY_VERSION)
     nested_rule = "A complete usable ID nested in a longer promo may be returned alongside the promo."
-    if discovery_prompt_version == CONFIGURED_DISCOVERY_VERSION and imaging_rule:
+    if repeated_takes and (imaging_rule or broad_intro):
         take_rule = (
             "Each independently complete performance gets its own clip, including consecutive identical takes. "
             "End the first take before the next complete performance begins; never combine repetitions merely "
             "because the words, speaker, station, or label match.\n"
         )
-        if end - start >= 3:
+        if imaging_rule and end - start >= 3:
             take_rule += (
                 f'For example, if [{start}] says "You are listening to Example FM", [{start + 1}] says '
                 f'"Your music station", and [{start + 2}] and [{start + 3}] repeat those two lines as a second '
                 f'performance, return two clips: {start}–{start + 1} and {start + 2}–{start + 3}, not {start}–{start + 3}.\n'
             )
+    if repeated_takes and imaging_rule:
         nested_rule = (
             "Return BOTH every complete independently usable ID nested in a longer promo AND the FULL continuous promo, "
             "including its continuation after the ID. Do not omit the independent ID because another clip already covers "
             "its sentences. A nested ID does not end or split the surrounding promo. Separate repeated performances, "
             "not the individual sentences or nested liners inside one continuous longer take."
         )
-    return f"""Find configured audio-image and custom deliverables in this transcript window.
+    heading = "Find configured audio-image and custom deliverables in this transcript window."
+    intro_rule = ""
+    if broad_intro:
+        heading = "Find configured Intro, audio-image, and custom deliverables in this transcript window."
+        intro_rule = (
+            "For Intro, find meaningful commentary about a song or artist: its history, influence, writing, "
+            "performance, or reception. No immediate musical handoff, named recording, or exact song title is required. "
+            "Preserve complete useful thoughts; reject isolated names, acknowledgments, and incidental mentions. "
+            "The configured guidelines control which commentary is useful for the requested Intro type.\n"
+        )
+    return f"""{heading}
 
 Configured types and guidelines:
 {type_lines}
 
 Return only complete, independently usable takes. Find exhaustive distinct repeats; there is no quota.
-{take_rule}Do not invent text. {imaging_rule}{nested_rule}
+{intro_rule}{take_rule}Do not invent text. {imaging_rule}{nested_rule}
 Use global sentence coordinates exactly as shown.
 
 Transcript window ({start} through {end}):

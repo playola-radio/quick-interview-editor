@@ -102,17 +102,20 @@ struct SuggestionConfigurationTests {
       ])
   }
 
-  @Test func defaultGuidelinesAndFieldInstructionsArePinned() {
+  @Test func defaultGuidelinesArePinned() {
     let configuration = SuggestionDefaults.configuration
     let byID = Dictionary(uniqueKeysWithValues: configuration.types.map { ($0.id, $0) })
-    let fieldsByID = Dictionary(uniqueKeysWithValues: configuration.fields.map { ($0.id, $0) })
 
     expectNoDifference(
       byID["spotlight"]?.guidelines,
       "one self-contained story or anecdote (~40-120s)")
     expectNoDifference(
       byID["intro"]?.guidelines,
-      "sets up ONE named song and ends on the handoff (~15-45s)")
+      "a complete, independently usable thought about a song or an artist, including songwriting, "
+        + "history, influence, performance, or reception. A direct lead-in to music is welcome but not "
+        + "required; artist-only commentary can qualify without a named song. Keep the context needed to "
+        + "understand the thought. Exclude isolated names, acknowledgments, and incidental mentions. Prefer "
+        + "Intro naming when the same passage also fits Spotlight.")
     expectNoDifference(
       byID["image-id"]?.guidelines,
       "a complete spoken artist/station identification or station-branding liner, including listening-to "
@@ -134,18 +137,26 @@ struct SuggestionConfigurationTests {
       "directly promotes a website, subscription, event/tour, release, or other listener action. A passing "
         + "factual mention within a story is not automatically promotional imaging."
     )
+  }
+
+  @Test func defaultFieldInstructionsArePinned() {
+    let fieldsByID = Dictionary(
+      uniqueKeysWithValues: SuggestionDefaults.fields.map { ($0.id, $0) })
     expectNoDifference(
       fieldsByID["song-title"]?.instructions,
-      "Identify the title of the recording this clip introduces. Use the candidate and relevant context elsewhere "
-        + "in the source transcript. Distinguish the introduced recording from songs mentioned as background. "
-        + "Return missing when the text does not establish the title; do not invent it."
+      "Identify the principal song discussed or introduced in this clip. Use the candidate and relevant "
+        + "context elsewhere in the source transcript. Distinguish the main song from incidental background "
+        + "mentions. A handoff to music is not required. Return missing for artist-only commentary or when "
+        + "the text does not establish a song title; do not invent it."
     )
     expectNoDifference(
       fieldsByID["artist-name"]?.instructions,
-      "Identify the performer singing the introduced recording. Do not substitute the station DJ, the speaker, "
-        + "the songwriter, or the first musician mentioned. For explicit collaborations, include the established "
-        + "performers. Use speaker identity elsewhere in the transcript only when the text establishes that this is "
-        + "their performance. Return missing when the performer cannot be established."
+      "Identify the performer of the principal song discussed or introduced. For artist-only "
+        + "commentary, identify the artist being discussed. Do not substitute the station DJ, an unrelated "
+        + "speaker, the songwriter of someone else's recording, or the first musician mentioned. For "
+        + "explicit collaborations, include the established performers. Use speaker identity elsewhere in "
+        + "the transcript only when the text establishes that they are the relevant artist. Return missing "
+        + "when the artist cannot be established."
     )
     expectNoDifference(
       fieldsByID["descriptive-title"]?.instructions,
@@ -457,7 +468,7 @@ struct SuggestionConfigurationTests {
       try JSONDecoder().decode(ProductType.self, from: Data(#""future-v2""#.utf8)), custom)
   }
 
-  @Test func bundledContractFixtureDecodesToTheDefaults() throws {
+  @Test func bundledHistoricalContractUpgradesToCurrentDefaults() throws {
     let url = try #require(
       Bundle(for: FixtureBundle.self).url(
         forResource: "suggestion-contract-v2", withExtension: "json"))
@@ -466,7 +477,9 @@ struct SuggestionConfigurationTests {
     }
     let fixture = try JSONDecoder().decode(Contract.self, from: Data(contentsOf: url))
 
-    expectNoDifference(fixture.configuration, SuggestionDefaults.configuration)
+    expectNoDifference(
+      SuggestionDefaults.upgradingLegacyIntroGuidance(in: fixture.configuration),
+      SuggestionDefaults.configuration)
   }
 
   private func validConfiguration() -> SuggestionConfiguration {

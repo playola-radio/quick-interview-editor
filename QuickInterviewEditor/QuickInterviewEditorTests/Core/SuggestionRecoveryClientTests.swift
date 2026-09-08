@@ -120,6 +120,13 @@ extension RecoveryFixture {
     let python = try JSONDecoder().decode(
       Python.self, from: suggestionContractFixture("suggestion-recovery-python"))
     var fixture = try Self()
+    struct HistoricalRequest: Decodable { var configuration: SuggestionConfiguration }
+    fixture.snapshot.configuration =
+      try JSONDecoder().decode(
+        HistoricalRequest.self, from: python.originalRequest
+      ).configuration
+    fixture.snapshot.configurationHash = try SuggestionRecoveryArchive.configurationHash(
+      fixture.snapshot.configuration)
     fixture.snapshot.runID = Fixtures.uuid(1)
     fixture.snapshot.model = "fixture-model"
     fixture.snapshot.discoveryPromptVersion = "configured-v1"

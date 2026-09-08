@@ -223,7 +223,7 @@ struct SuggestionRunModelTests {
 
   @Test func freshRunUsesConfiguredDiscoveryVersion() {
     let model = SuggestionRunModel(editPlan: Fixtures.editPlan(), sourceFingerprint: "fresh")
-    expectNoDifference(model.options.promptVersion, "configured-v2")
+    expectNoDifference(model.options.promptVersion, "configured-v3")
   }
 
   @Test func confirmationCancelPreservesTheExactDocumentWithoutPreparing() async {
@@ -355,7 +355,7 @@ struct SuggestionRunModelTests {
         await task.value
         expectNoDifference(model.message, "One field request failed.")
         let reopened = fixture.model()
-        expectNoDifference(reopened.options.promptVersion, "configured-v2")
+        expectNoDifference(reopened.options.promptVersion, "configured-v3")
         let retry = Task { await reopened.resumeTapped() }
         await fixture.waitForRequests(2)
         expectNoDifference(fixture.state.value.prepared.count, 1)

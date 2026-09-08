@@ -32,8 +32,8 @@ struct CutSuggestionsPageTests {
 
   @Test func freshPageUsesConfiguredDiscoveryWhileLegacyOptionsStayPinned() {
     let page = CutSuggestionsPageModel(editPlan: Fixtures.editPlan(), sourceFingerprint: "fresh")
-    expectNoDifference(page.options.promptVersion, "configured-v2")
-    expectNoDifference(page.run.options.promptVersion, "configured-v2")
+    expectNoDifference(page.options.promptVersion, "configured-v3")
+    expectNoDifference(page.run.options.promptVersion, "configured-v3")
     expectNoDifference(CutSuggestOptions().promptVersion, "v2")
   }
 

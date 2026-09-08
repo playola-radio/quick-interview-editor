@@ -4,6 +4,8 @@
 
 **Status:** Initial implementation completed on 2026-09-07. The user's 2026-09-08 correction supersedes discovery-time numbering and inline counter controls: see [acceptance-time numbering](2026-09-08-acceptance-numbering-design.md) and the [configuration layout plan](../plans/2026-09-08-numbering-in-configuration.md). The original design decisions below remain as historical context where superseded.
 
+**Intro definition update (2026-09-08):** [Broader Intro plan](../plans/2026-09-08-broader-intros.md) supersedes the handoff-only definition. Complete song or artist commentary qualifies; Intro takes naming priority over substantially duplicate Spotlights. Names remain editable.
+
 **Working branch:** `briankeane/suggestion-types`
 
 **Baseline:** `d38c9d8ddfb14f0ca477ea23c6a559584475e5d9`

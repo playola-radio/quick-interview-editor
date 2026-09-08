@@ -6,11 +6,14 @@ from dataclasses import asdict
 import math
 import uuid
 
-from .configured_discovery import _candidate_id, discover_configured
+from .configured_discovery import _candidate_id, _overlap, _span_length, discover_configured
 from .cutter import suggest_cuts
 from .extraction import parse_extraction_response, plan_extraction_batches
 from .run_journal import JournalRecoveryError, JournalStorageError, RunJournal, canonical_json, digest
-from .suggestion_config import CONFIGURED_DISCOVERY_VERSION, split_discovery_types, validate_configuration
+from .suggestion_config import (
+    BROAD_INTRO_DISCOVERY_VERSION, CONFIGURED_DISCOVERY_VERSION,
+    split_discovery_types, validate_configuration,
+)
 from .transcript import sentences_from_units
 
 _OPTION_KEYS = ('model', 'sample_rate', 'stage1_window', 'stage1_step',
@@ -115,10 +118,13 @@ def run_configured_suggest(request: dict, llm, journal: RunJournal, emit) -> dic
         checkpoint('discovering')
         return result
 
-    tuned, generic = split_discovery_types(configuration)
+    broad_intros = options['discovery_prompt_version'] == BROAD_INTRO_DISCOVERY_VERSION
+    tuned, generic = split_discovery_types(configuration, discovery_prompt_version=options['discovery_prompt_version'])
     try:
         if tuned:
-            result = suggest_cuts(sentences, llm, configuration=configuration,
+            # Keep captured requests immutable and the tuned Spotlight implementation unchanged.
+            tuned_configuration = {**configuration, 'types': tuned} if broad_intros else configuration
+            result = suggest_cuts(sentences, llm, configuration=tuned_configuration,
                                   refine_intros=options['discovery_prompt_version'] == CONFIGURED_DISCOVERY_VERSION,
                                   sample_rate=options['sample_rate'], window=options['stage1_window'],
                                   step=options['stage1_step'], progress=progress,
@@ -142,6 +148,11 @@ def run_configured_suggest(request: dict, llm, journal: RunJournal, emit) -> dic
         checkpoint('needs_retry')
         raise
     discovery_complete = True
+    if broad_intros:
+        intros = [item for item in suggestions if item['product_type'] == 'intro']
+        suggestions = [item for item in suggestions
+                       if item['product_type'] != 'spotlight'
+                       or not any(_overlap(item, intro) / _span_length(item) >= 0.8 for intro in intros)]
     suggestions.sort(key=lambda c: (c['start_index'], c['end_index'], c['product_type']))
     for candidate in suggestions:
         candidate['fields'] = recovered_fields.get(candidate['candidate_id'], {}).copy()

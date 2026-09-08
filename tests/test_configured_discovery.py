@@ -288,3 +288,26 @@ def test_custom_only_new_version_prompt_is_byte_identical_to_old():
     from cut_suggester.configured_discovery import _prompt
     types = {'custom-voice': 'URLs and stories are required.'}
     assert _prompt(_sentences(), types, 0, 3, discovery_prompt_version='configured-v2') == _prompt(_sentences(), types, 0, 3)
+
+
+def test_v3_intro_prompt_describes_broad_complete_thoughts_with_configured_guidelines():
+    from cut_suggester.configured_discovery import _prompt
+    guidelines = 'Focus on how the artist developed their writing practice.'
+    prompt = _prompt(_sentences(), {'intro': guidelines}, 0, 3, discovery_prompt_version='configured-v3')
+    assert f'- intro: {guidelines}' in prompt
+    assert 'song or artist' in prompt
+    assert 'No immediate musical handoff' in prompt
+    assert 'exact song title' in prompt
+    assert 'isolated names' in prompt
+    assert 'Each independently complete performance' in prompt
+    assert 'configured guidelines control' in prompt
+
+
+@pytest.mark.parametrize('types', [
+    {'image-id': 'Complete IDs.', 'image-promo': 'Full promos.'},
+    {'custom-voice': 'URLs and stories are required.'},
+])
+def test_v3_without_intro_keeps_v2_prompt_byte_identical(types):
+    from cut_suggester.configured_discovery import _prompt
+    assert _prompt(_sentences(), types, 110, 219, discovery_prompt_version='configured-v3') == _prompt(
+        _sentences(), types, 110, 219, discovery_prompt_version='configured-v2')

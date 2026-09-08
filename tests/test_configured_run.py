@@ -367,3 +367,110 @@ def test_all_types_custom_fixture_failed_naming_reopen_and_final_transport(tmp_p
     assert all(c['fields'] == preserved[c['candidate_id']] for c in result['suggestions'] if c['candidate_id'] in preserved)
     assert result == json.loads(Path('tests/fixtures/suggestion-integration-response-v2.json').read_text())
     assert integration_request() == json.loads(Path('tests/fixtures/suggestion-integration-request-v2.json').read_text())
+
+
+def broad_intro_request(texts, *, include_spotlight=False, fields=False):
+    req = request(len(texts), fields=False, tuned=True)
+    req['options']['discovery_prompt_version'] = 'configured-v3'
+    intro = req['configuration']['types'][0]
+    intro['guidelines'] = 'Keep complete commentary about the writing or influence of a song or artist.'
+    if fields:
+        intro['template'] = [dict(kind='field', value='song-title'),
+                             dict(kind='literal', value=', '), dict(kind='field', value='artist-name')]
+    if include_spotlight:
+        fixture = json.loads(Path('tests/fixtures/suggestion-contract-v2.json').read_text())
+        req['configuration']['types'].extend(t for t in fixture['configuration']['types'] if t['id'] == 'spotlight')
+    for unit, text in zip(req['transcript_units'], texts):
+        unit['text'] = text
+    return req
+
+
+class BroadIntroProvider(Provider):
+    """Scripted editorial decisions exercise real routing, filtering, and journaling."""
+    def __init__(self, intros, spotlights=()):
+        super().__init__()
+        self.intros, self.spotlights = intros, spotlights
+
+    def complete(self, prompt, *, purpose=''):
+        if purpose in ('classify', 'configured-discovery'):
+            self.calls.append((purpose, prompt))
+            kind, spans = ('intro', self.intros) if purpose == 'configured-discovery' else ('spotlight', self.spotlights)
+            return LLMResponse(json.dumps({'clips': [dict(type=kind, start=a, end=b,
+                                                          label=f'Complete {kind} thought', song=None)
+                                                     for a, b in spans]}))
+        return super().complete(prompt, purpose=purpose)
+
+
+@pytest.mark.parametrize('texts', [
+    ['I wrote Paper Lanterns after losing my childhood home.',
+     'The rising melody carries the hope I found when the neighbors rebuilt it.'],
+    ['River Vale changed how I approach writing.',
+     'Her quiet phrasing taught me to let the listener fill in the story.'],
+])
+def test_v3_song_and_artist_commentary_without_handoff_survives_missing_fields_and_replays(tmp_path, texts):
+    req = broad_intro_request(texts, fields=True)
+    captured = copy.deepcopy(req)
+    provider = BroadIntroProvider([(0, 1)])
+    result = run_configured_suggest(req, provider, journal(tmp_path, req), lambda e: None)
+    assert result['status'] == 'ready'
+    assert [(c['product_type'], c['start_index'], c['end_index']) for c in result['suggestions']] == [('intro', 0, 1)]
+    assert result['suggestions'][0]['fields'] == {'song-title': None, 'artist-name': None}
+    assert result['suggestions'][0]['label'] == 'Complete intro thought'
+    assert [stage for stage, _ in provider.calls[:1]] == ['configured-discovery']
+    assert len(provider.calls) == 2 and provider.calls[-1][0].startswith('extract:')
+    assert req == captured
+    req['mode'] = 'resume'
+    retry = BroadIntroProvider([(0, 1)])
+    resumed = run_configured_suggest(req, retry, journal(tmp_path, req), lambda e: None)
+    assert retry.calls == []
+    assert resumed['suggestions'] == result['suggestions']
+    assert resumed['status'] == 'ready'
+
+
+@pytest.mark.parametrize('intros,spotlights,retained', [
+    ([(0, 9)], [(0, 9)], []),
+    ([(0, 7)], [(0, 9)], []),  # Exactly 80% of the Spotlight is covered.
+    ([(0, 6)], [(0, 9)], [(0, 9)]),
+    ([(0, 9)], [(0, 19)], [(0, 19)]),  # Retain the whole longer story.
+    ([(0, 9)], [(20, 29)], [(20, 29)]),
+])
+def test_v3_intro_priority_uses_coverage_of_spotlight_and_preserves_longer_stories(tmp_path, intros, spotlights, retained):
+    req = broad_intro_request(['A complete thought about the artist.'] * 30, include_spotlight=True)
+    provider = BroadIntroProvider(intros, spotlights)
+    result = run_configured_suggest(req, provider, journal(tmp_path, req), lambda e: None)
+    assert [(c['start_index'], c['end_index']) for c in result['suggestions'] if c['product_type'] == 'intro'] == intros
+    assert [(c['start_index'], c['end_index']) for c in result['suggestions'] if c['product_type'] == 'spotlight'] == retained
+    prompts = dict(provider.calls)
+    assert '- ARTIST SPOTLIGHT' in prompts['classify']
+    assert '- INTRO' not in prompts['classify'] and 'For an intro' not in prompts['classify']
+    assert req['configuration']['types'][0]['guidelines'] in prompts['configured-discovery']
+    assert not any(stage.startswith('refine-intros:') for stage, _ in provider.calls)
+
+
+@pytest.mark.parametrize('sentence_count,spans', [
+    (2, [(0, 0), (1, 1)]),  # Adjacent identical short complete performances.
+    (40, [(0, 39)]),  # Eighty-second commentary exceeds the legacy Intro ceiling.
+])
+def test_v3_keeps_short_complete_repeats_and_commentary_over_75_seconds(tmp_path, sentence_count, spans):
+    req = broad_intro_request(['Her phrasing taught me to leave space in the melody.'] * sentence_count)
+    provider = BroadIntroProvider(spans)
+    result = run_configured_suggest(req, provider, journal(tmp_path, req), lambda e: None)
+    assert [(c['start_index'], c['end_index']) for c in result['suggestions']] == spans
+    assert [stage for stage, _ in provider.calls] == ['configured-discovery']
+
+
+def test_v3_saved_broad_discovery_survives_checkpoint_interruption(tmp_path, monkeypatch):
+    req = broad_intro_request(['River Vale taught me how to write a melody.'], fields=True)
+    j = journal(tmp_path, req)
+    def interrupted(**kwargs):
+        raise JournalStorageError('interrupted after saved broad discovery')
+    monkeypatch.setattr(j, 'write_checkpoint', interrupted)
+    with pytest.raises(JournalStorageError):
+        run_configured_suggest(req, BroadIntroProvider([(0, 0)]), j, lambda e: None)
+    assert len(j.completed_request_keys) == 1
+    req['mode'] = 'resume'
+    retry = BroadIntroProvider([(0, 0)])
+    result = run_configured_suggest(req, retry, journal(tmp_path, req), lambda e: None)
+    assert result['status'] == 'ready'
+    assert len(result['suggestions']) == 1
+    assert len(retry.calls) == 1 and retry.calls[0][0].startswith('extract:')

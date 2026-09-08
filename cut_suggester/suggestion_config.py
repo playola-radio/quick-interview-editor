@@ -1,8 +1,8 @@
 """Validate the shared suggestion-configuration wire format and route discovery.
 
-The configurable set is deliberately open-ended.  Only the two exact historic
-IDs use the tuned paragraph pass; all other IDs, including lookalike names, are
-left for configured discovery.
+The configurable set is deliberately open-ended. Historic requests route the
+two exact built-in IDs through the tuned paragraph pass. Broad Intro discovery
+leaves only Spotlight on that path; lookalike custom names stay configured.
 """
 
 from __future__ import annotations
@@ -14,6 +14,7 @@ from .models import DEFAULT_SPECS, ProductSpec, ProductType
 
 TUNED_IDS = frozenset(("spotlight", "intro"))
 CONFIGURED_DISCOVERY_VERSION = "configured-v2"
+BROAD_INTRO_DISCOVERY_VERSION = "configured-v3"
 IMAGING_IDS = frozenset(("image-id", "image-pre-commercial", "image-post-commercial", "image-promo"))
 _GROUPS = frozenset(("spotlights", "songIntros", "audioImages"))
 _FOUNDATION_WHITESPACE = frozenset(
@@ -163,12 +164,13 @@ def validate_configuration(config: object) -> None:
             seen_sequence.add(field_id)
 
 
-def split_discovery_types(config: object) -> tuple[list[dict], list[dict]]:
+def split_discovery_types(config: object, *, discovery_prompt_version: str = "configured-v1") -> tuple[list[dict], list[dict]]:
     """Validate then return (tuned, configured) type definitions in config order."""
     validate_configuration(config)
     types = config["types"]  # validated list of dictionaries
-    return ([item for item in types if item["id"] in TUNED_IDS],
-            [item for item in types if item["id"] not in TUNED_IDS])
+    tuned_ids = TUNED_IDS - {"intro"} if discovery_prompt_version == BROAD_INTRO_DISCOVERY_VERSION else TUNED_IDS
+    return ([item for item in types if item["id"] in tuned_ids],
+            [item for item in types if item["id"] not in tuned_ids])
 
 
 def configured_tuned_specs(config: object) -> dict[ProductType, ProductSpec]:

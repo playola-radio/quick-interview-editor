@@ -73,9 +73,13 @@ struct LiveCutSuggesterTests {
 extension LiveCutSuggesterTests {
   @Test func fullV2RequestMatchesSharedFixture() throws {
     let fixture = try suggestionContractFixture("suggestion-contract-v2")
+    struct HistoricalRequest: Decodable { var configuration: SuggestionConfiguration }
+    let capturedConfiguration = try JSONDecoder().decode(
+      HistoricalRequest.self, from: fixture
+    ).configuration
     let snapshot = SuggestionRunSnapshot(
       runID: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
-      configuration: SuggestionDefaults.configuration, configurationHash: "swift-only-hash",
+      configuration: capturedConfiguration, configurationHash: "swift-only-hash",
       model: "fixture-model", discoveryPromptVersion: "configured-v1",
       extractionPromptVersion: "fields-v1", productSpecVersion: "configured-v1",
       transcriptHash: "fixture-transcript", sourceFingerprint: "fixture-source", sampleRate: 44100)

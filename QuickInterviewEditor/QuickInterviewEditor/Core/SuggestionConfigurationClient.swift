@@ -72,7 +72,13 @@ actor SuggestionConfigurationStore {
     guard validationMessages.isEmpty else {
       throw SuggestionConfigurationStoreError.invalid(validationMessages)
     }
-    return configuration
+    var migrated = SuggestionDefaults.upgradingLegacyIntroGuidance(in: configuration)
+    guard migrated != configuration else { return configuration }
+    let (revision, overflow) = configuration.revision.addingReportingOverflow(1)
+    guard !overflow else { throw SuggestionConfigurationStoreError.revisionOverflow }
+    migrated.revision = revision
+    try write(JSONEncoder().encode(migrated), fileURL)
+    return migrated
   }
 }
 

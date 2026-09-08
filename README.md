@@ -88,6 +88,10 @@ Suggestions finds three groups of material in your transcript:
 | Song Intros | Song Intro | `Song Title 1, Artist Name` |
 | Audio Images | ID, Pre-commercial, Post-commercial, Promo | `ID 1`, `Pre-Com 1`, `Post-Com 1`, `Promo 1`, … |
 
+Song Intros include complete commentary about a song or artist, even without a lead-in
+to music. When the same passage also fits Spotlight, Intro takes priority for naming.
+Names remain editable; an Intro with an unknown song title keeps a descriptive name.
+
 Use **Types** to show any combination of groups or individual types. Filtering changes
 what you see; it does not delete suggestions or change saved clip names. Saved clips remain
 available independently of this filter.
@@ -96,7 +100,8 @@ Open **Configure Suggestions** to edit the app-wide rules. Each type has discove
 guidelines and a naming template built from text, extracted fields, and an optional
 sequence number. You can add types and fields, with instructions explaining how to
 extract each field from the transcript. The default Intro fields identify the song and
-its performing artist, not the station DJ. Saving rules affects future searches;
+its performing artist, or the artist being discussed when no specific song is established.
+They do not substitute the station DJ. Saving rules affects future searches;
 existing suggestions keep the rules captured when they were found. Cancel leaves the
 saved rules unchanged. A stale settings draft must reload before it can replace newer
 saved rules.

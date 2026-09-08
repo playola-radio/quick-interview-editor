@@ -178,6 +178,137 @@ struct SuggestionConfigurationClientTests {
     expectNoDifference(caught as? SuggestionConfigurationStoreError, .unimplemented("load"))
   }
 
+  @Test func loadingLegacyDefaultsUpgradesOnceAndRejectsOldDrafts() async throws {
+    let directory = try makeTemporaryDirectory()
+    defer { try? fileManager.removeItem(at: directory) }
+    let fileURL = directory.appending(component: "SuggestionConfiguration.json")
+    let legacy = try legacyConfiguration()
+    try JSONEncoder().encode(legacy).write(to: fileURL)
+    // swiftlint:disable:next implicit_optional_initialization
+    @Shared(.suggestionConfiguration) var published: SuggestionConfiguration? = nil
+    let store = SuggestionConfigurationStore(fileURL: fileURL)
+    var expected = SuggestionDefaults.configuration
+    expected.revision = 8
+
+    let loaded = try await store.load()
+
+    expectNoDifference(loaded, expected)
+    expectNoDifference(published, expected)
+    let reloaded = try await store.load()
+    expectNoDifference(reloaded, expected)
+    expectNoDifference(
+      try JSONDecoder().decode(SuggestionConfiguration.self, from: Data(contentsOf: fileURL)),
+      expected)
+    await #expect(throws: SuggestionConfigurationStoreError.staleDraft) {
+      try await store.save(legacy, expectedRevision: 7)
+    }
+  }
+
+  @Test func upgradingLegacyGuidancePreservesEachEditedProperty() async throws {
+    let directory = try makeTemporaryDirectory()
+    defer { try? fileManager.removeItem(at: directory) }
+    let fileURL = directory.appending(component: "SuggestionConfiguration.json")
+    var legacy = try legacyConfiguration()
+    legacy.types[0].name = "Artist Commentary"
+    legacy.types[0].guidelines = "Only find explicit handoffs, as I requested."
+    legacy.types[0].template = [NamingComponent(kind: .literal, value: "My Intro")]
+    legacy.fields[0].instructions = "My custom song extraction instructions."
+    try JSONEncoder().encode(legacy).write(to: fileURL)
+    var expected = legacy
+    expected.revision = 8
+    expected.fields[1].instructions = SuggestionDefaults.fields[1].instructions
+
+    let store = SuggestionConfigurationStore(fileURL: fileURL)
+    let reloaded = try await store.load()
+    expectNoDifference(reloaded, expected)
+  }
+
+  @Test func upgradingLegacyGuidanceDoesNotRestoreDeletedDefaults() async throws {
+    let directory = try makeTemporaryDirectory()
+    defer { try? fileManager.removeItem(at: directory) }
+    let fileURL = directory.appending(component: "SuggestionConfiguration.json")
+    var legacy = try legacyConfiguration()
+    legacy.types.removeFirst()
+    legacy.fields.removeFirst(2)
+    try JSONEncoder().encode(legacy).write(to: fileURL)
+    let originalBytes = try Data(contentsOf: fileURL)
+
+    let store = SuggestionConfigurationStore(fileURL: fileURL)
+    let loaded = try await store.load()
+    expectNoDifference(loaded, legacy)
+    expectNoDifference(try Data(contentsOf: fileURL), originalBytes)
+  }
+
+  @Test func editedArtistInstructionsSurviveOtherDefaultUpgrades() async throws {
+    let directory = try makeTemporaryDirectory()
+    defer { try? fileManager.removeItem(at: directory) }
+    let fileURL = directory.appending(component: "SuggestionConfiguration.json")
+    var legacy = try legacyConfiguration()
+    legacy.fields[1].instructions = "Extract my chosen artist."
+    try JSONEncoder().encode(legacy).write(to: fileURL)
+    var expected = SuggestionDefaults.configuration
+    expected.revision = 8
+    expected.fields[1].instructions = legacy.fields[1].instructions
+
+    let store = SuggestionConfigurationStore(fileURL: fileURL)
+    let reloaded = try await store.load()
+    expectNoDifference(reloaded, expected)
+  }
+
+  @Test func legacyUpgradeWriteFailurePreservesBytesAndPublication() async throws {
+    let directory = try makeTemporaryDirectory()
+    defer { try? fileManager.removeItem(at: directory) }
+    let fileURL = directory.appending(component: "SuggestionConfiguration.json")
+    let legacy = try legacyConfiguration()
+    let bytes = try JSONEncoder().encode(legacy)
+    try bytes.write(to: fileURL)
+    @Shared(.suggestionConfiguration) var published: SuggestionConfiguration? = legacy
+    let store = SuggestionConfigurationStore(
+      fileURL: fileURL, write: { _, _ in throw CocoaError(.fileWriteUnknown) })
+
+    await #expect(throws: (any Error).self) { try await store.load() }
+
+    expectNoDifference(try Data(contentsOf: fileURL), bytes)
+    expectNoDifference(published, legacy)
+  }
+
+  @Test func legacyUpgradeOverflowPreservesBytesAndPublication() async throws {
+    let directory = try makeTemporaryDirectory()
+    defer { try? fileManager.removeItem(at: directory) }
+    let fileURL = directory.appending(component: "SuggestionConfiguration.json")
+    var legacy = try legacyConfiguration()
+    legacy.revision = .max
+    let bytes = try JSONEncoder().encode(legacy)
+    try bytes.write(to: fileURL)
+    @Shared(.suggestionConfiguration) var published: SuggestionConfiguration? = legacy
+    let store = SuggestionConfigurationStore(fileURL: fileURL)
+
+    await #expect(throws: SuggestionConfigurationStoreError.revisionOverflow) {
+      try await store.load()
+    }
+
+    expectNoDifference(try Data(contentsOf: fileURL), bytes)
+    expectNoDifference(published, legacy)
+  }
+
+  @Test func freshSearchUsesBroadIntrosAndHistoricalOptionsRemainUnchanged() {
+    expectNoDifference(CutSuggestOptions.freshConfigured.promptVersion, "configured-v3")
+    expectNoDifference(
+      CutSuggestOptions(promptVersion: "configured-v2").promptVersion, "configured-v2")
+  }
+
+  private func legacyConfiguration() throws -> SuggestionConfiguration {
+    let url = try #require(
+      Bundle(for: ConfigurationMigrationFixtureBundle.self).url(
+        forResource: "suggestion-contract-v2", withExtension: "json"))
+    struct Contract: Decodable { var configuration: SuggestionConfiguration }
+    var configuration = try JSONDecoder().decode(
+      Contract.self, from: Data(contentsOf: url)
+    ).configuration
+    configuration.revision = 7
+    return configuration
+  }
+
   private func makeTemporaryDirectory() throws -> URL {
     let directory = fileManager.temporaryDirectory.appending(
       component: UUID().uuidString, directoryHint: .isDirectory)
@@ -185,3 +316,5 @@ struct SuggestionConfigurationClientTests {
     return directory
   }
 }
+
+private final class ConfigurationMigrationFixtureBundle {}
