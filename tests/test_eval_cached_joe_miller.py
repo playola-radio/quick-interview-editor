@@ -77,6 +77,12 @@ def test_committed_baseline_matches_cached_runs_for_all_datasets():
     for name, dataset_dir in _DATASETS.items():
         entry = baseline["datasets"][name]
         report = run_eval(dataset_dir, mode="cached", model="gpt-4o")
+        # Preserve the tuned editorial output itself, not just aggregate counts
+        # or the later generated display names.
+        spotlight_tuples = lambda candidates: sorted(
+            (c['start_index'], c['end_index'], c['label'])
+            for c in candidates if c['product_type'] == 'spotlight')
+        assert spotlight_tuples(report.candidates) == spotlight_tuples(entry['candidates'])
         # Compare every reported per-product metric (recall count, duration-window
         # compliance, fragment rate, overlap burden, candidates/hr) so a cached run
         # cannot drift any number while the test still passes. The recall

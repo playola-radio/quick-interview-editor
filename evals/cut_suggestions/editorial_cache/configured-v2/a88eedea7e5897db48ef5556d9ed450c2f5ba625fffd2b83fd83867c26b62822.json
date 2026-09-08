@@ -1,0 +1,31 @@
+{
+ "model": "gpt-4o",
+ "product_spec_version": "configured-v1",
+ "prompt": "Partition this slice of an interview transcript into CONTIGUOUS topical paragraphs that cover EVERY sentence (no gaps, no overlaps). A paragraph is a run of sentences on one subject. Return STRICT JSON: {\"paragraphs\": [{\"start\": <global idx>, \"end\": <global idx incl>, \"label\": \"<short topic>\"}]} spanning exactly 0..38.\n\n0: This next recording is by River Vale.\n1: River wrote it after a winter tour.\n2: The song is Paper Lanterns.\n3: Here is River Vale with Paper Lanterns.\n4: Station One keeps you company.\n5: Station One.\n6: Station One keeps you company.\n7: Station One.\n8: Join our synthetic listener circle today.\n9: Members hear early concert sessions.\n10: Your support funds local microphones.\n11: Choose a monthly level that fits.\n12: At Station One, membership brings ticket drawings.\n13: We send a handwritten welcome note.\n14: There are ticket drawings every spring.\n15: Station One keeps you company.\n16: Station One.\n17: The membership promotion continues now.\n18: Share it with a friend who listens.\n19: Small gifts keep these stories moving.\n20: Find the schedule in our newsletter.\n21: Thank you for joining the circle.\n22: That concludes our membership message.\n23: Welcome back from the advertisements.\n24: Our guest chose a recording by Nova Reed.\n25: Here is Nova Reed singing Harbor Lights.\n26: Yeah.\n27: Harbor Lights.\n28: We'll be right back after this.\n29: Mara built a neighborhood studio in an old bakery.\n30: She posted the repair notes at https://example.test/studio.\n31: Neighbors donated lumber and time for the booth.\n32: The first broadcast reached the apartment upstairs.\n33: A retired engineer tuned the borrowed transmitter.\n34: The project now records local oral histories.\n35: Station One played Paper Lanterns at the opening.\n36: Mara says the room belongs to everyone.\n37: Wait, let me start that handoff again.\n38: Coming up, a song by...",
+ "prompt_version": "configured-v2",
+ "purpose": "partition:0",
+ "response": {
+  "model": "gpt-4o",
+  "text": "{\"paragraphs\": [{\"start\": 0, \"end\": 3, \"label\": \"Introduction to River Vale's song\"}, {\"start\": 4, \"end\": 7, \"label\": \"Station One slogan\"}, {\"start\": 8, \"end\": 22, \"label\": \"Membership promotion\"}, {\"start\": 23, \"end\": 28, \"label\": \"Introduction to Nova Reed's song\"}, {\"start\": 29, \"end\": 36, \"label\": \"Mara's neighborhood studio\"}, {\"start\": 37, \"end\": 38, \"label\": \"Transition to next segment\"}]}",
+  "usage": {
+   "completion_tokens": 133,
+   "completion_tokens_details": {
+    "accepted_prediction_tokens": 0,
+    "audio_tokens": 0,
+    "reasoning_tokens": 0,
+    "rejected_prediction_tokens": 0
+   },
+   "finish_reason": "stop",
+   "prompt_tokens": 436,
+   "prompt_tokens_details": {
+    "audio_tokens": 0,
+    "cached_tokens": 0
+   },
+   "total_tokens": 569
+  }
+ },
+ "window_params": {
+  "step": 110,
+  "window": 130
+ }
+}

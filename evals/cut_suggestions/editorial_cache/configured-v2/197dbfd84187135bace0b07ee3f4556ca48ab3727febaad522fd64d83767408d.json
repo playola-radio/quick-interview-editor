@@ -1,0 +1,31 @@
+{
+ "model": "gpt-4o",
+ "product_spec_version": "configured-v1",
+ "prompt": "You are a radio editor. Below is an interview already partitioned into topic paragraphs (each tagged [P<start>-<end> | label]). Produce product clips of these kinds:\n- ARTIST SPOTLIGHT (40-120s): one self-contained story or anecdote (~40-120s)\n- INTRO (15-45s): sets up ONE named song and ends on the handoff (~15-45s)\n\nPREFER one paragraph = one clip. Only merge two adjacent paragraphs if they are clearly the SAME single story; never exceed ~130s. Be EXHAUSTIVE \u2014 emit a clip for EVERY clip-worthy paragraph (most paragraphs that are the subject telling a story qualify). You MAY trim to a sub-range of sentence indices for clean edges. Skip only paragraphs that are interviewer chatter or clearly not clip-worthy. For an intro, set \"song\" to the named song; otherwise null. Return STRICT JSON: {\"clips\": [{\"type\": \"spotlight\"|\"intro\", \"start\": <sent idx>, \"end\": <sent idx incl>, \"label\": \"<3-6 words>\", \"song\": <song or null>}]}.\n\n[P0-3 | Introduction to River Vale's song] This next recording is by River Vale. River wrote it after a winter tour. The song is Paper Lanterns. Here is River Vale with Paper Lanterns.\n\n[P4-7 | Station One slogan] Station One keeps you company. Station One. Station One keeps you company. Station One.\n\n[P8-22 | Membership promotion] Join our synthetic listener circle today. Members hear early concert sessions. Your support funds local microphones. Choose a monthly level that fits. At Station One, membership brings ticket drawings. We send a handwritten welcome note. There are ticket drawings every spring. Station One keeps you company. Station One. The membership promotion continues now. Share it with a friend who listens. Small gifts keep these stories moving. Find the schedule in our newsletter. Thank you for joining the circle. That concludes our membership message.\n\n[P23-28 | Introduction to Nova Reed's song] Welcome back from the advertisements. Our guest chose a recording by Nova Reed. Here is Nova Reed singing Harbor Lights. Yeah. Harbor Lights. We'll be right back after this.\n\n[P29-36 | Mara's neighborhood studio] Mara built a neighborhood studio in an old bakery. She posted the repair notes at https://example.test/studio. Neighbors donated lumber and time for the booth. The first broadcast reached the apartment upstairs. A retired engineer tuned the borrowed transmitter. The project now records local oral histories. Station One played Paper Lanterns at the opening. Mara says the room belongs to everyone.\n\n[P37-38 | Transition to next segment] Wait, let me start that handoff again. Coming up, a song by...",
+ "prompt_version": "configured-v2",
+ "purpose": "classify",
+ "response": {
+  "model": "gpt-4o",
+  "text": "{\"clips\": [{\"type\": \"intro\", \"start\": 0, \"end\": 3, \"label\": \"Intro to Paper Lanterns\", \"song\": \"Paper Lanterns\"}, {\"type\": \"intro\", \"start\": 23, \"end\": 28, \"label\": \"Intro to Harbor Lights\", \"song\": \"Harbor Lights\"}, {\"type\": \"spotlight\", \"start\": 29, \"end\": 36, \"label\": \"Mara's neighborhood studio\", \"song\": null}]}",
+  "usage": {
+   "completion_tokens": 109,
+   "completion_tokens_details": {
+    "accepted_prediction_tokens": 0,
+    "audio_tokens": 0,
+    "reasoning_tokens": 0,
+    "rejected_prediction_tokens": 0
+   },
+   "finish_reason": "stop",
+   "prompt_tokens": 579,
+   "prompt_tokens_details": {
+    "audio_tokens": 0,
+    "cached_tokens": 0
+   },
+   "total_tokens": 688
+  }
+ },
+ "window_params": {
+  "step": 110,
+  "window": 130
+ }
+}

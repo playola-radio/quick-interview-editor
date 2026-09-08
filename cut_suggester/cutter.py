@@ -183,6 +183,7 @@ def suggest_cuts(
     *,
     specs: dict[ProductType, ProductSpec] | None = None,
     configuration: dict | None = None,
+    refine_intros: bool = False,
     strict: bool = False,
     sample_rate: int = DEFAULT_SAMPLE_RATE,
     window: int = STAGE1_WINDOW,
@@ -214,6 +215,13 @@ def suggest_cuts(
     partitions = stage1_partition(sentences, llm, window=window, step=step, progress=progress, validated_request=validated_request)
     progress(phase="classifying", message="Selecting product clips")
     raw_clips = stage2_classify(sentences, partitions, llm, specs, strict=strict, validated_request=validated_request)
+
+    if configuration is not None and refine_intros and ProductType.INTRO in specs:
+        from .intro_refinement import refine_intro_clips
+        progress(phase="classifying", message="Checking song handoff boundaries")
+        raw_clips = refine_intro_clips(
+            sentences, raw_clips, llm, guidance=specs[ProductType.INTRO].description,
+            validated_request=validated_request)
 
     progress(phase="postprocessing", message="Building candidates")
     candidates: list[CutCandidate] = []

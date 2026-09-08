@@ -140,7 +140,7 @@ def test_custom_only_prompt_uses_requested_type_and_does_not_impose_imaging_rule
 
     assert '"type":"custom-voice"' in llm.prompts[0]
     assert '"type":"image-id"' not in llm.prompts[0]
-    assert "Incidental self-identification" not in llm.prompts[0]
+    assert "incidental self-identification" not in llm.prompts[0].lower()
 
 
 def test_later_window_prompt_example_uses_global_coordinates_inside_that_window():
@@ -267,3 +267,24 @@ def test_generic_duration_enforcement_is_one_to_240_seconds():
     out = discover_configured(sentences, [{"id": "image-promo", "guidelines": "Promo."}], _Responses([clips, []]),
                               run_id=uuid.uuid4(), sample_rate=SR, window=130, step=130)
     assert [(c["start_index"], c["end_index"]) for c in out] == [(0, 0)]
+
+
+def test_new_imaging_prompt_preserves_repeats_full_promo_and_later_window_coordinates():
+    from cut_suggester.configured_discovery import _prompt
+    types = {'image-id': 'Complete IDs.', 'image-promo': 'Full promos.'}
+    new = _prompt(_sentences(), types, 110, 219, discovery_prompt_version='configured-v2')
+    assert 'Each independently complete performance' in new
+    assert 'Return BOTH every complete independently usable ID' in new
+    assert 'FULL continuous promo' in new
+    assert '[110] says' in new and '110–111 and 112–113' in new
+    old = _prompt(_sentences(), types, 110, 219)
+    assert 'Each independently complete performance' not in old
+    assert _prompt(_sentences(), types, 110, 219, discovery_prompt_version='v2') == old
+    short = _prompt(_sentences(), types, 239, 239, discovery_prompt_version='configured-v2')
+    assert 'For example' not in short
+
+
+def test_custom_only_new_version_prompt_is_byte_identical_to_old():
+    from cut_suggester.configured_discovery import _prompt
+    types = {'custom-voice': 'URLs and stories are required.'}
+    assert _prompt(_sentences(), types, 0, 3, discovery_prompt_version='configured-v2') == _prompt(_sentences(), types, 0, 3)

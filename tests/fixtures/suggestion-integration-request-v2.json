@@ -1,0 +1,594 @@
+{
+  "schema_version": 2,
+  "run_id": "78dcca67-9103-5d43-b0af-b633fc1c671a",
+  "mode": "fresh",
+  "transcript_hash": "54e4c59e1c9c9d04e553c9b140ea594eac30be2d8e0dca4dc52a65bbed9b446e",
+  "source_fingerprint": "9c84887bce2f47cc31ba9b422df52196c654db9736d897720c370b7da05845be",
+  "transcript_units": [
+    {
+      "id": 1,
+      "text": "This next recording is by River Vale.",
+      "word_ids": [
+        1
+      ],
+      "start_sample": 0,
+      "end_sample": 88200,
+      "start_sec": 0,
+      "end_sec": 2
+    },
+    {
+      "id": 2,
+      "text": "River wrote it after a winter tour.",
+      "word_ids": [
+        2
+      ],
+      "start_sample": 88200,
+      "end_sample": 176400,
+      "start_sec": 2,
+      "end_sec": 4
+    },
+    {
+      "id": 3,
+      "text": "The song is Paper Lanterns.",
+      "word_ids": [
+        3
+      ],
+      "start_sample": 176400,
+      "end_sample": 264600,
+      "start_sec": 4,
+      "end_sec": 6
+    },
+    {
+      "id": 4,
+      "text": "Here is River Vale with Paper Lanterns.",
+      "word_ids": [
+        4
+      ],
+      "start_sample": 264600,
+      "end_sample": 352800,
+      "start_sec": 6,
+      "end_sec": 8
+    },
+    {
+      "id": 5,
+      "text": "Station One keeps you company.",
+      "word_ids": [
+        5
+      ],
+      "start_sample": 352800,
+      "end_sample": 441000,
+      "start_sec": 8,
+      "end_sec": 10
+    },
+    {
+      "id": 6,
+      "text": "Station One.",
+      "word_ids": [
+        6
+      ],
+      "start_sample": 441000,
+      "end_sample": 529200,
+      "start_sec": 10,
+      "end_sec": 12
+    },
+    {
+      "id": 7,
+      "text": "Station One keeps you company.",
+      "word_ids": [
+        7
+      ],
+      "start_sample": 529200,
+      "end_sample": 617400,
+      "start_sec": 12,
+      "end_sec": 14
+    },
+    {
+      "id": 8,
+      "text": "Station One.",
+      "word_ids": [
+        8
+      ],
+      "start_sample": 617400,
+      "end_sample": 705600,
+      "start_sec": 14,
+      "end_sec": 16
+    },
+    {
+      "id": 9,
+      "text": "Join our synthetic listener circle today.",
+      "word_ids": [
+        9
+      ],
+      "start_sample": 705600,
+      "end_sample": 815850,
+      "start_sec": 16,
+      "end_sec": 18.5
+    },
+    {
+      "id": 10,
+      "text": "Members hear early concert sessions.",
+      "word_ids": [
+        10
+      ],
+      "start_sample": 815850,
+      "end_sample": 926100,
+      "start_sec": 18.5,
+      "end_sec": 21
+    },
+    {
+      "id": 11,
+      "text": "Your support funds local microphones.",
+      "word_ids": [
+        11
+      ],
+      "start_sample": 926100,
+      "end_sample": 1036350,
+      "start_sec": 21,
+      "end_sec": 23.5
+    },
+    {
+      "id": 12,
+      "text": "Choose a monthly level that fits.",
+      "word_ids": [
+        12
+      ],
+      "start_sample": 1036350,
+      "end_sample": 1146600,
+      "start_sec": 23.5,
+      "end_sec": 26
+    },
+    {
+      "id": 13,
+      "text": "At Station One, membership brings ticket drawings.",
+      "word_ids": [
+        13
+      ],
+      "start_sample": 1146600,
+      "end_sample": 1256850,
+      "start_sec": 26,
+      "end_sec": 28.5
+    },
+    {
+      "id": 14,
+      "text": "We send a handwritten welcome note.",
+      "word_ids": [
+        14
+      ],
+      "start_sample": 1256850,
+      "end_sample": 1367100,
+      "start_sec": 28.5,
+      "end_sec": 31
+    },
+    {
+      "id": 15,
+      "text": "There are ticket drawings every spring.",
+      "word_ids": [
+        15
+      ],
+      "start_sample": 1367100,
+      "end_sample": 1477350,
+      "start_sec": 31,
+      "end_sec": 33.5
+    },
+    {
+      "id": 16,
+      "text": "Station One keeps you company.",
+      "word_ids": [
+        16
+      ],
+      "start_sample": 1477350,
+      "end_sample": 1587600,
+      "start_sec": 33.5,
+      "end_sec": 36
+    },
+    {
+      "id": 17,
+      "text": "Station One.",
+      "word_ids": [
+        17
+      ],
+      "start_sample": 1587600,
+      "end_sample": 1697850,
+      "start_sec": 36,
+      "end_sec": 38.5
+    },
+    {
+      "id": 18,
+      "text": "The membership promotion continues now.",
+      "word_ids": [
+        18
+      ],
+      "start_sample": 1697850,
+      "end_sample": 1808100,
+      "start_sec": 38.5,
+      "end_sec": 41
+    },
+    {
+      "id": 19,
+      "text": "Share it with a friend who listens.",
+      "word_ids": [
+        19
+      ],
+      "start_sample": 1808100,
+      "end_sample": 1918350,
+      "start_sec": 41,
+      "end_sec": 43.5
+    },
+    {
+      "id": 20,
+      "text": "Small gifts keep these stories moving.",
+      "word_ids": [
+        20
+      ],
+      "start_sample": 1918350,
+      "end_sample": 2028600,
+      "start_sec": 43.5,
+      "end_sec": 46
+    },
+    {
+      "id": 21,
+      "text": "Find the schedule in our newsletter.",
+      "word_ids": [
+        21
+      ],
+      "start_sample": 2028600,
+      "end_sample": 2138850,
+      "start_sec": 46,
+      "end_sec": 48.5
+    },
+    {
+      "id": 22,
+      "text": "Thank you for joining the circle.",
+      "word_ids": [
+        22
+      ],
+      "start_sample": 2138850,
+      "end_sample": 2249100,
+      "start_sec": 48.5,
+      "end_sec": 51
+    },
+    {
+      "id": 23,
+      "text": "That concludes our membership message.",
+      "word_ids": [
+        23
+      ],
+      "start_sample": 2249100,
+      "end_sample": 2359350,
+      "start_sec": 51,
+      "end_sec": 53.5
+    },
+    {
+      "id": 24,
+      "text": "Welcome back from the advertisements.",
+      "word_ids": [
+        24
+      ],
+      "start_sample": 2359350,
+      "end_sample": 2447550,
+      "start_sec": 53.5,
+      "end_sec": 55.5
+    },
+    {
+      "id": 25,
+      "text": "Our guest chose a recording by Nova Reed.",
+      "word_ids": [
+        25
+      ],
+      "start_sample": 2447550,
+      "end_sample": 2535750,
+      "start_sec": 55.5,
+      "end_sec": 57.5
+    },
+    {
+      "id": 26,
+      "text": "Here is Nova Reed singing Harbor Lights.",
+      "word_ids": [
+        26
+      ],
+      "start_sample": 2535750,
+      "end_sample": 2623950,
+      "start_sec": 57.5,
+      "end_sec": 59.5
+    },
+    {
+      "id": 27,
+      "text": "Yeah.",
+      "word_ids": [
+        27
+      ],
+      "start_sample": 2623950,
+      "end_sample": 2712150,
+      "start_sec": 59.5,
+      "end_sec": 61.5
+    },
+    {
+      "id": 28,
+      "text": "Harbor Lights.",
+      "word_ids": [
+        28
+      ],
+      "start_sample": 2712150,
+      "end_sample": 2800350,
+      "start_sec": 61.5,
+      "end_sec": 63.5
+    },
+    {
+      "id": 29,
+      "text": "We'll be right back after this.",
+      "word_ids": [
+        29
+      ],
+      "start_sample": 2800350,
+      "end_sample": 2888550,
+      "start_sec": 63.5,
+      "end_sec": 65.5
+    },
+    {
+      "id": 30,
+      "text": "Mara built a neighborhood studio in an old bakery.",
+      "word_ids": [
+        30
+      ],
+      "start_sample": 2888550,
+      "end_sample": 2976750,
+      "start_sec": 65.5,
+      "end_sec": 67.5
+    },
+    {
+      "id": 31,
+      "text": "She posted the repair notes at https://example.test/studio.",
+      "word_ids": [
+        31
+      ],
+      "start_sample": 2976750,
+      "end_sample": 3064950,
+      "start_sec": 67.5,
+      "end_sec": 69.5
+    },
+    {
+      "id": 32,
+      "text": "Neighbors donated lumber and time for the booth.",
+      "word_ids": [
+        32
+      ],
+      "start_sample": 3064950,
+      "end_sample": 3153150,
+      "start_sec": 69.5,
+      "end_sec": 71.5
+    },
+    {
+      "id": 33,
+      "text": "The first broadcast reached the apartment upstairs.",
+      "word_ids": [
+        33
+      ],
+      "start_sample": 3153150,
+      "end_sample": 3241350,
+      "start_sec": 71.5,
+      "end_sec": 73.5
+    },
+    {
+      "id": 34,
+      "text": "A retired engineer tuned the borrowed transmitter.",
+      "word_ids": [
+        34
+      ],
+      "start_sample": 3241350,
+      "end_sample": 3329550,
+      "start_sec": 73.5,
+      "end_sec": 75.5
+    },
+    {
+      "id": 35,
+      "text": "The project now records local oral histories.",
+      "word_ids": [
+        35
+      ],
+      "start_sample": 3329550,
+      "end_sample": 3417750,
+      "start_sec": 75.5,
+      "end_sec": 77.5
+    },
+    {
+      "id": 36,
+      "text": "Station One played Paper Lanterns at the opening.",
+      "word_ids": [
+        36
+      ],
+      "start_sample": 3417750,
+      "end_sample": 3505950,
+      "start_sec": 77.5,
+      "end_sec": 79.5
+    },
+    {
+      "id": 37,
+      "text": "Mara says the room belongs to everyone.",
+      "word_ids": [
+        37
+      ],
+      "start_sample": 3505950,
+      "end_sample": 3594150,
+      "start_sec": 79.5,
+      "end_sec": 81.5
+    },
+    {
+      "id": 38,
+      "text": "Wait, let me start that handoff again.",
+      "word_ids": [
+        38
+      ],
+      "start_sample": 3594150,
+      "end_sample": 3682350,
+      "start_sec": 81.5,
+      "end_sec": 83.5
+    },
+    {
+      "id": 39,
+      "text": "Coming up, a song by...",
+      "word_ids": [
+        39
+      ],
+      "start_sample": 3682350,
+      "end_sample": 3770550,
+      "start_sec": 83.5,
+      "end_sec": 85.5
+    }
+  ],
+  "configuration": {
+    "schemaVersion": 1,
+    "revision": 0,
+    "types": [
+      {
+        "id": "intro",
+        "name": "Song Intro",
+        "group": "songIntros",
+        "guidelines": "sets up ONE named song and ends on the handoff (~15-45s)",
+        "template": [
+          {
+            "kind": "field",
+            "value": "song-title"
+          },
+          {
+            "kind": "literal",
+            "value": " "
+          },
+          {
+            "kind": "sequence"
+          },
+          {
+            "kind": "literal",
+            "value": ", "
+          },
+          {
+            "kind": "field",
+            "value": "artist-name"
+          }
+        ],
+        "sequenceFieldIDs": [
+          "song-title",
+          "artist-name"
+        ]
+      },
+      {
+        "id": "spotlight",
+        "name": "Spotlight",
+        "group": "spotlights",
+        "guidelines": "one self-contained story or anecdote (~40-120s)",
+        "template": [
+          {
+            "kind": "literal",
+            "value": "Spotlight "
+          },
+          {
+            "kind": "sequence"
+          }
+        ],
+        "sequenceFieldIDs": []
+      },
+      {
+        "id": "image-id",
+        "name": "ID Image",
+        "group": "audioImages",
+        "guidelines": "a complete spoken artist/station identification or station-branding liner, including listening-to statements. A brief self-identification at the beginning of a longer anecdote is not automatically a separate ID. Prefer a more specific imaging subtype for explicit break transitions or direct promotions.",
+        "template": [
+          {
+            "kind": "literal",
+            "value": "ID "
+          },
+          {
+            "kind": "sequence"
+          }
+        ],
+        "sequenceFieldIDs": []
+      },
+      {
+        "id": "image-pre-commercial",
+        "name": "Pre-commercial Image",
+        "group": "audioImages",
+        "guidelines": "introduces an upcoming commercial break, asks the listener to stay through ads, or explains that the upcoming commercials support musicians. Include short transitions about paying the musicians.",
+        "template": [
+          {
+            "kind": "literal",
+            "value": "Pre-Com "
+          },
+          {
+            "kind": "sequence"
+          }
+        ],
+        "sequenceFieldIDs": []
+      },
+      {
+        "id": "image-post-commercial",
+        "name": "Post-commercial Image",
+        "group": "audioImages",
+        "guidelines": "returns from a commercial break, welcomes the listener back, or explicitly resumes station programming after the break.",
+        "template": [
+          {
+            "kind": "literal",
+            "value": "Post-Com "
+          },
+          {
+            "kind": "sequence"
+          }
+        ],
+        "sequenceFieldIDs": []
+      },
+      {
+        "id": "image-promo",
+        "name": "Promo Image",
+        "group": "audioImages",
+        "guidelines": "directly promotes a website, subscription, event/tour, release, or other listener action. A passing factual mention within a story is not automatically promotional imaging.",
+        "template": [
+          {
+            "kind": "literal",
+            "value": "Promo "
+          },
+          {
+            "kind": "sequence"
+          }
+        ],
+        "sequenceFieldIDs": []
+      },
+      {
+        "id": "custom-story",
+        "name": "Community Story",
+        "group": "spotlights",
+        "guidelines": "A complete story about a shared neighborhood project.",
+        "template": [
+          {
+            "kind": "field",
+            "value": "descriptive-title"
+          }
+        ],
+        "sequenceFieldIDs": []
+      }
+    ],
+    "fields": [
+      {
+        "id": "song-title",
+        "name": "Song Title",
+        "instructions": "Identify the title of the recording this clip introduces. Use the candidate and relevant context elsewhere in the source transcript. Distinguish the introduced recording from songs mentioned as background. Return missing when the text does not establish the title; do not invent it."
+      },
+      {
+        "id": "artist-name",
+        "name": "Artist Name",
+        "instructions": "Identify the performer singing the introduced recording. Do not substitute the station DJ, the speaker, the songwriter, or the first musician mentioned. For explicit collaborations, include the established performers. Use speaker identity elsewhere in the transcript only when the text establishes that this is their performance. Return missing when the performer cannot be established."
+      },
+      {
+        "id": "descriptive-title",
+        "name": "Descriptive Title",
+        "instructions": "Produce a concise 3\u20136-word description of this clip's complete thought or purpose, using only the source transcript. Do not make this output name control candidate merging."
+      }
+    ]
+  },
+  "options": {
+    "model": "fixture-model",
+    "sample_rate": 44100,
+    "stage1_window": 130,
+    "stage1_step": 110,
+    "discovery_prompt_version": "configured-v2",
+    "extraction_prompt_version": "fields-v1",
+    "product_spec_version": "configured-v1"
+  }
+}

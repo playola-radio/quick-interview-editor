@@ -13,6 +13,7 @@ from collections.abc import Mapping
 from .models import DEFAULT_SPECS, ProductSpec, ProductType
 
 TUNED_IDS = frozenset(("spotlight", "intro"))
+CONFIGURED_DISCOVERY_VERSION = "configured-v2"
 IMAGING_IDS = frozenset(("image-id", "image-pre-commercial", "image-post-commercial", "image-promo"))
 _GROUPS = frozenset(("spotlights", "songIntros", "audioImages"))
 _FOUNDATION_WHITESPACE = frozenset(

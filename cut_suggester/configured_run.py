@@ -10,7 +10,7 @@ from .configured_discovery import _candidate_id, discover_configured
 from .cutter import suggest_cuts
 from .extraction import parse_extraction_response, plan_extraction_batches
 from .run_journal import JournalRecoveryError, JournalStorageError, RunJournal, canonical_json, digest
-from .suggestion_config import split_discovery_types, validate_configuration
+from .suggestion_config import CONFIGURED_DISCOVERY_VERSION, split_discovery_types, validate_configuration
 from .transcript import sentences_from_units
 
 _OPTION_KEYS = ('model', 'sample_rate', 'stage1_window', 'stage1_step',
@@ -119,6 +119,7 @@ def run_configured_suggest(request: dict, llm, journal: RunJournal, emit) -> dic
     try:
         if tuned:
             result = suggest_cuts(sentences, llm, configuration=configuration,
+                                  refine_intros=options['discovery_prompt_version'] == CONFIGURED_DISCOVERY_VERSION,
                                   sample_rate=options['sample_rate'], window=options['stage1_window'],
                                   step=options['stage1_step'], progress=progress,
                                   validated_request=validated_request)
@@ -133,6 +134,7 @@ def run_configured_suggest(request: dict, llm, journal: RunJournal, emit) -> dic
             suggestions.extend(discover_configured(
                 sentences, generic, llm, run_id=run_id, sample_rate=options['sample_rate'],
                 window=options['stage1_window'], step=options['stage1_step'],
+                discovery_prompt_version=options['discovery_prompt_version'],
                 validated_request=validated_request))
     except (JournalStorageError, JournalRecoveryError):
         raise

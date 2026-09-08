@@ -13,7 +13,7 @@ from collections.abc import Callable, Mapping, Sequence
 
 from .llm import LLMClient
 from .models import Sentence
-from .suggestion_config import IMAGING_IDS
+from .suggestion_config import CONFIGURED_DISCOVERY_VERSION, IMAGING_IDS
 
 
 class DiscoveryError(ValueError):
@@ -79,7 +79,8 @@ def _validated_run_id(run_id: object) -> uuid.UUID:
     raise DiscoveryError("run_id must be a UUID")
 
 
-def _prompt(sentences: list[Sentence], types: dict[str, str], start: int, end: int) -> str:
+def _prompt(sentences: list[Sentence], types: dict[str, str], start: int, end: int,
+            *, discovery_prompt_version: str = "configured-v1") -> str:
     type_lines = "\n".join(f"- {type_id}: {guidance}" for type_id, guidance in types.items())
     transcript = "\n".join(f"[{s.index}] {s.text}" for s in sentences[start : end + 1])
     example_type = next(iter(types))
@@ -88,13 +89,33 @@ def _prompt(sentences: list[Sentence], types: dict[str, str], start: int, end: i
         "For built-in imaging types only, incidental self-identification, URLs, or story mentions are not standalone images.\n"
         if any(type_id in IMAGING_IDS for type_id in types) else ""
     )
+    take_rule = ""
+    nested_rule = "A complete usable ID nested in a longer promo may be returned alongside the promo."
+    if discovery_prompt_version == CONFIGURED_DISCOVERY_VERSION and imaging_rule:
+        take_rule = (
+            "Each independently complete performance gets its own clip, including consecutive identical takes. "
+            "End the first take before the next complete performance begins; never combine repetitions merely "
+            "because the words, speaker, station, or label match.\n"
+        )
+        if end - start >= 3:
+            take_rule += (
+                f'For example, if [{start}] says "You are listening to Example FM", [{start + 1}] says '
+                f'"Your music station", and [{start + 2}] and [{start + 3}] repeat those two lines as a second '
+                f'performance, return two clips: {start}–{start + 1} and {start + 2}–{start + 3}, not {start}–{start + 3}.\n'
+            )
+        nested_rule = (
+            "Return BOTH every complete independently usable ID nested in a longer promo AND the FULL continuous promo, "
+            "including its continuation after the ID. Do not omit the independent ID because another clip already covers "
+            "its sentences. A nested ID does not end or split the surrounding promo. Separate repeated performances, "
+            "not the individual sentences or nested liners inside one continuous longer take."
+        )
     return f"""Find configured audio-image and custom deliverables in this transcript window.
 
 Configured types and guidelines:
 {type_lines}
 
 Return only complete, independently usable takes. Find exhaustive distinct repeats; there is no quota.
-Do not invent text. {imaging_rule}A complete usable ID nested in a longer promo may be returned alongside the promo.
+{take_rule}Do not invent text. {imaging_rule}{nested_rule}
 Use global sentence coordinates exactly as shown.
 
 Transcript window ({start} through {end}):
@@ -173,6 +194,7 @@ def discover_configured(
     sentences: list[Sentence], types: Sequence[Mapping], llm: LLMClient, *, run_id: uuid.UUID | str,
     sample_rate: int, window: int = 130, step: int = 110,
     validated_request: Callable | None = None,
+    discovery_prompt_version: str = "configured-v1",
 ) -> list[dict]:
     """Discover configured types over globally-indexed overlapping windows."""
     if not _is_int(sample_rate) or sample_rate <= 0:
@@ -191,7 +213,7 @@ def discover_configured(
     candidates: list[dict] = []
     for start in range(0, len(sentences), step):
         end = min(len(sentences) - 1, start + window - 1)
-        prompt = _prompt(sentences, declared, start, end)
+        prompt = _prompt(sentences, declared, start, end, discovery_prompt_version=discovery_prompt_version)
         def validate(text):
             try:
                 decoded = json.loads(text)
