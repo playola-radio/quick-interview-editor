@@ -1,0 +1,31 @@
+{
+ "model": "gpt-4o",
+ "product_spec_version": "configured-v1",
+ "prompt": "Find configured audio-image and custom deliverables in this transcript window.\n\nConfigured types and guidelines:\n- image-id: a complete spoken artist/station identification or station-branding liner, including listening-to statements. A brief self-identification at the beginning of a longer anecdote is not automatically a separate ID. Prefer a more specific imaging subtype for explicit break transitions or direct promotions.\n- image-pre-commercial: introduces an upcoming commercial break, asks the listener to stay through ads, or explains that the upcoming commercials support musicians. Include short transitions about paying the musicians.\n- image-post-commercial: returns from a commercial break, welcomes the listener back, or explicitly resumes station programming after the break.\n- image-promo: directly promotes a website, subscription, event/tour, release, or other listener action. A passing factual mention within a story is not automatically promotional imaging.\n\nReturn only complete, independently usable takes. Find exhaustive distinct repeats; there is no quota.\nEach independently complete performance gets its own clip, including consecutive identical takes. End the first take before the next complete performance begins; never combine repetitions merely because the words, speaker, station, or label match.\nFor example, if [0] says \"You are listening to Example FM\", [1] says \"Your music station\", and [2] and [3] repeat those two lines as a second performance, return two clips: 0\u20131 and 2\u20133, not 0\u20133.\nDo not invent text. For built-in imaging types only, incidental self-identification, URLs, or story mentions are not standalone images.\nReturn BOTH every complete independently usable ID nested in a longer promo AND the FULL continuous promo, including its continuation after the ID. Do not omit the independent ID because another clip already covers its sentences. A nested ID does not end or split the surrounding promo. Separate repeated performances, not the individual sentences or nested liners inside one continuous longer take.\nUse global sentence coordinates exactly as shown.\n\nTranscript window (0 through 38):\n[0] This next recording is by River Vale.\n[1] River wrote it after a winter tour.\n[2] The song is Paper Lanterns.\n[3] Here is River Vale with Paper Lanterns.\n[4] Station One keeps you company.\n[5] Station One.\n[6] Station One keeps you company.\n[7] Station One.\n[8] Join our synthetic listener circle today.\n[9] Members hear early concert sessions.\n[10] Your support funds local microphones.\n[11] Choose a monthly level that fits.\n[12] At Station One, membership brings ticket drawings.\n[13] We send a handwritten welcome note.\n[14] There are ticket drawings every spring.\n[15] Station One keeps you company.\n[16] Station One.\n[17] The membership promotion continues now.\n[18] Share it with a friend who listens.\n[19] Small gifts keep these stories moving.\n[20] Find the schedule in our newsletter.\n[21] Thank you for joining the circle.\n[22] That concludes our membership message.\n[23] Welcome back from the advertisements.\n[24] Our guest chose a recording by Nova Reed.\n[25] Here is Nova Reed singing Harbor Lights.\n[26] Yeah.\n[27] Harbor Lights.\n[28] We'll be right back after this.\n[29] Mara built a neighborhood studio in an old bakery.\n[30] She posted the repair notes at https://example.test/studio.\n[31] Neighbors donated lumber and time for the booth.\n[32] The first broadcast reached the apartment upstairs.\n[33] A retired engineer tuned the borrowed transmitter.\n[34] The project now records local oral histories.\n[35] Station One played Paper Lanterns at the opening.\n[36] Mara says the room belongs to everyone.\n[37] Wait, let me start that handoff again.\n[38] Coming up, a song by...\n\nReply with strict JSON in this form:\n{\"clips\":[{\"type\":\"image-id\",\"start\":0,\"end\":1,\"label\":\"Complete take label\"}]}\n",
+ "prompt_version": "configured-v2",
+ "purpose": "configured-discovery",
+ "response": {
+  "model": "gpt-4o",
+  "text": "{\"clips\":[{\"type\":\"image-id\",\"start\":4,\"end\":5,\"label\":\"Station One keeps you company.\"},{\"type\":\"image-id\",\"start\":6,\"end\":7,\"label\":\"Station One keeps you company.\"},{\"type\":\"image-id\",\"start\":15,\"end\":16,\"label\":\"Station One keeps you company.\"},{\"type\":\"image-promo\",\"start\":8,\"end\":22,\"label\":\"Join our synthetic listener circle today.\"},{\"type\":\"image-post-commercial\",\"start\":23,\"end\":23,\"label\":\"Welcome back from the advertisements.\"},{\"type\":\"image-pre-commercial\",\"start\":28,\"end\":28,\"label\":\"We'll be right back after this.\"}]}",
+  "usage": {
+   "completion_tokens": 142,
+   "completion_tokens_details": {
+    "accepted_prediction_tokens": 0,
+    "audio_tokens": 0,
+    "reasoning_tokens": 0,
+    "rejected_prediction_tokens": 0
+   },
+   "finish_reason": "stop",
+   "prompt_tokens": 835,
+   "prompt_tokens_details": {
+    "audio_tokens": 0,
+    "cached_tokens": 0
+   },
+   "total_tokens": 977
+  }
+ },
+ "window_params": {
+  "step": 110,
+  "window": 130
+ }
+}

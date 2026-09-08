@@ -14,9 +14,14 @@ struct Slice: Identifiable, Equatable, Codable {
   var wordIDs: [Word.ID]
   var snippet: String
   var editingComplete: Bool = false
+  // swiftlint:disable:next implicit_optional_initialization
+  var suggestionNaming: SuggestionNamingRecord? = nil
+  // swiftlint:disable:next implicit_optional_initialization
+  var suggestionTypeID: String? = nil
 
   enum CodingKeys: String, CodingKey {
     case id, name, startSample, endSample, wordIDs, snippet, editingComplete
+    case suggestionNaming, suggestionTypeID
   }
 }
 
@@ -30,5 +35,8 @@ extension Slice {
     wordIDs = try container.decode([Word.ID].self, forKey: .wordIDs)
     snippet = try container.decode(String.self, forKey: .snippet)
     editingComplete = try container.decodeIfPresent(Bool.self, forKey: .editingComplete) ?? false
+    suggestionNaming = try container.decodeIfPresent(
+      SuggestionNamingRecord.self, forKey: .suggestionNaming)
+    suggestionTypeID = try container.decodeIfPresent(String.self, forKey: .suggestionTypeID)
   }
 }

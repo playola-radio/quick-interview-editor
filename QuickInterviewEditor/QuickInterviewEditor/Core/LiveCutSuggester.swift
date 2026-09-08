@@ -107,21 +107,16 @@ enum LiveCutSuggester {
 
   // MARK: suggestCuts
 
-  // swiftlint:disable:next function_body_length
-  static func suggestCuts(_ request: CutSuggestRequest, apiKey: String?)
+  static func suggestCuts(_ request: CutSuggestRequest, apiKey: String?, runner: Runner = .live)
     -> AsyncThrowingStream<CutSuggestEvent, Error>
   {
     AsyncThrowingStream { continuation in
-      let procBox = Mutex<SpawnedProcess?>(nil)
+      let procBox = Mutex<ProcessHandle?>(nil)
 
       let task = Task {
         do {
-          let startedAt = Date()
-          let launch = resolvedLaunch()
-          guard FileManager.default.isExecutableFile(atPath: launch.executable.path) else {
-            throw CutSuggestClientError.helperNotFound(launch.executable.path)
-          }
-          let work = try makeWorkDir()
+          let launch = runner.resolveLaunch()
+          let work = try runner.makeWorkDirectory()
           // The request JSON carries transcript text; remove the scratch dir on every
           // exit path (success, failure, cancel).
           defer { try? FileManager.default.removeItem(at: work) }
@@ -129,45 +124,34 @@ enum LiveCutSuggester {
           let requestURL = work.appendingPathComponent("request.json")
           try writeRequest(request, to: requestURL)
 
-          var args = ["--request", requestURL.path]
-          if let cache = cacheDirectory() {
-            args += ["--cache-dir", cache.path]
-          }
-          let proc = try SpawnedProcess(
-            executable: launch.executable,
-            arguments: launch.arguments(subcommand: "suggest", args),
-            currentDirectory: launch.workingDirectory,
-            extraEnvironment: childEnvironment(base: launch.environment, apiKey: apiKey)
-          )
+          let args = arguments(
+            for: request, requestURL: requestURL, cacheDirectory: runner.cacheDirectory)
+          let proc = try runner.spawn(
+            launch, launch.arguments(subcommand: "suggest", args),
+            childEnvironment(base: launch.environment, apiKey: apiKey))
           procBox.withLock { $0 = proc }
           if Task.isCancelled { proc.terminate() }
 
           async let stdoutData = proc.readStdoutToEnd()
           async let exitCode = proc.waitForExit()
 
+          var latestRevision = 0
           for await line in proc.stderrLines() {
-            guard line.hasPrefix("QIE_EVENT ") else { continue }
-            let json = Data(line.dropFirst("QIE_EVENT ".count).utf8)
-            guard
-              let wire = try? JSONDecoder().decode(WireEvent.self, from: json),
-              wire.type == "progress", let message = wire.message, !message.isEmpty
-            else { continue }
-            continuation.yield(.progress(message))
+            guard !Task.isCancelled else { break }
+            if let event = progressEvent(line, request: request, latestRevision: &latestRevision) {
+              continuation.yield(event)
+            }
           }
 
           let out = await stdoutData
           let code = await exitCode
 
-          if Task.isCancelled {
-            continuation.finish()
-            return
-          }
-          guard code == 0 else {
-            throw mapFailure(stderr: proc.stderrTail())
-          }
-          let completed = try completedEvent(
-            from: out, request: request, launch: launch, startedAt: startedAt)
-          continuation.yield(completed)
+          try Task.checkCancellation()
+          let events = try completedEvents(
+            from: out, request: request, exitCode: code,
+            stderr: proc.stderrTail(), latestRevision: latestRevision)
+          try Task.checkCancellation()
+          for event in events { continuation.yield(event) }
           continuation.finish()
         } catch is CancellationError {
           continuation.finish()
@@ -210,45 +194,85 @@ enum LiveCutSuggester {
       diarizationHash: request.diarization?.diarizationHash)
   }
 
-  private static func completedEvent(
-    from out: Data,
-    request: CutSuggestRequest,
-    launch: EngineLaunch,
-    startedAt: Date
-  ) throws -> CutSuggestEvent {
+  private static func completedEvents(
+    from out: Data, request: CutSuggestRequest,
+    exitCode: Int32, stderr: String, latestRevision: Int
+  ) throws -> [CutSuggestEvent] {
+    if let snapshot = request.snapshot, !out.isEmpty {
+      return try configuredCompletionEvents(
+        from: out, snapshot: snapshot, exitCode: exitCode,
+        stderr: stderr, latestRevision: latestRevision)
+    }
+    guard exitCode == 0 else { throw mapFailure(stderr: stderr) }
+    guard request.snapshot == nil else {
+      throw CutSuggestClientError.decodeFailed("The helper returned no result JSON.")
+    }
     let payload = try CutSuggestion.decodeSuggestionPayload(
       from: out, provenance: provenance(for: request), makeID: { UUID() })
-    guard !payload.suggestions.isEmpty else {
-      throw CutSuggestClientError.noSuggestions(
-        emptyRunDiagnostic(
-          meta: payload.meta,
-          launch: launch,
-          elapsed: Date().timeIntervalSince(startedAt)))
+    var events: [CutSuggestEvent] = []
+    if payload.suggestions.isEmpty, let meta = payload.meta {
+      events.append(.diagnostic(meta.diagnosticDescription))
     }
-    return .completed(payload.suggestions)
+    return events + [.completed(payload.suggestions)]
   }
 
-  private static func emptyRunDiagnostic(
-    meta: CutSuggestion.WireMeta?,
-    launch: EngineLaunch,
-    elapsed: TimeInterval
-  ) -> String {
-    let helperMode = launch.isBundled ? "bundled helper" : "dev Python fallback"
-    let base =
-      meta?.diagnosticDescription
-      ?? "The helper returned an empty suggestions array without diagnostics."
-    let elapsedText = String(format: "%.1f", elapsed)
-    var lines = [
-      base,
-      "Helper: \(helperMode) at \(launch.executable.path).",
-      "Elapsed: \(elapsedText)s.",
-    ]
-    if elapsed < 2 {
-      lines.append(
-        "Because this finished almost instantly, it was probably served from cached LLM responses "
-          + "rather than a fresh provider call.")
+  private static func configuredCompletionEvents(
+    from out: Data, snapshot: SuggestionRunSnapshot,
+    exitCode: Int32, stderr: String, latestRevision: Int
+  ) throws -> [CutSuggestEvent] {
+    let result = try SuggestionRunWireResult.decode(from: out, snapshot: snapshot)
+    guard result.checkpointRevision >= latestRevision else {
+      throw CutSuggestClientError.decodeFailed("Final result is older than the latest checkpoint.")
     }
-    return lines.joined(separator: "\n")
+    var events: [CutSuggestEvent] = []
+    if result.checkpointRevision > latestRevision {
+      events.append(.checkpoint(runID: snapshot.runID, revision: result.checkpointRevision))
+    }
+    if result.status == .needsRetry {
+      return events + [
+        .recoverableFailure(
+          runID: snapshot.runID,
+          failedRequestKeys: result.failedRequestKeys, message: result.failureMessage)
+      ]
+    }
+    guard exitCode == 0 else { throw mapFailure(stderr: stderr) }
+    if result.candidates.isEmpty, let meta = result.meta {
+      events.append(.diagnostic(meta.diagnosticDescription))
+    }
+    return events + [.completed(result.candidates)]
+  }
+
+  private static func arguments(
+    for request: CutSuggestRequest, requestURL: URL,
+    cacheDirectory: @Sendable () -> URL?
+  ) -> [String] {
+    var args = ["--request", requestURL.path]
+    if request.snapshot != nil {
+      if let journal = request.journalDirectory { args += ["--journal-dir", journal.path] }
+      if request.mode == .fresh { args.append("--refresh") }
+    } else if let cache = cacheDirectory() {
+      args += ["--cache-dir", cache.path]
+    }
+    return args
+  }
+
+  private static func progressEvent(
+    _ line: String, request: CutSuggestRequest,
+    latestRevision: inout Int
+  ) -> CutSuggestEvent? {
+    guard line.hasPrefix("QIE_EVENT "),
+      let wire = try? JSONDecoder().decode(
+        WireEvent.self,
+        from: Data(line.dropFirst("QIE_EVENT ".count).utf8))
+    else { return nil }
+    if wire.type == "checkpoint", let runID = wire.runID,
+      runID == request.snapshot?.runID, let revision = wire.revision, revision > latestRevision
+    {
+      latestRevision = revision
+      return .checkpoint(runID: runID, revision: revision)
+    }
+    guard wire.type == "progress", let message = wire.message, !message.isEmpty else { return nil }
+    return .progress(message)
   }
 
   /// Classifies a nonzero-exit failure from the helper's stderr tail. A missing
@@ -280,6 +304,45 @@ enum LiveCutSuggester {
   private struct WireEvent: Decodable {
     var type: String
     var message: String?
+    var runID: UUID?
+    var revision: Int?
+    enum CodingKeys: String, CodingKey {
+      case type, message, revision
+      case runID = "run_id"
+    }
+  }
+
+  struct ProcessHandle: Sendable {
+    var readStdoutToEnd: @Sendable () async -> Data
+    var waitForExit: @Sendable () async -> Int32
+    var stderrLines: @Sendable () -> AsyncStream<String>
+    var stderrTail: @Sendable () -> String
+    var terminate: @Sendable () -> Void
+  }
+
+  struct Runner: Sendable {
+    var resolveLaunch: @Sendable () -> EngineLaunch
+    var makeWorkDirectory: @Sendable () throws -> URL
+    var cacheDirectory: @Sendable () -> URL?
+    var spawn: @Sendable (EngineLaunch, [String], [String: String]) throws -> ProcessHandle
+
+    static var live: Self {
+      Self(
+        resolveLaunch: { resolvedLaunch() }, makeWorkDirectory: { try makeWorkDir() },
+        cacheDirectory: { LiveCutSuggester.cacheDirectory() },
+        spawn: { launch, arguments, environment in
+          guard FileManager.default.isExecutableFile(atPath: launch.executable.path) else {
+            throw CutSuggestClientError.helperNotFound(launch.executable.path)
+          }
+          let process = try SpawnedProcess(
+            executable: launch.executable, arguments: arguments,
+            currentDirectory: launch.workingDirectory, extraEnvironment: environment)
+          return ProcessHandle(
+            readStdoutToEnd: { await process.readStdoutToEnd() },
+            waitForExit: { await process.waitForExit() }, stderrLines: { process.stderrLines() },
+            stderrTail: { process.stderrTail() }, terminate: { process.terminate() })
+        })
+    }
   }
 
   // MARK: Request encoding
@@ -291,7 +354,14 @@ enum LiveCutSuggester {
   /// The request as the snake-cased JSON the Python CLI reads. Exposed (not private)
   /// so the Swift→Python wire contract is unit-tested without spawning a subprocess.
   static func encodedRequest(_ request: CutSuggestRequest) throws -> Data {
-    try JSONEncoder().encode(RequestWire(request))
+    if let snapshot = request.snapshot {
+      guard request.transcriptHash == snapshot.transcriptHash,
+        request.sourceFingerprint == snapshot.sourceFingerprint,
+        request.sampleRate == snapshot.sampleRate
+      else { throw CutSuggestClientError.decodeFailed("Request does not match its run snapshot.") }
+      return try JSONEncoder().encode(ConfiguredRequestWire(request: request, snapshot: snapshot))
+    }
+    return try JSONEncoder().encode(RequestWire(request))
   }
 }
 
@@ -409,6 +479,63 @@ private struct RequestWire: Encodable {
     var diarizationHash: String
     enum CodingKeys: String, CodingKey {
       case diarizationHash = "diarization_hash"
+    }
+  }
+}
+
+private struct ConfiguredRequestWire: Encodable {
+  var schemaVersion = 2
+  var runID: UUID
+  var mode: SuggestionSearchMode
+  var transcriptHash: String
+  var sourceFingerprint: String
+  var transcriptUnits: [RequestWire.Unit]
+  var interviewArtist: String?
+  var configuration: SuggestionConfiguration
+  var options: Options
+
+  enum CodingKeys: String, CodingKey {
+    case schemaVersion = "schema_version"
+    case runID = "run_id"
+    case mode, configuration, options
+    case transcriptHash = "transcript_hash"
+    case sourceFingerprint = "source_fingerprint"
+    case transcriptUnits = "transcript_units"
+    case interviewArtist = "interview_artist"
+  }
+
+  init(request: CutSuggestRequest, snapshot: SuggestionRunSnapshot) {
+    runID = snapshot.runID
+    mode = request.mode
+    transcriptHash = snapshot.transcriptHash
+    sourceFingerprint = snapshot.sourceFingerprint
+    transcriptUnits = request.transcriptUnits.map(RequestWire.Unit.init)
+    interviewArtist = snapshot.interviewArtist
+    configuration = snapshot.configuration
+    options = Options(
+      model: snapshot.model, sampleRate: snapshot.sampleRate,
+      stage1Window: snapshot.stage1Window, stage1Step: snapshot.stage1Step,
+      discoveryPromptVersion: snapshot.discoveryPromptVersion,
+      extractionPromptVersion: snapshot.extractionPromptVersion,
+      productSpecVersion: snapshot.productSpecVersion)
+  }
+
+  struct Options: Encodable {
+    var model: String
+    var sampleRate: Int
+    var stage1Window: Int
+    var stage1Step: Int
+    var discoveryPromptVersion: String
+    var extractionPromptVersion: String
+    var productSpecVersion: String
+    enum CodingKeys: String, CodingKey {
+      case model
+      case sampleRate = "sample_rate"
+      case stage1Window = "stage1_window"
+      case stage1Step = "stage1_step"
+      case discoveryPromptVersion = "discovery_prompt_version"
+      case extractionPromptVersion = "extraction_prompt_version"
+      case productSpecVersion = "product_spec_version"
     }
   }
 }

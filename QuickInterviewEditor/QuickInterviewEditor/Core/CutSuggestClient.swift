@@ -32,12 +32,24 @@ struct CutSuggestRequest: Equatable, Sendable {
   /// duration from `(endSample - startSample) / sampleRate`, so it must match the
   /// rate the samples were computed at or durations drift.
   var sampleRate: Int
+  var snapshot: SuggestionRunSnapshot?
+  var mode: SuggestionSearchMode = .fresh
+  var journalDirectory: URL?
+}
+
+enum SuggestionSearchMode: String, Codable, Sendable {
+  case fresh
+  case automatic
+  case resume
 }
 
 /// Streamed progress, then the final ranked candidates. Sample bounds on each candidate
 /// are still derived from words downstream, never from the LLM's duration guess.
 enum CutSuggestEvent: Equatable, Sendable {
   case progress(String)
+  case diagnostic(String)
+  case checkpoint(runID: UUID, revision: Int)
+  case recoverableFailure(runID: UUID, failedRequestKeys: [String], message: String)
   case completed([CutSuggestion])
 }
 

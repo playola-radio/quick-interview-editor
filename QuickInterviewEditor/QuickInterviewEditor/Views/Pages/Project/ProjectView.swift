@@ -55,6 +55,13 @@ struct ProjectView: View {
       Text(model.emptyStateTitle).font(.system(size: 20, weight: .semibold))
         .foregroundStyle(Color(white: 0.85))
       Text(model.emptyStateSubtitle).foregroundStyle(Color(white: 0.5))
+      VStack(alignment: .leading, spacing: 6) {
+        TextField(model.interviewArtistLabel, text: $model.interviewArtistText)
+          .textFieldStyle(.roundedBorder)
+        Text(model.interviewArtistHelp).font(.caption).foregroundStyle(.secondary)
+      }
+      .frame(maxWidth: 360)
+      .padding(.top, 8)
       Button(model.importButtonLabel) { model.importButtonTapped() }
         .padding(.top, 8)
     }

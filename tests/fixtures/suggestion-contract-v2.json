@@ -1,0 +1,109 @@
+{
+  "schema_version": 2,
+  "run_id": "00000000-0000-0000-0000-000000000001",
+  "mode": "fresh",
+  "transcript_hash": "fixture-transcript",
+  "source_fingerprint": "fixture-source",
+  "transcript_units": [
+    {
+      "id": 0,
+      "text": "You're listening to Playola.",
+      "word_ids": [
+        0
+      ],
+      "start_sample": 0,
+      "end_sample": 88200,
+      "start_sec": 0,
+      "end_sec": 2
+    }
+  ],
+  "options": {
+    "model": "fixture-model",
+    "sample_rate": 44100,
+    "stage1_window": 130,
+    "stage1_step": 110,
+    "discovery_prompt_version": "configured-v1",
+    "extraction_prompt_version": "fields-v1",
+    "product_spec_version": "configured-v1"
+  },
+  "configuration": {
+    "schemaVersion": 1,
+    "revision": 0,
+    "types": [
+      {
+        "id": "intro",
+        "name": "Song Intro",
+        "group": "songIntros",
+        "guidelines": "sets up ONE named song and ends on the handoff (~15-45s)",
+        "template": [
+          { "kind": "field", "value": "song-title" },
+          { "kind": "literal", "value": " " },
+          { "kind": "sequence" },
+          { "kind": "literal", "value": ", " },
+          { "kind": "field", "value": "artist-name" }
+        ],
+        "sequenceFieldIDs": ["song-title", "artist-name"]
+      },
+      {
+        "id": "spotlight",
+        "name": "Spotlight",
+        "group": "spotlights",
+        "guidelines": "one self-contained story or anecdote (~40-120s)",
+        "template": [
+          { "kind": "literal", "value": "Spotlight " },
+          { "kind": "sequence" }
+        ],
+        "sequenceFieldIDs": []
+      },
+      {
+        "id": "image-id",
+        "name": "ID Image",
+        "group": "audioImages",
+        "guidelines": "a complete spoken artist/station identification or station-branding liner, including listening-to statements. A brief self-identification at the beginning of a longer anecdote is not automatically a separate ID. Prefer a more specific imaging subtype for explicit break transitions or direct promotions.",
+        "template": [{ "kind": "literal", "value": "ID " }, { "kind": "sequence" }],
+        "sequenceFieldIDs": []
+      },
+      {
+        "id": "image-pre-commercial",
+        "name": "Pre-commercial Image",
+        "group": "audioImages",
+        "guidelines": "introduces an upcoming commercial break, asks the listener to stay through ads, or explains that the upcoming commercials support musicians. Include short transitions about paying the musicians.",
+        "template": [{ "kind": "literal", "value": "Pre-Com " }, { "kind": "sequence" }],
+        "sequenceFieldIDs": []
+      },
+      {
+        "id": "image-post-commercial",
+        "name": "Post-commercial Image",
+        "group": "audioImages",
+        "guidelines": "returns from a commercial break, welcomes the listener back, or explicitly resumes station programming after the break.",
+        "template": [{ "kind": "literal", "value": "Post-Com " }, { "kind": "sequence" }],
+        "sequenceFieldIDs": []
+      },
+      {
+        "id": "image-promo",
+        "name": "Promo Image",
+        "group": "audioImages",
+        "guidelines": "directly promotes a website, subscription, event/tour, release, or other listener action. A passing factual mention within a story is not automatically promotional imaging.",
+        "template": [{ "kind": "literal", "value": "Promo " }, { "kind": "sequence" }],
+        "sequenceFieldIDs": []
+      }
+    ],
+    "fields": [
+      {
+        "id": "song-title",
+        "name": "Song Title",
+        "instructions": "Identify the title of the recording this clip introduces. Use the candidate and relevant context elsewhere in the source transcript. Distinguish the introduced recording from songs mentioned as background. Return missing when the text does not establish the title; do not invent it."
+      },
+      {
+        "id": "artist-name",
+        "name": "Artist Name",
+        "instructions": "Identify the performer singing the introduced recording. Do not substitute the station DJ, the speaker, the songwriter, or the first musician mentioned. For explicit collaborations, include the established performers. Use speaker identity elsewhere in the transcript only when the text establishes that this is their performance. Return missing when the performer cannot be established."
+      },
+      {
+        "id": "descriptive-title",
+        "name": "Descriptive Title",
+        "instructions": "Produce a concise 3–6-word description of this clip's complete thought or purpose, using only the source transcript. Do not make this output name control candidate merging."
+      }
+    ]
+  }
+}

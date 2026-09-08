@@ -1,0 +1,126 @@
+[
+  {
+    "value": "\t",
+    "isBlank": true
+  },
+  {
+    "value": "\n",
+    "isBlank": true
+  },
+  {
+    "value": "\u000b",
+    "isBlank": true
+  },
+  {
+    "value": "\f",
+    "isBlank": true
+  },
+  {
+    "value": "\r",
+    "isBlank": true
+  },
+  {
+    "value": " ",
+    "isBlank": true
+  },
+  {
+    "value": "\u0085",
+    "isBlank": true
+  },
+  {
+    "value": "\u00a0",
+    "isBlank": true
+  },
+  {
+    "value": "\u1680",
+    "isBlank": true
+  },
+  {
+    "value": "\u2028",
+    "isBlank": true
+  },
+  {
+    "value": "\u2029",
+    "isBlank": true
+  },
+  {
+    "value": "\u202f",
+    "isBlank": true
+  },
+  {
+    "value": "\u205f",
+    "isBlank": true
+  },
+  {
+    "value": "\u3000",
+    "isBlank": true
+  },
+  {
+    "value": "\u2000",
+    "isBlank": true
+  },
+  {
+    "value": "\u2001",
+    "isBlank": true
+  },
+  {
+    "value": "\u2002",
+    "isBlank": true
+  },
+  {
+    "value": "\u2003",
+    "isBlank": true
+  },
+  {
+    "value": "\u2004",
+    "isBlank": true
+  },
+  {
+    "value": "\u2005",
+    "isBlank": true
+  },
+  {
+    "value": "\u2006",
+    "isBlank": true
+  },
+  {
+    "value": "\u2007",
+    "isBlank": true
+  },
+  {
+    "value": "\u2008",
+    "isBlank": true
+  },
+  {
+    "value": "\u2009",
+    "isBlank": true
+  },
+  {
+    "value": "\u200a",
+    "isBlank": true
+  },
+  {
+    "value": "\u200b",
+    "isBlank": true
+  },
+  {
+    "value": "\u200c",
+    "isBlank": false
+  },
+  {
+    "value": "\u001c",
+    "isBlank": false
+  },
+  {
+    "value": "\ufeff",
+    "isBlank": false
+  },
+  {
+    "value": "X",
+    "isBlank": false
+  },
+  {
+    "value": " \u200c\n",
+    "isBlank": false
+  }
+]

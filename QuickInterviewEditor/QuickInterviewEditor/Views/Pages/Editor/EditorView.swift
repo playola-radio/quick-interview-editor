@@ -51,6 +51,10 @@ struct EditorView: View {
       content: { EditSliceView(model: $0) }
     )
     .task { await model.loadWaveform() }
+    .sheet(
+      item: $model.exportReview, onDismiss: { model.exportReviewDismissed() },
+      content: { ExportReviewView(model: $0) }
+    )
     .task { await model.observePlayback() }
     // Kick off a background suggestion pass as soon as the file is open, so the user lands on
     // suggestions already in flight. Quietly no-ops when suggestions already exist or no API key

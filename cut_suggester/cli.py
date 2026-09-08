@@ -46,6 +46,8 @@ from .config import (
     STAGE1_WINDOW,
 )
 from .cutter import suggest_cuts
+from .configured_run import immutable_request, request_identity, run_configured_suggest, validate_request
+from .run_journal import RunJournal
 from .llm import LLMClient, live_client_for
 from .models import DEFAULT_SPECS, ProductSpec, ProductType
 from .transcript import sentences_from_units
@@ -157,6 +159,11 @@ def run_suggest(request: dict, llm: LLMClient, *, emit=_emit_event) -> dict:
     }
 
 
+class _JournalOnlyClient:
+    def complete(self, prompt, *, purpose=""):
+        raise CacheMiss(f"no validated journal response for {purpose}")
+
+
 def _cmd_suggest(args) -> int:
     if not os.path.exists(args.request):
         print(f"error: no such request file: {args.request}", file=sys.stderr)
@@ -165,13 +172,16 @@ def _cmd_suggest(args) -> int:
     # explicitly so a non-UTF-8 child locale (e.g. LC_ALL=C) can't raise on decode.
     with open(args.request, encoding="utf-8") as f:
         request = json.load(f)
+    if not isinstance(request, dict):
+        raise ValueError("request must be an object")
+    is_v2 = "schema_version" in request
+    if is_v2:
+        validate_request(request)
+        if args.journal_dir is None:
+            raise ValueError("V2 requests require --journal-dir")
+    elif args.refresh and args.cache_dir is None:
+        raise ValueError("--refresh requires --cache-dir")
     options = request.get("options") or {}
-    llm = build_llm(
-        options,
-        cache_dir=args.cache_dir,
-        cached_only=args.cached,
-        refresh=args.refresh,
-    )
 
     # stdout is a pure-JSON channel the app decodes wholesale. Redirect fd 1 to
     # stderr for the whole run (an SDK or dependency might print a warning to
@@ -181,14 +191,21 @@ def _cmd_suggest(args) -> int:
     saved_stdout_fd = os.dup(1)
     try:
         os.dup2(2, 1)
-        result = run_suggest(request, llm)
+        if is_v2:
+            journal = RunJournal(args.journal_dir, request_identity=request_identity(request),
+                                 immutable_request=immutable_request(request))
+            llm = _JournalOnlyClient() if args.cached else live_client_for(options["model"])
+            result = run_configured_suggest(request, llm, journal, _emit_event)
+        else:
+            llm = build_llm(options, cache_dir=args.cache_dir, cached_only=args.cached, refresh=args.refresh)
+            result = run_suggest(request, llm)
     finally:
         sys.stdout.flush()
         os.dup2(saved_stdout_fd, 1)
         os.close(saved_stdout_fd)
     json.dump(result, sys.stdout)
     sys.stdout.flush()
-    return 0
+    return 1 if result.get("status") == "needs_retry" else 0
 
 
 def main(argv=None) -> int:
@@ -200,6 +217,7 @@ def main(argv=None) -> int:
 
     s = sub.add_parser("suggest", help="run the two-stage cutter; result JSON to stdout")
     s.add_argument("--request", required=True, help="request.json (transcript units + options)")
+    s.add_argument("--journal-dir", default=None, help="trusted already per-run recovery directory (V2)")
     s.add_argument(
         "--cache-dir",
         default=None,
@@ -223,7 +241,8 @@ def main(argv=None) -> int:
     # --cached) and a --cache-dir to overwrite.
     if getattr(args, "cached", False) and getattr(args, "refresh", False):
         parser.error("--refresh cannot be combined with --cached (no live client to recompute)")
-    if getattr(args, "refresh", False) and getattr(args, "cache_dir", None) is None:
+    if (getattr(args, "refresh", False) and getattr(args, "cache_dir", None) is None
+            and getattr(args, "journal_dir", None) is None):
         parser.error("--refresh requires --cache-dir")
     try:
         return args.func(args)

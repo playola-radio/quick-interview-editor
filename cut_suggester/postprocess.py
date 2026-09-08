@@ -23,7 +23,7 @@ _SONG_STOPWORDS = {"the", "a", "an", "of", "to", "and", "in", "on", "for", "my",
 def validate_clip(raw: dict) -> tuple[bool, str]:
     """Strict validation of a raw stage-2 clip dict. Returns (ok, reason)."""
     ptype = raw.get("type")
-    if ptype not in _VALID_TYPES:
+    if not isinstance(ptype, str) or ptype not in _VALID_TYPES:
         return False, f"unknown type {ptype!r}"
     start, end = raw.get("start"), raw.get("end")
     if not isinstance(start, int) or isinstance(start, bool):
@@ -165,6 +165,7 @@ def merge_adjacent_same_label(
         j = i
         while (
             j + 1 < len(ordered)
+            and ordered[i].product_type is ProductType.SPOTLIGHT
             and ordered[j + 1].product_type is ordered[i].product_type
             and _norm_label(ordered[j + 1].label) == _norm_label(ordered[i].label)
             and ordered[j + 1].start_index <= ordered[j].end_index + max_gap_sentences + 1

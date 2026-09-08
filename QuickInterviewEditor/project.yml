@@ -121,6 +121,18 @@ targets:
         buildPhase: resources
       - path: Resources/Fixtures/project-state.json
         buildPhase: resources
+      - path: ../tests/fixtures/suggestion-contract-v2.json
+        buildPhase: resources
+      - path: ../tests/fixtures/suggestion-recovery-python.json
+        buildPhase: resources
+      - path: ../tests/fixtures/suggestion-result-v2.json
+        buildPhase: resources
+      - path: ../tests/fixtures/suggestion-whitespace.json
+        buildPhase: resources
+      - path: ../tests/fixtures/suggestion-integration-request-v2.json
+        buildPhase: resources
+      - path: ../tests/fixtures/suggestion-integration-response-v2.json
+        buildPhase: resources
       - path: QuickInterviewEditorTests/Fixtures/project-v1.pie
         type: folder
         buildPhase: resources
@@ -138,6 +150,11 @@ schemes:
       targets:
         PlayolaInterviewEditor: all
         PlayolaInterviewEditorTests: [test]
+    run:
+      environmentVariables:
+        # Keep the Swift app and Python helpers on the same worktree, even when
+        # Xcode inherits an override pointing at another checkout.
+        QIE_ENGINE_REPO: "$(SRCROOT)/.."
     test:
       targets:
         - PlayolaInterviewEditorTests

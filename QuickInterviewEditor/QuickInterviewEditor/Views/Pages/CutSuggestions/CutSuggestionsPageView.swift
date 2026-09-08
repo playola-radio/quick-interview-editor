@@ -7,12 +7,32 @@ struct CutSuggestionsPageView: View {
   @Bindable var model: CutSuggestionsPageModel
 
   var body: some View {
+    @Bindable var run = model.run
     VStack(alignment: .leading, spacing: 12) {
       Button(model.suggestButtonLabel) {
         Task { await model.suggestCutsTapped() }
       }
-      .disabled(model.isSuggesting)
+      .disabled(model.suggestDisabled)
 
+      Menu(model.typesMenuTitle) {
+        Button(model.allTypesTitle, systemImage: model.allTypesState.image) {
+          model.allTypesTapped()
+        }
+        .accessibilityValue(model.allTypesState.accessibilityValue)
+        ForEach(model.typeFilterGroups) { group in
+          Section {
+            Button(group.title, systemImage: group.state.image) {
+              model.groupFilterTapped(group.id)
+            }
+            .accessibilityValue(group.state.accessibilityValue)
+            ForEach(model.visibleTypeFilterRows(in: group.id)) { type in
+              Button(type.title, systemImage: type.state.image) { model.typeFilterTapped(type.id) }
+                .accessibilityValue(type.state.accessibilityValue)
+            }
+          }
+        }
+      }
+      if let message = model.catalogMessage { Text(message).foregroundStyle(.orange) }
       if model.showsSuggestionsToggle {
         Toggle(model.showSuggestionsToggleLabel, isOn: $model.showsSuggestionBands)
       }
@@ -21,9 +41,39 @@ struct CutSuggestionsPageView: View {
         HStack(spacing: 8) {
           ProgressView()
           Text(model.progressMessage)
+          Button(model.run.cancelButtonTitle) { model.run.cancelSearchTapped() }
         }
       }
 
+      if model.showsOrphanChoices {
+        Text(model.orphanTitle).font(.headline)
+        Text(model.orphanMessage)
+        ForEach(model.orphanRows) { row in
+          Button(row.title) { Task { await model.orphanSelected(row.id) } }
+        }
+        Button(model.run.cancelButtonTitle) { model.orphanCancelled() }
+      }
+      if let recoveryMessage = model.recoveryMessage { Text(recoveryMessage) }
+      if model.showsRecoveryActions {
+        HStack {
+          if model.run.canResume {
+            Button(model.run.resumeButtonTitle) { Task { await model.run.resumeTapped() } }
+          }
+          if model.run.canDiscard {
+            Button(model.run.discardButtonTitle) { Task { await model.run.discardSearchTapped() } }
+          }
+        }
+      }
+      if model.run.showsNumbering {
+        Text(model.run.numberingTitle).font(.headline)
+        ForEach($run.numberingEntries) { $entry in
+          TextField(entry.title, text: $entry.numberText)
+        }
+        Button(model.run.applyNumberingTitle) { Task { await model.run.numberingApplyTapped() } }
+      }
+      if let diagnostic = model.lastRunDiagnostic {
+        Text(diagnostic).foregroundStyle(.secondary).textSelection(.enabled)
+      }
       if let errorMessage = model.errorMessage {
         Text(errorMessage)
           .foregroundStyle(.red)
@@ -41,6 +91,8 @@ struct CutSuggestionsPageView: View {
       } else if model.showsEmptyState {
         Text(model.emptyStateMessage)
           .foregroundStyle(.secondary)
+      } else if model.showsNoMatches {
+        Text(model.noMatchesMessage).foregroundStyle(.secondary)
       } else {
         suggestionList
       }
@@ -50,6 +102,18 @@ struct CutSuggestionsPageView: View {
     .padding()
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     .onAppear { model.viewAppeared() }
+    .task { await model.catalogAppeared() }
+    .confirmationDialog(model.run.replaceTitle, isPresented: $run.isConfirmingReplacement) {
+      Button(model.run.replaceButtonTitle, role: .destructive) {
+        model.run.replacementButtonTapped()
+      }
+      Button(model.run.cancelButtonTitle, role: .cancel) { model.run.cancelReplacementTapped() }
+    } message: {
+      Text(model.run.replaceMessage)
+    }
+    .sheet(item: $model.suggestionReview) { review in
+      SuggestionReviewView(model: review)
+    }
     .sheet(item: $model.keyEntry) { entry in
       SettingsView(model: entry)
     }
@@ -117,22 +181,16 @@ private struct SuggestionCard: View {
               .font(.caption)
               .foregroundStyle(.orange)
           }
+          if let message = row.missingFieldsMessage {
+            Text(message).font(.caption).foregroundStyle(.orange)
+          }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
       }
       .buttonStyle(.plain)
       .accessibilityLabel(model.revealSuggestionLabel)
-      HStack {
-        if row.showsAcceptButton {
-          Button(model.acceptLabel) { model.acceptTapped(row.id) }
-            .disabled(!row.canAccept)
-        }
-        if row.showsRejectButton {
-          Button(model.rejectLabel) { model.rejectTapped(row.id) }
-            .disabled(!row.canReject)
-        }
-      }
+      rowActions(row)
     }
     .padding(8)
     .frame(maxWidth: .infinity, alignment: .leading)
@@ -159,6 +217,7 @@ private struct SuggestionCard: View {
       text: $model[dynamicMember: \.[editableTitle: row.id]]
     )
     .textFieldStyle(.plain)
+    .disabled(model.candidateActionsDisabled)
     .focused($titleFocused)
     .padding(.horizontal, 6).padding(.vertical, 3)
     .background(
@@ -171,5 +230,21 @@ private struct SuggestionCard: View {
     .onHover { titleHovering = $0 }
     .help(model.suggestionTitleHelp)
     .accessibilityLabel(model.suggestionTitleLabel)
+  }
+  private func rowActions(_ row: SuggestionRow) -> some View {
+    HStack {
+      if row.showsReviewButton {
+        Button(model.reviewFieldsLabel) { model.reviewFieldsTapped(row.id) }
+          .disabled(model.candidateActionsDisabled)
+      }
+      if row.showsAcceptButton {
+        Button(model.acceptLabel) { model.acceptTapped(row.id) }
+          .disabled(!row.canAccept || model.candidateActionsDisabled)
+      }
+      if row.showsRejectButton {
+        Button(model.rejectLabel) { model.rejectTapped(row.id) }
+          .disabled(!row.canReject || model.candidateActionsDisabled)
+      }
+    }
   }
 }

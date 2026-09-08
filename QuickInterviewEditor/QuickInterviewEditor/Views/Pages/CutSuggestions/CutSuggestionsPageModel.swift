@@ -2,6 +2,7 @@ import Dependencies
 import Foundation
 import IdentifiedCollections
 import Observation
+import Sharing
 
 /// Drives the cut-suggester surface: resolves the Anthropic key (onboarding when none),
 /// runs the "Suggest cuts" action, and lets the editor accept/reject the ranked candidates.
@@ -10,16 +11,17 @@ import Observation
 ///
 /// Owns no persisted state: the candidates it displays are read through
 /// `currentSuggestions` (the editor's document is the source of truth), and every edit is
-/// emitted as an intent (`onAccept`/`onReject`/`onTitleChanged`/`onSuggestionsProduced`/
+/// emitted as an intent (`onAccept`/`onReject`/`onTitleChanged`/
 /// `onSpeakerOverridesChanged`) that the editor funnels through `mutateDocument`.
 @MainActor
 @Observable
 final class CutSuggestionsPageModel: ViewModel {
 
   // MARK: - Dependencies
-  @ObservationIgnored @Dependency(\.cutSuggest) var cutSuggest
   @ObservationIgnored @Dependency(\.keychain) var keychain
   @ObservationIgnored @Dependency(\.environment) var environment
+  @ObservationIgnored @Dependency(\.suggestionConfiguration) var configurationClient
+  @ObservationIgnored @Shared(.suggestionConfiguration) var savedConfiguration
 
   // MARK: - Initialization
   let editPlan: EditPlan
@@ -42,9 +44,7 @@ final class CutSuggestionsPageModel: ViewModel {
   @ObservationIgnored var onTitleChanged: (@MainActor (CutSuggestion.ID, String) -> Void)?
   @ObservationIgnored var onTitleEditingBegan: (@MainActor (CutSuggestion.ID) -> Void)?
   @ObservationIgnored var onTitleEditingEnded: (@MainActor (CutSuggestion.ID) -> Void)?
-  /// Hands a completed run's stamped candidates to the editor to store in the document
-  /// (non-undoably — a background analysis pass must not pollute the undo stack).
-  @ObservationIgnored var onSuggestionsProduced: (@MainActor ([CutSuggestion]) -> Void)?
+  @ObservationIgnored var onInterviewArtistChanged: (@MainActor (String?) -> Void)?
   /// Emits per-file speaker overrides for the editor to fold into the document. Wired now;
   /// the paragraph/speaker UI that drives it lands in a later PR.
   @ObservationIgnored var onSpeakerOverridesChanged: (@MainActor (Int?, [String: String]) -> Void)?
@@ -55,16 +55,24 @@ final class CutSuggestionsPageModel: ViewModel {
   init(
     editPlan: EditPlan,
     sourceFingerprint: String,
-    options: CutSuggestOptions = CutSuggestOptions(),
+    options: CutSuggestOptions = .freshConfigured,
     productSpecs: [ProductSpec] = ProductSpec.defaults,
     onSelectSuggestion: ((CutSuggestion) -> Void)? = nil
   ) {
+    self.run = SuggestionRunModel(
+      editPlan: editPlan, sourceFingerprint: sourceFingerprint, options: options)
     self.editPlan = editPlan
     self.sourceFingerprint = sourceFingerprint
     self.options = options
     self.productSpecs = productSpecs
     self.onSelectSuggestion = onSelectSuggestion
     super.init()
+    run.currentDocument = { [weak self] in
+      EditorDocumentState(cutSuggestions: self?.currentSuggestions() ?? [])
+    }
+    run.resolveAPIKey = { [weak self] in self?.resolvedAPIKey() }
+    run.onMissingAPIKey = { [weak self] in self?.addAPIKeyTapped() }
+    run.onExplicitStart = { [weak self] in self?.onExplicitSuggest?() }
   }
 
   // MARK: - Phase
@@ -75,25 +83,77 @@ final class CutSuggestionsPageModel: ViewModel {
   }
 
   // MARK: - Properties
-  var phase: Phase = .idle
+  var orphanChoices: [SuggestionRecoveryOwner] = []
+  var onOrphanSelected: @MainActor (SuggestionRecoveryOwner) async -> Void = { _ in }
+  var onOrphanCancelled: @MainActor () -> Void = {}
+  let run: SuggestionRunModel
+  var phase: Phase {
+    switch run.phase {
+    case .running(_, let message): .suggesting(message)
+    case .failed(let message), .needsRetry(_, let message): .failed(message)
+    default: .idle
+    }
+  }
   /// Whether a usable Anthropic key resolved (Keychain or env). Refreshed on appear and
   /// after key entry; drives onboarding vs the live suggest flow.
   private(set) var hasAPIKey = false
+  var automaticSuggestionsEnabled: Bool {
+    get { run.automaticEnabled }
+    set { run.automaticEnabled = newValue }
+  }
+  var onExplicitSuggest: (() -> Void)?
   /// The message shown when accepting a suggestion failed (stale / invalid). Cleared on a
   /// successful accept or a new run.
   var actionMessage: String?
+  var lastRunDiagnostic: String? {
+    get { run.diagnostic }
+    set { run.diagnostic = newValue }
+  }
   /// The API-key entry sheet, presented when onboarding or when the user taps to add a key.
   var keyEntry: SettingsModel?
+  var suggestionReview: SuggestionReviewModel?
+  @ObservationIgnored var onReviewApply: (SuggestionReviewIntent) throws -> Void = { _ in
+    throw SuggestionReviewError.unavailable
+  }
+  var interviewArtistDraft: String?
+  private var futureStartDrafts: [String: String] = [:]
   /// Whether pending suggestions are drawn as faint outline bands in the transcript. The ranked
   /// list in this panel is unaffected — this only mutes the transcript overlay so the user can
   /// hide the proposals while keeping the list. Session-local: defaults on and resets per load.
   var showsSuggestionBands = true
   private var editingTitleID: CutSuggestion.ID?
+  var selectedTypeIDs: Set<String>?
+  var catalog: SuggestionConfiguration?
+  private var attemptedCatalogLoad = false
+  var catalogMessage: String?
 
   // MARK: - Display Text
+  let typesMenuTitle = "Types"
+  let allTypesTitle = "All Types"
+  let noMatchesMessage = "No suggestions match the selected types. Choose All Types to show them."
+  let futureStartsTitle = "Starting Counts"
+  let numberingScopeTitle = "Numbering — This project"
+  let numberingHelp =
+    "Numbers are assigned when you accept clips, so rejected suggestions do not use a number. "
+    + "Save or reset each starting count below; accepted clips continue after previously assigned numbers. "
+    + "These changes apply only to this project and can be undone in the editor."
+  let futureStartLabel = "Start numbering at"
+  let applyTypeStartLabel = "Save Type Start"
+  let songStartsTitle = "Song and Group Counts"
+  let songStartsHelp =
+    "Song overrides stay with their original song, even when a correction moves a suggestion elsewhere."
+  let reviewFieldsLabel = "Review Fields…"
+  let reviewGroupLabel = "Review Group…"
+  let resetSongStartLabel = "Reset to Type Start"
+  let automaticTypeStartLabel = "Use Automatic"
+  let orphanTitle = "Recover an unfinished search"
+  let orphanMessage = "Choose a saved search for this transcript, then resume or discard it."
   let startingMessage = "Analyzing transcript…"
-  let emptyStateMessage =
-    "No suggestions yet. Tap \u{201c}Suggest Cuts\u{201d} to find product cuts."
+  var emptyStateMessage: String {
+    run.currentDocument().suggestionBatch == nil
+      ? "No suggestions yet. Tap \u{201c}Suggest Cuts\u{201d} to find product cuts."
+      : "No matching suggestions found."
+  }
   let onboardingTitle = "Add your Anthropic API key to enable cut suggestions"
   let onboardingBody =
     "Cut suggestions use a hosted Claude model. Add your Anthropic API key (stored in your "
@@ -111,13 +171,127 @@ final class CutSuggestionsPageModel: ViewModel {
   }
 
   // MARK: - View Helpers
+  var orphanRows: [SuggestionOrphanRow] {
+    orphanChoices.map {
+      .init(
+        id: $0.id,
+        title: ($0.documentURL?.lastPathComponent ?? "Untitled project") + " · "
+          + $0.id.uuidString.prefix(8))
+    }
+  }
+  var showsOrphanChoices: Bool { !orphanChoices.isEmpty }
   /// The candidates to show, in ranked order, read from the editor's document.
-  var suggestions: [CutSuggestion] { currentSuggestions().ranked }
+  var suggestions: [CutSuggestion] {
+    visibleSuggestions(currentSuggestions().ranked, selected: selectedTypeIDs)
+  }
 
   /// The still-undecided candidates, in ranked order — the source of the amber clip
   /// containers the transcript draws. Accepted candidates are already slices (drawn green,
   /// so they aren't double-drawn here); rejected ones aren't drawn at all.
-  var pendingSuggestions: [CutSuggestion] { currentSuggestions().pending }
+  var pendingSuggestions: [CutSuggestion] {
+    visibleSuggestions(currentSuggestions().pending, selected: selectedTypeIDs)
+  }
+
+  var interviewArtist: String? { run.currentDocument().interviewArtist }
+
+  func visibleTypeFilterRows(in group: SuggestionGroup) -> [SuggestionTypeFilterRow] {
+    let rows = typeFilterRows.filter { $0.group == group }
+    guard rows.count == 1, let row = rows.first,
+      row.id == "intro" || row.id == "spotlight",
+      let preset = SuggestionDefaults.types.first(where: { $0.id == row.id }),
+      row.group == preset.group, row.title == preset.name
+    else { return rows }
+    return []
+  }
+
+  var typeFilterRows: [SuggestionTypeFilterRow] {
+    var rows: [SuggestionTypeFilterRow] = []
+    let configuration = savedConfiguration ?? catalog
+    for type in configuration?.types ?? [] {
+      rows.append(.init(id: type.id, title: type.name, group: type.group, state: .none))
+    }
+    for type in run.currentDocument().suggestionBatch?.snapshot.configuration.types ?? []
+    where !rows.contains(where: { $0.id == type.id }) {
+      rows.append(.init(id: type.id, title: type.name, group: type.group, state: .none))
+    }
+    for candidate in currentSuggestions()
+    where !rows.contains(where: { $0.id == candidate.productType.rawValue }) {
+      rows.append(
+        .init(
+          id: candidate.productType.rawValue,
+          title: candidate.naming?.typeName ?? candidate.productType.displayLabel,
+          group: candidate.naming?.typeGroup
+            ?? (candidate.productType == .intro ? .songIntros : .spotlights),
+          state: .none))
+    }
+    return rows.map { row in
+      var row = row
+      row.state = selectedTypeIDs?.contains(row.id) == false ? .none : .all
+      return row
+    }
+  }
+  var typeFilterGroups: [SuggestionFilterGroup] {
+    [
+      (SuggestionGroup.spotlights, "Spotlights"), (.songIntros, "Song Intros"),
+      (.audioImages, "Audio Images"),
+    ]
+    .map { group, title in
+      .init(id: group, title: title, types: typeFilterRows.filter { $0.group == group })
+    }.filter { !$0.types.isEmpty }
+  }
+  var allTypesState: SuggestionFilterState {
+    if selectedTypeIDs == nil { return .all }
+    if typeFilterRows.allSatisfy({ $0.state == .none }) { return .none }
+    return typeFilterRows.allSatisfy({ $0.state == .all }) ? .all : .some
+  }
+  var showsNoMatches: Bool { !currentSuggestions().isEmpty && suggestions.isEmpty }
+
+  var futureStartRows: [SuggestionFutureStartRow] {
+    let document = run.currentDocument()
+    return typeFilterRows.map { type in
+      let preference = document.suggestionStarts.types[type.id]
+      let explicit = preference?.isExplicit == true
+      return .init(
+        id: type.id, title: type.title,
+        preferenceLabel: explicit
+          ? "Starting count: \(preference?.number ?? 1)"
+          : "Automatic — starts at 1 or after previously issued numbers",
+        hasOverride: preference != nil)
+    }
+  }
+  var songStartRows: [SuggestionSongStartRow] {
+    let document = run.currentDocument()
+    var keys = document.suggestionStarts.groups.map(\.key)
+    if let batch = document.suggestionBatch {
+      for candidate in document.cutSuggestions {
+        if let key = reviewSequenceKey(candidate, batch: batch), !keys.contains(key) {
+          keys.append(key)
+        }
+      }
+    }
+    return keys.map { key in
+      let display = groupDisplay(key)
+      let values = key.fields.map { field in
+        display.canonicalValues[field.fieldID] ?? field.value
+      }.filter { !$0.isEmpty }
+      let song = values.isEmpty ? "Unresolved group" : values.joined(separator: " · ")
+      let override = document.suggestionStarts.groups.first { $0.key == key }
+      let number =
+        override?.start.number ?? document.suggestionStarts.types[key.typeID]?.number ?? 1
+      let title =
+        key.fields.isEmpty && key.provisionalCandidateID == nil
+        ? display.typeName : display.typeName + " · " + song
+      return .init(
+        id: key, title: title,
+        startLabel: "Starting count: \(number)", hasOverride: override != nil)
+    }
+  }
+  subscript(futureStart id: String) -> String {
+    get {
+      futureStartDrafts[id] ?? String(run.currentDocument().suggestionStarts.types[id]?.number ?? 1)
+    }
+    set { futureStartDrafts[id] = newValue }
+  }
 
   /// The show/hide toggle only makes sense when there are pending suggestions whose transcript
   /// outlines it can mute — hidden otherwise so it never dangles over an empty list.
@@ -128,7 +302,10 @@ final class CutSuggestionsPageModel: ViewModel {
   var sections: [SuggestionSection] {
     suggestionSections(
       from: suggestions, currentTranscriptHash: editPlan.transcriptHash,
-      currentFingerprint: sourceFingerprint)
+      currentFingerprint: sourceFingerprint,
+      fieldNames: Dictionary(
+        uniqueKeysWithValues: (run.currentDocument().suggestionBatch?.snapshot.configuration.fields
+          ?? []).map { ($0.id, $0.name) }))
   }
 
   /// The current (untrimmed) title of a suggestion, read live from the document so a rename
@@ -163,13 +340,98 @@ final class CutSuggestionsPageModel: ViewModel {
   var showsProgress: Bool { isSuggesting }
   /// The onboarding panel replaces the empty state when no key resolved and there's nothing
   /// to act on yet.
-  var showsOnboarding: Bool { !hasAPIKey && suggestions.isEmpty && !isSuggesting }
+  var showsOnboarding: Bool { !hasAPIKey && currentSuggestions().isEmpty && !isSuggesting }
   var showsEmptyState: Bool {
-    hasAPIKey && suggestions.isEmpty && !isSuggesting && errorMessage == nil
+    hasAPIKey && currentSuggestions().isEmpty && !isSuggesting && errorMessage == nil
   }
 
   // MARK: - User Actions
+  var recoveryBlocksSuggestions: Bool {
+    get { run.ownershipBlocked }
+    set { run.ownershipBlocked = newValue }
+  }
+  var candidateActionsDisabled: Bool { run.candidatesLocked }
+  var suggestDisabled: Bool { !run.canStart || showsOrphanChoices }
+  var showsRecoveryActions: Bool { run.canResume || run.canDiscard }
+  var recoveryMessage: String? {
+    switch run.phase {
+    case .paused, .needsNumbering: run.message
+    default: nil
+    }
+  }
+
   func viewAppeared() { refreshKeyState() }
+
+  func catalogAppeared() async {
+    guard !attemptedCatalogLoad else { return }
+    attemptedCatalogLoad = true
+    do {
+      catalog = try await configurationClient.load()
+      catalogMessage = nil
+    } catch {
+      catalogMessage = "Could not load saved suggestion types. \(error.localizedDescription)"
+    }
+  }
+
+  func allTypesTapped() { selectedTypeIDs = allTypesState == .all ? [] : nil }
+
+  func typeFilterTapped(_ id: String) {
+    var selected = selectedTypeIDs ?? Set(typeFilterRows.map(\.id))
+    if selected.contains(id) { selected.remove(id) } else { selected.insert(id) }
+    selectedTypeIDs = selected
+  }
+
+  func groupFilterTapped(_ group: SuggestionGroup) {
+    guard let row = typeFilterGroups.first(where: { $0.id == group }) else { return }
+    var selected = selectedTypeIDs ?? Set(typeFilterRows.map(\.id))
+    if row.state == .all {
+      selected.subtract(row.types.map(\.id))
+    } else {
+      selected.formUnion(row.types.map(\.id))
+    }
+    selectedTypeIDs = selected
+  }
+
+  func applyTypeStartTapped(_ id: String) {
+    do {
+      let number = try parseSuggestionStartingNumber(self[futureStart: id])
+      try applyReviewIntent(.futureType(typeID: id, start: number))
+      futureStartDrafts[id] = nil
+    } catch { actionMessage = reviewErrorMessage(error) }
+  }
+
+  func resetSongStartTapped(_ key: SuggestionSequenceKey) {
+    do { try applyReviewIntent(.resetGroup(key)) } catch {
+      actionMessage = reviewErrorMessage(error)
+    }
+  }
+
+  func resetTypeStartTapped(_ id: String) {
+    do {
+      try applyReviewIntent(.resetType(id))
+      futureStartDrafts[id] = nil
+    } catch { actionMessage = reviewErrorMessage(error) }
+  }
+
+  func reviewFieldsTapped(_ id: UUID) {
+    guard !candidateActionsDisabled,
+      let candidate = currentSuggestions()[id: id], candidate.isPending, candidate.naming != nil
+    else { return }
+    presentReview(candidateID: id)
+  }
+
+  func reviewGroupTapped(
+    _ key: SuggestionSequenceKey, settings: SuggestionSettingsModel? = nil
+  ) {
+    guard !candidateActionsDisabled else { return }
+    presentReview(sequenceKey: key, settings: settings)
+  }
+
+  func orphanSelected(_ id: UUID) async {
+    guard let owner = orphanChoices.first(where: { $0.id == id }) else { return }
+    await onOrphanSelected(owner)
+  }
+  func orphanCancelled() { onOrphanCancelled() }
 
   /// Clicking a row asks the editor to reveal it (select its words, scroll the transcript, zoom
   /// the waveform) so the user can review — and, with the fine-tune pane open, audition — the
@@ -180,72 +442,14 @@ final class CutSuggestionsPageModel: ViewModel {
   }
 
   func suggestCutsTapped() async {
-    guard !isSuggesting else { return }
-    // No key resolved → don't call the LLM; take the user to key entry instead.
-    guard let apiKey = resolvedAPIKey() else {
-      addAPIKeyTapped()
-      return
-    }
-    await runSuggest(apiKey: apiKey)
-  }
-
-  /// Fired once when the editor loads a file, so the user lands on suggestions already in
-  /// flight instead of having to press a button. It's deliberately quiet: it does nothing when
-  /// suggestions already exist (so it never clobbers prior results or accept/reject decisions),
-  /// and, unlike the manual button, it does NOT open the key-entry sheet when no key resolves —
-  /// a background pass must never nag. The button remains the way to add a key and run by hand.
-  func autoSuggestCutsIfNeeded() async {
-    guard !isSuggesting, suggestions.isEmpty else { return }
-    guard let apiKey = resolvedAPIKey() else { return }
-    await runSuggest(apiKey: apiKey, isBackgroundPass: true)
-  }
-
-  /// The shared run: stream the cutter and fold its events into `phase`/the sidecar. Both the
-  /// manual button and the background auto-pass funnel through here so they behave identically
-  /// once a key is in hand. `isBackgroundPass` is the one difference: a background pass refuses
-  /// to overwrite suggestions that appeared while it was in flight (see the completion handler).
-  private func runSuggest(apiKey: String, isBackgroundPass: Bool = false) async {
     actionMessage = nil
-    phase = .suggesting(startingMessage)
-    let request = buildRequest()
-    do {
-      for try await event in cutSuggest.suggestCuts(request, apiKey) {
-        switch event {
-        case .progress(let message):
-          phase = .suggesting(message)
-        case .completed(let candidates):
-          guard !candidates.isEmpty else {
-            phase = .failed(
-              "The cut-suggester completed but produced no usable suggestions. "
-                + "Existing suggestions were left unchanged.")
-            return
-          }
-          let stamped = candidates.map { stampProvenance(on: $0, from: request) }
-          // A background pass guards emptiness at start, but suggestions can land while it's in
-          // flight (a manual run, or a decision the user just made). Re-check right before
-          // emitting — the check and the emit are synchronous on the main actor, so nothing can
-          // slip between them: a background pass commits only if the document is still empty
-          // (else it would silently wipe the user's accept/reject decisions); a manual run always
-          // replaces — an explicit re-run is meant to overwrite. The editor de-dupes on store.
-          guard !isBackgroundPass || currentSuggestions().isEmpty else {
-            phase = .idle
-            return
-          }
-          onSuggestionsProduced?(stamped)
-          phase = .idle
-          return
-        }
-      }
-      // The stream finished without ever completing (a degenerate run): don't hang on the
-      // spinner, but fail visibly so the user sees the missing subprocess result.
-      if isSuggesting {
-        phase = .failed("The cut-suggester stopped before returning results.")
-      }
-    } catch is CancellationError {
-      phase = .idle
-    } catch {
-      phase = .failed(error.localizedDescription)
-    }
+    guard !showsOrphanChoices else { return }
+    await run.suggestTapped()
+  }
+
+  func autoSuggestCutsIfNeeded() async {
+    guard !showsOrphanChoices else { return }
+    await run.automaticSearchIfNeeded()
   }
 
   /// Accepts a suggestion: validates it against the current plan, then — on success —
@@ -255,14 +459,15 @@ final class CutSuggestionsPageModel: ViewModel {
   /// fingerprint, and `actionMessage`) keeps the outcome message local; the editor owns
   /// the undoable document write.
   func acceptTapped(_ id: CutSuggestion.ID) {
+    guard !candidateActionsDisabled else { return }
     finishTitleEditing(id)
     switch acceptCutSuggestion(
       id, in: ProjectState(cutSuggestions: currentSuggestions()), plan: editPlan,
       sourceFingerprint: sourceFingerprint, transcriptHash: editPlan.transcriptHash)
     {
     case .accepted(let slice, _):
-      onAccept?(slice, id)
       actionMessage = nil
+      onAccept?(slice, id)
     case .stale(let reason):
       actionMessage = cutSuggestionStaleMessage(reason)
     case .invalid(let reason):
@@ -271,20 +476,27 @@ final class CutSuggestionsPageModel: ViewModel {
   }
 
   func rejectTapped(_ id: CutSuggestion.ID) {
+    guard !candidateActionsDisabled else { return }
     finishTitleEditing(id)
-    onReject?(id)
     actionMessage = nil
+    onReject?(id)
   }
 
   /// Renames a suggestion as the user types in its title field. Routed to the editor so the
   /// document and accepted-slice name stay live while the surrounding focus session is coalesced.
   func titleChanged(_ id: CutSuggestion.ID, to newTitle: String) {
+    guard !candidateActionsDisabled,
+      let candidate = currentSuggestions()[id: id], candidate.isPending, candidate.naming == nil
+    else { return }
     onTitleChanged?(id, newTitle)
   }
 
   func titleFocusChanged(_ id: CutSuggestion.ID, isFocused: Bool) {
     if isFocused {
-      guard editingTitleID != id else { return }
+      guard !candidateActionsDisabled,
+        let candidate = currentSuggestions()[id: id], candidate.isPending, candidate.naming == nil,
+        editingTitleID != id
+      else { return }
       if let editingTitleID { finishTitleEditing(editingTitleID) }
       editingTitleID = id
       onTitleEditingBegan?(id)
@@ -305,6 +517,50 @@ final class CutSuggestionsPageModel: ViewModel {
   }
 
   // MARK: - Private Helpers
+  private func applyReviewIntent(_ intent: SuggestionReviewIntent) throws {
+    guard !candidateActionsDisabled else { throw SuggestionReviewError.locked }
+    try onReviewApply(intent)
+    actionMessage = nil
+  }
+
+  private func presentReview(
+    candidateID: UUID? = nil, sequenceKey: SuggestionSequenceKey? = nil,
+    settings: SuggestionSettingsModel? = nil
+  ) {
+    let review = SuggestionReviewModel(
+      candidateID: candidateID, sequenceKey: sequenceKey,
+      currentDocument: { [weak self] in self?.run.currentDocument() ?? .init() },
+      isLocked: { [weak self] in self?.candidateActionsDisabled ?? true },
+      onApply: { [weak self] intent in
+        guard let self else { throw SuggestionReviewError.unavailable }
+        try applyReviewIntent(intent)
+      },
+      onCancelled: { [weak self, weak settings] in
+        if let settings { settings.numberingReview = nil } else { self?.suggestionReview = nil }
+      })
+    if let settings { settings.numberingReview = review } else { suggestionReview = review }
+  }
+
+  private func groupDisplay(_ key: SuggestionSequenceKey) -> SuggestionStarts.GroupDisplay {
+    let document = run.currentDocument()
+    let snapshot = document.suggestionBatch?.snapshot.configuration
+    let saved = document.suggestionStarts.groups.first { $0.key == key }?.display
+    let type =
+      snapshot?.types.first { $0.id == key.typeID }
+      ?? (savedConfiguration ?? catalog)?.types.first { $0.id == key.typeID }
+    let fields = snapshot?.fields ?? (savedConfiguration ?? catalog)?.fields ?? []
+    let canonical =
+      document.suggestionBatch?.canonicalGroups.first { $0.key == key }?.values
+      ?? saved?.canonicalValues ?? document.issuedSuggestionNumbers.first { $0.key == key }?
+      .canonicalValues
+      ?? Dictionary(uniqueKeysWithValues: key.fields.map { ($0.fieldID, $0.value) })
+    return .init(
+      typeName: type?.name ?? saved?.typeName ?? key.typeID,
+      fieldNames: saved?.fieldNames
+        ?? Dictionary(uniqueKeysWithValues: fields.map { ($0.id, $0.name) }),
+      canonicalValues: canonical)
+  }
+
   private func refreshKeyState() { hasAPIKey = resolvedAPIKey() != nil }
 
   private func finishTitleEditing(_ id: CutSuggestion.ID) {
@@ -321,32 +577,23 @@ final class CutSuggestionsPageModel: ViewModel {
       env: environment.value(anthropicAPIKeyEnvVar))
   }
 
-  private func buildRequest() -> CutSuggestRequest {
-    CutSuggestRequest(
-      transcriptUnits: editPlan.transcriptUnits,
-      diarization: nil,
-      productSpecs: productSpecs,
-      options: options,
-      transcriptHash: editPlan.transcriptHash,
-      sourceFingerprint: sourceFingerprint,
-      sampleRate: editPlan.source.sampleRate)
-  }
+}
 
-  /// Provenance is bookkeeping the model owns authoritatively: it knows the current
-  /// transcript hash, source fingerprint, and pinned versions this run used. Stamping it
-  /// here (rather than trusting the client) guarantees every persisted suggestion carries
-  /// the hash the accept-time staleness gate compares against.
-  private func stampProvenance(on suggestion: CutSuggestion, from request: CutSuggestRequest)
-    -> CutSuggestion
-  {
-    var stamped = suggestion
-    stamped.provenance = CutSuggestion.Provenance(
-      model: request.options.model,
-      promptVersion: request.options.promptVersion,
-      productSpecVersion: request.options.productSpecVersion,
-      transcriptHash: request.transcriptHash,
-      sourceFingerprint: request.sourceFingerprint,
-      diarizationHash: request.diarization?.diarizationHash)
-    return stamped
-  }
+struct SuggestionOrphanRow: Identifiable {
+  var id: UUID
+  var title: String
+}
+
+struct SuggestionFutureStartRow: Identifiable {
+  var id: String
+  var title: String
+  var preferenceLabel: String
+  var hasOverride: Bool
+}
+
+struct SuggestionSongStartRow: Identifiable {
+  var id: SuggestionSequenceKey
+  var title: String
+  var startLabel: String
+  var hasOverride: Bool
 }

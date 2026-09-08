@@ -4,6 +4,7 @@ import SwiftUI
 struct QuickInterviewEditorApp: App {
   @State private var launch = AppLaunchModel()
   @State private var settings = SettingsModel()
+  @State private var suggestionSettings = SuggestionSettingsModel(isSettingsTab: true)
   @State private var clipSettings = ClipBoundarySettingsModel()
 
   var body: some Scene {
@@ -15,6 +16,7 @@ struct QuickInterviewEditorApp: App {
           // object rebuilds the host rather than reusing a model bound to the old one.
           .id(ObjectIdentifier(configuration.document))
           .environment(launch)
+          .environment(suggestionSettings)
           .preferredColorScheme(.dark)
       }
     )
@@ -29,6 +31,8 @@ struct QuickInterviewEditorApp: App {
       TabView {
         SettingsView(model: settings)
           .tabItem { Label("Cut Suggestions", systemImage: "scissors") }
+        SuggestionSettingsView(model: suggestionSettings)
+          .tabItem { Label(suggestionSettings.title, systemImage: "list.bullet.rectangle") }
         ClipBoundarySettingsView(model: clipSettings)
           .tabItem { Label("Editing", systemImage: "slider.horizontal.3") }
       }

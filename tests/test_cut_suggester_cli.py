@@ -202,3 +202,76 @@ def test_cli_cached_happy_path_emits_json_and_progress(tmp_path):
         if line.startswith("QIE_EVENT ")
     ]
     assert any(e["phase"] == "completed" for e in events)
+
+
+def _v2_request():
+    from pathlib import Path
+    request = json.loads(Path('tests/fixtures/suggestion-contract-v2.json').read_text())
+    request['configuration']['types'] = [t for t in request['configuration']['types'] if t['id'] == 'image-id']
+    return request
+
+
+def test_cli_v2_reopens_validated_journal_without_shared_cache(tmp_path):
+    from cut_suggester.configured_run import run_configured_suggest, request_identity, immutable_request
+    from cut_suggester.run_journal import RunJournal
+    request = _v2_request()
+    journal_dir = tmp_path / 'run'
+    j = RunJournal(journal_dir, request_identity=request_identity(request), immutable_request=immutable_request(request))
+    run_configured_suggest(request, _FakeLLM('', '{"clips":[]}'), j, lambda e: None)
+    request['mode'] = 'resume'
+    proc = _run_cli(tmp_path, request, ['--journal-dir', str(journal_dir), '--cached'])
+    assert proc.returncode == 0, proc.stderr
+    result = json.loads(proc.stdout)
+    assert result['schema_version'] == 2
+    assert result['status'] == 'ready'
+    assert result['suggestions'] == []
+    events = [json.loads(line.removeprefix('QIE_EVENT ')) for line in proc.stderr.splitlines() if line.startswith('QIE_EVENT ')]
+    assert any(e['type'] == 'checkpoint' for e in events)
+    assert (journal_dir / 'identity.json').exists()
+    assert not (journal_dir / request['run_id']).exists()
+
+
+@pytest.mark.parametrize('version',[1,3,None,True])
+def test_cli_present_unknown_schema_fails_before_provider(tmp_path,version):
+    request = _v2_request()
+    request['schema_version'] = version
+    proc = _run_cli(tmp_path, request, [])
+    assert proc.returncode == 1
+    assert 'unsupported schema_version' in proc.stderr
+    assert proc.stdout == ''
+
+
+@pytest.mark.parametrize('mode',['fresh','resume','automatic'])
+def test_cli_v2_uses_direct_provider_and_keeps_noisy_construction_off_stdout(tmp_path,mode):
+    request = _v2_request()
+    request['mode'] = mode
+    path = tmp_path / 'request.json'
+    path.write_text(json.dumps(request))
+    script = '''
+import sys
+from cut_suggester import cli
+from cut_suggester.llm import LLMResponse
+class Provider:
+    def complete(self, prompt, *, purpose=''):
+        print('provider output')
+        return LLMResponse(text='{"clips":[]}')
+def live(model):
+    print('provider construction')
+    return Provider()
+def forbidden(*a,**kw): raise AssertionError('shared cache must never wrap V2')
+cli.live_client_for=live
+cli.build_llm=forbidden
+raise SystemExit(cli.main(sys.argv[1:]))
+'''
+    proc = subprocess.run([sys.executable,'-c',script,'suggest','--request',str(path),'--journal-dir',str(tmp_path/'run'),'--refresh'],capture_output=True,text=True)
+    assert proc.returncode == 0, proc.stderr
+    assert json.loads(proc.stdout)['status'] == 'ready'
+    assert 'provider construction' in proc.stderr
+    assert 'provider output' in proc.stderr
+
+
+def test_cli_v2_cached_miss_never_uses_shared_cache(tmp_path):
+    proc = _run_cli(tmp_path, _v2_request(), ['--journal-dir',str(tmp_path/'run'),'--cached'])
+    assert proc.returncode == 1
+    assert 'no validated journal response' in proc.stderr
+    assert proc.stdout == ''

@@ -1,0 +1,31 @@
+{
+ "model": "gpt-4o",
+ "product_spec_version": "configured-v1",
+ "prompt": "Refine proposed Song Intro clips into complete, independently usable introductions or handoffs.\nConfigured Song Intro guidelines: sets up ONE named song and ends on the handoff (~15-45s)\nEach proposal is a coarse selection, not an instruction to retain the whole paragraph.\nUse the globally numbered sentences below. Return zero, one, or multiple complete takes strictly contained within each proposal.\nKeep only the actual introduction/handoff. Exclude unrelated commercial-break transitions and trailing acknowledgments, isolated song-title fragments, false starts, and unfinished handoffs.\nRetain the full contiguous relevant setup before the final handoff, including performer identification and background about the introduced recording. A complete introduction includes that setup; do not shorten it to only the title announcement or final handoff sentence.\nA short complete handoff is valid. Do not impose a minimum word count or duration. Do not invent missing content to complete a fragment.\nConsecutive independently complete introductions are separate takes even if the wording or song is identical.\nReturn exactly one result for every proposal ID, including an empty takes array if none is independently usable.\nWithin each proposal, returned takes must not overlap. Give each take a concise descriptive nonblank label and integer start/end global sentence indices.\nSet song to the song introduced by that individual take, as supported by its sentences, or null when not established. Do not inherit a song from another take.\nProposals:\nProposal p0 (0 through 3):\n[0] This next recording is by River Vale.\n[1] River wrote it after a winter tour.\n[2] The song is Paper Lanterns.\n[3] Here is River Vale with Paper Lanterns.\nProposal p1 (23 through 28):\n[23] Welcome back from the advertisements.\n[24] Our guest chose a recording by Nova Reed.\n[25] Here is Nova Reed singing Harbor Lights.\n[26] Yeah.\n[27] Harbor Lights.\n[28] We'll be right back after this.\nReply with strict JSON: {\"results\":[{\"proposal_id\":\"<exact proposal ID>\",\"takes\":[{\"start\":<global index>,\"end\":<global index>,\"label\":\"Complete song handoff\",\"song\":null}]}]}",
+ "prompt_version": "configured-v2",
+ "purpose": "refine-intros:p0,p1",
+ "response": {
+  "model": "gpt-4o",
+  "text": "{\"results\":[{\"proposal_id\":\"p0\",\"takes\":[{\"start\":0,\"end\":3,\"label\":\"Complete song handoff\",\"song\":\"Paper Lanterns\"}]},{\"proposal_id\":\"p1\",\"takes\":[{\"start\":24,\"end\":25,\"label\":\"Complete song handoff\",\"song\":\"Harbor Lights\"}]}]}",
+  "usage": {
+   "completion_tokens": 68,
+   "completion_tokens_details": {
+    "accepted_prediction_tokens": 0,
+    "audio_tokens": 0,
+    "reasoning_tokens": 0,
+    "rejected_prediction_tokens": 0
+   },
+   "finish_reason": "stop",
+   "prompt_tokens": 450,
+   "prompt_tokens_details": {
+    "audio_tokens": 0,
+    "cached_tokens": 0
+   },
+   "total_tokens": 518
+  }
+ },
+ "window_params": {
+  "step": 110,
+  "window": 130
+ }
+}

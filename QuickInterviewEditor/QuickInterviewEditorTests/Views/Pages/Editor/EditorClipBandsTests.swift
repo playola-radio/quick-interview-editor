@@ -8,6 +8,22 @@ import Testing
 @MainActor
 struct EditorClipBandsTests {
 
+  @Test func typeFilterKeepsListAndBandsTogetherWithoutDocumentMutation() {
+    var intro = Fixtures.cutSuggestion(id: Fixtures.uuid(1), wordIDs: [7, 8])
+    intro.productType = .intro
+    var spotlight = Fixtures.cutSuggestion(id: Fixtures.uuid(2), wordIDs: [9, 10])
+    spotlight.productType = .spotlight
+    withEditor(suggestions: [intro, spotlight]) { model in
+      model.slices = [slice(Fixtures.uuid(3), wordIDs: [1, 2])]
+      let before = model.documentState
+      model.cutSuggestions.typeFilterTapped("intro")
+      expectNoDifference(model.cutSuggestions.suggestions.map(\.id), [spotlight.id])
+      expectNoDifference(model.clipBands.map(\.id), [Fixtures.uuid(3), spotlight.id])
+      expectNoDifference(model.documentState, before)
+      #expect(!model.canUndo)
+    }
+  }
+
   private func slice(_ id: UUID, wordIDs: [Word.ID]) -> Slice {
     Slice(
       id: id, name: "A story", startSample: 0, endSample: 100,
