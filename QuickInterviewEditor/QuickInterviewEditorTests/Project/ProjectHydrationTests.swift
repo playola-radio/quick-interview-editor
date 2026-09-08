@@ -612,6 +612,57 @@ extension ProjectHydrationTests {
     expectNoDifference(record.registerChangeCount, changes)
   }
 
+  @Test(arguments: [false, true])
+  func orphanSelectionWaitsForExplicitResumeBeforeRequestingOrApplying(isReady: Bool) async throws {
+    let root = FileManager.default.temporaryDirectory.appending(component: UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let file = Fixtures.projectFile()
+    let plan = Fixtures.editPlan()
+    var fixture = try RecoveryFixture.matching(file: file, plan: plan)
+    fixture.preparation.control.originalBatchFingerprint = try suggestionBatchFingerprint(
+      file.content)
+    fixture.preparation.control.isPaused = !isReady
+    let store = SuggestionRecoveryStore(root: root, uuid: { UUID() })
+    let directory = try await store.prepare(fixture.owner, preparation: fixture.preparation)
+    if isReady {
+      try fixture.writePython(RecoveryFixture.python(matching: fixture), directory: directory)
+    }
+    let original = try await store.capture(
+      fixture.owner, runID: fixture.snapshot.runID, minimumPythonRevision: nil)
+    let calls = LockIsolated(0)
+    let (sink, record) = ProjectDocumentSink.recorder()
+    let model = withDependencies {
+      $0.uuid = .incrementing
+      $0.suggestionRecovery = .store(store)
+      $0.keychain = .inMemory("ephemeral-test-key")
+      $0.environment = .constant([:])
+      $0.cutSuggest.suggestCuts = { _, _ in
+        calls.withValue { $0 += 1 }
+        return AsyncThrowingStream { $0.finish() }
+      }
+    } operation: {
+      ProjectModel(
+        file: file, plan: plan, audio: .sessionFile(root.appending(component: "audio.aiff")),
+        sink: sink)
+    }
+    await model.viewAppeared()
+    let editor = try #require(model.editor)
+    let before = editor.documentState
+    await editor.cutSuggestions.orphanSelected(fixture.owner.id)
+    let isolated = try #require(model.recoveryOwner)
+    #expect(isolated.id != fixture.owner.id)
+    var expected = before
+    expected.suggestionRecoveryOwnerID = isolated.id
+    expected.unfinishedSuggestionRun = original.checkpoint
+    expectNoDifference(editor.documentState, expected)
+    expectNoDifference(calls.value, 0)
+    #expect(editor.cutSuggestions.run.canResume)
+    #expect(editor.cutSuggestions.run.canDiscard)
+    expectNoDifference(record.recoveries.last?.file.content, expected)
+    #expect(record.recoveries.last?.archive != nil)
+    expectNoDifference(model.recoverableSuggestionOwners, [])
+  }
+
   @Test func orphanChoiceCopiesAStillOpenOriginalOwnerBeforeResume() async throws {
     let root = FileManager.default.temporaryDirectory.appending(component: UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: root) }
@@ -649,7 +700,7 @@ extension ProjectHydrationTests {
     expectNoDifference(
       try SuggestionRecoveryArchive.decode(retained.archive),
       try SuggestionRecoveryArchive.decode(original.archive))
-    expectNoDifference(model.editor?.cutSuggestions.run.phase, .confirmingReplacement)
+    #expect(model.editor?.cutSuggestions.run.canResume == true)
   }
 
   @Test func locationChangePausesActiveSearchBeforeForkingItsOwner() async throws {

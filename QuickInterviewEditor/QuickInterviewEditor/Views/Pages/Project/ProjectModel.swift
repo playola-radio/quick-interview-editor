@@ -703,7 +703,6 @@ final class ProjectModel: ViewModel {
       else { return }
       recoverableSuggestionOwners = []
       synchronizeRecoveryEditor()
-      await editor?.cutSuggestions.run.resumeTapped()
     } catch {
       guard generation == recoveryGeneration else { return }
       recoveryErrorMessage = error.localizedDescription

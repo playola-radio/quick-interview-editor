@@ -115,7 +115,7 @@ final class CutSuggestionsPageModel: ViewModel {
 
   // MARK: - Display Text
   let orphanTitle = "Recover an unfinished search"
-  let orphanMessage = "Choose a saved search for this transcript to resume."
+  let orphanMessage = "Choose a saved search for this transcript, then resume or discard it."
   let startingMessage = "Analyzing transcript…"
   let emptyStateMessage =
     "No suggestions yet. Tap \u{201c}Suggest Cuts\u{201d} to find product cuts."
