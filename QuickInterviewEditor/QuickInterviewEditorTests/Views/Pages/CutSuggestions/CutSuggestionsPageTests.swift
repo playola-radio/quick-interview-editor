@@ -10,6 +10,94 @@ import Testing
 @MainActor
 struct CutSuggestionsPageTests {
 
+  @Test func actualStartLabelsUseResolvedGroupsRatherThanFutureTypePreference() throws {
+    let editor = try SuggestionReviewTests().fixture()
+    let key = try #require(editor.documentCutSuggestions[0].naming?.reservation?.key)
+    var secondKey = key
+    secondKey.fields[0].value = "another artist"
+    editor.suggestionBatch?.actualStarts.groups = [
+      .init(key: key, start: .init(number: 8, isExplicit: false))
+    ]
+    expectNoDifference(
+      editor.cutSuggestions.futureStartRows.first { $0.id == "intro" }?.actualStartLabel,
+      "This search started at: 8")
+    editor.suggestionBatch?.actualStarts.groups.append(
+      .init(key: secondKey, start: .init(number: 3, isExplicit: true)))
+    expectNoDifference(
+      editor.cutSuggestions.futureStartRows.first { $0.id == "intro" }?.actualStartLabel,
+      "This search used song starts: 3, 8")
+  }
+
+  @Test func completedEmptySearchHasDifferentCopyFromInitialAndFilteredEmpty() throws {
+    let editor = try SuggestionReviewTests().fixture()
+    editor.documentCutSuggestions = []
+    expectNoDifference(editor.cutSuggestions.emptyStateMessage, "No matching suggestions found.")
+    #expect(!editor.cutSuggestions.showsNoMatches)
+    editor.suggestionBatch = nil
+    #expect(editor.cutSuggestions.emptyStateMessage.contains("No suggestions yet"))
+  }
+
+  @Test func catalogLoadsWithoutSearchAndDoesNotResetFilterOrStartDraft() async {
+    await withDependencies {
+      $0.suggestionConfiguration = .inMemory()
+    } operation: {
+      let model = CutSuggestionsPageModel(
+        editPlan: Fixtures.editPlan(), sourceFingerprint: "catalog")
+      await model.catalogAppeared()
+      expectNoDifference(model.futureStartRows.count, 6)
+      model.typeFilterTapped("intro")
+      model[futureStart: "intro"] = "12"
+      await model.catalogAppeared()
+      expectNoDifference(model[futureStart: "intro"], "12")
+      #expect(model.selectedTypeIDs?.contains("intro") == false)
+    }
+  }
+
+  @Test func songStartsIncludeOrphanOverridesWithSavedLabels() throws {
+    let editor = try SuggestionReviewTests().fixture()
+    let orphan = SuggestionSequenceKey(
+      typeID: "custom-removed", fields: [.init(fieldID: "custom-song", value: "dreams")],
+      provisionalCandidateID: nil)
+    editor.suggestionStarts.groups = [
+      .init(
+        key: orphan, start: .init(number: 9, isExplicit: true),
+        display: .init(
+          typeName: "Station Song", fieldNames: ["custom-song": "Recording"],
+          canonicalValues: ["custom-song": "Dreams"]))
+    ]
+    let row = try #require(editor.cutSuggestions.songStartRows.first { $0.id == orphan })
+    #expect(row.title.contains("Dreams"))
+    #expect(row.title.contains("Station Song"))
+    #expect(row.hasOverride)
+    editor.cutSuggestions.resetSongStartTapped(orphan)
+    #expect(!editor.cutSuggestions.songStartRows.contains { $0.id == orphan })
+  }
+
+  @Test func typeFiltersSupportAllNonePartialAndHistoricalLabels() {
+    let model = CutSuggestionsPageModel(editPlan: Fixtures.editPlan(), sourceFingerprint: "filters")
+    var historical = Fixtures.cutSuggestion(id: Fixtures.uuid(1), wordIDs: [1, 2])
+    historical.productType = ProductType(rawValue: "custom-old")!
+    historical.naming = .init(
+      runID: Fixtures.uuid(2), typeID: "custom-old", typeName: "Station Visit",
+      typeGroup: .audioImages, discoveryLabel: "Visit", extractedValues: [:],
+      missingFieldIDs: [], correctedValues: [:], reservation: nil)
+    model.currentSuggestions = { [historical] }
+    model.catalog = SuggestionDefaults.configuration
+    expectNoDifference(model.typeFilterGroups.last?.state, .all)
+    #expect(model.typeFilterGroups.last?.types.contains { $0.title == "Station Visit" } == true)
+    model.typeFilterTapped("image-id")
+    expectNoDifference(model.typeFilterGroups.last?.state, .some)
+    model.allTypesTapped()
+    expectNoDifference(model.selectedTypeIDs, nil)
+    model.allTypesTapped()
+    expectNoDifference(model.selectedTypeIDs, [])
+    #expect(model.showsNoMatches)
+    #expect(!model.showsOnboarding)
+    #expect(!model.showsEmptyState)
+    model.typeFilterTapped("custom-old")
+    expectNoDifference(model.sections.first?.title, "Station Visit")
+  }
+
   @Test func replacementRequiresConfirmationBeforePreparingOrCallingProvider() async {
     let calls = LockIsolated(0)
     let preparations = LockIsolated(0)

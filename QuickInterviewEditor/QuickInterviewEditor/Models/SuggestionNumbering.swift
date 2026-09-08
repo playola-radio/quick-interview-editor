@@ -37,10 +37,169 @@ struct SuggestionStarts: Codable, Equatable, Sendable {
   struct GroupStart: Codable, Equatable, Sendable {
     var key: SuggestionSequenceKey
     var start: SuggestionStart
+    var display: GroupDisplay?
+  }
+
+  struct GroupDisplay: Codable, Equatable, Sendable {
+    var typeName: String
+    var fieldNames: [String: String]
+    var canonicalValues: [String: String]
   }
 
   var types: [String: SuggestionStart] = [:]
   var groups: [GroupStart] = []
+}
+
+enum SuggestionReviewIntent {
+  case fields(candidateID: UUID, runID: UUID, values: [String: String])
+  case renumber(key: SuggestionSequenceKey, runID: UUID, start: Int)
+  case spelling(key: SuggestionSequenceKey, runID: UUID, values: [String: String])
+  case futureType(typeID: String, start: Int)
+  case futureGroup(key: SuggestionSequenceKey, start: Int, display: SuggestionStarts.GroupDisplay?)
+  case resetGroup(SuggestionSequenceKey)
+  case resetType(String)
+}
+
+enum SuggestionReviewChange {
+  case batch([CutSuggestion], SuggestionBatch)
+  case starts(SuggestionStarts)
+}
+
+enum SuggestionReviewError: Error, LocalizedError {
+  case unavailable, locked, groupChanged
+
+  var errorDescription: String? {
+    switch self {
+    case .unavailable: "This suggestion or search has changed. Close this review and open it again."
+    case .locked:
+      "Finish or discard the unfinished search before changing suggestion names or starts."
+    case .groupChanged:
+      "Group spelling must name the same song and artist. Change an individual suggestion to move it to another group."
+    }
+  }
+}
+
+func suggestionReviewChange(
+  _ intent: SuggestionReviewIntent, document: EditorDocumentState
+) throws -> SuggestionReviewChange {
+  switch intent {
+  case .futureType(let typeID, let start):
+    guard start > 0 else { throw SuggestionNumberingError.invalidStart }
+    var starts = document.suggestionStarts
+    starts.types[typeID] = .init(number: start, isExplicit: true)
+    return .starts(starts)
+  case .futureGroup(let key, let start, let display):
+    guard start > 0 else { throw SuggestionNumberingError.invalidStart }
+    var starts = document.suggestionStarts
+    starts.groups.removeAll { $0.key == key }
+    starts.groups.append(
+      .init(key: key, start: .init(number: start, isExplicit: true), display: display))
+    return .starts(starts)
+  case .resetGroup(let key):
+    var starts = document.suggestionStarts
+    starts.groups.removeAll { $0.key == key }
+    return .starts(starts)
+  case .resetType(let typeID):
+    var starts = document.suggestionStarts
+    starts.types[typeID] = nil
+    return .starts(starts)
+  case .fields(let candidateID, let runID, let values):
+    return try fieldReviewChange(
+      candidateID: candidateID, runID: runID, values: values, document: document)
+  case .renumber(let key, let runID, let start):
+    return try renumberReviewChange(key: key, runID: runID, start: start, document: document)
+  case .spelling(let key, let runID, let values):
+    return try spellingReviewChange(key: key, runID: runID, values: values, document: document)
+  }
+}
+
+private func renumberReviewChange(
+  key: SuggestionSequenceKey, runID: UUID, start: Int, document: EditorDocumentState
+) throws -> SuggestionReviewChange {
+  guard start > 0 else { throw SuggestionNumberingError.invalidStart }
+  let batch = try reviewBatch(document, runID: runID)
+  let selected = Set(
+    document.cutSuggestions.filter {
+      $0.isPending && reviewSequenceKey($0, batch: batch) == key
+    }.map(\.id))
+  guard !selected.isEmpty else { throw SuggestionReviewError.unavailable }
+  var starts = batch.actualStarts
+  starts.groups.removeAll { $0.key == key }
+  starts.groups.append(.init(key: key, start: .init(number: start, isExplicit: true)))
+  let result = try numberSuggestions(
+    Array(document.cutSuggestions), snapshot: batch.snapshot, starts: starts,
+    issued: document.issuedSuggestionNumbers,
+    retained: document.cutSuggestions.compactMap { $0.naming?.reservation },
+    mode: .pendingRenumber(selectedCandidateIDs: selected), existingBatch: batch)
+  return .batch(result.candidates, result.batch)
+}
+
+private func fieldReviewChange(
+  candidateID: UUID, runID: UUID, values: [String: String], document: EditorDocumentState
+) throws -> SuggestionReviewChange {
+  let batch = try reviewBatch(document, runID: runID)
+  var candidates = Array(document.cutSuggestions)
+  guard let index = candidates.firstIndex(where: { $0.id == candidateID && $0.isPending }),
+    let naming = candidates[index].naming,
+    let type = batch.snapshot.configuration.types.first(where: { $0.id == naming.typeID }),
+    Set(values.keys).isSubset(of: Set(batch.snapshot.configuration.fields.map(\.id)))
+  else { throw SuggestionReviewError.unavailable }
+  let referenced = Set(type.template.compactMap { $0.kind == .field ? $0.value : nil })
+    .union(type.sequenceFieldIDs)
+  guard Set(values.keys).isSubset(of: referenced) else { throw SuggestionReviewError.unavailable }
+  candidates[index].naming?.correctedValues.merge(values) { _, corrected in corrected }
+  let result = try numberSuggestions(
+    candidates, snapshot: batch.snapshot, starts: batch.actualStarts,
+    issued: document.issuedSuggestionNumbers,
+    retained: document.cutSuggestions.compactMap { $0.naming?.reservation },
+    mode: .correction(candidateID: candidateID), existingBatch: batch)
+  return .batch(result.candidates, result.batch)
+}
+
+func reviewSequenceKey(_ candidate: CutSuggestion, batch: SuggestionBatch) -> SuggestionSequenceKey?
+{
+  guard let naming = candidate.naming,
+    let type = batch.snapshot.configuration.types.first(where: { $0.id == naming.typeID })
+  else { return nil }
+  return suggestionSequenceKey(
+    type: type,
+    values: naming.extractedValues.merging(naming.correctedValues) { _, value in value },
+    candidateID: candidate.id)
+}
+
+private func reviewBatch(_ document: EditorDocumentState, runID: UUID) throws -> SuggestionBatch {
+  guard let batch = document.suggestionBatch, batch.snapshot.runID == runID else {
+    throw SuggestionReviewError.unavailable
+  }
+  try validateSuggestionRunApplication(candidates: Array(document.cutSuggestions), batch: batch)
+  return batch
+}
+
+private func spellingReviewChange(
+  key: SuggestionSequenceKey, runID: UUID, values: [String: String], document: EditorDocumentState
+) throws -> SuggestionReviewChange {
+  var batch = try reviewBatch(document, runID: runID)
+  guard let type = batch.snapshot.configuration.types.first(where: { $0.id == key.typeID }),
+    Set(values.keys) == Set(type.sequenceFieldIDs),
+    suggestionSequenceKey(
+      type: type, values: values, candidateID: key.provisionalCandidateID ?? runID) == key
+  else { throw SuggestionReviewError.groupChanged }
+  batch.canonicalGroups.removeAll { $0.key == key }
+  batch.canonicalGroups.append(.init(key: key, values: values))
+  let candidates = document.cutSuggestions.map { original in
+    guard original.isPending, reviewSequenceKey(original, batch: batch) == key,
+      let naming = original.naming
+    else { return original }
+    var candidate = original
+    let effective = naming.extractedValues.merging(naming.correctedValues) { _, value in value }
+      .merging(values) { _, canonical in canonical }
+    candidate.title = renderSuggestionName(
+      template: type.template, values: effective, sequence: naming.reservation?.number,
+      fallback: naming.discoveryLabel)
+    candidate.naming?.reservation?.canonicalValues = values
+    return candidate
+  }
+  return .batch(candidates, batch)
 }
 
 enum SuggestionNumberingError: Error, Equatable {

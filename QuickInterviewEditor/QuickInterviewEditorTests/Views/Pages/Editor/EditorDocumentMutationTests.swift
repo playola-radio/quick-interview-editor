@@ -9,6 +9,60 @@ import Testing
 @MainActor
 struct EditorDocumentMutationTests {
 
+  @Test func automaticTypeStartIsVisibleAndRestorableWithSeparateUndo() async throws {
+    let model = try SuggestionReviewTests().fixture()
+    let before = model.documentState
+    expectNoDifference(
+      model.cutSuggestions.futureStartRows.first { $0.id == "intro" }?.preferenceLabel,
+      "Automatic — starts at 1 or after previously issued numbers")
+    model.cutSuggestions[futureStart: "intro"] = "7"
+    model.cutSuggestions.applyTypeStartTapped("intro")
+    expectNoDifference(
+      model.cutSuggestions.futureStartRows.first { $0.id == "intro" }?.preferenceLabel,
+      "Explicit start: 7")
+    model.cutSuggestions.resetTypeStartTapped("intro")
+    expectNoDifference(model.suggestionStarts.types["intro"], nil)
+    await model.undoTapped()
+    expectNoDifference(model.suggestionStarts.types["intro"]?.number, 7)
+    expectNoDifference(model.documentCutSuggestions, before.cutSuggestions)
+    expectNoDifference(model.suggestionBatch, before.suggestionBatch)
+  }
+
+  @Test func futureStartsResetUndoAndReopenNeverRenumberCurrentBatch() async throws {
+    let model = try SuggestionReviewTests().fixture()
+    let before = model.documentState
+    let key = try #require(model.documentCutSuggestions[0].naming?.reservation?.key)
+    model.cutSuggestions[futureStart: "intro"] = "7"
+    model.cutSuggestions.applyTypeStartTapped("intro")
+    expectNoDifference(model.documentCutSuggestions, before.cutSuggestions)
+    expectNoDifference(model.suggestionStarts.types["intro"]?.number, 7)
+    let reopened = try JSONDecoder().decode(
+      EditorDocumentState.self, from: JSONEncoder().encode(model.documentState))
+    expectNoDifference(reopened.suggestionStarts, model.suggestionStarts)
+    try model.applySuggestionReviewIntent(.futureGroup(key: key, start: 10, display: nil))
+    model.cutSuggestions.resetSongStartTapped(key)
+    expectNoDifference(model.suggestionStarts.groups, [])
+    await model.undoTapped()
+    expectNoDifference(model.suggestionStarts.groups.first?.start.number, 10)
+    expectNoDifference(model.documentCutSuggestions, before.cutSuggestions)
+    model.cutSuggestions.recoveryBlocksSuggestions = true
+    let locked = model.documentState
+    model.cutSuggestions[futureStart: "intro"] = "20"
+    model.cutSuggestions.applyTypeStartTapped("intro")
+    model.cutSuggestions.resetSongStartTapped(key)
+    expectNoDifference(model.documentState, locked)
+  }
+
+  @Test func groupStartOldJSONRemainsDecodableWithoutDisplayMetadata() throws {
+    let start = SuggestionStarts.GroupStart(
+      key: .init(typeID: "intro", fields: [], provisionalCandidateID: nil),
+      start: .init(number: 3, isExplicit: true))
+    let decoded = try JSONDecoder().decode(
+      SuggestionStarts.GroupStart.self, from: JSONEncoder().encode(start))
+    expectNoDifference(decoded, start)
+    expectNoDifference(decoded.display, nil)
+  }
+
   private func editor() -> EditorModel {
     EditorModel(
       sourceURL: URL(fileURLWithPath: "/clip.m4a"),

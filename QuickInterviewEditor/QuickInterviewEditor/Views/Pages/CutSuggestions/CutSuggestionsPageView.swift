@@ -15,6 +15,57 @@ struct CutSuggestionsPageView: View {
       .disabled(model.suggestDisabled)
 
       Button(model.configureSuggestionsLabel) { model.configureSuggestionsTapped() }
+      Menu(model.typesMenuTitle) {
+        Button(model.allTypesTitle, systemImage: model.allTypesState.image) {
+          model.allTypesTapped()
+        }
+        .accessibilityValue(model.allTypesState.accessibilityValue)
+        ForEach(model.typeFilterGroups) { group in
+          Section {
+            Button(group.title, systemImage: group.state.image) {
+              model.groupFilterTapped(group.id)
+            }
+            .accessibilityValue(group.state.accessibilityValue)
+            ForEach(group.types) { type in
+              Button(type.title, systemImage: type.state.image) { model.typeFilterTapped(type.id) }
+                .accessibilityValue(type.state.accessibilityValue)
+            }
+          }
+        }
+      }
+      if let message = model.catalogMessage { Text(message).foregroundStyle(.orange) }
+      DisclosureGroup(model.futureStartsTitle) {
+        ScrollView {
+          VStack(alignment: .leading, spacing: 8) {
+            ForEach(model.futureStartRows) { row in
+              Text(row.title).font(.headline)
+              Text(row.preferenceLabel).font(.caption).foregroundStyle(.secondary)
+              Text(model.futureStartLabel).font(.caption)
+              TextField(model.futureStartLabel, text: $model[futureStart: row.id])
+              if let actual = row.actualStartLabel { Text(actual).font(.caption) }
+              Button(model.applyTypeStartLabel) { model.applyTypeStartTapped(row.id) }
+              if row.hasOverride {
+                Button(model.automaticTypeStartLabel) { model.resetTypeStartTapped(row.id) }
+              }
+            }
+          }
+        }.frame(maxHeight: 220)
+      }.disabled(model.candidateActionsDisabled)
+      DisclosureGroup(model.songStartsTitle) {
+        Text(model.songStartsHelp).font(.caption).foregroundStyle(.secondary)
+        ScrollView {
+          VStack(alignment: .leading, spacing: 8) {
+            ForEach(model.songStartRows) { row in
+              Text(row.title).font(.headline)
+              Text(row.startLabel).font(.caption)
+              Button(model.reviewGroupLabel) { model.reviewGroupTapped(row.id) }
+              if row.hasOverride {
+                Button(model.resetSongStartLabel) { model.resetSongStartTapped(row.id) }
+              }
+            }
+          }
+        }.frame(maxHeight: 220)
+      }.disabled(model.candidateActionsDisabled)
 
       if model.showsSuggestionsToggle {
         Toggle(model.showSuggestionsToggleLabel, isOn: $model.showsSuggestionBands)
@@ -74,6 +125,8 @@ struct CutSuggestionsPageView: View {
       } else if model.showsEmptyState {
         Text(model.emptyStateMessage)
           .foregroundStyle(.secondary)
+      } else if model.showsNoMatches {
+        Text(model.noMatchesMessage).foregroundStyle(.secondary)
       } else {
         suggestionList
       }
@@ -83,6 +136,7 @@ struct CutSuggestionsPageView: View {
     .padding()
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     .onAppear { model.viewAppeared() }
+    .task { await model.catalogAppeared() }
     .confirmationDialog(model.run.replaceTitle, isPresented: $run.isConfirmingReplacement) {
       Button(model.run.replaceButtonTitle, role: .destructive) {
         model.run.replacementButtonTapped()
@@ -93,6 +147,9 @@ struct CutSuggestionsPageView: View {
     }
     .sheet(item: $model.suggestionSettings) { settings in
       SuggestionSettingsView(model: settings)
+    }
+    .sheet(item: $model.suggestionReview) { review in
+      SuggestionReviewView(model: review)
     }
     .sheet(item: $model.keyEntry) { entry in
       SettingsView(model: entry)
@@ -161,22 +218,16 @@ private struct SuggestionCard: View {
               .font(.caption)
               .foregroundStyle(.orange)
           }
+          if let message = row.missingFieldsMessage {
+            Text(message).font(.caption).foregroundStyle(.orange)
+          }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
       }
       .buttonStyle(.plain)
       .accessibilityLabel(model.revealSuggestionLabel)
-      HStack {
-        if row.showsAcceptButton {
-          Button(model.acceptLabel) { model.acceptTapped(row.id) }
-            .disabled(!row.canAccept || model.candidateActionsDisabled)
-        }
-        if row.showsRejectButton {
-          Button(model.rejectLabel) { model.rejectTapped(row.id) }
-            .disabled(!row.canReject || model.candidateActionsDisabled)
-        }
-      }
+      rowActions(row)
     }
     .padding(8)
     .frame(maxWidth: .infinity, alignment: .leading)
@@ -215,5 +266,21 @@ private struct SuggestionCard: View {
     .onHover { titleHovering = $0 }
     .help(model.suggestionTitleHelp)
     .accessibilityLabel(model.suggestionTitleLabel)
+  }
+  private func rowActions(_ row: SuggestionRow) -> some View {
+    HStack {
+      if row.showsReviewButton {
+        Button(model.reviewFieldsLabel) { model.reviewFieldsTapped(row.id) }
+          .disabled(model.candidateActionsDisabled)
+      }
+      if row.showsAcceptButton {
+        Button(model.acceptLabel) { model.acceptTapped(row.id) }
+          .disabled(!row.canAccept || model.candidateActionsDisabled)
+      }
+      if row.showsRejectButton {
+        Button(model.rejectLabel) { model.rejectTapped(row.id) }
+          .disabled(!row.canReject || model.candidateActionsDisabled)
+      }
+    }
   }
 }

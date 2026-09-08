@@ -170,6 +170,10 @@ final class EditorModel: ViewModel {
       try self.applySuggestionRun(candidates: candidates, batch: batch)
     }
     cutSuggestions.run.synchronizeDocument()
+    cutSuggestions.onReviewApply = { [weak self] intent in
+      guard let self else { throw SuggestionReviewError.unavailable }
+      try self.applySuggestionReviewIntent(intent)
+    }
     cutSuggestions.currentSuggestions = { [weak self] in self?.documentCutSuggestions ?? [] }
     cutSuggestions.onAccept = { [weak self] slice, id in
       self?.acceptCutSuggestion(slice, id: id)
@@ -786,7 +790,7 @@ final class EditorModel: ViewModel {
     // ranked list: when it's off, no suggested bands are drawn (accepted slices stay put).
     guard cutSuggestions.showsSuggestionBands else { return approved }
     let claimed = Set(approved.flatMap(\.wordIDs))
-    let suggested = documentCutSuggestions.pending.compactMap {
+    let suggested = cutSuggestions.pendingSuggestions.compactMap {
       suggestion -> TranscriptClipBand? in
       let words = draftedWordIDs(forSuggestion: suggestion.id) ?? suggestion.wordIDs
       let unclaimed = words.filter { !claimed.contains($0) }
@@ -2080,6 +2084,16 @@ final class EditorModel: ViewModel {
     mutateDocument(recordUndo: recordUndo) {
       $0.cutSuggestions = IdentifiedArray(candidates, uniquingIDsWith: { first, _ in first })
       $0.suggestionBatch = batch
+    }
+  }
+
+  func applySuggestionReviewIntent(_ intent: SuggestionReviewIntent) throws {
+    guard !cutSuggestions.candidateActionsDisabled else { throw SuggestionReviewError.locked }
+    switch try suggestionReviewChange(intent, document: documentState) {
+    case .batch(let candidates, let batch):
+      try replaceSuggestionBatch(candidates: candidates, batch: batch, recordUndo: true)
+    case .starts(let starts):
+      mutateDocument { $0.suggestionStarts = starts }
     }
   }
 
