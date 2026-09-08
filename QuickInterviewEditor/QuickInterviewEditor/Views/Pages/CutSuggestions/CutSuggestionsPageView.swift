@@ -34,39 +34,6 @@ struct CutSuggestionsPageView: View {
         }
       }
       if let message = model.catalogMessage { Text(message).foregroundStyle(.orange) }
-      DisclosureGroup(model.futureStartsTitle) {
-        ScrollView {
-          VStack(alignment: .leading, spacing: 8) {
-            ForEach(model.futureStartRows) { row in
-              Text(row.title).font(.headline)
-              Text(row.preferenceLabel).font(.caption).foregroundStyle(.secondary)
-              Text(model.futureStartLabel).font(.caption)
-              TextField(model.futureStartLabel, text: $model[futureStart: row.id])
-              if let actual = row.actualStartLabel { Text(actual).font(.caption) }
-              Button(model.applyTypeStartLabel) { model.applyTypeStartTapped(row.id) }
-              if row.hasOverride {
-                Button(model.automaticTypeStartLabel) { model.resetTypeStartTapped(row.id) }
-              }
-            }
-          }
-        }.frame(maxHeight: 220)
-      }.disabled(model.candidateActionsDisabled)
-      DisclosureGroup(model.songStartsTitle) {
-        Text(model.songStartsHelp).font(.caption).foregroundStyle(.secondary)
-        ScrollView {
-          VStack(alignment: .leading, spacing: 8) {
-            ForEach(model.songStartRows) { row in
-              Text(row.title).font(.headline)
-              Text(row.startLabel).font(.caption)
-              Button(model.reviewGroupLabel) { model.reviewGroupTapped(row.id) }
-              if row.hasOverride {
-                Button(model.resetSongStartLabel) { model.resetSongStartTapped(row.id) }
-              }
-            }
-          }
-        }.frame(maxHeight: 220)
-      }.disabled(model.candidateActionsDisabled)
-
       if model.showsSuggestionsToggle {
         Toggle(model.showSuggestionsToggleLabel, isOn: $model.showsSuggestionBands)
       }
@@ -145,7 +112,8 @@ struct CutSuggestionsPageView: View {
     } message: {
       Text(model.run.replaceMessage)
     }
-    .sheet(item: $model.suggestionSettings) { settings in
+    .sheet(item: $model.suggestionSettings, onDismiss: model.suggestionSettingsDismissed) {
+      settings in
       SuggestionSettingsView(model: settings)
     }
     .sheet(item: $model.suggestionReview) { review in

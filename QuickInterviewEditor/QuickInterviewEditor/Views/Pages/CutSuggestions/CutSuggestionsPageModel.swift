@@ -131,10 +131,15 @@ final class CutSuggestionsPageModel: ViewModel {
   let typesMenuTitle = "Types"
   let allTypesTitle = "All Types"
   let noMatchesMessage = "No suggestions match the selected types. Choose All Types to show them."
-  let futureStartsTitle = "Future Search Starts"
-  let futureStartLabel = "Start next search at"
+  let futureStartsTitle = "Starting Counts"
+  let numberingScopeTitle = "Numbering — This project"
+  let numberingHelp =
+    "Numbers are assigned when you accept clips, so rejected suggestions do not use a number. "
+    + "Save or reset each starting count below; accepted clips continue after previously assigned numbers. "
+    + "These changes apply only to this project and can be undone in the editor."
+  let futureStartLabel = "Start numbering at"
   let applyTypeStartLabel = "Save Type Start"
-  let songStartsTitle = "Song Starts"
+  let songStartsTitle = "Song and Group Counts"
   let songStartsHelp =
     "Song overrides stay with their original song, even when a correction moves a suggestion elsewhere."
   let reviewFieldsLabel = "Review Fields…"
@@ -232,15 +237,12 @@ final class CutSuggestionsPageModel: ViewModel {
   var futureStartRows: [SuggestionFutureStartRow] {
     let document = run.currentDocument()
     return typeFilterRows.map { type in
-      let hasBatch =
-        document.suggestionBatch?.snapshot.configuration.types.contains { $0.id == type.id } == true
       let preference = document.suggestionStarts.types[type.id]
       let explicit = preference?.isExplicit == true
       return .init(
         id: type.id, title: type.title,
-        actualStartLabel: hasBatch ? actualStartLabel(typeID: type.id, document: document) : nil,
         preferenceLabel: explicit
-          ? "Explicit start: \(preference?.number ?? 1)"
+          ? "Starting count: \(preference?.number ?? 1)"
           : "Automatic — starts at 1 or after previously issued numbers",
         hasOverride: preference != nil)
     }
@@ -269,7 +271,7 @@ final class CutSuggestionsPageModel: ViewModel {
         ? display.typeName : display.typeName + " · " + song
       return .init(
         id: key, title: title,
-        startLabel: "Start next search at: \(number)", hasOverride: override != nil)
+        startLabel: "Starting count: \(number)", hasOverride: override != nil)
     }
   }
   subscript(futureStart id: String) -> String {
@@ -408,7 +410,7 @@ final class CutSuggestionsPageModel: ViewModel {
 
   func reviewGroupTapped(_ key: SuggestionSequenceKey) {
     guard !candidateActionsDisabled else { return }
-    presentReview(sequenceKey: key)
+    presentReview(sequenceKey: key, settings: suggestionSettings)
   }
 
   func orphanSelected(_ id: UUID) async {
@@ -497,20 +499,21 @@ final class CutSuggestionsPageModel: ViewModel {
   func configureSuggestionsTapped() {
     suggestionSettings = withDependencies(from: self) {
       SuggestionSettingsModel(
-        onSaved: { [weak self] in self?.suggestionSettings = nil },
-        onCancelled: { [weak self] in self?.suggestionSettings = nil })
+        numberingPage: self,
+        onSaved: { [weak self] in self?.closeSuggestionSettings() },
+        onCancelled: { [weak self] in self?.closeSuggestionSettings() })
     }
   }
 
+  func suggestionSettingsDismissed() {
+    guard suggestionSettings == nil else { return }
+    futureStartDrafts = [:]
+  }
+
   // MARK: - Private Helpers
-  private func actualStartLabel(typeID: String, document: EditorDocumentState) -> String {
-    let numbers = Set(
-      (document.suggestionBatch?.actualStarts.groups ?? [])
-        .filter { $0.key.typeID == typeID }.map { $0.start.number }
-    ).sorted()
-    if numbers.count == 1, let number = numbers.first { return "This search started at: \(number)" }
-    if numbers.isEmpty { return "This search has no numbered suggestions for this type." }
-    return "This search used song starts: " + numbers.map(String.init).joined(separator: ", ")
+  private func closeSuggestionSettings() {
+    suggestionSettings = nil
+    suggestionSettingsDismissed()
   }
   private func applyReviewIntent(_ intent: SuggestionReviewIntent) throws {
     guard !candidateActionsDisabled else { throw SuggestionReviewError.locked }
@@ -518,15 +521,22 @@ final class CutSuggestionsPageModel: ViewModel {
     actionMessage = nil
   }
 
-  private func presentReview(candidateID: UUID? = nil, sequenceKey: SuggestionSequenceKey? = nil) {
-    suggestionReview = SuggestionReviewModel(
+  private func presentReview(
+    candidateID: UUID? = nil, sequenceKey: SuggestionSequenceKey? = nil,
+    settings: SuggestionSettingsModel? = nil
+  ) {
+    let review = SuggestionReviewModel(
       candidateID: candidateID, sequenceKey: sequenceKey,
       currentDocument: { [weak self] in self?.run.currentDocument() ?? .init() },
       isLocked: { [weak self] in self?.candidateActionsDisabled ?? true },
       onApply: { [weak self] intent in
         guard let self else { throw SuggestionReviewError.unavailable }
         try applyReviewIntent(intent)
-      }, onCancelled: { [weak self] in self?.suggestionReview = nil })
+      },
+      onCancelled: { [weak self, weak settings] in
+        if let settings { settings.numberingReview = nil } else { self?.suggestionReview = nil }
+      })
+    if let settings { settings.numberingReview = review } else { suggestionReview = review }
   }
 
   private func groupDisplay(_ key: SuggestionSequenceKey) -> SuggestionStarts.GroupDisplay {
@@ -575,7 +585,6 @@ struct SuggestionOrphanRow: Identifiable {
 struct SuggestionFutureStartRow: Identifiable {
   var id: String
   var title: String
-  var actualStartLabel: String?
   var preferenceLabel: String
   var hasOverride: Bool
 }

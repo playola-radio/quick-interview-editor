@@ -23,7 +23,7 @@ struct CutSuggestionsPageTests {
     let document = editor.documentState
     let rows = editor.cutSuggestions.songStartRows
     expectNoDifference(rows.first { $0.id == typeOnly }?.title, "Spotlight")
-    expectNoDifference(rows.first { $0.id == typeOnly }?.startLabel, "Start next search at: 7")
+    expectNoDifference(rows.first { $0.id == typeOnly }?.startLabel, "Starting count: 7")
     expectNoDifference(rows.first { $0.id == typeOnly }?.hasOverride, true)
     expectNoDifference(rows.first { $0.id == provisional }?.title, "Song Intro · Unresolved group")
     expectNoDifference(Array(rows.dropFirst(2)).map(\.title), resolvedRows)
@@ -37,22 +37,14 @@ struct CutSuggestionsPageTests {
     expectNoDifference(CutSuggestOptions().promptVersion, "v2")
   }
 
-  @Test func actualStartLabelsUseResolvedGroupsRatherThanFutureTypePreference() throws {
+  @Test func startingCountLabelsDescribeAcceptanceInsteadOfSearchNumbering() throws {
     let editor = try SuggestionReviewTests().fixture()
-    let key = try #require(editor.documentCutSuggestions[0].naming?.reservation?.key)
-    var secondKey = key
-    secondKey.fields[0].value = "another artist"
-    editor.suggestionBatch?.actualStarts.groups = [
-      .init(key: key, start: .init(number: 8, isExplicit: false))
-    ]
+    editor.suggestionStarts.types["intro"] = .init(number: 7, isExplicit: true)
     expectNoDifference(
-      editor.cutSuggestions.futureStartRows.first { $0.id == "intro" }?.actualStartLabel,
-      "This search started at: 8")
-    editor.suggestionBatch?.actualStarts.groups.append(
-      .init(key: secondKey, start: .init(number: 3, isExplicit: true)))
-    expectNoDifference(
-      editor.cutSuggestions.futureStartRows.first { $0.id == "intro" }?.actualStartLabel,
-      "This search used song starts: 3, 8")
+      editor.cutSuggestions.futureStartRows.first { $0.id == "intro" }?.preferenceLabel,
+      "Starting count: 7")
+    expectNoDifference(editor.cutSuggestions.futureStartLabel, "Start numbering at")
+    #expect(editor.cutSuggestions.numberingHelp.contains("when you accept clips"))
   }
 
   @Test func completedEmptySearchHasDifferentCopyFromInitialAndFilteredEmpty() throws {
@@ -219,7 +211,8 @@ struct CutSuggestionsPageTests {
         fixture.finish([fixture.candidate()])
         await task.value
         expectNoDifference(model.phase, .idle)
-        expectNoDifference(model.suggestions.first?.title, "Spotlight 1")
+        expectNoDifference(model.suggestions.first?.title, "Story")
+        #expect(model.suggestions.first?.naming?.reservation == nil)
         expectNoDifference(
           model.suggestions.first?.provenance.sourceFingerprint, fixture.owner.sourceFingerprint)
         #expect(model.suggestions.first?.naming != nil)

@@ -18,27 +18,35 @@ Group review opens as a child sheet of configuration. Field review from the main
 
 Files: `QuickInterviewEditor/QuickInterviewEditor/Views/Pages/SuggestionSettings/SuggestionSettingsModel.swift`, `QuickInterviewEditor/QuickInterviewEditorTests/Views/Pages/SuggestionSettings/SuggestionSettingsTests.swift`, `QuickInterviewEditor/QuickInterviewEditor/Views/Pages/CutSuggestions/CutSuggestionsPageModel.swift`.
 
-- [ ] Add tests for project-aware numbering selection, preservation of a changed rules draft across navigation, project save surviving Cancel Rule Edits, and absence of numbering in standalone settings. Use existing editor fixtures and `expectDifference` / `expectNoDifference`.
-- [ ] Run `make -C QuickInterviewEditor test-fast ONLY=PlayolaInterviewEditorTests/SuggestionSettingsTests` and observe missing selection/context API failures.
-- [ ] Add `weak var numberingPage: CutSuggestionsPageModel?`, `private(set) var isNumberingSelected = false`, `var numberingReview: SuggestionReviewModel?`, and a default-nil `numberingPage` initializer argument. Derive `showsNumbering`, `showsNumberingOption`, `showsRuleActions`, and `showsDone` in the model. Numbering selection changes only navigation; type/field selection exits numbering.
-- [ ] Pass `numberingPage: self` from `configureSuggestionsTapped()`. Route group reviews to `suggestionSettings.numberingReview` while settings is present, with a dismissal callback that clears that child only. Keep field reviews on the page.
-- [ ] Verify project start changes use the existing `applyTypeStartTapped`, `resetTypeStartTapped`, `resetSongStartTapped`, and `reviewGroupTapped` actions with their existing lock/error handling.
+- [x] Add tests for project-aware numbering selection, preservation of a changed rules draft across navigation, project save surviving Cancel Rule Edits, and absence of numbering in standalone settings. Use existing editor fixtures and `expectDifference` / `expectNoDifference`.
+- [x] Run `make -C QuickInterviewEditor test-fast ONLY=PlayolaInterviewEditorTests/SuggestionSettingsTests` and observe missing selection/context API failures.
+- [x] Add `weak var numberingPage: CutSuggestionsPageModel?`, `private(set) var isNumberingSelected = false`, `var numberingReview: SuggestionReviewModel?`, and a default-nil `numberingPage` initializer argument. Derive `showsNumbering`, `showsNumberingOption`, `showsRuleActions`, and `showsDone` in the model. Numbering selection changes only navigation; type/field selection exits numbering.
+- [x] Pass `numberingPage: self` from `configureSuggestionsTapped()`. Route group reviews to `suggestionSettings.numberingReview` while settings is present, with a dismissal callback that clears that child only. Keep field reviews on the page.
+- [x] Verify project start changes use the existing `applyTypeStartTapped`, `resetTypeStartTapped`, `resetSongStartTapped`, and `reviewGroupTapped` actions with their existing lock/error handling.
 
 ## Task 2: Move the controls
 
 Files: `QuickInterviewEditor/QuickInterviewEditor/Views/Pages/CutSuggestions/CutSuggestionsPageView.swift`, `QuickInterviewEditor/QuickInterviewEditor/Views/Pages/SuggestionSettings/SuggestionSettingsView.swift`.
 
-- [ ] Remove both DisclosureGroups from CutSuggestionsPageView.
-- [ ] Add the Numbering sidebar choice to SuggestionSettingsView. Display a local `SuggestionNumberingView` (same Swift file, no project registration changes) bound to the original page model when selected.
-- [ ] Move the existing control content into two sections in the configuration content ScrollView, removing their nested 220-point scroll limits. Display project scope/help and the page action error inside the panel. Disable its actions using `candidateActionsDisabled`.
-- [ ] Add the settings-owned `.sheet(item: $model.numberingReview)` for SuggestionReviewView. Keep the settings sheet open when that review closes.
-- [ ] Use model-derived footer visibility and copy so Done is available for numbering-only visits and rule Save/Cancel remains scoped to rule drafts.
+- [x] Remove both DisclosureGroups from CutSuggestionsPageView.
+- [x] Add the Numbering sidebar choice to SuggestionSettingsView. Display a local `SuggestionNumberingView` (same Swift file, no project registration changes) bound to the original page model when selected.
+- [x] Move the existing control content into two sections in the configuration content ScrollView, removing their nested 220-point scroll limits. Display project scope/help and the page action error inside the panel. Disable its actions using `candidateActionsDisabled`.
+- [x] Add the settings-owned `.sheet(item: $model.numberingReview)` for SuggestionReviewView. Keep the settings sheet open when that review closes.
+- [x] Use model-derived footer visibility and copy so Done is available for numbering-only visits and rule Save/Cancel remains scoped to rule drafts.
 
 ## Task 3: Verify and document
 
 Files: the preceding tests plus `QuickInterviewEditor/QuickInterviewEditorTests/Views/Pages/CutSuggestions/SuggestionReviewTests.swift`, `README.md`, this plan.
 
-- [ ] Add a regression opening Configure Suggestions → Numbering → Review Group, saving a song start, renumbering pending suggestions, resetting the override, and closing only the review. Verify locks and surfaced invalid starting-number errors through the moved controls; preserve existing number/Undo tests.
-- [ ] Run affected suites: SuggestionSettingsTests, CutSuggestionsPageTests, SuggestionReviewTests, and EditorSuggestionFlowTests (one xcodebuild invocation with four suite filters).
-- [ ] Run scoped `xcrun swift-format lint --strict`, `swiftlint lint --strict --path` if supported (otherwise the existing full `make lint`), and `git diff --check`. Fix only relevant formatting.
-- [ ] Inspect the final model/view wiring for nested sheet ownership, retained rule drafts, and weak ownership. Record actual test results here, update README location instructions, and commit locally. Do not restart the user's app or touch its project data.
+- [x] Add a regression opening Configure Suggestions → Numbering → Review Group, saving a song start, resetting the override, and closing only the review. Verify locks and surfaced invalid starting-number errors through the moved controls; preserve existing number/Undo tests.
+- [x] Run affected suites: SuggestionSettingsTests, CutSuggestionsPageTests, SuggestionReviewTests, and EditorSuggestionFlowTests (one xcodebuild invocation with four suite filters).
+- [x] Run scoped `xcrun swift-format lint --strict`, `swiftlint lint --strict --path` if supported (otherwise the existing full `make lint`), and `git diff --check`. Fix only relevant formatting.
+- [x] Inspect the final model/view wiring for nested sheet ownership, retained rule drafts, and weak ownership. Record actual test results here, update README location instructions, and commit locally. Do not restart the user's app or touch its project data.
+
+## Acceptance-numbering correction during execution
+
+The user subsequently required numbering only when clips are accepted, so rejected suggestions leave no gaps. The companion [acceptance-numbering plan](2026-09-08-acceptance-numbering.md) implements that behavior. This supersedes pending-renumber controls and search-start wording in the original task: the new panel uses Starting Counts, Start numbering at, and Song and Group Counts. Group review no longer offers pending renumbering. Previously issued clip identities remain stable.
+
+Initial location verification: 18 SuggestionSettingsTests passed, including navigation/draft preservation, independent project saves, nested review ownership, invalid input and lock protection, and weak ownership. Independent UI review found no actionable issues. Final integrated checks follow acceptance-numbering changes.
+
+Final integration: 1,521 Swift tests in 124 suites passed (14 expected known issues), including 145 focused tests across seven feature suites and 10 document-mutation tests. Independent UI, acceptance, and canonical Undo reviews passed. The pure legacy allocation helpers retain separate compatibility tests; normal search/review paths no longer allocate pending numbers.

@@ -42,17 +42,11 @@ struct SuggestionReviewView: View {
 
   private var groupEditor: some View {
     VStack(alignment: .leading, spacing: 12) {
-      Text(model.thisSearchStart).foregroundStyle(.secondary)
       Text(model.startLabel).font(.headline)
       TextField(model.startLabel, text: $model.startText)
       Text(model.futureHelp).foregroundStyle(.secondary)
       Button(model.applyFutureStartLabel) { model.applyFutureStartTapped() }.disabled(
         !model.canApplyFutureStart)
-      Divider()
-      Text(model.renumberPreviewTitle).font(.headline)
-      namePreviews(model.renumberPreviewNames)
-      if let message = model.numberingError { Text(message).foregroundStyle(.orange) }
-      Button(model.renumberLabel) { model.renumberTapped() }.disabled(!model.canRenumber)
       Divider()
       Text(model.spellingTitle).font(.headline)
       Text(model.spellingHelp).foregroundStyle(.secondary)

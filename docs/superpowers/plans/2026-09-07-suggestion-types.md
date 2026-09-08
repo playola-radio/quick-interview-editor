@@ -1,5 +1,7 @@
 # Configurable Suggestions Implementation Plan
 
+The initial implementation is complete. The user's 2026-09-08 corrections are tracked in [numbering in configuration](2026-09-08-numbering-in-configuration.md) and [acceptance-time numbering](2026-09-08-acceptance-numbering.md); those plans supersede the discovery-time numbering and inline control instructions below.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add configurable Spotlight, Song Intro, imaging, and custom suggestions with editable field-based naming, safe numbering across tapes, resumable replacement searches, type filters, and explicit export collision review.

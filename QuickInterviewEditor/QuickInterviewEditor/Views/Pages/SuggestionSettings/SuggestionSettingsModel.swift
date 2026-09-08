@@ -27,6 +27,7 @@ final class SuggestionSettingsModel: ViewModel, Identifiable {
   // MARK: - Initialization
   init(
     configuration: SuggestionConfiguration? = nil,
+    numberingPage: CutSuggestionsPageModel? = nil,
     onSaved: (() -> Void)? = nil, onCancelled: (() -> Void)? = nil
   ) {
     let initial = configuration ?? SuggestionDefaults.configuration
@@ -37,6 +38,7 @@ final class SuggestionSettingsModel: ViewModel, Identifiable {
     selectedTypeID = initial.types.first?.id
     self.onSaved = onSaved
     self.onCancelled = onCancelled
+    self.numberingPage = numberingPage
     super.init()
     rebuildNamingTemplate()
   }
@@ -48,6 +50,9 @@ final class SuggestionSettingsModel: ViewModel, Identifiable {
   private(set) var loadedRevision: Int
   private(set) var selectedTypeID: String?
   private(set) var selectedFieldID: String?
+  weak var numberingPage: CutSuggestionsPageModel?
+  private(set) var isNumberingSelected = false
+  var numberingReview: SuggestionReviewModel?
   private var validationErrors: [String] = []
   private(set) var statusMessage: String?
   private(set) var isSaving = false
@@ -65,7 +70,10 @@ final class SuggestionSettingsModel: ViewModel, Identifiable {
     return validationErrors.filter { seen.insert($0).inserted }
   }
 
-  let title = "Suggestion Rules"
+  let title = "Configure Suggestions"
+  let numberingTitle = "Numbering"
+  let projectScopeTitle = "This project"
+  let doneLabel = "Done"
   let typesTitle = "Types"
   let fieldsTitle = "Fields"
   let addTypeLabel = "Add Type"
@@ -77,12 +85,15 @@ final class SuggestionSettingsModel: ViewModel, Identifiable {
   let groupLabel = "Display Group"
   let guidelinesLabel = "Discovery Guidelines"
   let fieldInstructionsLabel = "Extraction Instructions"
-  let saveLabel = "Save"
-  let cancelLabel = "Cancel"
+  let saveLabel = "Save Rules"
+  let cancelLabel = "Cancel Rule Edits"
   let reloadLabel = "Reload Saved Rules"
   let selectionPrompt = "Choose a type or field to edit."
-  let helpText =
-    "Saved changes apply to future searches. Removing a type keeps its existing suggestions visible in your projects."
+  var helpText: String {
+    showsNumbering
+      ? "Starting counts belong to this project. Save Rules and Cancel Rule Edits apply only to the rule draft."
+      : "Saved rules apply to future searches in all projects. Removing a type keeps its existing suggestions visible."
+  }
   let builtInHelp =
     "Song Intro and Spotlight use tuned discovery. Editing their discovery guidelines or removing either type "
     + "changes the default discovery configuration. The original discovery prompt is preserved only while both keep "
@@ -101,14 +112,14 @@ final class SuggestionSettingsModel: ViewModel, Identifiable {
     draft.types.map {
       .init(
         id: $0.id, title: $0.name.isEmpty ? "Untitled Type" : $0.name,
-        isSelected: $0.id == selectedTypeID)
+        isSelected: !isNumberingSelected && $0.id == selectedTypeID)
     }
   }
   var fieldRows: [SuggestionSettingsRow] {
     draft.fields.map {
       .init(
         id: $0.id, title: $0.name.isEmpty ? "Untitled Field" : $0.name,
-        isSelected: $0.id == selectedFieldID)
+        isSelected: !isNumberingSelected && $0.id == selectedFieldID)
     }
   }
   var missingPresets: [SuggestionSettingsRow] {
@@ -116,8 +127,12 @@ final class SuggestionSettingsModel: ViewModel, Identifiable {
       .map { .init(id: $0.id, title: $0.name) }
   }
   var showsRestore: Bool { !missingPresets.isEmpty }
-  var showsTypeEditor: Bool { typeIndex != nil }
-  var showsFieldEditor: Bool { fieldIndex != nil }
+  var showsNumberingOption: Bool { numberingPage != nil }
+  var showsNumbering: Bool { isNumberingSelected && showsNumberingOption }
+  var showsRuleActions: Bool { !showsNumbering || draft != loadedConfiguration }
+  var showsDone: Bool { !showsRuleActions }
+  var showsTypeEditor: Bool { !showsNumbering && typeIndex != nil }
+  var showsFieldEditor: Bool { !showsNumbering && fieldIndex != nil }
   var showsTunedDiscoveryHelp: Bool { selectedTypeID == "intro" || selectedTypeID == "spotlight" }
   var isBusy: Bool { isSaving || isLoading }
   var canEdit: Bool { hasLoaded && !isBusy }
@@ -175,15 +190,22 @@ final class SuggestionSettingsModel: ViewModel, Identifiable {
   }
 
   func typeSelected(_ id: String) {
+    isNumberingSelected = false
     selectedTypeID = id
     selectedFieldID = nil
     rebuildNamingTemplate()
   }
 
   func fieldSelected(_ id: String) {
+    isNumberingSelected = false
     selectedFieldID = id
     selectedTypeID = nil
     namingTemplate = nil
+  }
+
+  func numberingSelected() {
+    guard showsNumberingOption else { return }
+    isNumberingSelected = true
   }
 
   func addTypeTapped() {
@@ -284,6 +306,7 @@ final class SuggestionSettingsModel: ViewModel, Identifiable {
   private var fieldIndex: Int? { draft.fields.firstIndex { $0.id == selectedFieldID } }
 
   private func applyLoaded(_ configuration: SuggestionConfiguration, markLoaded: Bool = true) {
+    let wasNumberingSelected = isNumberingSelected
     draft = configuration
     loadedConfiguration = configuration
     loadedRevision = configuration.revision
@@ -296,6 +319,7 @@ final class SuggestionSettingsModel: ViewModel, Identifiable {
         configuration.types.first(where: { $0.id == selectedTypeID })?.id
           ?? configuration.types.first?.id ?? "")
     }
+    isNumberingSelected = wasNumberingSelected
   }
 
   private func rebuildNamingTemplate() {

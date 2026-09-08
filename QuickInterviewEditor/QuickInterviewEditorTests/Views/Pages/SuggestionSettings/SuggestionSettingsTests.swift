@@ -8,6 +8,101 @@ import Testing
 
 @MainActor
 struct SuggestionSettingsTests {
+  @Test func loadingRulesPreservesNumberingSelection() async {
+    @Shared(.suggestionConfiguration) var published = SuggestionDefaults.configuration
+    let page = withDependencies {
+      $0.suggestionConfiguration = .inMemory()
+    } operation: {
+      CutSuggestionsPageModel(editPlan: Fixtures.editPlan(), sourceFingerprint: "settings-load")
+    }
+    page.configureSuggestionsTapped()
+    page.suggestionSettings?.numberingSelected()
+    await page.suggestionSettings?.viewAppeared()
+    #expect(page.suggestionSettings?.showsNumbering == true)
+    #expect(page.suggestionSettings?.showsDone == true)
+  }
+
+  @Test func groupReviewBelongsToConfigurationAndKeepsItOpenOnClose() throws {
+    let editor = try SuggestionReviewTests().fixture()
+    let page = editor.cutSuggestions
+    let batch = try #require(editor.suggestionBatch)
+    let key = try #require(reviewSequenceKey(editor.documentCutSuggestions[0], batch: batch))
+    page.configureSuggestionsTapped()
+    let settings = try #require(page.suggestionSettings)
+    settings.numberingSelected()
+    page.reviewGroupTapped(key)
+    let review = try #require(settings.numberingReview)
+    #expect(page.suggestionReview == nil)
+    review.startText = "9"
+    review.applyFutureStartTapped()
+    expectNoDifference(editor.suggestionStarts.groups.first { $0.key == key }?.start.number, 9)
+    review.cancelTapped()
+    #expect(settings.numberingReview == nil)
+    #expect(page.suggestionSettings === settings)
+    page.resetSongStartTapped(key)
+    #expect(editor.suggestionStarts.groups.isEmpty)
+    let before = editor.documentState
+    page[futureStart: "intro"] = "invalid"
+    page.applyTypeStartTapped("intro")
+    #expect(page.actionMessage != nil)
+    expectNoDifference(editor.documentState, before)
+    page.recoveryBlocksSuggestions = true
+    page[futureStart: "intro"] = "10"
+    page.applyTypeStartTapped("intro")
+    page.reviewGroupTapped(key)
+    expectNoDifference(editor.documentState, before)
+    #expect(settings.numberingReview == nil)
+  }
+
+  @Test func numberingNavigationKeepsRuleDraftAndProjectStartsIndependent() async throws {
+    @Shared(.suggestionConfiguration) var published = SuggestionDefaults.configuration
+    let editor = try SuggestionReviewTests().fixture()
+    let page = editor.cutSuggestions
+    page.configureSuggestionsTapped()
+    let settings = try #require(page.suggestionSettings)
+    #expect(settings.numberingPage === page)
+    #expect(settings.showsNumberingOption)
+    settings.typeName = "My Song Intro"
+    let draft = settings.draft
+    settings.numberingSelected()
+    #expect(settings.showsNumbering)
+    #expect(!settings.showsTypeEditor)
+    #expect(settings.showsRuleActions)
+    expectNoDifference(settings.draft, draft)
+    page[futureStart: "spotlight"] = "7"
+    page.applyTypeStartTapped("spotlight")
+    expectNoDifference(editor.suggestionStarts.types["spotlight"]?.number, 7)
+    settings.typeSelected("intro")
+    #expect(!settings.showsNumbering)
+    expectNoDifference(settings.typeName, "My Song Intro")
+    page[futureStart: "spotlight"] = "99"
+    settings.cancelTapped()
+    #expect(page.suggestionSettings == nil)
+    expectNoDifference(editor.suggestionStarts.types["spotlight"]?.number, 7)
+    expectNoDifference(page[futureStart: "spotlight"], "7")
+    expectNoDifference(published, SuggestionDefaults.configuration)
+  }
+
+  @Test func standaloneSettingsHaveNoProjectNumbering() {
+    let model = SuggestionSettingsModel(configuration: SuggestionDefaults.configuration)
+    #expect(!model.showsNumberingOption)
+    model.numberingSelected()
+    #expect(!model.showsNumbering)
+    #expect(model.showsTypeEditor)
+  }
+
+  @Test func numberingOnlyVisitShowsDoneAndDoesNotRetainPage() throws {
+    var page: CutSuggestionsPageModel? = CutSuggestionsPageModel(
+      editPlan: Fixtures.editPlan(), sourceFingerprint: "numbering")
+    page?.configureSuggestionsTapped()
+    let model = try #require(page?.suggestionSettings)
+    model.numberingSelected()
+    #expect(model.showsDone)
+    #expect(!model.showsRuleActions)
+    page = nil
+    #expect(model.numberingPage == nil)
+  }
+
   @Test func repeatedInvalidLiteralsProduceOneSaveDiagnosticAndKeepDraftInvalid() async throws {
     let model = SuggestionSettingsModel(configuration: SuggestionDefaults.configuration)
     let template = try #require(model.namingTemplate)

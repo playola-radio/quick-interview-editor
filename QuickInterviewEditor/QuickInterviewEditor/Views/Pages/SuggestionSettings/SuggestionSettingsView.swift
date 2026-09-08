@@ -11,7 +11,9 @@ struct SuggestionSettingsView: View {
         sidebar.frame(minWidth: 165, idealWidth: 190, maxWidth: 230)
         ScrollView {
           VStack(alignment: .leading, spacing: 12) {
-            if model.showsTypeEditor {
+            if model.showsNumbering, let page = model.numberingPage {
+              SuggestionNumberingView(model: page)
+            } else if model.showsTypeEditor {
               typeEditor
             } else if model.showsFieldEditor {
               fieldEditor
@@ -24,7 +26,7 @@ struct SuggestionSettingsView: View {
         }
         .frame(minWidth: 390)
       }
-      .disabled(!model.canEdit)
+      .disabled(model.isBusy)
       if model.isBusy { ProgressView() }
       if let notice = model.savedRevisionStatus { Text(notice).foregroundStyle(.orange) }
       if let status = model.statusMessage { Text(status).textSelection(.enabled) }
@@ -32,50 +34,72 @@ struct SuggestionSettingsView: View {
         Text(message).foregroundStyle(.orange)
       }
       HStack {
-        Button(model.reloadLabel) { Task { await model.reloadTapped() } }
-          .disabled(!model.canReload)
-        Spacer()
-        Button(model.cancelLabel) { model.cancelTapped() }
-          .disabled(!model.canCancel)
-          .keyboardShortcut(.cancelAction)
-        Button(model.saveLabel) { Task { await model.saveTapped() } }
-          .disabled(!model.canSave)
-          .keyboardShortcut(.defaultAction)
+        if model.showsRuleActions {
+          Button(model.reloadLabel) { Task { await model.reloadTapped() } }
+            .disabled(!model.canReload)
+          Spacer()
+          Button(model.cancelLabel) { model.cancelTapped() }
+            .disabled(!model.canCancel)
+            .keyboardShortcut(.cancelAction)
+          Button(model.saveLabel) { Task { await model.saveTapped() } }
+            .disabled(!model.canSave)
+            .keyboardShortcut(.defaultAction)
+        }
+        if model.showsDone {
+          Spacer()
+          Button(model.doneLabel) { model.cancelTapped() }
+            .disabled(!model.canCancel)
+            .keyboardShortcut(.cancelAction)
+        }
       }
     }
     .padding(20)
     .frame(minWidth: 700, idealWidth: 780, minHeight: 570, idealHeight: 680)
     .task { await model.viewAppeared() }
     .interactiveDismissDisabled(model.isBusy)
+    .sheet(item: $model.numberingReview) { review in
+      SuggestionReviewView(model: review)
+    }
   }
 
   private var sidebar: some View {
     ScrollView {
       VStack(alignment: .leading, spacing: 8) {
-        Text(model.typesTitle).font(.headline)
-        ForEach(model.typeRows) { row in
-          Button(row.title) { model.typeSelected(row.id) }
-            .buttonStyle(.plain)
-            .fontWeight(row.isSelected ? .semibold : .regular)
-            .foregroundStyle(row.isSelected ? Color.accentColor : Color.primary)
-        }
-        Button(model.addTypeLabel, systemImage: "plus") { model.addTypeTapped() }
-        if model.showsRestore {
-          Menu(model.restoreLabel) {
-            ForEach(model.missingPresets) { row in
-              Button(row.title) { model.restoreBuiltInTapped(row.id) }
+        Group {
+          Text(model.typesTitle).font(.headline)
+          ForEach(model.typeRows) { row in
+            Button(row.title) { model.typeSelected(row.id) }
+              .buttonStyle(.plain)
+              .fontWeight(row.isSelected ? .semibold : .regular)
+              .foregroundStyle(row.isSelected ? Color.accentColor : Color.primary)
+          }
+          Button(model.addTypeLabel, systemImage: "plus") { model.addTypeTapped() }
+          if model.showsRestore {
+            Menu(model.restoreLabel) {
+              ForEach(model.missingPresets) { row in
+                Button(row.title) { model.restoreBuiltInTapped(row.id) }
+              }
             }
           }
+          Divider()
+          Text(model.fieldsTitle).font(.headline)
+          ForEach(model.fieldRows) { row in
+            Button(row.title) { model.fieldSelected(row.id) }
+              .buttonStyle(.plain)
+              .fontWeight(row.isSelected ? .semibold : .regular)
+              .foregroundStyle(row.isSelected ? Color.accentColor : Color.primary)
+          }
+          Button(model.addFieldLabel, systemImage: "plus") { model.addFieldTapped() }
         }
-        Divider()
-        Text(model.fieldsTitle).font(.headline)
-        ForEach(model.fieldRows) { row in
-          Button(row.title) { model.fieldSelected(row.id) }
+        .disabled(!model.canEdit)
+        if model.showsNumberingOption {
+          Divider()
+          Text(model.projectScopeTitle).font(.headline)
+          Button(model.numberingTitle) { model.numberingSelected() }
             .buttonStyle(.plain)
-            .fontWeight(row.isSelected ? .semibold : .regular)
-            .foregroundStyle(row.isSelected ? Color.accentColor : Color.primary)
+            .fontWeight(model.isNumberingSelected ? .semibold : .regular)
+            .foregroundStyle(model.isNumberingSelected ? Color.accentColor : Color.primary)
         }
-        Button(model.addFieldLabel, systemImage: "plus") { model.addFieldTapped() }
       }
       .frame(maxWidth: .infinity, alignment: .leading)
       .padding(.trailing, 8)
@@ -98,6 +122,7 @@ struct SuggestionSettingsView: View {
       Button(model.removeTypeLabel, role: .destructive) { model.removeSelectedTypeTapped() }
         .disabled(!model.canRemoveType)
     }
+    .disabled(!model.canEdit)
   }
 
   private var fieldEditor: some View {
@@ -109,6 +134,54 @@ struct SuggestionSettingsView: View {
         .frame(minHeight: 160)
         .accessibilityLabel(model.fieldInstructionsLabel)
       Button(model.removeFieldLabel, role: .destructive) { model.removeSelectedFieldTapped() }
+    }
+    .disabled(!model.canEdit)
+  }
+}
+
+private struct SuggestionNumberingView: View {
+  @Bindable var model: CutSuggestionsPageModel
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 16) {
+      Text(model.numberingScopeTitle).font(.title3)
+      Text(model.numberingHelp).foregroundStyle(.secondary)
+      VStack(alignment: .leading, spacing: 12) {
+        Text(model.futureStartsTitle).font(.headline)
+        ForEach(model.futureStartRows) { row in
+          VStack(alignment: .leading, spacing: 6) {
+            Text(row.title).font(.headline)
+            Text(row.preferenceLabel).font(.caption).foregroundStyle(.secondary)
+            TextField(model.futureStartLabel, text: $model[futureStart: row.id])
+              .accessibilityLabel(row.title + " — " + model.futureStartLabel)
+            HStack {
+              Button(model.applyTypeStartLabel) { model.applyTypeStartTapped(row.id) }
+              if row.hasOverride {
+                Button(model.automaticTypeStartLabel) { model.resetTypeStartTapped(row.id) }
+              }
+            }
+          }
+          Divider()
+        }
+        Text(model.songStartsTitle).font(.headline)
+        Text(model.songStartsHelp).font(.caption).foregroundStyle(.secondary)
+        ForEach(model.songStartRows) { row in
+          VStack(alignment: .leading, spacing: 6) {
+            Text(row.title).font(.headline)
+            Text(row.startLabel).font(.caption)
+            HStack {
+              Button(model.reviewGroupLabel) { model.reviewGroupTapped(row.id) }
+              if row.hasOverride {
+                Button(model.resetSongStartLabel) { model.resetSongStartTapped(row.id) }
+              }
+            }
+          }
+        }
+      }
+      .disabled(model.candidateActionsDisabled)
+      if let message = model.actionMessage {
+        Text(message).foregroundStyle(.orange).textSelection(.enabled)
+      }
     }
   }
 }

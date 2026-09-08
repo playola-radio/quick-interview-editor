@@ -89,7 +89,7 @@ Suggestions finds three groups of material in your transcript:
 | Audio Images | ID, Pre-commercial, Post-commercial, Promo | `ID 1`, `Pre-Com 1`, `Post-Com 1`, `Promo 1`, … |
 
 Use **Types** to show any combination of groups or individual types. Filtering changes
-what you see; it does not delete suggestions or change their numbers. Saved clips remain
+what you see; it does not delete suggestions or change saved clip names. Saved clips remain
 available independently of this filter.
 
 Open **Configure Suggestions** to edit the app-wide rules. Each type has discovery
@@ -102,17 +102,20 @@ saved rules unchanged. A stale settings draft must reload before it can replace 
 saved rules.
 
 Review extracted fields before accepting a suggestion. Missing values are identified for
-correction. Correcting a pending suggestion updates its name using that search's
-template. A canonical spelling change can update pending names in the same numbering
-group; it does not rename clips you already accepted.
+correction. Pending suggestions retain their descriptive labels; the captured naming
+template is applied when you accept a clip. Field corrections and canonical group
+spelling affect that accepted name without renaming clips you already accepted.
 
-**Start next search at** belongs to the current project. Leave it Automatic to choose
-the next safe count, or enter a starting number when continuing across source tapes or
-`.pie` files. Intros can also have per-song starting numbers. These settings do not
-share a counter across projects. Explicit numbers that would reuse an issued count
-require correction rather than silently advancing. Changing future starts does not
-rename the current batch; use the separate previewed renumber action for pending
-suggestions.
+Open **Configure Suggestions → Numbering**, under **This project**, for starting counts
+and song/group overrides. Leave a count Automatic, or enter a starting number when
+continuing across source tapes or `.pie` files. Each Save/Reset applies directly to the
+project and can be undone in the editor. These counters are independent of app-wide
+rule drafts and of other projects.
+
+Numbers are assigned in acceptance order within each type or song group. Starting at 7,
+rejecting a suggestion, accepting two clips, and rejecting another yields clips 7 and 8.
+The next accepted clip gets 9. A starting count is a minimum; allocation continues after
+previously issued numbers in the same group.
 
 Accepting a suggestion permanently reserves its sequence number in that project.
 Deleting a clip, undoing acceptance, or running a new search does not release an issued

@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-07
 
-**Status:** Approved for implementation planning on 2026-09-07, including both adversarial-review revision rounds below. Application implementation has not begun.
+**Status:** Initial implementation completed on 2026-09-07. The user's 2026-09-08 correction supersedes discovery-time numbering and inline counter controls: see [acceptance-time numbering](2026-09-08-acceptance-numbering-design.md) and the [configuration layout plan](../plans/2026-09-08-numbering-in-configuration.md). The original design decisions below remain as historical context where superseded.
 
 **Working branch:** `briankeane/suggestion-types`
 
