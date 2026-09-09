@@ -305,10 +305,10 @@ final class CutSuggestionsPageModel: ViewModel {
   /// outlines it can mute — hidden otherwise so it never dangles over an empty list.
   var showsSuggestionsToggle: Bool { !pendingSuggestions.isEmpty }
 
-  /// Ranked candidates grouped/labeled by product type, with per-row display values and
-  /// freshness derived against the current transcript/source.
-  var sections: [SuggestionSection] {
-    suggestionSections(
+  /// Ranked candidates flattened into one list ordered by position in the audio, with per-row
+  /// display values and freshness derived against the current transcript/source.
+  var rows: [SuggestionRow] {
+    suggestionRows(
       from: suggestions, currentTranscriptHash: editPlan.transcriptHash,
       currentFingerprint: sourceFingerprint,
       fieldNames: Dictionary(

@@ -43,11 +43,14 @@ func visibleSuggestions(_ suggestions: [CutSuggestion], selected: Set<String>?) 
   return suggestions.filter { selected.contains($0.productType.rawValue) }
 }
 
-/// One row in the ranked cut-suggestion list. Every string and flag is precomputed here so
-/// the view renders it directly (CLAUDE.md's "zero logic in views"). Built by
-/// ``suggestionSections(from:currentTranscriptHash:currentFingerprint:)``.
+/// One row in the position-ordered cut-suggestion list. Every string and flag is precomputed
+/// here so the view renders it directly (CLAUDE.md's "zero logic in views"). Built by
+/// ``suggestionRows(from:currentTranscriptHash:currentFingerprint:fieldNames:)``.
 struct SuggestionRow: Identifiable, Equatable, Sendable {
   var id: CutSuggestion.ID
+  /// The product-type name (e.g. "Artist Spotlight"), shown per row now that the list is
+  /// ordered by position rather than grouped under per-type headers.
+  var typeLabel: String
   var title: String
   /// `"Song: …"`, marked when unverified — or `nil` when the suggestion names no song.
   var songLine: String?
@@ -78,37 +81,23 @@ struct SuggestionRow: Identifiable, Equatable, Sendable {
   var missingFieldsMessage: String?
 }
 
-/// A product-type group of rows (e.g. all "Artist Spotlight" candidates), in ranked order.
-struct SuggestionSection: Identifiable, Equatable, Sendable {
-  var id: String
-  var title: String
-  var rows: [SuggestionRow]
-}
-
-/// Groups ranked suggestions by product type, preserving the incoming order within each
-/// group (pending-first, then rank — see `ProjectState.rankedSuggestions`). Section order
-/// follows first appearance in the ranked list, so the group holding the best-ranked
-/// candidate comes first.
-func suggestionSections(
+/// Ranked suggestions flattened into one list ordered by position in the audio (earliest
+/// start first), so the list mirrors the transcript/waveform order rather than grouping by
+/// product type. `endSample` then `id` break ties for a deterministic ordering.
+func suggestionRows(
   from suggestions: [CutSuggestion], currentTranscriptHash: String, currentFingerprint: String,
   fieldNames: [String: String] = [:]
-) -> [SuggestionSection] {
-  var order: [ProductType] = []
-  var rowsByType: [ProductType: [SuggestionRow]] = [:]
-  for suggestion in suggestions {
-    if rowsByType[suggestion.productType] == nil { order.append(suggestion.productType) }
-    rowsByType[suggestion.productType, default: []].append(
+) -> [SuggestionRow] {
+  suggestions
+    .sorted {
+      ($0.startSample, $0.endSample, $0.id.uuidString)
+        < ($1.startSample, $1.endSample, $1.id.uuidString)
+    }
+    .map {
       suggestionRow(
-        suggestion, currentTranscriptHash: currentTranscriptHash,
-        currentFingerprint: currentFingerprint, fieldNames: fieldNames))
-  }
-  return order.map { type in
-    SuggestionSection(
-      id: type.rawValue,
-      title: suggestions.first(where: { $0.productType == type })?.naming?.typeName
-        ?? type.displayLabel,
-      rows: rowsByType[type] ?? [])
-  }
+        $0, currentTranscriptHash: currentTranscriptHash,
+        currentFingerprint: currentFingerprint, fieldNames: fieldNames)
+    }
 }
 
 /// Builds one display row, deriving freshness by comparing the suggestion's provenance
@@ -124,6 +113,7 @@ func suggestionRow(
   let trimmedTitle = suggestion.title.trimmingCharacters(in: .whitespacesAndNewlines)
   return SuggestionRow(
     id: suggestion.id,
+    typeLabel: suggestion.naming?.typeName ?? suggestion.productType.displayLabel,
     title: trimmedTitle.isEmpty ? suggestion.productType.displayLabel : trimmedTitle,
     songLine: suggestion.song.map { song in
       "Song: \(song)" + (suggestion.songVerified ? "" : " (unverified)")
