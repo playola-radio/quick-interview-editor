@@ -104,6 +104,18 @@ struct CutSuggestionPresentationTests {
     expectNoDifference(rows.map(\.id), [intro.id, spotlight.id])
   }
 
+  @Test func equalStartsBreakTiesByEndSampleThenID() {
+    let longer = Fixtures.cutSuggestion(
+      id: Fixtures.uuid(1), startSample: 44_100, endSample: 66_150)
+    let shorter = Fixtures.cutSuggestion(
+      id: Fixtures.uuid(2), startSample: 44_100, endSample: 55_125)
+    let sameSpan = Fixtures.cutSuggestion(
+      id: Fixtures.uuid(3), startSample: 44_100, endSample: 55_125)
+    let rows = suggestionRows(
+      from: [longer, sameSpan, shorter], currentTranscriptHash: "h", currentFingerprint: "fp")
+    expectNoDifference(rows.map(\.id), [shorter.id, sameSpan.id, longer.id])
+  }
+
   @Test func rowCarriesItsProductTypeLabel() {
     let spotlight = Fixtures.cutSuggestion(id: Fixtures.uuid(1), productType: .spotlight)
     let row = suggestionRow(spotlight, currentTranscriptHash: "h", currentFingerprint: "fp")
