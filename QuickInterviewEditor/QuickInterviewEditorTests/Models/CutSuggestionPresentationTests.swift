@@ -93,14 +93,20 @@ struct CutSuggestionPresentationTests {
       suggestionRow(none, currentTranscriptHash: "h", currentFingerprint: "fp").songLine == nil)
   }
 
-  @Test func sectionsFollowTheGroupOfTheBestRankedCandidate() {
-    // Suggestions arrive in ranked order (spotlight #1, then intro #2).
+  @Test func rowsAreOrderedByPositionRegardlessOfRankOrType() {
+    // Spotlight ranks first but starts later than the intro; position order wins.
     let spotlight = Fixtures.cutSuggestion(
-      id: Fixtures.uuid(1), productType: .spotlight, rank: 1)
-    let intro = Fixtures.cutSuggestion(id: Fixtures.uuid(2), productType: .intro, rank: 2)
-    let sections = suggestionSections(
+      id: Fixtures.uuid(1), productType: .spotlight, startSample: 88_200, rank: 1)
+    let intro = Fixtures.cutSuggestion(
+      id: Fixtures.uuid(2), productType: .intro, startSample: 44_100, rank: 2)
+    let rows = suggestionRows(
       from: [spotlight, intro], currentTranscriptHash: "h", currentFingerprint: "fp")
-    expectNoDifference(sections.map(\.title), ["Artist Spotlight", "Intro"])
-    expectNoDifference(sections.map { $0.rows.count }, [1, 1])
+    expectNoDifference(rows.map(\.id), [intro.id, spotlight.id])
+  }
+
+  @Test func rowCarriesItsProductTypeLabel() {
+    let spotlight = Fixtures.cutSuggestion(id: Fixtures.uuid(1), productType: .spotlight)
+    let row = suggestionRow(spotlight, currentTranscriptHash: "h", currentFingerprint: "fp")
+    expectNoDifference(row.typeLabel, "Artist Spotlight")
   }
 }

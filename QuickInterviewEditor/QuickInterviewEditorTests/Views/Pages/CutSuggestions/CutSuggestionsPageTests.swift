@@ -144,7 +144,7 @@ struct CutSuggestionsPageTests {
     #expect(!model.showsOnboarding)
     #expect(!model.showsEmptyState)
     model.typeFilterTapped("custom-old")
-    expectNoDifference(model.sections.first?.title, "Station Visit")
+    expectNoDifference(model.rows.first?.typeLabel, "Station Visit")
   }
 
   @Test func replacementRequiresConfirmationBeforePreparingOrCallingProvider() async {
@@ -477,42 +477,44 @@ struct CutSuggestionsPageTests {
     expectNoDifference(store.value[id: suggestion.id]?.title, "Renamed")
   }
 
-  // MARK: - Ranked, grouped presentation + freshness
+  // MARK: - Position-ordered presentation + freshness
 
-  @Test func sectionsGroupByProductTypeInRankedOrderWithFreshnessFlags() {
-    let fingerprint = "fp-sections"
+  @Test func rowsAreOrderedByPositionWithPerRowFreshnessFlags() {
+    let fingerprint = "fp-rows"
     let plan = Fixtures.editPlan()
     let hash = plan.transcriptHash
-    let spotlight = stamped(
-      Fixtures.cutSuggestion(
-        id: Fixtures.uuid(1), productType: .spotlight, title: "Story",
-        wordIDs: [10, 11, 12], rank: 1),
-      transcriptHash: hash, fingerprint: fingerprint)
-    // transcript drifted under the intro
+    // The intro starts earlier in the audio than the spotlight, so it leads the list even
+    // though the spotlight ranks higher.
     let intro = stamped(
       Fixtures.cutSuggestion(
         id: Fixtures.uuid(2), productType: .intro, title: "Setup", song: "Hit",
-        wordIDs: [13, 14], rank: 2),
-      transcriptHash: "stale", fingerprint: fingerprint)
-    let store = LockIsolated<IdentifiedArrayOf<CutSuggestion>>([intro, spotlight])
+        wordIDs: [13, 14], startSample: 44_100, rank: 2),
+      transcriptHash: "stale", fingerprint: fingerprint)  // transcript drifted under the intro
+    let spotlight = stamped(
+      Fixtures.cutSuggestion(
+        id: Fixtures.uuid(1), productType: .spotlight, title: "Story",
+        wordIDs: [10, 11, 12], startSample: 88_200, rank: 1),
+      transcriptHash: hash, fingerprint: fingerprint)
+    let store = LockIsolated<IdentifiedArrayOf<CutSuggestion>>([spotlight, intro])
 
     withDependencies { _ in
     } operation: {
       let model = CutSuggestionsPageModel(editPlan: plan, sourceFingerprint: fingerprint)
       wire(model, to: store)
 
-      let sections = model.sections
-      // Spotlight ranks first (rank 1), so its section leads.
-      expectNoDifference(sections.map(\.title), ["Artist Spotlight", "Intro"])
-      expectNoDifference(sections[0].rows.map(\.id), [spotlight.id])
-      expectNoDifference(sections[0].rows[0].isStale, false)
-      expectNoDifference(sections[0].rows[0].canAccept, true)
+      let rows = model.rows
+      expectNoDifference(rows.map(\.id), [intro.id, spotlight.id])
+      expectNoDifference(rows.map(\.typeLabel), ["Intro", "Artist Spotlight"])
 
-      let introRow = sections[1].rows[0]
+      let introRow = rows[0]
       expectNoDifference(introRow.isStale, true)
       expectNoDifference(introRow.canAccept, false)
       expectNoDifference(introRow.showsFreshnessWarning, true)
       expectNoDifference(introRow.songLine, "Song: Hit (unverified)")
+
+      let spotlightRow = rows[1]
+      expectNoDifference(spotlightRow.isStale, false)
+      expectNoDifference(spotlightRow.canAccept, true)
     }
   }
 

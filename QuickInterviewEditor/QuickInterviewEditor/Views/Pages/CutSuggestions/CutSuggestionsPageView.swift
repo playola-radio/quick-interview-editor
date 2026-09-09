@@ -130,14 +130,9 @@ struct CutSuggestionsPageView: View {
   private var suggestionList: some View {
     ScrollViewReader { proxy in
       ScrollView {
-        VStack(alignment: .leading, spacing: 16) {
-          ForEach(model.sections) { section in
-            VStack(alignment: .leading, spacing: 8) {
-              Text(section.title).font(.headline)
-              ForEach(section.rows) { row in
-                SuggestionCard(model: model, row: row).id(row.id)
-              }
-            }
+        VStack(alignment: .leading, spacing: 8) {
+          ForEach(model.rows) { row in
+            SuggestionCard(model: model, row: row).id(row.id)
           }
         }
       }
@@ -165,6 +160,10 @@ private struct SuggestionCard: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 4) {
+      Text(row.typeLabel)
+        .font(.caption)
+        .fontWeight(.semibold)
+        .foregroundStyle(.secondary)
       if row.showsEditableTitle {
         header { editableTitle }
       }
