@@ -155,6 +155,38 @@ extension EditorModel {
     }
   }
 
+  /// A drag/point word intent honoring the two-step gate: a word inside a clip the user has not yet
+  /// engaged first selects that clip (Logic-style — you select the region before its contents).
+  /// `selectTranscriptObject` invalidates the transcript's drag anchor, so the in-flight drag stops
+  /// painting across the clip. A word in the engaged clip, in the live freeform range, or outside all
+  /// clips selects the word directly.
+  func selectWordOrEngageClip(_ id: Word.ID) {
+    if let clip = clipToEngage(coveringWord: id) {
+      selectTranscriptObject(clip)
+    } else {
+      selectWord(id, extending: false)
+    }
+  }
+
+  /// The clip covering `id` the user has not yet engaged, or nil when the word is outside all clips
+  /// or already inside the engaged clip (so the caller selects the word instead). Uses the same
+  /// foreground/visible hit-test ordering as `transcriptClicked`.
+  private func clipToEngage(coveringWord id: Word.ID) -> TranscriptObjectID? {
+    let clip = objectsCovering(id, objects: visibleTranscriptObjects, selected: selection.objectID)
+      .first { if case .clip = $0.id { return true } else { return false } }
+    guard let clip, !isEditingWords(inside: clip) else { return nil }
+    return clip.id
+  }
+
+  /// Whether the current selection is already "inside" `object` for word editing: the clip itself is
+  /// the object selection, or the live freeform range's words all lie within the clip.
+  private func isEditingWords(inside object: TranscriptObject) -> Bool {
+    guard case .clip = object.id else { return false }
+    if selection.objectID == object.id { return true }
+    guard selection.freeformRange != nil, !selectedWordIDs.isEmpty else { return false }
+    return selectedWordIDs.isSubset(of: object.wordIDs)
+  }
+
   func transcriptClicked(_ click: TranscriptClick) {
     if click.count == 2 {
       openCapturedTranscriptClick(click)

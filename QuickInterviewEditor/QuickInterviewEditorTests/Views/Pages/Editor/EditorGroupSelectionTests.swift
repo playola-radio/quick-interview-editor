@@ -429,6 +429,59 @@ struct EditorGroupSelectionTests {
     expectNoDifference(model.transcriptObjects, [])
   }
 
+  private func wordOffset(_ model: EditorModel, word: Int) -> Int {
+    model.transcript.document.wordRanges.first { $0.wordID == word }!.range.location
+  }
+
+  // Two-step: a drag over a clip the user has not engaged selects the clip first.
+  @Test func dragBeganOnUnselectedClipWordSelectsClip() {
+    let model = editor()
+    let clip = Fixtures.slice(start: 70_648, end: 119_202)
+    model.slices = [clip]
+    model.transcript.transcriptDragBegan(atUTF16Offset: wordOffset(model, word: 3))
+    expectNoDifference(model.selection, .object(.clip(clip.id)))
+  }
+
+  // Selecting the clip invalidates the drag anchor, so continuing the drag paints nothing.
+  @Test func dragOverUnselectedClipDoesNotPaintFreeform() {
+    let model = editor()
+    let clip = Fixtures.slice(start: 70_648, end: 119_202)
+    model.slices = [clip]
+    model.transcript.transcriptDragBegan(atUTF16Offset: wordOffset(model, word: 2))
+    model.transcript.transcriptDragged(toUTF16Offset: wordOffset(model, word: 4))
+    expectNoDifference(model.selection, .object(.clip(clip.id)))
+  }
+
+  // Once the clip is engaged, a drag inside it selects that word (freeform range).
+  @Test func dragBeganInsideEngagedClipSelectsWord() {
+    let model = editor()
+    let clip = Fixtures.slice(start: 70_648, end: 119_202)
+    model.slices = [clip]
+    model.selectTranscriptObject(.clip(clip.id))
+    model.transcript.transcriptDragBegan(atUTF16Offset: wordOffset(model, word: 3))
+    expectNoDifference(model.selection.freeformRange, model.sourceRange(ofWord: 3))
+  }
+
+  // A drag across the engaged clip paints the word range it covers.
+  @Test func dragAcrossEngagedClipPaintsWordRange() {
+    let model = editor()
+    let clip = Fixtures.slice(start: 70_648, end: 119_202)
+    model.slices = [clip]
+    model.selectTranscriptObject(.clip(clip.id))
+    model.transcript.transcriptDragBegan(atUTF16Offset: wordOffset(model, word: 2))
+    model.transcript.transcriptDragged(toUTF16Offset: wordOffset(model, word: 4))
+    let expected =
+      model.sourceRange(ofWord: 2)!.lowerBound..<model.sourceRange(ofWord: 4)!.upperBound
+    expectNoDifference(model.selection.freeformRange, expected)
+  }
+
+  // Regression: dragging an unclipped word still selects that word directly.
+  @Test func dragBeganOnUnclippedWordSelectsWord() {
+    let model = editor()
+    model.transcript.transcriptDragBegan(atUTF16Offset: wordOffset(model, word: 3))
+    expectNoDifference(model.selection.freeformRange, model.sourceRange(ofWord: 3))
+  }
+
   @Test func rangeAndSeamFacadesReplaceObjectSelection() {
     let model = editor()
     model.slices = [Fixtures.slice(start: 72_000, end: 120_000)]

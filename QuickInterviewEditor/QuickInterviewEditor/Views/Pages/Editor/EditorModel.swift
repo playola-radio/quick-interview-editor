@@ -149,7 +149,8 @@ final class EditorModel: ViewModel {
       guard let self else { return }
       switch intent {
       case .words(let anchor, let focus): self.selectWords(anchorID: anchor, focusID: focus)
-      case .word(let id, let extending): self.selectWord(id, extending: extending)
+      case .word(let id, extending: true): self.selectWord(id, extending: true)
+      case .word(let id, extending: false): self.selectWordOrEngageClip(id)
       case .clear: self.clearSelection()
       }
     }
