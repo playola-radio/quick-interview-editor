@@ -31,7 +31,7 @@ extension EditorModel {
       }
       await reconcilePlayback()
     case .range:
-      clearSelectionTapped()
+      await removeSelectedSectionTapped()
     case .seam(let id):
       mutateDocument(selectionAfter: EditorSelection.none, label: "Restore Removed Audio") {
         $0.timelineRemovals[id: id] = nil

@@ -34,7 +34,7 @@ strikes the words through, clears the selection; undo restores.
 case → `await removeSelectedSectionTapped()` (was `clearSelectionTapped()`).
 **Tests**: rewrite `deleteRangeOnlyClearsHighlightAndIsUndoable` →
 removes audio + strikethrough + undoable; export stays blocked.
-**Status**: Not Started
+**Status**: Complete
 
 ## Stage 3: Edit-Slice sheet transcript select + delete
 **Goal**: The sheet's transcript can select words (drag) and delete them; removals
