@@ -1979,6 +1979,21 @@ struct EditSliceTests {
     #expect(model.removedWordIDs.isSuperset(of: [2, 3, 4]))
   }
 
+  /// After removing a single-word transcript selection, re-clicking that same word selects it again
+  /// instead of being swallowed as a toggle-off re-click. The removal must invalidate the scoped
+  /// transcript's stale gesture anchor, which `waveformSelection = nil` alone does not touch.
+  @Test func reclickingAWordAfterRemovingItSelectsItAgain() async {
+    let model = wordSelectionModel()
+    model.onRemoveSection = { _ in }
+    model.transcript.selectWords(anchorID: 3, focusID: 3)
+    await model.removeSectionKeyPressed()
+    expectNoDifference(model.waveformSelection, nil)
+
+    model.transcript.wordClicked(3, extending: false)
+    expectNoDifference(model.waveformSelection, 77_704..<98_916)
+    expectNoDifference(model.selectedWordIDs, [3])
+  }
+
   /// A draft (not-yet-saved) slice cannot mutate the document, so a transcript drag selects nothing.
   @Test func transcriptSelectionIgnoredForDraftTarget() {
     let plan = Fixtures.editPlan()

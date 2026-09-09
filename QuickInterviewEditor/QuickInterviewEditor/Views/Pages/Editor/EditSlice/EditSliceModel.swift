@@ -733,6 +733,9 @@ final class EditSliceModel: ViewModel, Identifiable {
     guard let range = waveformSelection else { return }
     await onRemoveSection(range)
     waveformSelection = nil
+    // The transcript keeps its own gesture anchor/focus; drop it so re-clicking the just-removed
+    // word selects it fresh instead of being read as a toggle-off re-click.
+    transcript.invalidateSelectionAnchor()
   }
 
   /// ⌫ parity with the main editor's `handleRemoveSectionKey`: a selected seam restores its removal;
