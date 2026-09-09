@@ -33,8 +33,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   private func removePlainSave() {
-    guard let menu = NSApp.mainMenu else { return }
-    SaveMenuSurgery.removePlainSave(from: menu)
+    // `NSApplicationDelegate` callbacks are nonisolated on the CI SDK (Xcode 16.4), but `NSApp` and
+    // `mainMenu` are main-actor-isolated; these callbacks and the menu notification always fire on
+    // the main thread, so assert that rather than let strict concurrency reject the build.
+    MainActor.assumeIsolated {
+      guard let menu = NSApp.mainMenu else { return }
+      SaveMenuSurgery.removePlainSave(from: menu)
+    }
   }
 }
 
