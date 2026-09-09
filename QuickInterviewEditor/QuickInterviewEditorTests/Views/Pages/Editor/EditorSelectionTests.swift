@@ -266,14 +266,15 @@ struct EditorSelectionTests {
     #expect(model.audioSelection?.upperBound == 119_202)
   }
 
-  /// Clicking within an adjusted freeform highlight preserves its exact audio edges.
-  @Test func edgeEditedHighlightSurvivesClickWithinIt() {
+  /// New model: single clicks always word-select, so clicking within an edge-edited highlight
+  /// discards the manual edge edit and re-selects the clicked word's exact source range.
+  @Test func clickWithinEdgeEditedHighlightReselectsClickedWord() {
     let model = editor()
     model.transcript.wordClicked(2, extending: false)
     model.selectionNudged(.start, byMs: -10)
-    let adjusted = model.selection
+    #expect(model.selection.freeformRange != model.sourceRange(ofWord: 2))
     model.transcript.wordClicked(2, extending: false)
-    expectNoDifference(model.selection, adjusted)
+    expectNoDifference(model.selection.freeformRange, model.sourceRange(ofWord: 2))
   }
 
   /// A slice/suggestion reveal *replaces* the selection, so it must repin `selectionAnchorSample` to

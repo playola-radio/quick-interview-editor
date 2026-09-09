@@ -108,6 +108,31 @@ struct TranscriptDocument: Equatable {
     return !(text as NSString).substring(with: separator).contains("\n")
   }
 
+  /// Groups the selected words into contiguous UTF-16 runs for a gapless selection sweep.
+  /// Consecutive selected words (adjacent in `wordRanges`) merge into one range that spans their
+  /// interior separators; an unselected word between two selected words splits the run. Each run
+  /// runs from its first word's location to its last word's end, so the sweep has no inter-word
+  /// gaps — the whole point of drawing selection as a sweep rather than per-word boxes.
+  func selectionRuns(for selected: Set<Word.ID>) -> [NSRange] {
+    guard !selected.isEmpty else { return [] }
+    var runs: [NSRange] = []
+    var runStart: Int?
+    var runEnd = 0
+    for entry in wordRanges {
+      if selected.contains(entry.wordID) {
+        if runStart == nil { runStart = entry.range.location }
+        runEnd = NSMaxRange(entry.range)
+      } else if let start = runStart {
+        runs.append(NSRange(location: start, length: runEnd - start))
+        runStart = nil
+      }
+    }
+    if let start = runStart {
+      runs.append(NSRange(location: start, length: runEnd - start))
+    }
+    return runs
+  }
+
   private func wordIndex(atOrBefore offset: Int) -> Int? {
     var low = 0
     var high = wordRanges.count - 1
