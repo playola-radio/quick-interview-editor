@@ -107,6 +107,11 @@ final class EditSliceModel: ViewModel, Identifiable {
   /// removal set is frozen). Asked before a stretch starts, so the sheet never previews a drag the
   /// parent's `updateCrossfade` funnel would discard on release — the main lane's begin-time refusal.
   var canEditCrossfade: () -> Bool = { true }
+  /// Whether the parent is mid-export. Removal is frozen mid-export (the running export renders the
+  /// un-cut canonical audio, so an added removal would leave the finished AIFF stale). The sheet must
+  /// mirror the main window's `canRemoveSelectedSection` gate, or it would clear the selection while
+  /// the parent's `removeSourceRange` silently drops the removal.
+  var isParentExporting: () -> Bool = { false }
   /// Commits a cut-point move through the parent's `updateRemovalRange` funnel as one undo step: the
   /// moved `removedRange` only — moving a cut never rewrites the stored fade duration, so the move is
   /// non-destructive: the fade renders as short as fits near the edge and the full stored length
@@ -197,7 +202,9 @@ final class EditSliceModel: ViewModel, Identifiable {
   var waveformHighlightRange: Range<Int>? { waveformSelection ?? fineTune.draftRange }
 
   /// Whether the Remove control acts on anything — a marquee selection exists.
-  var canRemoveSelection: Bool { canMutateDocument && waveformSelection != nil }
+  var canRemoveSelection: Bool {
+    canMutateDocument && waveformSelection != nil && !isParentExporting()
+  }
 
   // MARK: - Seam overlays
   /// The bowtie spans the lane draws at each seam, mapped to the collapsed lane's view coordinates.
@@ -729,8 +736,7 @@ final class EditSliceModel: ViewModel, Identifiable {
   /// Removes the current marquee selection through the parent's merge funnel, then clears it. The
   /// timeline re-sync (parent → `syncTimeline`) collapses the removed span on this lane.
   func removeSelectionTapped() async {
-    guard canMutateDocument else { return }
-    guard let range = waveformSelection else { return }
+    guard canRemoveSelection, let range = waveformSelection else { return }
     await onRemoveSection(range)
     waveformSelection = nil
     // The transcript keeps its own gesture anchor/focus; drop it so re-clicking the just-removed
@@ -742,7 +748,7 @@ final class EditSliceModel: ViewModel, Identifiable {
   /// otherwise the marquee selection is removed through the parent merge funnel. No-ops when neither
   /// is present (the key monitor consumes ⌫ regardless, like ⌘Z, so it never beeps in the sheet).
   func removeSectionKeyPressed() async {
-    guard canMutateDocument else { return }
+    guard canMutateDocument, !isParentExporting() else { return }
     if let seamID = selectedSeamID {
       onRestore(seamID)
       return

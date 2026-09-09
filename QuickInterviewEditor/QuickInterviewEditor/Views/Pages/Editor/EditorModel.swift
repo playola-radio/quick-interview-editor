@@ -2386,6 +2386,10 @@ final class EditorModel: ViewModel {
     child.canEditCrossfade = { [weak self, weak child] in
       child?.canMutateDocument == true && self?.isExporting == false
     }
+    // Removal is frozen mid-export (see `removeSourceRange`); mirror the main window's
+    // `canRemoveSelectedSection` gate so the sheet disables Remove instead of clearing the selection
+    // against a silently dropped removal.
+    child.isParentExporting = { [weak self] in self?.isExporting == true }
     // ⌘Z/⌘⇧Z pressed inside the sheet route here: a modal removal lives on this document's undo
     // stack, and `undoTapped`/`redoTapped` fan the restored timeline back into the open sheet via
     // `syncEditedTimeline`. The main window's SwiftUI undo shortcut can't fire while the sheet is key.

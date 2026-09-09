@@ -1994,6 +1994,24 @@ struct EditSliceTests {
     expectNoDifference(model.selectedWordIDs, [3])
   }
 
+  /// Removal is frozen mid-export (the running export renders the un-cut canonical audio), so the
+  /// sheet mirrors the main window's `canRemoveSelectedSection` gate: Remove is disabled and ⌫ is
+  /// inert while the parent is exporting, and the selection is retained rather than silently consumed.
+  @Test func removeIsInertWhileParentExporting() async {
+    let model = wordSelectionModel()
+    var removeCalls = 0
+    model.onRemoveSection = { _ in removeCalls += 1 }
+    model.isParentExporting = { true }
+    model.transcript.selectWords(anchorID: 3, focusID: 3)
+    expectNoDifference(model.waveformSelection, 77_704..<98_916)
+    #expect(!model.canRemoveSelection)
+
+    await model.removeSectionKeyPressed()
+
+    expectNoDifference(removeCalls, 0)
+    expectNoDifference(model.waveformSelection, 77_704..<98_916)
+  }
+
   /// A draft (not-yet-saved) slice cannot mutate the document, so a transcript drag selects nothing.
   @Test func transcriptSelectionIgnoredForDraftTarget() {
     let plan = Fixtures.editPlan()
