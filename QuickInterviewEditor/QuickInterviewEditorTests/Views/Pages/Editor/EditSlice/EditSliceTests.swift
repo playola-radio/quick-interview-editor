@@ -1909,4 +1909,83 @@ struct EditSliceTests {
 
     expectNoDifference(model.selectedSeamID, nil)
   }
+
+  // MARK: - Transcript word selection + deletion
+
+  /// A sheet over a saved clip spanning fixture words 1–5 (samples 54_772–135_960), so the scoped
+  /// transcript holds real words a drag can select.
+  private func wordSelectionModel() -> EditSliceModel {
+    let plan = Fixtures.editPlan()
+    let slice = Slice(
+      id: UUID(), name: "Clip", startSample: 50_000, endSample: 140_000,
+      wordIDs: [1, 2, 3, 4, 5], snippet: "")
+    return EditSliceModel(slice: slice, editPlan: plan)
+  }
+
+  /// Dragging across words in the sheet's transcript selects their exact source span as the removal
+  /// selection (the same state the waveform marquee and ⌫ act on) and highlights the covered words.
+  @Test func transcriptDragSelectsWordsAsRemovalSelection() {
+    let model = wordSelectionModel()
+    model.transcript.selectWords(anchorID: 2, focusID: 4)
+    expectNoDifference(model.waveformSelection, 70_648..<119_202)
+    expectNoDifference(model.selectedWordIDs, [2, 3, 4])
+    #expect(model.canRemoveSelection)
+  }
+
+  /// A single-word transcript click selects just that word for removal.
+  @Test func transcriptSingleWordSelectsThatWord() {
+    let model = wordSelectionModel()
+    model.transcript.selectWords(anchorID: 3, focusID: 3)
+    expectNoDifference(model.waveformSelection, 77_704..<98_916)
+    expectNoDifference(model.selectedWordIDs, [3])
+  }
+
+  /// A word whose bounds spill past the slice window is clamped to the window, mirroring the marquee.
+  @Test func transcriptSelectionClampsToSliceWindow() {
+    let plan = Fixtures.editPlan()
+    let slice = Slice(
+      id: UUID(), name: "Clip", startSample: 72_000, endSample: 140_000,
+      wordIDs: [2, 3, 4, 5], snippet: "")
+    let model = EditSliceModel(slice: slice, editPlan: plan)
+    model.transcript.selectWords(anchorID: 2, focusID: 2)
+    expectNoDifference(model.waveformSelection, 72_000..<74_176)
+  }
+
+  /// ⌫ on a transcript word selection removes it through the parent's `removeSourceRange` funnel
+  /// (kept in sync with the main window) and clears the selection.
+  @Test func deletingTranscriptSelectionRoutesThroughParentRemoval() async {
+    let model = wordSelectionModel()
+    var removed: [Range<Int>] = []
+    model.onRemoveSection = { removed.append($0) }
+    model.transcript.selectWords(anchorID: 2, focusID: 4)
+
+    await model.removeSectionKeyPressed()
+
+    expectNoDifference(removed, [70_648..<119_202])
+    expectNoDifference(model.waveformSelection, nil)
+  }
+
+  /// A removal synced back from the parent strikes through the words whose whole span it covers.
+  @Test func syncedRemovalStrikesThroughContainedWords() {
+    let model = wordSelectionModel()
+    model.syncTimeline(
+      EditedTimeline(
+        sourceDurationSamples: Fixtures.editPlan().source.durationSamples,
+        removals: [
+          TimelineRemoval(
+            id: UUID(), removedRange: 70_648..<119_202,
+            crossfade: Crossfade(lengthSamples: 480, curve: .equalPower))
+        ]))
+    #expect(model.removedWordIDs.isSuperset(of: [2, 3, 4]))
+  }
+
+  /// A draft (not-yet-saved) slice cannot mutate the document, so a transcript drag selects nothing.
+  @Test func transcriptSelectionIgnoredForDraftTarget() {
+    let plan = Fixtures.editPlan()
+    let model = EditSliceModel(
+      target: .freeformDraft(UUID()), title: "Draft", range: 50_000..<140_000, editPlan: plan,
+      scopedWordIDs: [1, 2, 3, 4, 5])
+    model.transcript.selectWords(anchorID: 2, focusID: 4)
+    expectNoDifference(model.waveformSelection, nil)
+  }
 }

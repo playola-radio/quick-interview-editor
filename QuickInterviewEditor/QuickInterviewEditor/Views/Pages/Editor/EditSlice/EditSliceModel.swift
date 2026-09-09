@@ -68,6 +68,7 @@ final class EditSliceModel: ViewModel, Identifiable {
     fineTune.begin(
       target: target.isDraft ? .pendingSelection : .slice(target.resultingClipID), range: range)
     editedWaveform.setNavigableEditedRange(pinnedEditedRange)
+    wireTranscriptSelection()
   }
 
   // MARK: - Properties
@@ -621,6 +622,80 @@ final class EditSliceModel: ViewModel, Identifiable {
     activeAudition = .cutOut
     isPlaying = true
     await onPlay(start..<range.upperBound)
+  }
+
+  // MARK: - Transcript word selection
+  /// The anchor sample a Shift-extend pivots from — the anchor word's far-from-focus edge, set when a
+  /// fresh transcript selection is made (Logic's "anchor stays put, focus moves").
+  @ObservationIgnored private var transcriptSelectionAnchorSample: Int?
+
+  /// Words the scoped transcript highlights — those overlapping the live removal selection. Pushed
+  /// into `transcript` by the view, mirroring the main editor's `selectedWordIDs`.
+  var selectedWordIDs: Set<Word.ID> {
+    waveformSelection.map { Set(wordIDs(anyOverlap: $0, words: editPlan.words)) } ?? []
+  }
+
+  /// Words struck through in the scoped transcript — those whose whole span a synced removal covers.
+  /// Derived from the lane's timeline so a parent removal / undo / redo updates it with no bookkeeping.
+  var removedWordIDs: Set<Word.ID> {
+    Set(
+      editedWaveform.timeline.removals.flatMap {
+        wordIDs(fullyContainedIn: $0.removedRange, words: editPlan.words)
+      })
+  }
+
+  /// Wires the scoped transcript's selection gestures to the removal selection. The scoped transcript
+  /// holds only this slice's words (no clips), so a word intent maps straight to its source range —
+  /// clamped to the slice window — and becomes the same `waveformSelection` the marquee, Remove
+  /// button, and ⌫ already act on. Deletion funnels through the parent's `removeSourceRange`, so the
+  /// main transcript, the main audio, and the clip stay in sync. One-directional, like the main editor.
+  private func wireTranscriptSelection() {
+    transcript.onSelectionIntent = { [weak self] intent in
+      guard let self else { return }
+      switch intent {
+      case .words(let anchor, let focus): selectTranscriptWords(anchorID: anchor, focusID: focus)
+      case .word(let id, extending: true): extendTranscriptSelection(toWord: id)
+      case .word(let id, extending: false): selectTranscriptWords(anchorID: id, focusID: id)
+      case .clear: clearTranscriptSelection()
+      }
+    }
+  }
+
+  private func selectTranscriptWords(anchorID: Word.ID, focusID: Word.ID) {
+    guard canMutateDocument, let anchorWord = sourceRange(ofWord: anchorID),
+      let focusWord = sourceRange(ofWord: focusID)
+    else { return }
+    let lower = clampedToWindow(min(anchorWord.lowerBound, focusWord.lowerBound))
+    let upper = clampedToWindow(max(anchorWord.upperBound, focusWord.upperBound))
+    guard lower < upper else { return }
+    selectedSeamID = nil
+    transcriptSelectionAnchorSample =
+      anchorWord.lowerBound <= focusWord.lowerBound ? anchorWord.lowerBound : anchorWord.upperBound
+    waveformSelection = lower..<upper
+  }
+
+  private func extendTranscriptSelection(toWord id: Word.ID) {
+    guard canMutateDocument, let word = sourceRange(ofWord: id) else { return }
+    let anchor = transcriptSelectionAnchorSample ?? waveformSelection?.lowerBound ?? word.lowerBound
+    let lower = clampedToWindow(min(anchor, word.lowerBound))
+    let upper = clampedToWindow(max(anchor, word.upperBound))
+    guard lower < upper else { return }
+    selectedSeamID = nil
+    waveformSelection = lower..<upper
+  }
+
+  private func clearTranscriptSelection() {
+    guard canMutateDocument else { return }
+    waveformSelection = nil
+    transcriptSelectionAnchorSample = nil
+  }
+
+  /// The exact source range of one word, or nil if it has no monotonic sample bounds.
+  private func sourceRange(ofWord id: Word.ID) -> Range<Int>? {
+    guard let word = editPlan.words.first(where: { $0.id == id }),
+      let start = word.startSample, let end = word.endSample, start < end
+    else { return nil }
+    return start..<end
   }
 
   // MARK: - Marquee removal
