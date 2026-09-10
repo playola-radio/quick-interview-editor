@@ -274,7 +274,7 @@ final class EditorModel: ViewModel {
   /// is not recorded; deletion may pair its document change with deselection.
   var history = EditorHistory<EditorDocumentState, EditorSelection>()
   private var cutSuggestionTitleEdit: (id: CutSuggestion.ID, before: EditorDocumentState)?
-  private var sliceNameEdit: (id: Slice.ID, before: EditorDocumentState)?
+  private var sliceNameEdit: (id: Slice.ID, draft: String)?
   private var focusedSliceNameID: Slice.ID?
   /// Fired after every committed document change (mutation, undo, redo) with the new
   /// document — the single dirtiness signal. The tab model wires this to persistence, so
@@ -397,6 +397,12 @@ final class EditorModel: ViewModel {
   @ObservationIgnored private var autoScrollTask: Task<Void, Never>?
   /// Bumped each time a marquee drag begins so a stale auto-scroll tick from a previous drag bails.
   @ObservationIgnored private var areaSelectGeneration = 0
+  /// The live, view-only marquee range while a drag is in progress (nil otherwise). It feeds the
+  /// waveform rectangle through `activeEditingRange` so the drag renders immediately, but it never
+  /// touches `audioSelection`/`selection` — so the transcript highlight and the deferred
+  /// selection→playhead snap don't recompute per pointer tick. The real selection is committed once
+  /// on release (`waveformAreaSelectEnded`), matching the "drag = view-only preview" rule.
+  private(set) var marqueePreview: Range<Int>?
   var exportPhase: ExportPhase = .idle
   var exportReview: ExportReviewModel?
   @ObservationIgnored private var exportSession: ExportReviewModel?
@@ -605,10 +611,14 @@ final class EditorModel: ViewModel {
   /// The range a fresh edit session would start from — aligned with `fineTuneTarget`: the
   /// transcript selection takes precedence, else the active slice.
   var activeOrSelectedRange: Range<Int>? { selectedSourceRange ?? activeSliceRange }
-  /// The one range the main waveform overlay tracks — the live draft while dragging, else the
-  /// active/selected range. The waveform doesn't care whether it's pending, slice-backed, or
-  /// mid-drag.
-  var activeEditingRange: Range<Int>? { fineTune.draftRange ?? activeOrSelectedRange }
+  /// The one range the main waveform overlay tracks — the live marquee preview or fine-tune draft
+  /// while dragging, else the active/selected range. The waveform doesn't care whether it's pending,
+  /// slice-backed, or mid-drag. A live marquee wins over `fineTune.draftRange`: a prior selection
+  /// leaves `draftRange` populated (via `syncEditSession`) even with nothing tuned, so the moving
+  /// marquee must take precedence or the overlay would freeze on the stale draft.
+  var activeEditingRange: Range<Int>? {
+    marqueePreview ?? fineTune.draftRange ?? activeOrSelectedRange
+  }
 
   // MARK: - Selection (source samples — the single source of truth)
   var selection: EditorSelection = .none {
@@ -1575,28 +1585,34 @@ final class EditorModel: ViewModel {
   /// and scrolling the transcript to the range's first overlapping word. Freeform — the committed
   /// range is the raw dragged samples, never snapped to word edges. A degenerate (empty) range clears.
   func waveformAreaSelectEnded(toX positionX: CGFloat) {
-    guard isWaveformAreaSelecting, areaSelectDrag != nil else { return }
+    guard isWaveformAreaSelecting, let drag = areaSelectDrag else { return }
     areaSelectDrag?.currentX = positionX
     cancelAutoScroll()
     let range = marqueeSourceRange()
+    // The drag's fixed edge, passed explicitly because the mid-drag `selection` write that used to
+    // carry it is gone (the drag was view-only): without it the commit would read a stale
+    // `selectionAnchorSample` from before the drag.
+    let anchor = drag.existingAnchorSample ?? drag.anchorSample
     areaSelectDrag = nil
     isWaveformAreaSelecting = false
+    marqueePreview = nil
     // Retire this drag's epoch too (not only `Began`), so a tick already resumed past its sleep bails
     // on the generation guard even before the next drag starts.
     areaSelectGeneration &+= 1
     if let range {
-      selectSourceRange(range, snapPlayhead: true)
+      selectSourceRange(range, snapPlayhead: true, anchor: anchor)
       revealSourceRange(range)
     } else {
       clearSelection()
     }
   }
 
-  /// Live selection during the drag: writes the exact dragged source range to `audioSelection` on
-  /// every pointer move — freeform, no word snap.
+  /// Live preview during the drag: writes the exact dragged source range to the view-only
+  /// `marqueePreview` on every pointer move — freeform, no word snap. Deliberately does NOT touch
+  /// `selection`/`audioSelection`, so the transcript highlight and the selection→playhead snap don't
+  /// recompute per tick; the real selection is committed once on release.
   private func updateMarqueeSelection() {
-    guard let range = marqueeSourceRange(), let drag = areaSelectDrag else { return }
-    selection = .range(range, anchor: drag.existingAnchorSample ?? drag.anchorSample)
+    marqueePreview = marqueeSourceRange()
   }
 
   /// The exact SOURCE range for the current drag: the fixed edge (the drag anchor, or the preserved
@@ -2036,14 +2052,32 @@ final class EditorModel: ViewModel {
     recordingPermanentReservations reservations: [SequenceReservation] = [],
     _ body: (inout EditorDocumentState) -> Void
   ) {
+    // Probe whether `body` actually changes the document, WITHOUT flushing any pending title/name
+    // draft first. A no-op mutation must not end an in-progress edit session: `synchronizeRecoveryEditor`
+    // re-sets unchanged recovery fields on every title keystroke, and flushing there would collapse
+    // title/name coalescing into one undo entry per character.
+    var probe = documentState
+    body(&probe)
+    probe.recordPermanentReservations(reservations)
+    guard probe != documentState else { return }
+    // A real change: commit any pending title/name draft first, so it lands in `documentState` as its
+    // own coalesced undo entry, then re-apply `body` on top of the post-flush state so `slices =
+    // new.slices` below can't clobber a just-committed rename.
+    finishCutSuggestionTitleEdit()
+    finishSliceNameEdit()
     let oldSelection = selection
     let old = documentState
     var new = old
     body(&new)
     new.recordPermanentReservations(reservations)
-    guard new != old else { return }
-    finishCutSuggestionTitleEdit()
-    finishSliceNameEdit()
+    guard new != old else {
+      // The flush already realized what `body` would have changed (e.g. a programmatic rename of the
+      // very slice whose draft was just committed). Nothing left to apply; settle selection and return.
+      if let selectionAfter { selection = selectionAfter }
+      reconcileSelection()
+      reconcileDraftEditing()
+      return
+    }
     slices = new.slices
     timelineRemovals = new.timelineRemovals
     documentCutSuggestions = new.cutSuggestions
@@ -2119,8 +2153,15 @@ final class EditorModel: ViewModel {
     guard sliceNameEdit?.id != id else { return }
     finishSliceNameEdit()
     finishCutSuggestionTitleEdit()
-    guard !isExporting, slices[id: id] != nil else { return }
-    sliceNameEdit = (id, documentState)
+    guard !isExporting, let slice = slices[id: id] else { return }
+    sliceNameEdit = (id, slice.name)
+  }
+
+  /// The in-progress name for a slice whose rename session is live, or `nil` when the slice has no
+  /// active edit. The focused row's `TextField` binds to this so keystrokes never touch `slices`
+  /// (which would invalidate the whole transcript/clip-band chain); the draft commits once on blur.
+  func sliceNameDraft(_ id: Slice.ID) -> String? {
+    sliceNameEdit?.id == id ? sliceNameEdit?.draft : nil
   }
 
   func sliceNameChanged(_ id: Slice.ID, to name: String) {
@@ -2132,11 +2173,10 @@ final class EditorModel: ViewModel {
       renameSlice(id, to: name)
       return
     }
-    var updatedSlices = slices
-    updatedSlices[id: id]?.name = name
-    guard updatedSlices != slices else { return }
-    slices = updatedSlices
-    onDocumentStateChanged?(documentState)
+    // Keystrokes only update the view-only draft — never `slices`. Committing the draft to the
+    // document is deferred to `finishSliceNameEdit` (blur/submit), so a rename no longer re-renders
+    // the transcript and clip bands on every character.
+    sliceNameEdit?.draft = name
   }
 
   private func sliceNameEditingEnded(_ id: Slice.ID) {
@@ -2166,9 +2206,14 @@ final class EditorModel: ViewModel {
   func finishSliceNameEdit() {
     guard let edit = sliceNameEdit else { return }
     sliceNameEdit = nil
+    guard slices[id: edit.id] != nil, slices[id: edit.id]?.name != edit.draft else { return }
+    // Any document mutation during the session flushes the draft first (see `mutateDocument`), so
+    // the current state is the true pre-rename snapshot — capture it as the undo `before`.
+    let before = documentState
+    slices[id: edit.id]?.name = edit.draft
     history.record(
-      .init(
-        document: .init(before: edit.before, after: documentState), selection: nil, label: ""))
+      .init(document: .init(before: before, after: documentState), selection: nil, label: ""))
+    onDocumentStateChanged?(documentState)
   }
 
   /// `slices`-only convenience over `mutateDocument`, kept so every existing slice
@@ -3835,6 +3880,9 @@ final class EditorModel: ViewModel {
 
   // MARK: - Export Actions
   func exportSliceTapped(_ id: Slice.ID) {
+    // Commit a pending rename before reading the target, or the export would render the old name
+    // into the AIFF (the draft lives only in `sliceNameEdit` until blur).
+    finishSliceNameEdit()
     guard !isExporting, !hasUncommittedSliceEdit, editedTimeline.isValid,
       let slice = slices[id: id], sliceIsExportable(slice)
     else { return }
@@ -3843,6 +3891,7 @@ final class EditorModel: ViewModel {
   }
 
   func exportAllTapped() {
+    finishSliceNameEdit()
     guard !isExporting, !hasUncommittedSliceEdit, editedTimeline.isValid else { return }
     let targets = slices.filter(sliceIsExportable)
     guard !targets.isEmpty else { return }

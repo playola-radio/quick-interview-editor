@@ -587,17 +587,17 @@ struct EditorTests {
     expectNoDifference(model.slices[id: slice.id]?.name, "   ")
   }
 
-  @Test func sliceNameTypingPublishesEachChangeWithoutUndoOrUnrelatedObservation() {
+  @Test func sliceNameTypingUpdatesOnlyTheDraftWithoutTouchingSlicesOrPublishing() {
     let model = editor()
     let slice = Fixtures.slice(id: Fixtures.uuid(1))
     model.mutateDocument(recordUndo: false) { $0.slices.append(slice) }
-    var seen: [EditorDocumentState] = []
-    model.onDocumentStateChanged = { seen.append($0) }
-    let unrelatedObservationChanges = LockIsolated(0)
+    let publishCount = LockIsolated(0)
+    model.onDocumentStateChanged = { _ in publishCount.withValue { $0 += 1 } }
+    let slicesObservedChange = LockIsolated(0)
     withObservationTracking {
-      _ = model.timelineRemovals
+      _ = model.slices
     } onChange: {
-      unrelatedObservationChanges.withValue { $0 += 1 }
+      slicesObservedChange.withValue { $0 += 1 }
     }
 
     model.sliceNameFocusChanged(slice.id, isFocused: true)
@@ -605,12 +605,50 @@ struct EditorTests {
     model.sliceNameChanged(slice.id, to: "Renamed")
     model.sliceNameChanged(slice.id, to: "Renamed clip")
 
-    expectNoDifference(model.slices[id: slice.id]?.name, "Renamed clip")
-    expectNoDifference(seen.count, 3)
-    expectNoDifference(seen.last?.slices[id: slice.id]?.name, "Renamed clip")
+    // The live draft reflects every keystroke, but `slices` is never written and nothing publishes
+    // through the document funnel until the edit finishes — so the transcript/clip-band chain that
+    // reads `slices` is never invalidated per keystroke (the confirmed source of the rename lag).
+    expectNoDifference(model.sliceNameDraft(slice.id), "Renamed clip")
+    expectNoDifference(model.slices[id: slice.id]?.name, slice.name)
+    expectNoDifference(publishCount.value, 0)
+    expectNoDifference(slicesObservedChange.value, 0)
     expectNoDifference(model.history.undo.count, 0)
     expectNoDifference(model.canUndo, false)
-    expectNoDifference(unrelatedObservationChanges.value, 0)
+  }
+
+  @Test func finishingSliceNameEditCommitsSlicesAndPublishesExactlyOnce() {
+    let model = editor()
+    let slice = Fixtures.slice(id: Fixtures.uuid(1))
+    model.mutateDocument(recordUndo: false) { $0.slices.append(slice) }
+    let publishCount = LockIsolated(0)
+    model.onDocumentStateChanged = { _ in publishCount.withValue { $0 += 1 } }
+
+    model.sliceNameFocusChanged(slice.id, isFocused: true)
+    model.sliceNameChanged(slice.id, to: "R")
+    model.sliceNameChanged(slice.id, to: "Renamed clip")
+    expectNoDifference(publishCount.value, 0)
+
+    model.sliceNameFocusChanged(slice.id, isFocused: false)
+
+    expectNoDifference(model.slices[id: slice.id]?.name, "Renamed clip")
+    expectNoDifference(publishCount.value, 1)
+    expectNoDifference(model.sliceNameDraft(slice.id), nil)
+    expectNoDifference(model.history.undo.count, 1)
+  }
+
+  @Test func finishingAnUnchangedSliceNameEditNeitherCommitsNorPublishes() {
+    let model = editor()
+    let slice = Fixtures.slice(id: Fixtures.uuid(1))
+    model.mutateDocument(recordUndo: false) { $0.slices.append(slice) }
+    let publishCount = LockIsolated(0)
+    model.onDocumentStateChanged = { _ in publishCount.withValue { $0 += 1 } }
+
+    model.sliceNameFocusChanged(slice.id, isFocused: true)
+    model.sliceNameFocusChanged(slice.id, isFocused: false)
+
+    expectNoDifference(model.slices[id: slice.id]?.name, slice.name)
+    expectNoDifference(publishCount.value, 0)
+    expectNoDifference(model.history.undo.count, 0)
   }
 
   @Test func finishingSliceNameEditRecordsOneUndoForTheWholeRename() async {
@@ -1259,6 +1297,58 @@ struct EditorTests {
 
     let contents = Set(try FileManager.default.contentsOfDirectory(atPath: destination.path))
     expectNoDifference(contents, ["\(stem) - Slice 1.aiff", "\(stem) - Slice 2.aiff"])
+  }
+
+  @Test func exportingASliceWithAPendingRenameUsesTheNewName() async throws {
+    let model = editor()
+    addSlices(model, [(0, 1)])
+    let slice = model.slices[0]
+    let stem = model.sourceURL.deletingPathExtension().lastPathComponent
+    let destination = try makeTempDir()
+    defer { try? FileManager.default.removeItem(at: destination) }
+
+    // A rename that has been typed but not blurred lives only in `sliceNameEdit`. Export must
+    // flush it first, or it would render the pre-rename name into the AIFF.
+    model.sliceNameFocusChanged(slice.id, isFocused: true)
+    model.sliceNameChanged(slice.id, to: "Renamed clip")
+
+    await withDependencies {
+      $0.exportRender.renderSlice = { try writeStubAIFF($0) }
+      $0.engine.injectMarkers = { _ in }
+      $0.workspace.reveal = { _ in }
+    } operation: {
+      model.destinationURL = destination
+      model.exportSliceTapped(slice.id)
+      await model.exportTask?.value
+    }
+
+    let contents = Set(try FileManager.default.contentsOfDirectory(atPath: destination.path))
+    expectNoDifference(contents, ["\(stem) - Renamed clip.aiff"])
+  }
+
+  @Test func exportAllWithAPendingRenameUsesTheNewName() async throws {
+    let model = editor()
+    addSlices(model, [(0, 1)])
+    let slice = model.slices[0]
+    let stem = model.sourceURL.deletingPathExtension().lastPathComponent
+    let destination = try makeTempDir()
+    defer { try? FileManager.default.removeItem(at: destination) }
+
+    model.sliceNameFocusChanged(slice.id, isFocused: true)
+    model.sliceNameChanged(slice.id, to: "Renamed clip")
+
+    await withDependencies {
+      $0.exportRender.renderSlice = { try writeStubAIFF($0) }
+      $0.engine.injectMarkers = { _ in }
+      $0.workspace.reveal = { _ in }
+    } operation: {
+      model.destinationURL = destination
+      model.exportAllTapped()
+      await model.exportTask?.value
+    }
+
+    let contents = Set(try FileManager.default.contentsOfDirectory(atPath: destination.path))
+    expectNoDifference(contents, ["\(stem) - Renamed clip.aiff"])
   }
 
   @Test func missingDestinationPromptsChooseDirectory() async throws {
