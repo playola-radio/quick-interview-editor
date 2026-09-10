@@ -1331,7 +1331,7 @@
 			path = EditSlice;
 			sourceTree = "<group>";
 		};
-		"TEMP_A84417BD-0632-4248-A858-CC10C031FDE1" /* Fixtures */ = {
+		"TEMP_DC946304-FB1E-489B-9162-C9C5E111DFA7" /* Fixtures */ = {
 			isa = PBXGroup;
 			children = (
 			);
@@ -1850,7 +1850,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 5;
+				CURRENT_PROJECT_VERSION = 6;
 				DEVELOPMENT_TEAM = FSRSPV9N9Q;
 				ENABLE_TESTABILITY = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -1859,7 +1859,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 2.1.0;
+				MARKETING_VERSION = 2.2.0;
 				PRODUCT_BUNDLE_IDENTIFIER = fm.playola.PlayolaInterviewEditor;
 				PRODUCT_NAME = PlayolaInterviewEditor;
 				SDKROOT = macosx;
@@ -1873,7 +1873,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 5;
+				CURRENT_PROJECT_VERSION = 6;
 				DEVELOPMENT_TEAM = FSRSPV9N9Q;
 				ENABLE_TESTABILITY = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -1882,7 +1882,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 2.1.0;
+				MARKETING_VERSION = 2.2.0;
 				PRODUCT_BUNDLE_IDENTIFIER = fm.playola.PlayolaInterviewEditor;
 				PRODUCT_NAME = PlayolaInterviewEditor;
 				SDKROOT = macosx;
