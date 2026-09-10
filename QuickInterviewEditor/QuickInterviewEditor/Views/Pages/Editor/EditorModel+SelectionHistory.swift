@@ -45,6 +45,7 @@ extension EditorModel {
   /// Explicit Clear is undoable; ordinary navigation uses the non-recording clear.
   func clearSelectionTapped() {
     finishCutSuggestionTitleEdit()
+    finishSliceNameEdit()
     let before = selection
     clearSelection()
     selectionPreservesTransport = true

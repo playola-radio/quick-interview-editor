@@ -53,6 +53,26 @@ struct EditorSelectionHistoryTests {
     expectNoDifference(model.selection, .none)
   }
 
+  @Test func clearFinishesPendingSliceRenameBeforeRecordingSelectionHistory() async {
+    let model = editor()
+    let clip = Fixtures.slice(id: Fixtures.uuid(1))
+    model.mutateDocument(recordUndo: false) { $0.slices.append(clip) }
+    model.selectSourceRange(70_648..<119_202, snapPlayhead: false)
+    let selected = model.selection
+    model.sliceNameFocusChanged(clip.id, isFocused: true)
+    model.sliceNameChanged(clip.id, to: "Renamed")
+
+    model.clearSelectionTapped()
+    model.sliceNameFocusChanged(clip.id, isFocused: false)
+
+    expectNoDifference(model.history.undo.count, 2)
+    await model.undoTapped()
+    expectNoDifference(model.selection, selected)
+    expectNoDifference(model.slices[id: clip.id]?.name, "Renamed")
+    await model.undoTapped()
+    expectNoDifference(model.slices[id: clip.id]?.name, clip.name)
+  }
+
   @Test func undoClearDuringPlaybackDoesNotStopOrSeek() async {
     let stops = LockIsolated(0)
     let model = withDependencies {
