@@ -2035,14 +2035,14 @@ final class EditorModel: ViewModel {
     recordingPermanentReservations reservations: [SequenceReservation] = [],
     _ body: (inout EditorDocumentState) -> Void
   ) {
-    finishCutSuggestionTitleEdit()
-    finishSliceNameEdit()
     let oldSelection = selection
     let old = documentState
     var new = old
     body(&new)
     new.recordPermanentReservations(reservations)
     guard new != old else { return }
+    finishCutSuggestionTitleEdit()
+    finishSliceNameEdit()
     slices = new.slices
     timelineRemovals = new.timelineRemovals
     documentCutSuggestions = new.cutSuggestions
