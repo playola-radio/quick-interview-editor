@@ -53,6 +53,12 @@ struct TranscriptPageTests {
     expectNoDifference(model.selectionSummary, "3 words selected")
   }
 
+  @Test func selectionRunsComeFromHighlightedWords() {
+    let model = TranscriptPageModel(editPlan: Fixtures.editPlanV2())
+    model.highlightedWordIDs = [2, 3]
+    expectNoDifference(model.selectionRuns, [NSRange(location: 3, length: 7)])
+  }
+
   @Test func viewAppearedLoadsWords() async {
     await withDependencies {
       $0.engine.loadPlan = { _ in Fixtures.editPlan() }

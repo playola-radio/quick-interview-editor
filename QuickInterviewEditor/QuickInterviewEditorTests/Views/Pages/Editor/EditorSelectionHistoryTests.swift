@@ -231,6 +231,7 @@ struct EditorSelectionHistoryTests {
     model.onDocumentStateChanged = { _ in writes += 1 }
     await model.deleteSelectionTapped()
     expectNoDifference(model.selection, .none)
+    expectNoDifference(model.history.undo.last?.label, "Remove Section")
     expectNoDifference(model.timelineRemovals.map(\.removedRange), [70_648..<119_202])
     #expect(model.timelineRemovals.first?.crossfade.curve == .equalPower)
     #expect(model.removedWordIDs.isSuperset(of: [2, 3, 4]))

@@ -172,6 +172,9 @@ class TranscriptPageModel: ViewModel {
 
   // MARK: - View Helpers
   var hasSelection: Bool { !selectedWords.isEmpty }
+  var selectionRuns: [NSRange] {
+    document.selectionRuns(for: highlightedWordIDs)
+  }
   var selectionSummary: String {
     let count = selectedWords.count
     guard count > 0 else { return "No selection" }

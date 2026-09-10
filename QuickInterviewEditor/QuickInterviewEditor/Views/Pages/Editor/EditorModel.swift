@@ -2547,7 +2547,7 @@ final class EditorModel: ViewModel {
     let removal = TimelineRemoval(
       id: UUID(), removedRange: mergedLower..<mergedUpper,
       crossfade: Crossfade(lengthSamples: defaultCrossfadeSamples, curve: .equalPower))
-    mutateDocument { doc in
+    mutateDocument(label: "Remove Section") { doc in
       for absorbedRemoval in absorbed { doc.timelineRemovals.remove(id: absorbedRemoval.id) }
       doc.timelineRemovals.append(removal)
       doc.timelineRemovals = IdentifiedArray(

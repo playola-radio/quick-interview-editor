@@ -13,6 +13,7 @@ struct TranscriptPageView: View {
         paragraphSpacing: model.paragraphSpacing,
         lineSpacing: model.lineSpacing,
         selected: model.highlightedWordIDs,
+        selectionRuns: model.selectionRuns,
         clipContainers: model.clipContainers,
         removedWordIDs: model.removedWordIDs,
         currentWordID: model.currentWordID,
@@ -116,6 +117,7 @@ struct TranscriptPageView: View {
     TranscriptClipBand(id: UUID(), wordIDs: Array(1...14), kind: .approved),
     TranscriptClipBand(id: UUID(), wordIDs: Array(41...49), kind: .suggested),
   ]
+  model.highlightedWordIDs = [10, 11, 12]
   return TranscriptTextView(
     model: model,
     text: model.plainTranscriptText,
@@ -123,7 +125,8 @@ struct TranscriptPageView: View {
     paragraphSpacing: 12,
     lineSpacing: 12,
     // A red selection overlapping the green clip, to eyeball that it draws ON TOP of the fill.
-    selected: Set([10, 11, 12]),
+    selected: model.highlightedWordIDs,
+    selectionRuns: model.selectionRuns,
     clipContainers: model.clipContainers,
     removedWordIDs: [],
     // A "current word" highlight (light band) on word 30 to eyeball it against the fills.

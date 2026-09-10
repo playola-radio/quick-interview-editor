@@ -12,6 +12,7 @@ struct TranscriptTextView: NSViewRepresentable {
   let paragraphSpacing: Double
   let lineSpacing: Double
   let selected: Set<Word.ID>
+  let selectionRuns: [NSRange]
   let clipContainers: [TranscriptClipContainer]
   let removedWordIDs: Set<Word.ID>
   let currentWordID: Word.ID?
@@ -76,7 +77,7 @@ struct TranscriptTextView: NSViewRepresentable {
     context.coordinator.observeScroll()
     context.coordinator.rebuildText(
       text: text, fontSize: fontSize, selected: selected, clipContainers: clipContainers,
-      removedWordIDs: removedWordIDs)
+      selectionRuns: selectionRuns, removedWordIDs: removedWordIDs)
     return scroll
   }
 
@@ -86,8 +87,8 @@ struct TranscriptTextView: NSViewRepresentable {
     context.coordinator.lineSpacing = lineSpacing
     context.coordinator.apply(
       text: text, fontSize: fontSize, selected: selected, clipContainers: clipContainers,
-      removedWordIDs: removedWordIDs, currentWordID: currentWordID, scrollTarget: scrollTarget,
-      followMode: followMode, reveal: reveal, resizeItems: resizeItems)
+      selectionRuns: selectionRuns, removedWordIDs: removedWordIDs, currentWordID: currentWordID,
+      scrollTarget: scrollTarget, followMode: followMode, reveal: reveal, resizeItems: resizeItems)
     context.coordinator.updateOverlap()
   }
 
@@ -151,9 +152,11 @@ struct TranscriptTextView: NSViewRepresentable {
       textView?.layoutManager as? ClipContainerLayoutManager
     }
 
+    // swiftlint:disable:next function_parameter_count
     func rebuildText(
       text: String, fontSize: Double, selected: Set<Word.ID>,
-      clipContainers: [TranscriptClipContainer], removedWordIDs: Set<Word.ID>
+      clipContainers: [TranscriptClipContainer], selectionRuns: [NSRange],
+      removedWordIDs: Set<Word.ID>
     ) {
       guard let storage = textView?.textStorage else { return }
       cachedResizeZones = nil
@@ -185,14 +188,14 @@ struct TranscriptTextView: NSViewRepresentable {
       lastRemovedWordIDs = removedWordIDs
       applyRemovedWordIDs(added: removedWordIDs, removed: [])
       lastSelected = selected
-      applySelection(added: selected, removed: [])
+      applySelection(added: selected, removed: [], selectionRuns: selectionRuns)
     }
 
     // swiftlint:disable:next function_parameter_count
     func apply(
       text: String, fontSize: Double, selected: Set<Word.ID>,
-      clipContainers: [TranscriptClipContainer], removedWordIDs: Set<Word.ID>,
-      currentWordID: Word.ID?, scrollTarget: Word.ID?,
+      clipContainers: [TranscriptClipContainer], selectionRuns: [NSRange],
+      removedWordIDs: Set<Word.ID>, currentWordID: Word.ID?, scrollTarget: Word.ID?,
       followMode: TranscriptFollowMode, reveal: TranscriptReveal?,
       resizeItems: [TranscriptResizeItem]
     ) {
@@ -203,7 +206,7 @@ struct TranscriptTextView: NSViewRepresentable {
         updateResizeItems(resizeItems)
         rebuildText(
           text: text, fontSize: fontSize, selected: selected, clipContainers: clipContainers,
-          removedWordIDs: removedWordIDs)
+          selectionRuns: selectionRuns, removedWordIDs: removedWordIDs)
         lastCurrentWordID = nil
       }
 
@@ -240,7 +243,7 @@ struct TranscriptTextView: NSViewRepresentable {
       let selAdded = selected.subtracting(lastSelected)
       let selRemoved = lastSelected.subtracting(selected)
       lastSelected = selected
-      applySelection(added: selAdded, removed: selRemoved)
+      applySelection(added: selAdded, removed: selRemoved, selectionRuns: selectionRuns)
 
       applyScrollTarget(scrollTarget: scrollTarget, followMode: followMode, reveal: reveal)
     }
@@ -421,13 +424,15 @@ struct TranscriptTextView: NSViewRepresentable {
       storage.endEditing()
     }
 
-    private func applySelection(added: Set<Word.ID>, removed: Set<Word.ID>) {
+    private func applySelection(
+      added: Set<Word.ID>, removed: Set<Word.ID>, selectionRuns: [NSRange]
+    ) {
       guard let storage = textView?.textStorage else { return }
       // Selection renders as a continuous rounded sweep the layout manager draws (like the
       // current-word band), not per-word `.backgroundColor` boxes — so consecutive selected
       // words read as one crisp highlight with no inter-word gaps. `lastSelected` is the current
       // full selection (the caller updates it before this runs).
-      clipLayoutManager?.selectionRuns = model.document.selectionRuns(for: lastSelected)
+      clipLayoutManager?.selectionRuns = selectionRuns
       storage.beginEditing()
       // Foreground respects both selection and clip state, so recompute it (not just reset to
       // grey) for every word whose selection changed — a deselected clip word stays white/dim.
