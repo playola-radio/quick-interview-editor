@@ -16,8 +16,20 @@ struct ResignStrayFieldEditorMonitorTests {
     let editor: NSText
   }
 
+  private final class KeyTestWindow: NSWindow {
+    override var isKeyWindow: Bool { true }
+  }
+
+  private final class DetachedEditingControl: NSTextField {
+    let detachedEditor = NSTextView()
+
+    override func currentEditor() -> NSText? {
+      detachedEditor
+    }
+  }
+
   private func editingField(frame: NSRect) throws -> EditingFixture {
-    let window = NSWindow(
+    let window = KeyTestWindow(
       contentRect: NSRect(x: 0, y: 0, width: 400, height: 300),
       styleMask: [.titled], backing: .buffered, defer: true)
     let field = NSTextField(frame: frame)
@@ -40,6 +52,46 @@ struct ResignStrayFieldEditorMonitorTests {
     let fixture = try editingField(frame: frame)
     let outside = NSPoint(x: 300, y: 250)  // blank window area, well clear of the field
     #expect(Coordinator.shouldResign(clickInWindow: outside, fieldEditor: fixture.editor))
+  }
+
+  @Test func resignsForADetachedControlWithNoWindow() {
+    let field = DetachedEditingControl(frame: NSRect(x: 50, y: 100, width: 120, height: 22))
+    field.isEditable = true
+    field.addSubview(field.detachedEditor)
+    #expect(field.window == nil)
+    #expect(Coordinator.editingControl(for: field.detachedEditor) === field)
+    #expect(
+      Coordinator.shouldResign(
+        clickInWindow: NSPoint(x: field.frame.midX, y: field.frame.midY),
+        fieldEditor: field.detachedEditor))
+  }
+
+  @Test func coordinatorResignsOnlyWhenClickLandsOutsideTheEditingField() throws {
+    let frame = NSRect(x: 50, y: 100, width: 120, height: 22)
+    let fixture = try editingField(frame: frame)
+    #expect(fixture.window.isKeyWindow)
+
+    let host = NSView(frame: .zero)
+    fixture.window.contentView?.addSubview(host)
+    let coordinator = Coordinator()
+    coordinator.install(host: host)
+    defer {
+      coordinator.remove()
+      fixture.window.makeFirstResponder(nil)
+    }
+
+    coordinator.resignIfClickIsOutsideEditingField(
+      at: NSPoint(x: 300, y: 250),
+      eventWindowNumber: fixture.window.windowNumber)
+    #expect(fixture.window.firstResponder !== fixture.editor)
+    #expect((fixture.window.firstResponder as? NSText) == nil)
+
+    #expect(fixture.window.makeFirstResponder(fixture.field))
+    let editor = try #require(fixture.field.currentEditor())
+    coordinator.resignIfClickIsOutsideEditingField(
+      at: NSPoint(x: frame.midX, y: frame.midY),
+      eventWindowNumber: fixture.window.windowNumber)
+    #expect(fixture.window.firstResponder === editor)
   }
 
   @Test func aClickOnTheFieldsPaddingEdgeStillCountsAsInside() throws {

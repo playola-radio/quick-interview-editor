@@ -67,7 +67,7 @@ struct ResignStrayFieldEditorMonitor: NSViewRepresentable {
 
     /// Resigns the window's field editor when `point` (in window base coordinates) lands outside
     /// the field being edited. Main-actor: reads AppKit window / first-responder state.
-    private func resignIfClickIsOutsideEditingField(at point: NSPoint, eventWindowNumber: Int) {
+    func resignIfClickIsOutsideEditingField(at point: NSPoint, eventWindowNumber: Int) {
       // A local monitor sees every window's clicks (including child sheets/popovers). Act only on a
       // click that belongs to our own key window — matched by identity, not just `isKeyWindow`.
       guard let window = window(matching: eventWindowNumber),
@@ -93,7 +93,9 @@ struct ResignStrayFieldEditorMonitor: NSViewRepresentable {
     /// Uses `bounds` (the control's own frame), not `visibleRect`: an unclipped field's `visibleRect`
     /// balloons to its superview's area, which would swallow the whole panel and never resign.
     static func shouldResign(clickInWindow point: NSPoint, fieldEditor: NSText?) -> Bool {
-      guard let control = editingControl(for: fieldEditor) else { return true }
+      guard let control = editingControl(for: fieldEditor),
+        control.window != nil
+      else { return true }
       return !control.convert(control.bounds, to: nil).contains(point)
     }
 
