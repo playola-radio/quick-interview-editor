@@ -24,6 +24,8 @@ struct OutputLatencyMathTests {
   @Test func effectiveSecondsTreatsNonFiniteManualAsZero() {
     expectNoDifference(OutputLatencyMath.effectiveSeconds(automatic: 0.15, manual: .nan), 0.15)
     expectNoDifference(OutputLatencyMath.effectiveSeconds(automatic: 0.15, manual: .infinity), 0.15)
+    expectNoDifference(
+      OutputLatencyMath.effectiveSeconds(automatic: 0.15, manual: -.infinity), 0.15)
   }
 
   @Test func presentationFramesSubtractsRateScaledDelay() {

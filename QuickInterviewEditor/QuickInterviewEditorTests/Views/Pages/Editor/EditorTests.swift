@@ -800,6 +800,29 @@ struct EditorTests {
     }
   }
 
+  @Test func observePlaybackDrivesCursorFromPresentationNotRenderSample() async {
+    let model = editor()
+    let session = PlaybackSessionID()
+    model.transportContext = .slice(UUID())  // this editor owns slice playback
+    model.transportPhase = .playing(session)
+    let (stream, continuation) = AsyncStream.makeStream(of: PlaybackPosition.self)
+    await withDependencies {
+      $0.audioPlayer.positions = { stream }
+    } operation: {
+      let task = Task { await model.observePlayback() }
+      // Latency compensation makes presentationSample LAG renderSample; the cursor must follow the
+      // compensated (heard) position, not the raw render position.
+      continuation.yield(
+        PlaybackPosition(
+          sessionID: session, renderSample: .source(1000), presentationSample: .source(800),
+          isPlaying: true))
+      await settle { model.playheadEditedSample == 800 }
+      expectNoDifference(model.playheadEditedSample, 800)  // presentation, not render (1000)
+      continuation.finish()
+      await task.value
+    }
+  }
+
   @Test func observePlaybackIgnoresTicksWhenThisEditorIsNotPlaying() async {
     let model = editor()  // owns no playback — another tab owns it; cursor rests at 0
     let (stream, continuation) = AsyncStream.makeStream(of: PlaybackPosition.self)

@@ -606,6 +606,9 @@ private actor LivePlayerBox {
   func setRate(_ rate: Double) {
     currentRate = Self.clampedRate(rate)
     timePitch.rate = Float(currentRate)
+    // Spec §1: re-read the output-latency estimate on a rate change. Guard on `isPlaying` so a
+    // rate set while stopped doesn't publish a latency read from an idle engine.
+    if node.isPlaying { refreshOutputLatency() }
   }
 
   /// Clamps a requested speed to a hardware-safe range as a defensive backstop; the app's 0.5–3.0

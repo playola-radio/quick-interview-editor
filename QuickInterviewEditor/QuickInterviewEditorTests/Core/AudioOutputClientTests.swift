@@ -1,6 +1,5 @@
 import CustomDump
 import Dependencies
-import IssueReporting
 import Testing
 
 @testable import PlayolaInterviewEditor
@@ -35,6 +34,6 @@ struct AudioOutputClientTests {
     for await _ in AudioOutputClient.previewValue.changes() {
       count += 1
     }
-    #expect(count == 0)
+    expectNoDifference(count, 0)
   }
 }
