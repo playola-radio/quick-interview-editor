@@ -978,8 +978,7 @@ struct EditorTests {
     let model = editor()
     let word = model.editPlan.words.first { $0.startSample != nil && $0.endSample != nil }!
     // A slice is playing and the transcript is following it, then the user scrolls away.
-    model.transcript.playheadChanged(
-      sample: word.startSample!, isPlaying: true)
+    model.transcript.playheadChanged(sample: word.startSample!, isPlaying: true)
     model.transcript.transcriptUserScrolled()
     expectNoDifference(model.transcript.followMode, .userPaused)
     model.transportContext = .slice(UUID())
@@ -993,8 +992,7 @@ struct EditorTests {
 
     // Stopping reset the transcript's playing flag, so the next slice's first tick is a
     // clean rising edge (false→true) and follow resumes instead of staying paused.
-    model.transcript.playheadChanged(
-      sample: word.startSample!, isPlaying: true)
+    model.transcript.playheadChanged(sample: word.startSample!, isPlaying: true)
     expectNoDifference(model.transcript.followMode, .following)
   }
 
@@ -1011,16 +1009,14 @@ struct EditorTests {
       let task = Task { await model.playSliceTapped(slice.id) }
       await gate.awaitStarted()
       // The transcript is following the slice, then the user scrolls away.
-      model.transcript.playheadChanged(
-        sample: word.startSample!, isPlaying: true)
+      model.transcript.playheadChanged(sample: word.startSample!, isPlaying: true)
       model.transcript.transcriptUserScrolled()
       expectNoDifference(model.transcript.followMode, .userPaused)
       gate.release()  // natural completion — the transport cleanup must reset transcript follow
       await task.value
     }
     // Without the reset the next tick isn't a rising edge and follow would stay paused.
-    model.transcript.playheadChanged(
-      sample: word.startSample!, isPlaying: true)
+    model.transcript.playheadChanged(sample: word.startSample!, isPlaying: true)
     expectNoDifference(model.transcript.followMode, .following)
   }
 

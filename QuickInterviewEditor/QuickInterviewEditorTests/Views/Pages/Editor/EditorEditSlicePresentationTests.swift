@@ -521,8 +521,7 @@ struct EditorEditSlicePresentationTests {
     model.transportContext = .sliceEdit
     model.transportPhase = .playing(PlaybackSessionID())
     model.transportOriginEditedSample = slice.startSample
-    child.updatePlayback(
-      sample: slice.startSample + 5_000, isPlaying: true)  // ticked mid-slice
+    child.updatePlayback(sample: slice.startSample + 5_000, isPlaying: true)  // ticked mid-slice
 
     await withDependencies {
       $0.audioPlayer.stop = { _ in }
