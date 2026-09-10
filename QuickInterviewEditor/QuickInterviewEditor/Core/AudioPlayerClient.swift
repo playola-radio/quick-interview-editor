@@ -242,6 +242,7 @@ private actor LivePlayerBox {
   /// start and on a device-change event.
   private var currentDeviceUID: String?
   private var routeChangeTask: Task<Void, Never>?
+  private var configChangeObserver: (any NSObjectProtocol)?
 
   init(
     audioOutput: AudioOutputClient,
@@ -252,7 +253,10 @@ private actor LivePlayerBox {
     self.offsets = offsets
     self.estimates = estimates
     // `init` is nonisolated; hop onto the actor to start observing (the guard keeps it idempotent).
-    Task { [weak self] in await self?.startObservingRouteChanges() }
+    Task { [weak self] in
+      await self?.startObservingRouteChanges()
+      await self?.startObservingConfigurationChanges()
+    }
   }
 
   func addPositionContinuation(
@@ -722,6 +726,24 @@ private actor LivePlayerBox {
     // A default-output change tears down/retunes the engine graph; don't pair the new device with
     // the old graph's latency. Stop cleanly (a normal `.stopped`) — v1 requires pressing Play again
     // — then refresh identity for the next play.
+    if currentSession != nil { supersede(reason: .stopped) }
+    currentDeviceUID = audioOutput.current()?.uid
+  }
+
+  private func startObservingConfigurationChanges() {
+    guard configChangeObserver == nil else { return }
+    configChangeObserver = NotificationCenter.default.addObserver(
+      forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil
+    ) { [weak self] _ in
+      // The notification can fire on any thread; hop onto the actor to touch its state.
+      Task { [weak self] in await self?.handleConfigurationChanged() }
+    }
+  }
+
+  private func handleConfigurationChanged() {
+    // A configuration change tears down/retunes the engine graph even when the default output UID is
+    // unchanged; the old graph's latency no longer applies. Stop cleanly (a normal `.stopped`) — v1
+    // requires pressing Play again — so playback can't wedge, then refresh identity for the next play.
     if currentSession != nil { supersede(reason: .stopped) }
     currentDeviceUID = audioOutput.current()?.uid
   }
