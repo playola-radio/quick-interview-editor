@@ -94,7 +94,13 @@ enum PlaybackSample: Sendable, Equatable {
 /// lands in an unambiguous coordinate system (the native-frame conversion is internal).
 struct PlaybackPosition: Sendable, Equatable {
   var sessionID: PlaybackSessionID
-  var sample: PlaybackSample
+  /// The raw engine render position (frames actually rendered). Kept for debugging/tests and any
+  /// future consumer that needs the true render point rather than the audible one.
+  var renderSample: PlaybackSample
+  /// The latency-compensated position representing audio reaching the user's ears. This is what
+  /// the playhead, paused cursor, and transcript follow use. Equals `renderSample` when no
+  /// compensation applies (0 delay). See `OutputLatencyMath`.
+  var presentationSample: PlaybackSample
   var isPlaying: Bool
 }
 
@@ -615,9 +621,10 @@ private actor LivePlayerBox {
     tickTask?.cancel()
     tickTask = nil
     if broadcastStop, let session = currentSession {
+      let zero = positionSample(forFramesPlayed: 0)
       broadcast(
         PlaybackPosition(
-          sessionID: session, sample: positionSample(forFramesPlayed: 0), isPlaying: false))
+          sessionID: session, renderSample: zero, presentationSample: zero, isPlaying: false))
     }
   }
 
@@ -634,7 +641,9 @@ private actor LivePlayerBox {
     else { return }
     let framesPlayed = Int(max(0, playerTime.sampleTime))
     let sample = positionSample(forFramesPlayed: framesPlayed)
-    broadcast(PlaybackPosition(sessionID: session, sample: sample, isPlaying: true))
+    broadcast(
+      PlaybackPosition(
+        sessionID: session, renderSample: sample, presentationSample: sample, isPlaying: true))
   }
 
   /// Converts the node's played input-frame count to the reported axis-tagged sample: an EDITED

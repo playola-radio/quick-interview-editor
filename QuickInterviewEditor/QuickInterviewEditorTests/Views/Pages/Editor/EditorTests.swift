@@ -788,7 +788,9 @@ struct EditorTests {
     } operation: {
       let task = Task { await model.observePlayback() }
       continuation.yield(
-        PlaybackPosition(sessionID: session, sample: .source(1000), isPlaying: true))
+        PlaybackPosition(
+          sessionID: session, renderSample: .source(1000), presentationSample: .source(1000),
+          isPlaying: true))
       await settle { model.playheadEditedSample == 1000 }
       #expect(model.playheadEditedSample == 1000)  // maps the live position
       continuation.finish()  // stands in for the task being cancelled / stream ending
@@ -806,7 +808,9 @@ struct EditorTests {
     } operation: {
       let task = Task { await model.observePlayback() }
       continuation.yield(
-        PlaybackPosition(sessionID: PlaybackSessionID(), sample: .source(5000), isPlaying: true))
+        PlaybackPosition(
+          sessionID: PlaybackSessionID(), renderSample: .source(5000),
+          presentationSample: .source(5000), isPlaying: true))
       await settle { false }  // let the tick be processed
       #expect(model.playheadEditedSample == 0)  // never adopts another tab's position
       continuation.finish()
@@ -825,11 +829,15 @@ struct EditorTests {
     } operation: {
       let task = Task { await model.observePlayback() }
       continuation.yield(
-        PlaybackPosition(sessionID: session, sample: .source(1000), isPlaying: true))
+        PlaybackPosition(
+          sessionID: session, renderSample: .source(1000), presentationSample: .source(1000),
+          isPlaying: true))
       await settle { model.playheadEditedSample == 1000 }
       // A false/final tick ends transcript follow but must NOT move the persistent cursor.
       continuation.yield(
-        PlaybackPosition(sessionID: session, sample: .source(1200), isPlaying: false))
+        PlaybackPosition(
+          sessionID: session, renderSample: .source(1200), presentationSample: .source(1200),
+          isPlaying: false))
       await settle { false }  // let the false tick be processed
       #expect(model.playheadEditedSample == 1000)  // cursor stays where the audio last played
       continuation.finish()
@@ -848,11 +856,15 @@ struct EditorTests {
     } operation: {
       let task = Task { await model.observePlayback() }
       continuation.yield(
-        PlaybackPosition(sessionID: session, sample: .source(1000), isPlaying: true))
+        PlaybackPosition(
+          sessionID: session, renderSample: .source(1000), presentationSample: .source(1000),
+          isPlaying: true))
       await settle { model.playheadEditedSample == 1000 }
       // A straggler tick from a superseded/foreign session must NOT move the cursor.
       continuation.yield(
-        PlaybackPosition(sessionID: PlaybackSessionID(), sample: .source(9999), isPlaying: true))
+        PlaybackPosition(
+          sessionID: PlaybackSessionID(), renderSample: .source(9999),
+          presentationSample: .source(9999), isPlaying: true))
       await settle { false }  // let the foreign tick be processed
       #expect(model.playheadEditedSample == 1000)  // unchanged — foreign tick ignored
       continuation.finish()
@@ -966,7 +978,8 @@ struct EditorTests {
     let model = editor()
     let word = model.editPlan.words.first { $0.startSample != nil && $0.endSample != nil }!
     // A slice is playing and the transcript is following it, then the user scrolls away.
-    model.transcript.playheadChanged(sample: word.startSample!, isPlaying: true)
+    model.transcript.playheadChanged(
+      sample: word.startSample!, isPlaying: true)
     model.transcript.transcriptUserScrolled()
     expectNoDifference(model.transcript.followMode, .userPaused)
     model.transportContext = .slice(UUID())
@@ -980,7 +993,8 @@ struct EditorTests {
 
     // Stopping reset the transcript's playing flag, so the next slice's first tick is a
     // clean rising edge (false→true) and follow resumes instead of staying paused.
-    model.transcript.playheadChanged(sample: word.startSample!, isPlaying: true)
+    model.transcript.playheadChanged(
+      sample: word.startSample!, isPlaying: true)
     expectNoDifference(model.transcript.followMode, .following)
   }
 
@@ -997,14 +1011,16 @@ struct EditorTests {
       let task = Task { await model.playSliceTapped(slice.id) }
       await gate.awaitStarted()
       // The transcript is following the slice, then the user scrolls away.
-      model.transcript.playheadChanged(sample: word.startSample!, isPlaying: true)
+      model.transcript.playheadChanged(
+        sample: word.startSample!, isPlaying: true)
       model.transcript.transcriptUserScrolled()
       expectNoDifference(model.transcript.followMode, .userPaused)
       gate.release()  // natural completion — the transport cleanup must reset transcript follow
       await task.value
     }
     // Without the reset the next tick isn't a rising edge and follow would stay paused.
-    model.transcript.playheadChanged(sample: word.startSample!, isPlaying: true)
+    model.transcript.playheadChanged(
+      sample: word.startSample!, isPlaying: true)
     expectNoDifference(model.transcript.followMode, .following)
   }
 

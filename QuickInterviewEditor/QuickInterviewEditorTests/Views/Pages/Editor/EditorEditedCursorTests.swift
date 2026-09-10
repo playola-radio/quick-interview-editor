@@ -59,7 +59,9 @@ struct EditorEditedCursorTests {
     } operation: {
       let observe = Task { await model.observePlayback() }
       continuation.yield(
-        PlaybackPosition(sessionID: session, sample: .source(70_000), isPlaying: true))
+        PlaybackPosition(
+          sessionID: session, renderSample: .source(70_000), presentationSample: .source(70_000),
+          isPlaying: true))
       continuation.finish()
       await observe.value
     }
@@ -79,7 +81,9 @@ struct EditorEditedCursorTests {
     } operation: {
       let observe = Task { await model.observePlayback() }
       continuation.yield(
-        PlaybackPosition(sessionID: session, sample: .source(38_000), isPlaying: true))
+        PlaybackPosition(
+          sessionID: session, renderSample: .source(38_000), presentationSample: .source(38_000),
+          isPlaying: true))
       continuation.finish()
       await observe.value
     }
@@ -114,7 +118,9 @@ struct EditorEditedCursorTests {
     } operation: {
       let observe = Task { await model.observePlayback() }
       continuation.yield(
-        PlaybackPosition(sessionID: session, sample: .edited(45_200), isPlaying: true))
+        PlaybackPosition(
+          sessionID: session, renderSample: .edited(45_200), presentationSample: .edited(45_200),
+          isPlaying: true))
       continuation.finish()
       await observe.value
     }

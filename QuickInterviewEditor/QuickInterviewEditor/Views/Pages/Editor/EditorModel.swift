@@ -1421,7 +1421,7 @@ final class EditorModel: ViewModel {
         // as-is; a source tick (range playback) converts on arrival. The modal/transcript
         // boundaries keep reading SOURCE samples either way.
         let sourceSample: Int
-        switch position.sample {
+        switch position.presentationSample {
         case .edited(let editedSample):
           sourceSample = applyEditedPlaybackSample(editedSample)
         case .source(let source):
