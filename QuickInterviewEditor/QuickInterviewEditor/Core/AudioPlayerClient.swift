@@ -11,6 +11,32 @@ struct PlaybackSessionID: Hashable, Sendable {
   init(rawValue: UUID = UUID()) { self.rawValue = rawValue }
 }
 
+struct AudioPlaybackObservation: Equatable, Sendable {
+  var session: PlaybackSessionID?
+  var generation: Int
+}
+
+enum AudioPlaybackRouteChangeGate {
+  static func shouldStopPlayback(
+    observed: AudioPlaybackObservation, current: AudioPlaybackObservation
+  ) -> Bool {
+    observed.session != nil && observed == current
+  }
+}
+
+private final class AudioPlaybackObservationBox: @unchecked Sendable {
+  private let lock = NSLock()
+  private var observation = AudioPlaybackObservation(session: nil, generation: 0)
+
+  func current() -> AudioPlaybackObservation {
+    lock.withLock { observation }
+  }
+
+  func set(_ observation: AudioPlaybackObservation) {
+    lock.withLock { self.observation = observation }
+  }
+}
+
 /// Why a `play` call returned. `finished` = the segment played to its end (the caller may
 /// rest the cursor at the range end); `stopped` = a `stop` on this session ended it; `superseded`
 /// = a newer `play` (this tab or, crucially, another tab sharing the one player) took over. Only
@@ -243,6 +269,7 @@ private actor LivePlayerBox {
   private var currentDeviceUID: String?
   private var routeChangeTask: Task<Void, Never>?
   private var configChangeObserver: (any NSObjectProtocol)?
+  private let playbackObservation = AudioPlaybackObservationBox()
 
   init(
     audioOutput: AudioOutputClient,
@@ -301,6 +328,7 @@ private actor LivePlayerBox {
     // tab's playhead before B's first position arrives. The new ticking task emits shortly.
     supersede(broadcastStop: false)
     currentSession = session
+    updatePlaybackObservation()
     startPlanSample = max(0, range.lowerBound)
     playRatio = ratio
     nativeSampleRate = nativeRate
@@ -369,6 +397,7 @@ private actor LivePlayerBox {
 
     supersede(broadcastStop: false)
     currentSession = session
+    updatePlaybackObservation()
     startPlanSample = 0
     playRatio = ratio
     nativeSampleRate = format.sampleRate
@@ -633,6 +662,7 @@ private actor LivePlayerBox {
     stopTicking(broadcastStop: broadcastStop)
     stopNode()
     currentSession = nil
+    updatePlaybackObservation()
     waiter?.resume(returning: reason)
   }
 
@@ -642,7 +672,13 @@ private actor LivePlayerBox {
     stopTicking()
     stopNode()
     currentSession = nil
+    updatePlaybackObservation()
     waiter.resume(returning: .finished)
+  }
+
+  private func updatePlaybackObservation() {
+    playbackObservation.set(
+      AudioPlaybackObservation(session: currentSession, generation: generation))
   }
 
   /// Polls the node's render position ~30 Hz and yields plan-sample positions.
@@ -717,16 +753,17 @@ private actor LivePlayerBox {
     routeChangeTask = Task { [weak self] in
       guard let self else { return }
       for await _ in self.audioOutput.changes() {
-        await self.handleOutputDeviceChanged()
+        let observation = self.playbackObservation.current()
+        await self.handleOutputDeviceChanged(observed: observation)
       }
     }
   }
 
-  private func handleOutputDeviceChanged() {
+  private func handleOutputDeviceChanged(observed observation: AudioPlaybackObservation) {
     // A default-output change tears down/retunes the engine graph; don't pair the new device with
     // the old graph's latency. Stop cleanly (a normal `.stopped`) — v1 requires pressing Play again
     // — then refresh identity for the next play.
-    if currentSession != nil { supersede(reason: .stopped) }
+    stopPlaybackForRouteOrConfigurationChange(observed: observation)
     currentDeviceUID = audioOutput.current()?.uid
   }
 
@@ -735,17 +772,29 @@ private actor LivePlayerBox {
     configChangeObserver = NotificationCenter.default.addObserver(
       forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil
     ) { [weak self] _ in
+      let observation = self?.playbackObservation.current()
       // The notification can fire on any thread; hop onto the actor to touch its state.
-      Task { [weak self] in await self?.handleConfigurationChanged() }
+      Task { [weak self] in
+        if let observation { await self?.handleConfigurationChanged(observed: observation) }
+      }
     }
   }
 
-  private func handleConfigurationChanged() {
+  private func handleConfigurationChanged(observed observation: AudioPlaybackObservation) {
     // A configuration change tears down/retunes the engine graph even when the default output UID is
     // unchanged; the old graph's latency no longer applies. Stop cleanly (a normal `.stopped`) — v1
     // requires pressing Play again — so playback can't wedge, then refresh identity for the next play.
-    if currentSession != nil { supersede(reason: .stopped) }
+    stopPlaybackForRouteOrConfigurationChange(observed: observation)
     currentDeviceUID = audioOutput.current()?.uid
+  }
+
+  private func stopPlaybackForRouteOrConfigurationChange(
+    observed observation: AudioPlaybackObservation
+  ) {
+    let current = AudioPlaybackObservation(session: currentSession, generation: generation)
+    if AudioPlaybackRouteChangeGate.shouldStopPlayback(observed: observation, current: current) {
+      supersede(reason: .stopped)
+    }
   }
 
   /// Converts the node's played input-frame count to the reported axis-tagged sample: an EDITED
