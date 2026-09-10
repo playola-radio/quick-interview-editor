@@ -54,16 +54,20 @@ final class PlaybackLatencySettingsModel: ViewModel {
   }
 
   func offsetChanged(_ ms: Double) {
-    guard let uid = audioOutput.current()?.uid else { return }
+    guard let device = audioOutput.current() else { return }
+    let uid = device.uid
     deviceUID = uid
+    deviceName = device.name  // keep the visible target in step with the device we write to
     let clampedMs = min(max(ms, minMs), maxMs).rounded()
     offsetMs = clampedMs
     $offsets.withLock { $0[uid] = clampedMs / 1000 }
   }
 
   func resetTapped() {
-    guard let uid = audioOutput.current()?.uid else { return }
+    guard let device = audioOutput.current() else { return }
+    let uid = device.uid
     deviceUID = uid
+    deviceName = device.name
     offsetMs = 0
     $offsets.withLock { $0[uid] = 0 }
   }
@@ -87,6 +91,8 @@ final class PlaybackLatencySettingsModel: ViewModel {
       }
     }
   }
+
+  deinit { deviceObservationTask?.cancel() }
 
   private static func readoutLabel(for ms: Double) -> String {
     let rounded = Int(ms.rounded())

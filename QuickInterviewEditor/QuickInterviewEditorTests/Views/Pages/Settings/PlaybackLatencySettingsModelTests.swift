@@ -85,6 +85,7 @@ struct PlaybackLatencySettingsModelTests {
     model.offsetChanged(-30)
     expectNoDifference(offsets["uid-b"], -0.030)  // written to the LIVE current device
     expectNoDifference(offsets["uid-a"], nil)  // NOT the stale cached device
+    expectNoDifference(model.deviceName, "AirPods")  // visible target matches what we wrote
   }
 
   private func settle(until condition: () -> Bool) async {
