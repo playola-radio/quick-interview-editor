@@ -40,6 +40,11 @@ struct EditorView: View {
       }
     )
     .background(EditorKeyMonitor(model: model))
+    // A focused slice/suggestion rename field keeps an editable field editor as first responder;
+    // clicking blank panel space or the tab picker doesn't resign it, and while it lingers the
+    // space bar and ⌘Z both go dead. This resigns it on any click outside the field, restoring
+    // the transport and undo keys. See `ResignStrayFieldEditorMonitor`.
+    .background(ResignStrayFieldEditorMonitor())
     // `onDismiss` covers EVERY way the sheet can go away — Save, Cancel, AND an Escape-key/
     // outside-click dismissal that bypasses both buttons — so `.sliceEdit` transport can never be
     // left orphaned. `sliceEditSheetDismissed` captures the session synchronously (so a late stop
