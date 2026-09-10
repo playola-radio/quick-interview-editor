@@ -552,7 +552,10 @@ struct EditorEditSlicePresentationTests {
       let task = Task { await model.observePlayback() }
       continuation.yield(
         PlaybackPosition(
-          sessionID: session, sample: .source(slice.startSample + 200), isPlaying: true))
+          sessionID: session,
+          renderSample: .source(slice.startSample + 200),
+          presentationSample: .source(slice.startSample + 200),
+          isPlaying: true))
       await settle { model.editSlice?.playheadSample == slice.startSample + 200 }
 
       expectNoDifference(model.playheadEditedSample, slice.startSample + 200)
@@ -734,12 +737,18 @@ struct EditorEditSlicePresentationTests {
       let task = Task { await model.observePlayback() }
       continuation.yield(
         PlaybackPosition(
-          sessionID: session, sample: .source(slice.startSample + 200), isPlaying: true))
+          sessionID: session,
+          renderSample: .source(slice.startSample + 200),
+          presentationSample: .source(slice.startSample + 200),
+          isPlaying: true))
       await settle { model.editSlice?.playheadSample == slice.startSample + 200 }
 
       continuation.yield(
         PlaybackPosition(
-          sessionID: session, sample: .source(slice.startSample + 200), isPlaying: false))
+          sessionID: session,
+          renderSample: .source(slice.startSample + 200),
+          presentationSample: .source(slice.startSample + 200),
+          isPlaying: false))
       await settle { model.editSlice?.isPlaying == false }
 
       #expect(model.editSlice?.isPlaying == false)

@@ -788,13 +788,38 @@ struct EditorTests {
     } operation: {
       let task = Task { await model.observePlayback() }
       continuation.yield(
-        PlaybackPosition(sessionID: session, sample: .source(1000), isPlaying: true))
+        PlaybackPosition(
+          sessionID: session, renderSample: .source(1000), presentationSample: .source(1000),
+          isPlaying: true))
       await settle { model.playheadEditedSample == 1000 }
       #expect(model.playheadEditedSample == 1000)  // maps the live position
       continuation.finish()  // stands in for the task being cancelled / stream ending
       await task.value
       // Persists after exit — the cursor is never cleared.
       #expect(model.playheadEditedSample == 1000)
+    }
+  }
+
+  @Test func observePlaybackDrivesCursorFromPresentationNotRenderSample() async {
+    let model = editor()
+    let session = PlaybackSessionID()
+    model.transportContext = .slice(UUID())  // this editor owns slice playback
+    model.transportPhase = .playing(session)
+    let (stream, continuation) = AsyncStream.makeStream(of: PlaybackPosition.self)
+    await withDependencies {
+      $0.audioPlayer.positions = { stream }
+    } operation: {
+      let task = Task { await model.observePlayback() }
+      // Latency compensation makes presentationSample LAG renderSample; the cursor must follow the
+      // compensated (heard) position, not the raw render position.
+      continuation.yield(
+        PlaybackPosition(
+          sessionID: session, renderSample: .source(1000), presentationSample: .source(800),
+          isPlaying: true))
+      await settle { model.playheadEditedSample == 800 }
+      expectNoDifference(model.playheadEditedSample, 800)  // presentation, not render (1000)
+      continuation.finish()
+      await task.value
     }
   }
 
@@ -806,7 +831,9 @@ struct EditorTests {
     } operation: {
       let task = Task { await model.observePlayback() }
       continuation.yield(
-        PlaybackPosition(sessionID: PlaybackSessionID(), sample: .source(5000), isPlaying: true))
+        PlaybackPosition(
+          sessionID: PlaybackSessionID(), renderSample: .source(5000),
+          presentationSample: .source(5000), isPlaying: true))
       await settle { false }  // let the tick be processed
       #expect(model.playheadEditedSample == 0)  // never adopts another tab's position
       continuation.finish()
@@ -825,11 +852,15 @@ struct EditorTests {
     } operation: {
       let task = Task { await model.observePlayback() }
       continuation.yield(
-        PlaybackPosition(sessionID: session, sample: .source(1000), isPlaying: true))
+        PlaybackPosition(
+          sessionID: session, renderSample: .source(1000), presentationSample: .source(1000),
+          isPlaying: true))
       await settle { model.playheadEditedSample == 1000 }
       // A false/final tick ends transcript follow but must NOT move the persistent cursor.
       continuation.yield(
-        PlaybackPosition(sessionID: session, sample: .source(1200), isPlaying: false))
+        PlaybackPosition(
+          sessionID: session, renderSample: .source(1200), presentationSample: .source(1200),
+          isPlaying: false))
       await settle { false }  // let the false tick be processed
       #expect(model.playheadEditedSample == 1000)  // cursor stays where the audio last played
       continuation.finish()
@@ -848,11 +879,15 @@ struct EditorTests {
     } operation: {
       let task = Task { await model.observePlayback() }
       continuation.yield(
-        PlaybackPosition(sessionID: session, sample: .source(1000), isPlaying: true))
+        PlaybackPosition(
+          sessionID: session, renderSample: .source(1000), presentationSample: .source(1000),
+          isPlaying: true))
       await settle { model.playheadEditedSample == 1000 }
       // A straggler tick from a superseded/foreign session must NOT move the cursor.
       continuation.yield(
-        PlaybackPosition(sessionID: PlaybackSessionID(), sample: .source(9999), isPlaying: true))
+        PlaybackPosition(
+          sessionID: PlaybackSessionID(), renderSample: .source(9999),
+          presentationSample: .source(9999), isPlaying: true))
       await settle { false }  // let the foreign tick be processed
       #expect(model.playheadEditedSample == 1000)  // unchanged — foreign tick ignored
       continuation.finish()

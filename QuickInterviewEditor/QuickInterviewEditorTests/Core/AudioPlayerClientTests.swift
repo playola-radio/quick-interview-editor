@@ -1,3 +1,4 @@
+import CustomDump
 import Dependencies
 import Foundation
 import IssueReporting
@@ -19,6 +20,31 @@ struct AudioPlayerClientTests {
     await AudioPlayerClient.previewValue.stop(nil)
   }
 
+  // MARK: - Route/configuration callback staleness
+
+  @Test func staleRouteOrConfigurationCallbackDoesNotStopRestartedPlayback() {
+    let oldSession = PlaybackSessionID()
+    let newSession = PlaybackSessionID()
+    let staleObservation = AudioPlaybackObservation(session: oldSession, generation: 0)
+
+    let shouldStopRestartedPlayback = AudioPlaybackRouteChangeGate.shouldStopPlayback(
+      observed: staleObservation,
+      current: AudioPlaybackObservation(session: newSession, generation: 2))
+
+    expectNoDifference(shouldStopRestartedPlayback, false)
+  }
+
+  @Test func routeOrConfigurationCallbackStopsTheObservedPlayback() {
+    let session = PlaybackSessionID()
+    let observation = AudioPlaybackObservation(session: session, generation: 3)
+
+    let shouldStopObservedPlayback = AudioPlaybackRouteChangeGate.shouldStopPlayback(
+      observed: observation,
+      current: AudioPlaybackObservation(session: session, generation: 3))
+
+    expectNoDifference(shouldStopObservedPlayback, true)
+  }
+
   // MARK: - Live position overshoot clamp (the fine-tune inset playhead can't drift past the marker)
 
   /// Below the range end the reported plan sample tracks the audio exactly (start offset + played
@@ -26,7 +52,7 @@ struct AudioPlayerClientTests {
   @Test func sourcePlanSampleTracksTheAudioWithinTheRange() {
     let sample = AudioPlayerClient.sourcePlanSample(
       startPlanSample: 10_000, framesPlayed: 1_000, ratio: 1.0, ceiling: 40_000)
-    #expect(sample == 11_000)
+    expectNoDifference(sample, 11_000)
   }
 
   /// The node's frame clock keeps advancing after the last real sample, so a tick can ask for more
@@ -35,14 +61,14 @@ struct AudioPlayerClientTests {
   @Test func sourcePlanSampleClampsAnOvershootToTheRangeEnd() {
     let sample = AudioPlayerClient.sourcePlanSample(
       startPlanSample: 10_000, framesPlayed: 1_000_000, ratio: 1.0, ceiling: 40_000)
-    #expect(sample == 40_000)
+    expectNoDifference(sample, 40_000)
   }
 
   /// A nil ceiling (no active range) clamps nothing.
   @Test func sourcePlanSampleWithoutACeilingIsUnclamped() {
     let sample = AudioPlayerClient.sourcePlanSample(
       startPlanSample: 0, framesPlayed: 1_000_000, ratio: 1.0, ceiling: nil)
-    #expect(sample == 1_000_000)
+    expectNoDifference(sample, 1_000_000)
   }
 
   /// The EDITED (playlist) tick path caps its edited sample through the same `clamped` helper, so an
@@ -50,8 +76,8 @@ struct AudioPlayerClientTests {
   /// pins the edited axis to the ceiling too — the source-only tests above would still pass if the
   /// edited branch dropped the clamp.
   @Test func clampedCapsAnEditedOvershootAndPassesNilThrough() {
-    #expect(AudioPlayerClient.clamped(30_000, ceiling: 25_000) == 25_000)
-    #expect(AudioPlayerClient.clamped(20_000, ceiling: 25_000) == 20_000)
-    #expect(AudioPlayerClient.clamped(1_000_000, ceiling: nil) == 1_000_000)
+    expectNoDifference(AudioPlayerClient.clamped(30_000, ceiling: 25_000), 25_000)
+    expectNoDifference(AudioPlayerClient.clamped(20_000, ceiling: 25_000), 20_000)
+    expectNoDifference(AudioPlayerClient.clamped(1_000_000, ceiling: nil), 1_000_000)
   }
 }

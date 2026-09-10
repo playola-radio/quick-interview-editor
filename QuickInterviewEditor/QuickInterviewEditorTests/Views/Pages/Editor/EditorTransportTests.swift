@@ -308,7 +308,9 @@ struct EditorTransportTests {
       let task = Task { await model.observePlayback() }
       // A buffered straggler tick for the paused session must NOT thaw the frozen cursor.
       continuation.yield(
-        PlaybackPosition(sessionID: session, sample: .source(9000), isPlaying: true))
+        PlaybackPosition(
+          sessionID: session, renderSample: .source(9000), presentationSample: .source(9000),
+          isPlaying: true))
       await settle { false }  // let the tick be processed
       expectNoDifference(model.playheadEditedSample, 4321)
       continuation.finish()

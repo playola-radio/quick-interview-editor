@@ -285,7 +285,9 @@ struct EditorSlicePlaybackTests {
       // Slice-local edited 12_000 is 6_800 into the post-cut run, i.e. slice-local source
       // 36_800 → absolute source 66_800.
       continuation.yield(
-        PlaybackPosition(sessionID: session, sample: .edited(12_000), isPlaying: true))
+        PlaybackPosition(
+          sessionID: session, renderSample: .edited(12_000), presentationSample: .edited(12_000),
+          isPlaying: true))
       await settle(until: model.playheadSourceSample == 66_800)
       expectNoDifference(model.playheadSourceSample, 66_800)
       // …which is edited 42_000 on the GLOBAL axis the cursor lives on — NOT the raw 12_000 the
@@ -381,7 +383,9 @@ struct EditorSlicePlaybackTests {
     } operation: {
       let observe = Task { await model.observePlayback() }
       continuation.yield(
-        PlaybackPosition(sessionID: session, sample: .edited(45_200), isPlaying: true))
+        PlaybackPosition(
+          sessionID: session, renderSample: .edited(45_200), presentationSample: .edited(45_200),
+          isPlaying: true))
       continuation.finish()
       await observe.value
     }
