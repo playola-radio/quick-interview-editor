@@ -274,6 +274,7 @@ final class EditorModel: ViewModel {
   /// is not recorded; deletion may pair its document change with deselection.
   var history = EditorHistory<EditorDocumentState, EditorSelection>()
   private var cutSuggestionTitleEdit: (id: CutSuggestion.ID, before: EditorDocumentState)?
+  private var sliceNameEdit: (id: Slice.ID, before: EditorDocumentState)?
   /// Fired after every committed document change (mutation, undo, redo) with the new
   /// document — the single dirtiness signal. The tab model wires this to persistence, so
   /// the editor itself never touches the sidecar.
@@ -1212,16 +1213,16 @@ final class EditorModel: ViewModel {
   // finished AIFFs stale relative to what the user sees.
   var canUndo: Bool {
     if let editing = editSlice, editing.target.isDraft { return editing.canUndoDraft }
-    return history.canUndo && cutSuggestionTitleEdit == nil && !hasUncommittedSliceEdit
-      && !isExporting
+    return history.canUndo && cutSuggestionTitleEdit == nil && sliceNameEdit == nil
+      && !hasUncommittedSliceEdit && !isExporting
       && (!cutSuggestions.candidateActionsDisabled
         || (history.undo.last?.document?.before.cutSuggestions ?? documentCutSuggestions)
           == documentCutSuggestions)
   }
   var canRedo: Bool {
     if let editing = editSlice, editing.target.isDraft { return editing.canRedoDraft }
-    return history.canRedo && cutSuggestionTitleEdit == nil && !hasUncommittedSliceEdit
-      && !isExporting
+    return history.canRedo && cutSuggestionTitleEdit == nil && sliceNameEdit == nil
+      && !hasUncommittedSliceEdit && !isExporting
       && (!cutSuggestions.candidateActionsDisabled
         || (history.redo.last?.document?.after.cutSuggestions ?? documentCutSuggestions)
           == documentCutSuggestions)
@@ -2035,6 +2036,7 @@ final class EditorModel: ViewModel {
     _ body: (inout EditorDocumentState) -> Void
   ) {
     finishCutSuggestionTitleEdit()
+    finishSliceNameEdit()
     let oldSelection = selection
     let old = documentState
     var new = old
@@ -2105,6 +2107,51 @@ final class EditorModel: ViewModel {
   func finishCutSuggestionTitleEdit() {
     guard let edit = cutSuggestionTitleEdit else { return }
     cutSuggestionTitleEdit = nil
+    history.record(
+      .init(
+        document: .init(before: edit.before, after: documentState), selection: nil, label: ""))
+  }
+
+  private func sliceNameEditingBegan(_ id: Slice.ID) {
+    guard sliceNameEdit?.id != id else { return }
+    finishSliceNameEdit()
+    guard !isExporting, slices[id: id] != nil else { return }
+    sliceNameEdit = (id, documentState)
+  }
+
+  func sliceNameChanged(_ id: Slice.ID, to name: String) {
+    guard !isExporting, slices[id: id] != nil else { return }
+    guard sliceNameEdit?.id == id else {
+      renameSlice(id, to: name)
+      return
+    }
+    var updatedSlices = slices
+    updatedSlices[id: id]?.name = name
+    guard updatedSlices != slices else { return }
+    slices = updatedSlices
+    onDocumentStateChanged?(documentState)
+  }
+
+  private func sliceNameEditingEnded(_ id: Slice.ID) {
+    guard sliceNameEdit?.id == id else { return }
+    finishSliceNameEdit()
+  }
+
+  func sliceNameFocusChanged(_ id: Slice.ID, isFocused: Bool) {
+    if isFocused {
+      sliceNameEditingBegan(id)
+    } else {
+      sliceNameEditingEnded(id)
+    }
+  }
+
+  func sliceNameSubmitted(_ id: Slice.ID) {
+    sliceNameEditingEnded(id)
+  }
+
+  func finishSliceNameEdit() {
+    guard let edit = sliceNameEdit else { return }
+    sliceNameEdit = nil
     history.record(
       .init(
         document: .init(before: edit.before, after: documentState), selection: nil, label: ""))

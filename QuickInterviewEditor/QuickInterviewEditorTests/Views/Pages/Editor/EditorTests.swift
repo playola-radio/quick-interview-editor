@@ -2,6 +2,7 @@ import CustomDump
 import Dependencies
 import Foundation
 import IdentifiedCollections
+import Observation
 import Testing
 
 @testable import PlayolaInterviewEditor
@@ -584,6 +585,107 @@ struct EditorTests {
     expectNoDifference(model.slices[id: slice.id]?.name, "My Clip")
     model.renameSlice(slice.id, to: "   ")
     expectNoDifference(model.slices[id: slice.id]?.name, "   ")
+  }
+
+  @Test func sliceNameTypingPublishesEachChangeWithoutUndoOrUnrelatedObservation() {
+    let model = editor()
+    let slice = Fixtures.slice(id: Fixtures.uuid(1))
+    model.mutateDocument(recordUndo: false) { $0.slices.append(slice) }
+    var seen: [EditorDocumentState] = []
+    model.onDocumentStateChanged = { seen.append($0) }
+    let unrelatedObservationChanges = LockIsolated(0)
+    withObservationTracking {
+      _ = model.timelineRemovals
+    } onChange: {
+      unrelatedObservationChanges.withValue { $0 += 1 }
+    }
+
+    model.sliceNameFocusChanged(slice.id, isFocused: true)
+    model.sliceNameChanged(slice.id, to: "R")
+    model.sliceNameChanged(slice.id, to: "Renamed")
+    model.sliceNameChanged(slice.id, to: "Renamed clip")
+
+    expectNoDifference(model.slices[id: slice.id]?.name, "Renamed clip")
+    expectNoDifference(seen.count, 3)
+    expectNoDifference(seen.last?.slices[id: slice.id]?.name, "Renamed clip")
+    expectNoDifference(model.history.undo.count, 0)
+    expectNoDifference(model.canUndo, false)
+    expectNoDifference(unrelatedObservationChanges.value, 0)
+  }
+
+  @Test func finishingSliceNameEditRecordsOneUndoForTheWholeRename() async {
+    let model = editor()
+    let slice = Fixtures.slice(id: Fixtures.uuid(1))
+    model.mutateDocument(recordUndo: false) { $0.slices.append(slice) }
+
+    model.sliceNameFocusChanged(slice.id, isFocused: true)
+    model.sliceNameChanged(slice.id, to: "R")
+    model.sliceNameChanged(slice.id, to: "Renamed")
+    model.sliceNameSubmitted(slice.id)
+    model.sliceNameFocusChanged(slice.id, isFocused: false)
+
+    expectNoDifference(model.history.undo.count, 1)
+    await model.undoTapped()
+    expectNoDifference(model.slices[id: slice.id]?.name, slice.name)
+  }
+
+  @Test func focusingAnotherSliceFinishesEachRenameSeparately() async {
+    let model = editor()
+    let first = Fixtures.slice(id: Fixtures.uuid(1))
+    let second = Fixtures.slice(id: Fixtures.uuid(2))
+    model.mutateDocument(recordUndo: false) {
+      $0.slices.append(first)
+      $0.slices.append(second)
+    }
+
+    model.sliceNameFocusChanged(first.id, isFocused: true)
+    model.sliceNameChanged(first.id, to: "First renamed")
+    model.sliceNameFocusChanged(second.id, isFocused: true)
+    model.sliceNameFocusChanged(first.id, isFocused: false)
+    model.sliceNameChanged(second.id, to: "Second renamed")
+
+    expectNoDifference(model.history.undo.count, 1)
+    model.sliceNameFocusChanged(second.id, isFocused: false)
+    expectNoDifference(model.history.undo.count, 2)
+
+    await model.undoTapped()
+    expectNoDifference(model.slices[id: first.id]?.name, "First renamed")
+    expectNoDifference(model.slices[id: second.id]?.name, second.name)
+    await model.undoTapped()
+    expectNoDifference(model.slices[id: first.id]?.name, first.name)
+  }
+
+  @Test func unrelatedDocumentMutationFinishesPendingSliceRenameFirst() async {
+    let model = editor()
+    let slice = Fixtures.slice(id: Fixtures.uuid(1))
+    model.mutateDocument(recordUndo: false) { $0.slices.append(slice) }
+
+    model.sliceNameFocusChanged(slice.id, isFocused: true)
+    model.sliceNameChanged(slice.id, to: "Renamed")
+    model.setSliceEditingComplete(slice.id, to: true)
+
+    expectNoDifference(model.history.undo.count, 2)
+    await model.undoTapped()
+    expectNoDifference(model.slices[id: slice.id]?.name, "Renamed")
+    expectNoDifference(model.slices[id: slice.id]?.editingComplete, false)
+    await model.undoTapped()
+    expectNoDifference(model.slices[id: slice.id]?.name, slice.name)
+  }
+
+  @Test func programmaticSliceRenameUsesOneShotDocumentMutation() async {
+    let model = editor()
+    let slice = Fixtures.slice(id: Fixtures.uuid(1))
+    model.mutateDocument(recordUndo: false) { $0.slices.append(slice) }
+    var seen: [EditorDocumentState] = []
+    model.onDocumentStateChanged = { seen.append($0) }
+
+    model.renameSlice(slice.id, to: "Programmatic rename")
+
+    expectNoDifference(model.slices[id: slice.id]?.name, "Programmatic rename")
+    expectNoDifference(seen.count, 1)
+    expectNoDifference(model.history.undo.count, 1)
+    await model.undoTapped()
+    expectNoDifference(model.slices[id: slice.id]?.name, slice.name)
   }
 
   @Test func addSliceDoesNotReuseNumberAfterDeletion() async {
