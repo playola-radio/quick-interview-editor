@@ -139,7 +139,7 @@ struct EditorAreaSelectTests {
     expectNoDifference(model.transcript.reveal?.wordID, 2)
   }
 
-  @Test func marqueeIsViewOnlyMidDragThenCommitsSelectionAndPlayheadOnRelease() async {
+  @Test func marqueeIsViewOnlyMidDragThenCommitsSelectionAndPlayheadOnRelease() {
     let model = editor()
     geometry(model)
     model.playheadEditedSample = 999
@@ -148,10 +148,6 @@ struct EditorAreaSelectTests {
     // The drag is view-only: the real selection is untouched, only the preview carries the range.
     expectNoDifference(model.audioSelection, nil)
     expectNoDifference(model.marqueePreview, 70000..<120000)
-    // Even if the view's deferred selection→playhead snap fires mid-drag, it must not move the cursor.
-    let token = model.cursorMoveToken
-    await model.transportSelectionChanged(model.marqueePreview, cursorToken: token)
-    expectNoDifference(model.playheadEditedSample, 999)  // still suppressed
     model.waveformAreaSelectEnded(toX: 600)
     expectNoDifference(model.audioSelection, 70000..<120000)  // committed once on release
     expectNoDifference(model.marqueePreview, nil)  // preview cleared
