@@ -42,6 +42,28 @@ struct ProjectModelTests {
   private let fingerprint = "path:/clip.m4a"
   private let importedAt = Date(timeIntervalSince1970: 1_700_000_000)
 
+  @Test func projectPersistenceDoesNotEndSliceRenameAfterEachKeystroke() async throws {
+    let slice = Fixtures.slice(id: Fixtures.uuid(1))
+    var file = Fixtures.projectFile()
+    file.content.slices.append(slice)
+    let (sink, _) = ProjectDocumentSink.recorder()
+    let model = ProjectModel(
+      file: file, plan: Fixtures.editPlan(),
+      audio: .sessionFile(URL(fileURLWithPath: "/session/audio.aiff")), sink: sink)
+    await model.viewAppeared()
+    let editor = try #require(model.editor)
+
+    editor.sliceNameFocusChanged(slice.id, isFocused: true)
+    editor.sliceNameChanged(slice.id, to: "R")
+    editor.sliceNameChanged(slice.id, to: "Renamed")
+
+    expectNoDifference(editor.history.undo.count, 0)
+    editor.sliceNameFocusChanged(slice.id, isFocused: false)
+    expectNoDifference(editor.history.undo.count, 1)
+    await editor.undoTapped()
+    expectNoDifference(editor.slices[id: slice.id]?.name, slice.name)
+  }
+
   @Test func untouchedV1DoesNotAutoSuggestOrDirtyAndNextEditUpgrades() async throws {
     var file = Fixtures.projectFile(content: EditorDocumentState())
     file.schemaVersion = 1

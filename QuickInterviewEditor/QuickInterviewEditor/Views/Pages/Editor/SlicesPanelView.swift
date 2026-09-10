@@ -112,11 +112,19 @@ private struct SliceCard: View {
           "",
           text: Binding(
             get: { model.slices[id: row.id]?.name ?? row.name },
-            set: { model.renameSlice(row.id, to: $0) })
+            set: { model.sliceNameChanged(row.id, to: $0) })
         )
         .textFieldStyle(.plain).font(.system(size: 14, weight: .semibold))
         .opacity(row.editingComplete ? 0.6 : 1)
         .focused($nameFocused)
+        .onChange(of: nameFocused) { _, isFocused in
+          model.sliceNameFocusChanged(row.id, isFocused: isFocused)
+        }
+        .onSubmit {
+          model.sliceNameSubmitted(row.id)
+          nameFocused = false
+        }
+        .onDisappear { model.sliceNameFocusChanged(row.id, isFocused: false) }
         .padding(.horizontal, 6).padding(.vertical, 3)
         .background(
           RoundedRectangle(cornerRadius: 5)
