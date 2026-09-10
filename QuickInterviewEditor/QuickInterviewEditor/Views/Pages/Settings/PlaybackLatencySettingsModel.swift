@@ -24,6 +24,7 @@ final class PlaybackLatencySettingsModel: ViewModel {
   private var deviceUID: String?
   var deviceName: String = "No output device"
   var offsetMs: Double = 0
+  @ObservationIgnored private var deviceObservationTask: Task<Void, Never>?
 
   // MARK: - Display Text
   let title = "Playback Latency"
@@ -48,11 +49,8 @@ final class PlaybackLatencySettingsModel: ViewModel {
 
   // MARK: - User Actions
   func viewAppeared() {
-    let device = audioOutput.current()
-    deviceUID = device?.uid
-    deviceName = device?.name ?? "No output device"
-    let seconds = OutputLatencyOffsets.offsetSeconds(for: deviceUID, in: offsets)
-    offsetMs = (seconds * 1000).rounded()
+    resolveCurrentDevice()
+    startObservingDeviceChanges()
   }
 
   func offsetChanged(_ ms: Double) {
@@ -69,6 +67,24 @@ final class PlaybackLatencySettingsModel: ViewModel {
   }
 
   // MARK: - Private Helpers
+  private func resolveCurrentDevice() {
+    let device = audioOutput.current()
+    deviceUID = device?.uid
+    deviceName = device?.name ?? "No output device"
+    let seconds = OutputLatencyOffsets.offsetSeconds(for: deviceUID, in: offsets)
+    offsetMs = (seconds * 1000).rounded()
+  }
+
+  private func startObservingDeviceChanges() {
+    guard deviceObservationTask == nil else { return }
+    deviceObservationTask = Task { [weak self] in
+      guard let self else { return }
+      for await _ in self.audioOutput.changes() {
+        self.resolveCurrentDevice()
+      }
+    }
+  }
+
   private static func readoutLabel(for ms: Double) -> String {
     let rounded = Int(ms.rounded())
     if rounded == 0 { return "0 ms" }
