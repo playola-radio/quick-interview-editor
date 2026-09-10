@@ -2,6 +2,7 @@ import AVFoundation
 import Dependencies
 import Foundation
 import IssueReporting
+import Sharing
 
 /// Identifies one continuous playback so a stale/superseded tick can never be mistaken for
 /// the current one. A fresh id is minted per `play`.
@@ -151,7 +152,11 @@ extension AudioPlayerClient {
   /// AVFoundation range playback via a shared engine + player node. Not unit
   /// tested (real audio hardware); covered by manual verification.
   static func live() -> AudioPlayerClient {
-    let box = LivePlayerBox()
+    @Dependency(\.audioOutput) var audioOutput
+    @Shared(.outputLatencyOffsets) var offsets
+    @Shared(.outputLatencyEstimates) var estimates
+    let box = LivePlayerBox(
+      audioOutput: audioOutput, offsets: $offsets, estimates: $estimates)
     return AudioPlayerClient(
       play: { url, range, sampleRate, rate, session in
         try await box.play(
@@ -225,6 +230,31 @@ private actor LivePlayerBox {
   /// `pause`/`resume`/`stop` so a stale session's call is a no-op.
   private var currentSession: PlaybackSessionID?
 
+  private let audioOutput: AudioOutputClient
+  private let offsets: Shared<[String: Double]>
+  private let estimates: Shared<[String: Double]>
+  /// The file's native sample rate for the current playback, used to convert the latency delay
+  /// (wall-clock output seconds) into input frames. Set at the top of `play`/`playEdited`.
+  private var nativeSampleRate: Double = 44_100
+  /// The automatic latency estimate (seconds) read from the node after the engine starts.
+  private var automaticLatencySeconds: Double = 0
+  /// The current default output device's UID (for the manual-offset lookup), refreshed on play
+  /// start and on a device-change event.
+  private var currentDeviceUID: String?
+  private var routeChangeTask: Task<Void, Never>?
+
+  init(
+    audioOutput: AudioOutputClient,
+    offsets: Shared<[String: Double]>,
+    estimates: Shared<[String: Double]>
+  ) {
+    self.audioOutput = audioOutput
+    self.offsets = offsets
+    self.estimates = estimates
+    // `init` is nonisolated; hop onto the actor to start observing (the guard keeps it idempotent).
+    Task { [weak self] in await self?.startObservingRouteChanges() }
+  }
+
   func addPositionContinuation(
     id: UUID, _ continuation: AsyncStream<PlaybackPosition>.Continuation
   ) {
@@ -269,6 +299,7 @@ private actor LivePlayerBox {
     currentSession = session
     startPlanSample = max(0, range.lowerBound)
     playRatio = ratio
+    nativeSampleRate = nativeRate
     positionCeiling = max(0, range.upperBound)
     if node.engine == nil { engine.attach(node) }
     if timePitch.engine == nil { engine.attach(timePitch) }
@@ -279,6 +310,7 @@ private actor LivePlayerBox {
     // Set the speed before starting so the first buffers already play at the intended rate.
     timePitch.rate = Float(currentRate)
     try engine.start()
+    refreshOutputLatency()
 
     let myGeneration = generation
     // `.dataPlayedBack` fires when the audio has actually been played through the
@@ -335,6 +367,7 @@ private actor LivePlayerBox {
     currentSession = session
     startPlanSample = 0
     playRatio = ratio
+    nativeSampleRate = format.sampleRate
     // The cursor table is built from the RESOLVED entries — the frame counts that truly
     // reach the node — never from a second rounding of the plan. A clamped or dropped
     // item would otherwise leave every later entry's frame offset ahead of the audio.
@@ -361,6 +394,7 @@ private actor LivePlayerBox {
     engine.connect(timePitch, to: engine.mainMixerNode, format: format)
     timePitch.rate = Float(currentRate)
     try engine.start()
+    refreshOutputLatency()
 
     schedule(scheduledEntries, from: file)
     node.play()
@@ -534,7 +568,8 @@ private actor LivePlayerBox {
     if let nodeTime = node.lastRenderTime,
       let playerTime = node.playerTime(forNodeTime: nodeTime)
     {
-      restingSample = positionSample(forFramesPlayed: Int(max(0, playerTime.sampleTime)))
+      restingSample = positionSample(
+        forFramesPlayed: presentationFrames(for: Int(max(0, playerTime.sampleTime))))
     } else {
       restingSample = positionSample(forFramesPlayed: 0)
     }
@@ -640,10 +675,52 @@ private actor LivePlayerBox {
       let playerTime = node.playerTime(forNodeTime: nodeTime)
     else { return }
     let framesPlayed = Int(max(0, playerTime.sampleTime))
-    let sample = positionSample(forFramesPlayed: framesPlayed)
+    let renderSample = positionSample(forFramesPlayed: framesPlayed)
+    let presentationSample = positionSample(forFramesPlayed: presentationFrames(for: framesPlayed))
     broadcast(
       PlaybackPosition(
-        sessionID: session, renderSample: sample, presentationSample: sample, isPlaying: true))
+        sessionID: session, renderSample: renderSample,
+        presentationSample: presentationSample, isPlaying: true))
+  }
+
+  /// The audible (latency-compensated) input-frame count for a render-frame count, using the
+  /// cached device estimate + this device's stored manual offset at the current rate.
+  private func presentationFrames(for renderFrames: Int) -> Int {
+    let manual = OutputLatencyOffsets.offsetSeconds(for: currentDeviceUID, in: offsets.wrappedValue)
+    let effective = OutputLatencyMath.effectiveSeconds(
+      automatic: automaticLatencySeconds, manual: manual)
+    return OutputLatencyMath.presentationFrames(
+      renderFrames: renderFrames, effectiveSeconds: effective,
+      nativeSampleRate: nativeSampleRate, rate: currentRate)
+  }
+
+  /// Reads the current output device and the node's downstream presentation latency, caches them
+  /// for the offset math, and publishes the estimate for Settings. Call after `engine.start()`.
+  private func refreshOutputLatency() {
+    let device = audioOutput.current()
+    currentDeviceUID = device?.uid
+    automaticLatencySeconds = max(0, node.outputPresentationLatency)
+    if let uid = device?.uid {
+      estimates.withLock { $0[uid] = automaticLatencySeconds }
+    }
+  }
+
+  private func startObservingRouteChanges() {
+    guard routeChangeTask == nil else { return }
+    routeChangeTask = Task { [weak self] in
+      guard let self else { return }
+      for await _ in self.audioOutput.changes() {
+        await self.handleOutputDeviceChanged()
+      }
+    }
+  }
+
+  private func handleOutputDeviceChanged() {
+    // A default-output change tears down/retunes the engine graph; don't pair the new device with
+    // the old graph's latency. Stop cleanly (a normal `.stopped`) — v1 requires pressing Play again
+    // — then refresh identity for the next play.
+    if currentSession != nil { supersede(reason: .stopped) }
+    currentDeviceUID = audioOutput.current()?.uid
   }
 
   /// Converts the node's played input-frame count to the reported axis-tagged sample: an EDITED
