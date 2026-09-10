@@ -275,6 +275,7 @@ final class EditorModel: ViewModel {
   var history = EditorHistory<EditorDocumentState, EditorSelection>()
   private var cutSuggestionTitleEdit: (id: CutSuggestion.ID, before: EditorDocumentState)?
   private var sliceNameEdit: (id: Slice.ID, before: EditorDocumentState)?
+  private var focusedSliceNameID: Slice.ID?
   /// Fired after every committed document change (mutation, undo, redo) with the new
   /// document — the single dirtiness signal. The tab model wires this to persistence, so
   /// the editor itself never touches the sidecar.
@@ -2077,6 +2078,8 @@ final class EditorModel: ViewModel {
 
   private func cutSuggestionTitleEditingBegan(_ id: CutSuggestion.ID) {
     finishCutSuggestionTitleEdit()
+    focusedSliceNameID = nil
+    finishSliceNameEdit()
     guard !cutSuggestions.candidateActionsDisabled,
       let candidate = documentCutSuggestions[id: id], candidate.isPending, candidate.naming == nil
     else { return }
@@ -2115,12 +2118,16 @@ final class EditorModel: ViewModel {
   private func sliceNameEditingBegan(_ id: Slice.ID) {
     guard sliceNameEdit?.id != id else { return }
     finishSliceNameEdit()
+    finishCutSuggestionTitleEdit()
     guard !isExporting, slices[id: id] != nil else { return }
     sliceNameEdit = (id, documentState)
   }
 
   func sliceNameChanged(_ id: Slice.ID, to name: String) {
     guard !isExporting, slices[id: id] != nil else { return }
+    if sliceNameEdit == nil, focusedSliceNameID == id {
+      sliceNameEditingBegan(id)
+    }
     guard sliceNameEdit?.id == id else {
       renameSlice(id, to: name)
       return
@@ -2139,13 +2146,20 @@ final class EditorModel: ViewModel {
 
   func sliceNameFocusChanged(_ id: Slice.ID, isFocused: Bool) {
     if isFocused {
+      focusedSliceNameID = id
       sliceNameEditingBegan(id)
     } else {
+      if focusedSliceNameID == id {
+        focusedSliceNameID = nil
+      }
       sliceNameEditingEnded(id)
     }
   }
 
   func sliceNameSubmitted(_ id: Slice.ID) {
+    if focusedSliceNameID == id {
+      focusedSliceNameID = nil
+    }
     sliceNameEditingEnded(id)
   }
 

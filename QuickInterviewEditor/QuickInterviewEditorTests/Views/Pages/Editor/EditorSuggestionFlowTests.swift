@@ -504,6 +504,61 @@ struct EditorSuggestionFlowTests {
       model.documentCutSuggestions[id: suggestion.id]?.title, suggestion.title)
   }
 
+  @Test func startingSliceRenameFinishesSuggestionTitleBeforeCapturingItsSnapshot() async {
+    let plan = Fixtures.editPlan()
+    let model = editor(plan)
+    let suggestion = freshSuggestion(Fixtures.uuid(1), plan: plan)
+    let slice = Fixtures.slice(id: Fixtures.uuid(2))
+    model.mutateDocument(recordUndo: false) {
+      $0.cutSuggestions = [suggestion]
+      $0.slices = [slice]
+    }
+
+    model.cutSuggestions.titleFocusChanged(suggestion.id, isFocused: true)
+    model.cutSuggestions.titleChanged(suggestion.id, to: "Renamed suggestion")
+    model.sliceNameFocusChanged(slice.id, isFocused: true)
+    expectNoDifference(model.history.undo.count, 1)
+    model.sliceNameChanged(slice.id, to: "Renamed slice")
+    model.sliceNameFocusChanged(slice.id, isFocused: false)
+    model.cutSuggestions.titleFocusChanged(suggestion.id, isFocused: false)
+    expectNoDifference(model.history.undo.count, 2)
+
+    await model.undoTapped()
+    expectNoDifference(model.slices[id: slice.id]?.name, slice.name)
+    expectNoDifference(
+      model.documentCutSuggestions[id: suggestion.id]?.title, "Renamed suggestion")
+    await model.undoTapped()
+    expectNoDifference(
+      model.documentCutSuggestions[id: suggestion.id]?.title, suggestion.title)
+  }
+
+  @Test func startingSuggestionTitleEditFinishesSliceRenameBeforeCapturingItsSnapshot() async {
+    let plan = Fixtures.editPlan()
+    let model = editor(plan)
+    let suggestion = freshSuggestion(Fixtures.uuid(1), plan: plan)
+    let slice = Fixtures.slice(id: Fixtures.uuid(2))
+    model.mutateDocument(recordUndo: false) {
+      $0.cutSuggestions = [suggestion]
+      $0.slices = [slice]
+    }
+
+    model.sliceNameFocusChanged(slice.id, isFocused: true)
+    model.sliceNameChanged(slice.id, to: "Renamed slice")
+    model.cutSuggestions.titleFocusChanged(suggestion.id, isFocused: true)
+    expectNoDifference(model.history.undo.count, 1)
+    model.cutSuggestions.titleChanged(suggestion.id, to: "Renamed suggestion")
+    model.cutSuggestions.titleFocusChanged(suggestion.id, isFocused: false)
+    model.sliceNameFocusChanged(slice.id, isFocused: false)
+    expectNoDifference(model.history.undo.count, 2)
+
+    await model.undoTapped()
+    expectNoDifference(
+      model.documentCutSuggestions[id: suggestion.id]?.title, suggestion.title)
+    expectNoDifference(model.slices[id: slice.id]?.name, "Renamed slice")
+    await model.undoTapped()
+    expectNoDifference(model.slices[id: slice.id]?.name, slice.name)
+  }
+
   @Test func acceptingAfterEditingTheTitleNamesTheSliceFromTheEditedTitle() {
     let plan = Fixtures.editPlan()
     let model = editor(plan)

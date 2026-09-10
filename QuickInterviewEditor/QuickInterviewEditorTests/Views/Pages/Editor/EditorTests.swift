@@ -672,6 +672,29 @@ struct EditorTests {
     expectNoDifference(model.slices[id: slice.id]?.name, slice.name)
   }
 
+  @Test func typingAfterBackgroundMutationStartsANewCoalescedRename() async {
+    let model = editor()
+    let slice = Fixtures.slice(id: Fixtures.uuid(1))
+    model.mutateDocument(recordUndo: false) { $0.slices.append(slice) }
+
+    model.sliceNameFocusChanged(slice.id, isFocused: true)
+    model.sliceNameChanged(slice.id, to: "R")
+    model.mutateDocument(recordUndo: false) { $0.speakerCountOverride = 3 }
+    expectNoDifference(model.history.undo.count, 1)
+
+    model.sliceNameChanged(slice.id, to: "Re")
+    model.sliceNameChanged(slice.id, to: "Renamed")
+    expectNoDifference(model.history.undo.count, 1)
+    model.sliceNameFocusChanged(slice.id, isFocused: false)
+    expectNoDifference(model.history.undo.count, 2)
+
+    await model.undoTapped()
+    expectNoDifference(model.slices[id: slice.id]?.name, "R")
+    await model.undoTapped()
+    expectNoDifference(model.slices[id: slice.id]?.name, slice.name)
+    expectNoDifference(model.speakerCountOverride, 3)
+  }
+
   @Test func programmaticSliceRenameUsesOneShotDocumentMutation() async {
     let model = editor()
     let slice = Fixtures.slice(id: Fixtures.uuid(1))
