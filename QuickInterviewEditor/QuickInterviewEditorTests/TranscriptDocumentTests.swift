@@ -155,4 +155,44 @@ struct TranscriptDocumentTests {
       paragraphs: [paragraph([1, 2]), paragraph([1, 3])])
     expectNoDifference(doc.text, "a b\nc d")
   }
+
+  // MARK: - selectionRuns(for:)
+
+  /// Adjacent selected words merge into one gapless run that spans the interior separator, so
+  /// the selection sweep draws as a single sweep behind the run instead of per-word boxes.
+  @Test func selectionRunsMergesAdjacentWords() {
+    let doc = TranscriptDocument(
+      words: [word(1, "Hello"), word(2, "world"), word(3, "Foo"), word(4, "bar")])
+    expectNoDifference(doc.selectionRuns(for: [1, 2]), [NSRange(location: 0, length: 11)])
+  }
+
+  /// An unselected word between two selected words splits the sweep into two runs.
+  @Test func selectionRunsSplitsOnGap() {
+    let doc = TranscriptDocument(
+      words: [word(1, "Hello"), word(2, "world"), word(3, "Foo"), word(4, "bar")])
+    expectNoDifference(
+      doc.selectionRuns(for: [1, 3]),
+      [NSRange(location: 0, length: 5), NSRange(location: 12, length: 3)])
+  }
+
+  @Test func selectionRunsEmptyForNoSelection() {
+    let doc = TranscriptDocument(
+      words: [word(1, "Hello"), word(2, "world"), word(3, "Foo"), word(4, "bar")])
+    expectNoDifference(doc.selectionRuns(for: []), [])
+  }
+
+  @Test func selectionRunsSingleWordIsItsRange() {
+    let doc = TranscriptDocument(
+      words: [word(1, "Hello"), word(2, "world"), word(3, "Foo"), word(4, "bar")])
+    expectNoDifference(doc.selectionRuns(for: [2]), [NSRange(location: 6, length: 5)])
+  }
+
+  /// Words adjacent across a paragraph break still merge into one run; the layout manager draws
+  /// the sweep per line fragment, so spanning the newline stays gapless within each line.
+  @Test func selectionRunsMergesAcrossParagraphBreak() {
+    let doc = TranscriptDocument(
+      words: [word(1, "Hello"), word(2, "world"), word(3, "Foo"), word(4, "bar")],
+      paragraphs: [paragraph([1, 2]), paragraph([3, 4])])
+    expectNoDifference(doc.selectionRuns(for: [2, 3]), [NSRange(location: 6, length: 9)])
+  }
 }

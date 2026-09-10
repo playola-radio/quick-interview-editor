@@ -223,23 +223,35 @@ struct EditorSelectionHistoryTests {
     #expect(!model.canRedo)
   }
 
-  @Test func deleteRangeOnlyClearsHighlightAndIsUndoable() async {
+  @Test func deleteRangeRemovesSelectedAudioWithCrossfadeAndIsUndoable() async {
     let model = editor()
     model.selectSourceRange(70_648..<119_202, snapPlayhead: false)
-    let selected = model.selection
     let before = model.documentState
     var writes = 0
     model.onDocumentStateChanged = { _ in writes += 1 }
     await model.deleteSelectionTapped()
     expectNoDifference(model.selection, .none)
-    expectNoDifference(model.documentState, before)
+    expectNoDifference(model.history.undo.last?.label, "Remove Section")
+    expectNoDifference(model.timelineRemovals.map(\.removedRange), [70_648..<119_202])
+    #expect(model.timelineRemovals.first?.crossfade.curve == .equalPower)
+    #expect(model.removedWordIDs.isSuperset(of: [2, 3, 4]))
+    expectNoDifference(writes, 1)
     await model.undoTapped()
-    expectNoDifference(model.selection, selected)
+    expectNoDifference(model.documentState, before)
+    #expect(model.timelineRemovals.isEmpty)
+    #expect(model.removedWordIDs.isEmpty)
     #expect(!model.canUndo)
     await model.redoTapped()
+    expectNoDifference(model.timelineRemovals.map(\.removedRange), [70_648..<119_202])
     expectNoDifference(model.selection, .none)
-    expectNoDifference(model.documentState, before)
-    expectNoDifference(writes, 0)
+  }
+
+  @Test func deleteRangeBlockedWhileExporting() async {
+    let model = editor()
+    model.selectSourceRange(70_648..<119_202, snapPlayhead: false)
+    model.exportPhase = .exporting(current: 1, total: 1)
+    await model.deleteSelectionTapped()
+    expectNoDifference(model.timelineRemovals, [])
   }
 
   @Test func deleteSeamRestoresAudioAndSelectionOnUndo() async {

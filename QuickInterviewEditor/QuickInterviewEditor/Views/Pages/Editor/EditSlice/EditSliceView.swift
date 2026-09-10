@@ -13,6 +13,15 @@ struct EditSliceView: View {
 
       TranscriptPageView(model: model.transcript)
         .frame(minHeight: 160, maxHeight: .infinity)
+        // Same pushed-in pattern as the main editor: the model derives which words are struck
+        // (fully removed) and highlighted (overlapping the removal selection); the transcript stays
+        // layout-local and only renders what it's handed.
+        .onChange(of: model.removedWordIDs, initial: true) { _, ids in
+          model.transcript.removedWordIDs = ids
+        }
+        .onChange(of: model.selectedWordIDs, initial: true) { _, ids in
+          model.transcript.highlightedWordIDs = ids
+        }
 
       Divider()
 

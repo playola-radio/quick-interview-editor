@@ -215,8 +215,8 @@ struct TranscriptClipContainersTests {
   ) {
     coordinator.apply(
       text: coordinator.model.plainTranscriptText, fontSize: 17, selected: [],
-      clipContainers: [], removedWordIDs: [], currentWordID: nil, scrollTarget: nil,
-      followMode: .following, reveal: nil, resizeItems: items)
+      clipContainers: [], selectionRuns: [], removedWordIDs: [], currentWordID: nil,
+      scrollTarget: nil, followMode: .following, reveal: nil, resizeItems: items)
   }
 
   @Test func coincidentResizeEdgesFollowForegroundObjectOrderAndFreeformWins() throws {

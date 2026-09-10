@@ -162,6 +162,7 @@ struct EditorEditSlicePresentationTests {
       // opens matching the parent (none yet)
       #expect(child.editedWaveform.timeline.removals.isEmpty)
 
+      model.selectTranscriptObject(.clip(slice.id))  // engage the clip (two-step gate)
       selectWords(model.transcript, 1, 2)  // a removable span inside the slice
       await model.removeSelectedSectionTapped()
 
@@ -191,6 +192,7 @@ struct EditorEditSlicePresentationTests {
       model.editSliceTapped(slice.id)
       let child = model.editSlice!
 
+      model.selectTranscriptObject(.clip(slice.id))  // engage the clip (two-step gate)
       selectWords(model.transcript, 1, 2)  // seed one removal inside the slice
       await model.removeSelectedSectionTapped()
       #expect(model.timelineRemovals.count == 1)
@@ -231,6 +233,7 @@ struct EditorEditSlicePresentationTests {
       model.editSliceTapped(slice.id)
       let child = model.editSlice!
 
+      model.selectTranscriptObject(.clip(slice.id))  // engage the clip (two-step gate)
       selectWords(model.transcript, 1, 2)  // seed one removal inside the slice
       await model.removeSelectedSectionTapped()
       let id = model.timelineRemovals[0].id
@@ -273,6 +276,7 @@ struct EditorEditSlicePresentationTests {
       model.editSliceTapped(slice.id)
       let child = model.editSlice!
 
+      model.selectTranscriptObject(.clip(slice.id))  // engage the clip (two-step gate)
       selectWords(model.transcript, 2, 2)  // remove a word just inside the slice's start
       await model.removeSelectedSectionTapped()
       let id = model.timelineRemovals[0].id
@@ -316,6 +320,7 @@ struct EditorEditSlicePresentationTests {
       model.editSliceTapped(slice.id)
       let child = model.editSlice!
 
+      model.selectTranscriptObject(.clip(slice.id))  // engage the clip (two-step gate)
       selectWords(model.transcript, 1, 2)
       await model.removeSelectedSectionTapped()
       let id = model.timelineRemovals[0].id
@@ -344,6 +349,7 @@ struct EditorEditSlicePresentationTests {
       model.editSliceTapped(slice.id)
       let child = model.editSlice!
 
+      model.selectTranscriptObject(.clip(slice.id))  // engage the clip (two-step gate)
       selectWords(model.transcript, 1, 2)
       await model.removeSelectedSectionTapped()
       let id = model.timelineRemovals[0].id
@@ -369,6 +375,7 @@ struct EditorEditSlicePresentationTests {
       model.editSliceTapped(slice.id)
       let child = model.editSlice!
 
+      model.selectTranscriptObject(.clip(slice.id))  // engage the clip (two-step gate)
       selectWords(model.transcript, 1, 2)
       await child.onRemoveSection(model.selectedSourceRange!)
       #expect(model.timelineRemovals.count == 1)

@@ -161,31 +161,29 @@ extension EditorModel {
       return
     }
     guard click.count == 1 else { return }
+    // Single-click (and drag) always selects words — never a clip object and never the overlap
+    // chooser. Clip object selection lives in the sidebar; stacked-region disambiguation is a
+    // deferred visual-layering concern, not hit-test logic.
     transcript.clickCapture = nil
-    transcript.overlapClick = click.extending ? nil : click
+    transcript.overlapClick = nil
     defer { reconcileTranscriptOverlap() }
     guard let wordID = click.wordID else {
       clearSelection()
       return
     }
     if click.extending {
+      // A Shift-extend is not a "select this word to open" gesture, so it never primes the
+      // double-click-open capture below — otherwise a plain click on the same word within the
+      // interval would open the clip off the back of an extend.
       selectWord(wordID, extending: true)
       return
     }
-    let candidates = objectsCovering(
-      wordID, objects: visibleTranscriptObjects,
-      selected: selection.objectID
-    ).filter { transcriptHit(click, belongsTo: $0.wordIDs) }
-    if selection.freeformRange != nil, transcriptHit(click, belongsTo: selectedWordIDs) {
-      // The live freeform highlight is the top click target throughout its extent.
-    } else if let object = candidates.first {
-      selectTranscriptObject(object.id)
-    } else if click.utf16Offset.map({ transcript.document.containsWord(atUTF16Offset: $0) }) ?? true
-    {
-      selectWord(wordID, extending: false)
-    } else {
+    guard click.utf16Offset.map({ transcript.document.containsWord(atUTF16Offset: $0) }) ?? true
+    else {
       clearSelection()
+      return
     }
+    selectWord(wordID, extending: false)
     guard let range = audioSelection else { return }
     transcript.clickCapture = TranscriptClickCapture(
       selection: selection, range: range, timestamp: click.timestamp)
@@ -200,7 +198,29 @@ extension EditorModel {
       transcriptHit(
         click, belongsTo: Set(wordIDs(anyOverlap: captured.range, words: editPlan.words)))
     else { return }
-    openSelectionTapped()
+    // Single clicks only word-select now, so a double-click resolves the object to open here: the
+    // frontmost clip or suggestion covering the clicked word. A clip opens its editor directly; a
+    // suggestion becomes the selection so its draft opens (matching the pre-gate behavior); a word
+    // in neither falls back to a freeform draft on the clicked word.
+    switch coveringObject(click) {
+    case .clip(let id):
+      editSliceTapped(id)
+    case .suggestion(let id):
+      selectTranscriptObject(.suggestion(id))
+      openSelectionTapped()
+    case nil:
+      openSelectionTapped()
+    }
+  }
+
+  private func coveringObject(_ click: TranscriptClick) -> TranscriptObjectID? {
+    guard let wordID = click.wordID else { return nil }
+    for object in objectsCovering(
+      wordID, objects: visibleTranscriptObjects, selected: selection.objectID)
+    where transcriptHit(click, belongsTo: object.wordIDs) {
+      return object.id
+    }
+    return nil
   }
 
   private func transcriptHit(_ click: TranscriptClick, belongsTo wordIDs: Set<Word.ID>) -> Bool {

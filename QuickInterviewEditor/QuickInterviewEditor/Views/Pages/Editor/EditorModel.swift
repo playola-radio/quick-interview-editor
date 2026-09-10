@@ -149,7 +149,8 @@ final class EditorModel: ViewModel {
       guard let self else { return }
       switch intent {
       case .words(let anchor, let focus): self.selectWords(anchorID: anchor, focusID: focus)
-      case .word(let id, let extending): self.selectWord(id, extending: extending)
+      case .word(let id, extending: true): self.selectWord(id, extending: true)
+      case .word(let id, extending: false): self.selectWord(id, extending: false)
       case .clear: self.clearSelection()
       }
     }
@@ -2385,6 +2386,10 @@ final class EditorModel: ViewModel {
     child.canEditCrossfade = { [weak self, weak child] in
       child?.canMutateDocument == true && self?.isExporting == false
     }
+    // Removal is frozen mid-export (see `removeSourceRange`); mirror the main window's
+    // `canRemoveSelectedSection` gate so the sheet disables Remove instead of clearing the selection
+    // against a silently dropped removal.
+    child.isParentExporting = { [weak self] in self?.isExporting == true }
     // ⌘Z/⌘⇧Z pressed inside the sheet route here: a modal removal lives on this document's undo
     // stack, and `undoTapped`/`redoTapped` fan the restored timeline back into the open sheet via
     // `syncEditedTimeline`. The main window's SwiftUI undo shortcut can't fire while the sheet is key.
@@ -2542,7 +2547,7 @@ final class EditorModel: ViewModel {
     let removal = TimelineRemoval(
       id: UUID(), removedRange: mergedLower..<mergedUpper,
       crossfade: Crossfade(lengthSamples: defaultCrossfadeSamples, curve: .equalPower))
-    mutateDocument { doc in
+    mutateDocument(label: "Remove Section") { doc in
       for absorbedRemoval in absorbed { doc.timelineRemovals.remove(id: absorbedRemoval.id) }
       doc.timelineRemovals.append(removal)
       doc.timelineRemovals = IdentifiedArray(

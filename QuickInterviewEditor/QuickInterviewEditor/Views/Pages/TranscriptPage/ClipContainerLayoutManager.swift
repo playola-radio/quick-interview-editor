@@ -14,53 +14,69 @@ struct ClipContainerRun: Equatable {
 
 /// A TextKit-1 layout manager that paints clip containers behind the text: one continuous
 /// tinted, rounded, ringed shape running through each clip's words. It draws containers
-/// FIRST, then calls `super` so the standard `.backgroundColor` pass (the red text
-/// selection) lands on top — glyphs draw last, above both.
+/// FIRST, then the current-word band, then the selection sweep, then calls `super` (glyphs
+/// draw last, above all).
 ///
-/// It owns no state decisions: `containerRuns` is handed in by the coordinator. Rounded
-/// caps sit only at a run's true ends (computed from the full run, never the clipped dirty
-/// range), and a run that wraps is drawn as one square-jointed segment per line fragment so
-/// the ring closes across the wrap without a seam.
+/// It owns no state decisions: `containerRuns`, `currentWordRange`, and `selectionRuns` are
+/// handed in by the coordinator. Rounded caps sit only at a run's true ends (computed from
+/// the full run, never the clipped dirty range), and a run that wraps is drawn as one
+/// square-jointed segment per line fragment so the ring closes across the wrap without a seam.
 final class ClipContainerLayoutManager: NSLayoutManager {
 
   var containerRuns: [ClipContainerRun] = []
   /// The word under the playhead while listening, or nil. Drawn as a soft light band ("current
   /// word" highlight) above the clip fills but below the selection.
   var currentWordRange: NSRange?
+  /// The selected words as gapless UTF-16 runs (from `TranscriptDocument.selectionRuns`). Drawn
+  /// as one continuous rounded sweep per run — no per-word boxes, no inter-word gaps — above the
+  /// clip fills and the current word, below the glyphs.
+  var selectionRuns: [NSRange] = []
 
   private let cornerRadius: CGFloat = 6
   /// Symmetric breathing room above/below the glyph box (the mockup's `padding: 4px 0`); kept
   /// small because the font's ascender/descender box already includes some leading.
   private let verticalPadding: CGFloat = 3
-  /// Soft white glow for the current word — distinct from the clip hues and the red selection.
+  /// Soft white glow for the current word — distinct from the clip hues and the selection sweep.
   private let currentWordColor = NSColor(calibratedWhite: 1, alpha: 0.14)
+  /// Crisp text-selection-style sweep: the emphasized selected-content colour, which is designed
+  /// for white text on top (the selected words use the white foreground).
+  private let selectionColor = NSColor.selectedContentBackgroundColor
 
   override func drawBackground(forGlyphRange glyphsToShow: NSRange, at origin: NSPoint) {
     drawClipContainers(forGlyphRange: glyphsToShow, at: origin)
-    drawCurrentWord(forGlyphRange: glyphsToShow, at: origin)
-    // Selection (`.backgroundColor`) draws on top of both, then glyphs above all.
+    fillRoundedSweep(
+      currentWordRange.map { [$0] } ?? [], color: currentWordColor, forGlyphRange: glyphsToShow,
+      at: origin)
+    fillRoundedSweep(
+      selectionRuns, color: selectionColor, forGlyphRange: glyphsToShow, at: origin)
     super.drawBackground(forGlyphRange: glyphsToShow, at: origin)
   }
 
-  private func drawCurrentWord(forGlyphRange glyphsToShow: NSRange, at origin: NSPoint) {
-    guard let range = currentWordRange, let textContainer = textContainers.first else { return }
-    let fullGlyphRange = glyphRange(forCharacterRange: range, actualCharacterRange: nil)
-    let visible = NSIntersectionRange(fullGlyphRange, glyphsToShow)
-    guard visible.length > 0 else { return }
-    currentWordColor.setFill()
-    enumerateLineFragments(forGlyphRange: visible) { [self] lineRect, _, _, lineGlyphRange, _ in
-      let segment = NSIntersectionRange(fullGlyphRange, lineGlyphRange)
-      guard segment.length > 0 else { return }
-      let horizontal = boundingRect(forGlyphRange: segment, in: textContainer)
-      let font = glyphFont(atGlyph: segment.location)
-      let baselineY = lineRect.minY + location(forGlyphAt: segment.location).y
-      let rect = CGRect(
-        x: horizontal.minX + origin.x,
-        y: baselineY - font.ascender + origin.y - verticalPadding,
-        width: horizontal.width,
-        height: (font.ascender - font.descender) + verticalPadding * 2)
-      let radius = min(cornerRadius, rect.height / 2, rect.width / 2)
-      NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius).fill()
+  /// Fills each range as a rounded sweep, one rounded rect per line fragment (so a wrapping run
+  /// stays gapless within each line). Shared by the current-word band and the selection sweep.
+  private func fillRoundedSweep(
+    _ ranges: [NSRange], color: NSColor, forGlyphRange glyphsToShow: NSRange, at origin: NSPoint
+  ) {
+    guard !ranges.isEmpty, let textContainer = textContainers.first else { return }
+    color.setFill()
+    for range in ranges {
+      let fullGlyphRange = glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+      let visible = NSIntersectionRange(fullGlyphRange, glyphsToShow)
+      guard visible.length > 0 else { continue }
+      enumerateLineFragments(forGlyphRange: visible) { [self] lineRect, _, _, lineGlyphRange, _ in
+        let segment = NSIntersectionRange(fullGlyphRange, lineGlyphRange)
+        guard segment.length > 0 else { return }
+        let horizontal = boundingRect(forGlyphRange: segment, in: textContainer)
+        let font = glyphFont(atGlyph: segment.location)
+        let baselineY = lineRect.minY + location(forGlyphAt: segment.location).y
+        let rect = CGRect(
+          x: horizontal.minX + origin.x,
+          y: baselineY - font.ascender + origin.y - verticalPadding,
+          width: horizontal.width,
+          height: (font.ascender - font.descender) + verticalPadding * 2)
+        let radius = min(cornerRadius, rect.height / 2, rect.width / 2)
+        NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius).fill()
+      }
     }
   }
 
