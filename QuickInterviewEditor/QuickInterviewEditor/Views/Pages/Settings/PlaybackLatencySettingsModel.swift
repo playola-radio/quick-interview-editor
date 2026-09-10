@@ -54,14 +54,16 @@ final class PlaybackLatencySettingsModel: ViewModel {
   }
 
   func offsetChanged(_ ms: Double) {
-    guard let uid = deviceUID else { return }
+    guard let uid = audioOutput.current()?.uid else { return }
+    deviceUID = uid
     let clampedMs = min(max(ms, minMs), maxMs).rounded()
     offsetMs = clampedMs
     $offsets.withLock { $0[uid] = clampedMs / 1000 }
   }
 
   func resetTapped() {
-    guard let uid = deviceUID else { return }
+    guard let uid = audioOutput.current()?.uid else { return }
+    deviceUID = uid
     offsetMs = 0
     $offsets.withLock { $0[uid] = 0 }
   }
@@ -77,9 +79,10 @@ final class PlaybackLatencySettingsModel: ViewModel {
 
   private func startObservingDeviceChanges() {
     guard deviceObservationTask == nil else { return }
+    let changes = audioOutput.changes
     deviceObservationTask = Task { [weak self] in
-      guard let self else { return }
-      for await _ in self.audioOutput.changes() {
+      for await _ in changes() {
+        guard let self else { return }
         self.resolveCurrentDevice()
       }
     }

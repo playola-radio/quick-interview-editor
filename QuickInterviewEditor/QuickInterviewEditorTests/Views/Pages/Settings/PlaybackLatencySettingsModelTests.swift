@@ -69,6 +69,24 @@ struct PlaybackLatencySettingsModelTests {
     expectNoDifference(model.offsetMs, -50)  // -0.05 s → -50 ms, the NEW device's stored offset
   }
 
+  @Test func offsetChangedWritesToLiveCurrentDeviceBeforeChangeEventProcessed() {
+    @Shared(.outputLatencyOffsets) var offsets = [:]
+    let currentDevice = LockIsolated(OutputDevice(id: 1, uid: "uid-a", name: "Built-in"))
+    let model = withDependencies {
+      $0.audioOutput = AudioOutputClient(
+        current: { currentDevice.value },
+        changes: { AsyncStream { $0.finish() } })
+    } operation: {
+      PlaybackLatencySettingsModel()
+    }
+    model.viewAppeared()
+    // OS output switches; the async changes() event has NOT been delivered/processed yet.
+    currentDevice.setValue(OutputDevice(id: 2, uid: "uid-b", name: "AirPods"))
+    model.offsetChanged(-30)
+    expectNoDifference(offsets["uid-b"], -0.030)  // written to the LIVE current device
+    expectNoDifference(offsets["uid-a"], nil)  // NOT the stale cached device
+  }
+
   private func settle(until condition: () -> Bool) async {
     for _ in 0..<1000 where !condition() { await Task.yield() }
   }
