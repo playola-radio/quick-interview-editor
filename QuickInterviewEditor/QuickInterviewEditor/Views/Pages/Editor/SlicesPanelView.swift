@@ -111,7 +111,14 @@ private struct SliceCard: View {
         TextField(
           "",
           text: Binding(
-            get: { model.slices[id: row.id]?.name ?? row.name },
+            get: {
+              // While this row is focused, bind to the live rename draft so keystrokes never write
+              // `slices` (which would invalidate the transcript/clip-band chain). The `nameFocused`
+              // short-circuit keeps unfocused rows off the draft, so only the focused row redraws
+              // as the user types.
+              if nameFocused, let draft = model.sliceNameDraft(row.id) { return draft }
+              return model.slices[id: row.id]?.name ?? row.name
+            },
             set: { model.sliceNameChanged(row.id, to: $0) })
         )
         .textFieldStyle(.plain).font(.system(size: 14, weight: .semibold))

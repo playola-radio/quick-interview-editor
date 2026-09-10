@@ -504,6 +504,38 @@ struct EditorSuggestionFlowTests {
       model.documentCutSuggestions[id: suggestion.id]?.title, suggestion.title)
   }
 
+  @Test func titleEditingCoalescesDespiteRecoverySyncNoOpsBetweenKeystrokes() async {
+    let plan = Fixtures.editPlan()
+    let model = editor(plan)
+    let suggestion = freshSuggestion(Fixtures.uuid(1), plan: plan)
+    model.mutateDocument(recordUndo: false) { $0.cutSuggestions = [suggestion] }
+
+    // Mimic `ProjectModel.wireEditor`: every published change triggers a recovery-editor re-sync
+    // that re-sets the same (unchanged) recovery fields through a `recordUndo: false` mutation.
+    // That no-op must not end an in-progress title session, or coalescing collapses to one undo
+    // entry per keystroke.
+    model.onDocumentStateChanged = { [weak model] _ in
+      guard let model else { return }
+      let owner = model.suggestionRecoveryOwnerID
+      model.mutateDocument(recordUndo: false) { $0.suggestionRecoveryOwnerID = owner }
+    }
+
+    model.cutSuggestions.titleFocusChanged(suggestion.id, isFocused: true)
+    model.cutSuggestions.titleChanged(suggestion.id, to: "R")
+    model.cutSuggestions.titleChanged(suggestion.id, to: "Renamed")
+    model.cutSuggestions.titleChanged(suggestion.id, to: "Renamed cut")
+
+    expectNoDifference(model.documentCutSuggestions[id: suggestion.id]?.title, "Renamed cut")
+    expectNoDifference(model.history.undo.count, 0)
+
+    model.cutSuggestions.titleFocusChanged(suggestion.id, isFocused: false)
+
+    expectNoDifference(model.history.undo.count, 1)
+
+    await model.undoTapped()
+    expectNoDifference(model.documentCutSuggestions[id: suggestion.id]?.title, suggestion.title)
+  }
+
   @Test func startingSliceRenameFinishesSuggestionTitleBeforeCapturingItsSnapshot() async {
     let plan = Fixtures.editPlan()
     let model = editor(plan)

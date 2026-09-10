@@ -43,9 +43,11 @@ protocol WaveformLaneDriving: AnyObject {
 ///
 /// Redraw isolation is preserved from the original in-editor waveform: the expensive
 /// ``WaveformCanvas`` reads `waveform.visibleColumns()` in its own body (so zoom/pan auto-redraw via
-/// Observation, and a playback tick — which leaves those columns unchanged — skips it via view
-/// equality), while the moving ``WaveformPlayhead``/``RulerPlayhead`` read
-/// `waveform.playheadX(for:)` in their own bodies so only they reposition on a tick.
+/// Observation) and holds only its waveform reference, so SwiftUI's default view comparison lets a
+/// parent re-render that leaves the columns unchanged — a playback tick, or a marquee drag moving
+/// the highlight — skip it. The moving ``WaveformPlayhead``/``RulerPlayhead`` (playhead) and
+/// ``WaveformHighlight`` (selection rectangle) each read their live value in their own bodies, so
+/// only they repaint on a tick.
 struct WaveformLaneView<Overlay: View>: View {
   let waveform: any WaveformLaneDriving
   let playhead: () -> Int?
@@ -217,7 +219,8 @@ struct WaveformLaneView<Overlay: View>: View {
       centeredMessage(waveform.emptyMessage)
     } else {
       ZStack(alignment: .leading) {
-        WaveformCanvas(waveform: waveform, highlight: highlight)
+        WaveformHighlight(highlight: highlight)
+        WaveformCanvas(waveform: waveform)
         SeamBowtieOverlay(seams: seams)
         WaveformPlayhead(waveform: waveform, playhead: playhead)
       }
@@ -231,14 +234,15 @@ struct WaveformLaneView<Overlay: View>: View {
   }
 }
 
-/// Draws the min/max columns plus the highlight rect. Reads only geometry + the injected highlight
-/// (never the playhead), so playhead ticks don't force it to redraw.
+/// Draws the min/max waveform columns. Reads only geometry (never the highlight or the playhead),
+/// and its sole stored property is the `waveform` reference, so SwiftUI's default view comparison
+/// treats a parent re-render carrying only a moved highlight or playhead as unchanged — the
+/// expensive per-pixel `visibleColumns()` + path rebuild never reruns for it. Zoom/pan/amplitude
+/// still redraw it, through the Observation reads in its own body.
 private struct WaveformCanvas: View {
   let waveform: any WaveformLaneDriving
-  let highlight: WaveformSpan?
 
   private let waveColor = Color(white: 0.62)
-  private let highlightColor = Color.white.opacity(0.14)
 
   var body: some View {
     // Read observed model output here so SwiftUI re-renders on change; the Canvas
@@ -248,11 +252,6 @@ private struct WaveformCanvas: View {
     Canvas { context, size in
       let midY = size.height / 2
       let scale = size.height / 2 * 0.9 * amplitudeScale
-      if let highlight {
-        context.fill(
-          Path(CGRect(x: highlight.positionX, y: 0, width: highlight.width, height: size.height)),
-          with: .color(highlightColor))
-      }
       var path = Path()
       for column in columns {
         let top = midY - CGFloat(column.max) * scale
@@ -261,6 +260,26 @@ private struct WaveformCanvas: View {
         path.addLine(to: CGPoint(x: column.positionX + 0.5, y: Swift.max(bottom, top + 0.75)))
       }
       context.stroke(path, with: .color(waveColor), lineWidth: 1)
+    }
+  }
+}
+
+/// The translucent selection rectangle over the band, isolated in its own view — like
+/// ``WaveformPlayhead`` — so a marquee drag repaints only this fill each tick and never the
+/// expensive ``WaveformCanvas`` strokes beneath. Sits below the canvas in the ``ZStack`` so the
+/// waveform draws on top of the highlight, matching the original single-canvas draw order.
+private struct WaveformHighlight: View {
+  let highlight: WaveformSpan?
+
+  private let highlightColor = Color.white.opacity(0.14)
+
+  var body: some View {
+    if let highlight {
+      Canvas { context, size in
+        context.fill(
+          Path(CGRect(x: highlight.positionX, y: 0, width: highlight.width, height: size.height)),
+          with: .color(highlightColor))
+      }
     }
   }
 }

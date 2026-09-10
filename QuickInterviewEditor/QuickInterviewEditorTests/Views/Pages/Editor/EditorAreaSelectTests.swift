@@ -7,10 +7,12 @@ import Testing
 
 @testable import PlayolaInterviewEditor
 
-/// Logic-style marquee: a horizontal drag in the waveform body writes `audioSelection` with the
-/// EXACT dragged `[start, end)` in source samples — freeform, never snapped to word edges — and,
-/// on release, snaps the playhead to the range start and scrolls the transcript to the range's
-/// first overlapping word. Dragging past the viewport edge auto-scrolls.
+/// Logic-style marquee: a horizontal drag in the waveform body previews the EXACT dragged
+/// `[start, end)` in source samples — freeform, never snapped to word edges — through the view-only
+/// `marqueePreview` while the drag is live, leaving `audioSelection` untouched so the transcript
+/// highlight and the selection→playhead snap don't recompute per tick. On release it commits the
+/// range to `audioSelection`, snaps the playhead to the range start, and scrolls the transcript to
+/// the range's first overlapping word. Dragging past the viewport edge auto-scrolls.
 ///
 /// Geometry is installed explicitly (no audio decode) so `xToSample(x) == start + floor(x * spp)`.
 /// With `spp: 200, start: 0`, view-x maps to source samples as `sample = x * 200`. The fixture's
@@ -137,18 +139,19 @@ struct EditorAreaSelectTests {
     expectNoDifference(model.transcript.reveal?.wordID, 2)
   }
 
-  @Test func playheadSnapIsSuppressedMidDragThenCommittedOnRelease() async {
+  @Test func marqueeIsViewOnlyMidDragThenCommitsSelectionAndPlayheadOnRelease() {
     let model = editor()
     geometry(model)
     model.playheadEditedSample = 999
     model.waveformAreaSelectBegan(atX: 350, extending: false)
-    model.waveformAreaSelectChanged(toX: 600)  // audioSelection 70000..<120000
-    // Simulate the view's deferred selection→playhead snap firing mid-drag: it must bail.
-    let token = model.cursorMoveToken
-    await model.transportSelectionChanged(model.audioSelection, cursorToken: token)
-    expectNoDifference(model.playheadEditedSample, 999)  // still suppressed
+    model.waveformAreaSelectChanged(toX: 600)
+    // The drag is view-only: the real selection is untouched, only the preview carries the range.
+    expectNoDifference(model.audioSelection, nil)
+    expectNoDifference(model.marqueePreview, 70000..<120000)
     model.waveformAreaSelectEnded(toX: 600)
-    expectNoDifference(model.playheadEditedSample, 70000)  // committed once on release
+    expectNoDifference(model.audioSelection, 70000..<120000)  // committed once on release
+    expectNoDifference(model.marqueePreview, nil)  // preview cleared
+    expectNoDifference(model.playheadEditedSample, 70000)  // playhead snaps once
   }
 
   // MARK: - Auto-scroll past the visible edge
@@ -161,11 +164,12 @@ struct EditorAreaSelectTests {
       model.waveformAreaSelectBegan(atX: 900, extending: false)  // anchor sample 180000
       // Past the right edge → word 10 only, and the auto-scroll loop starts.
       model.waveformAreaSelectChanged(toX: 1100)
-      expectNoDifference(model.audioSelection, 180000..<200000)  // clamped to the right edge
+      expectNoDifference(model.marqueePreview, 180000..<200000)  // clamped to the right edge
+      expectNoDifference(model.audioSelection, nil)  // still view-only mid-drag
       await clock.advance(by: .milliseconds(16))  // one auto-scroll tick
       #expect(model.editedWaveform.visibleStartSample > 0)  // the viewport scrolled right
       // The scroll revealed more audio, and the marquee's far edge extended past the old edge.
-      #expect(model.audioSelection.map { $0.upperBound > 200_000 } ?? false)
+      #expect(model.marqueePreview.map { $0.upperBound > 200_000 } ?? false)
       model.waveformAreaSelectEnded(toX: 1100)
     }
   }
@@ -183,7 +187,7 @@ struct EditorAreaSelectTests {
       await clock.advance(by: .seconds(1))  // many ticks — must clamp, not overrun
       // Pinned at the document start.
       expectNoDifference(model.editedWaveform.visibleStartSample, 0)
-      expectNoDifference(model.audioSelection?.lowerBound, 0)  // far edge reached sample 0
+      expectNoDifference(model.marqueePreview?.lowerBound, 0)  // far edge reached sample 0
       model.waveformAreaSelectEnded(toX: -50)
     }
   }
@@ -212,6 +216,39 @@ struct EditorAreaSelectTests {
       expectNoDifference(model.editedWaveform.visibleStartSample, 0)  // no scroll task ever started
       model.waveformAreaSelectEnded(toX: 600)
     }
+  }
+
+  @Test func aLiveDragLeavesAnExistingSelectionUntouchedUntilRelease() {
+    let model = editor()
+    geometry(model)
+    model.transcript.selectWord(5)  // seeds audioSelection to word 5 (120966..<135960)
+    let seeded = model.audioSelection
+
+    model.waveformAreaSelectBegan(atX: 350, extending: false)
+    model.waveformAreaSelectChanged(toX: 600)
+    // The prior selection stays put (transcript highlight doesn't recompute); the new range is
+    // preview-only until release.
+    expectNoDifference(model.audioSelection, seeded)
+    expectNoDifference(model.marqueePreview, 70000..<120000)
+
+    model.waveformAreaSelectEnded(toX: 600)
+    expectNoDifference(model.audioSelection, 70000..<120000)
+    expectNoDifference(model.marqueePreview, nil)
+  }
+
+  @Test func aLiveMarqueeRendersOverAPriorSelectionsFineTuneDraft() {
+    let model = editor()
+    geometry(model)
+    model.transcript.selectWord(5)  // seeds a pending selection…
+    model.syncEditSession()  // …which populates fineTune.draftRange even with nothing tuned
+    #expect(model.fineTune.draftRange != nil)
+
+    model.waveformAreaSelectBegan(atX: 350, extending: false)
+    model.waveformAreaSelectChanged(toX: 600)
+
+    // The moving marquee, not the stale draft, drives the waveform overlay.
+    expectNoDifference(model.marqueePreview, 70000..<120000)
+    expectNoDifference(model.activeEditingRange, 70000..<120000)
   }
 
   // MARK: - Geometry guard
