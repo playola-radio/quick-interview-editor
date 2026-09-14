@@ -45,6 +45,15 @@ struct EditorCutSuggestionTests {
     expectNoDifference(model.sliceScrollTarget, id)
   }
 
+  @Test func acceptingASuggestionAddsItToTheTopOfTheClipsList() {
+    let model = editor()
+    let first = Fixtures.uuid(1)
+    let second = Fixtures.uuid(7)
+    model.acceptCutSuggestion(slice(first), id: first)
+    model.acceptCutSuggestion(slice(second), id: second)
+    expectNoDifference(Array(model.slices.ids), [second, first])
+  }
+
   @Test func acceptingIsIdempotentByID() {
     let model = editor()
     let id = Fixtures.uuid(1)

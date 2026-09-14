@@ -245,7 +245,7 @@ struct SuggestionReviewTests {
     editor.cutSuggestions.acceptTapped(Fixtures.uuid(2))
     editor.cutSuggestions.acceptTapped(Fixtures.uuid(1))
     expectNoDifference(
-      editor.slices.map(\.name), ["Wildflowers 1, Tom Petty", "Wildflowers 2, Tom Petty"])
+      editor.slices.map(\.name), ["Wildflowers 2, Tom Petty", "Wildflowers 1, Tom Petty"])
     group.applyFutureStartTapped()
     expectNoDifference(
       editor.suggestionStarts.groups.first?.display?.canonicalValues["artist-name"], "Tom Petty")
