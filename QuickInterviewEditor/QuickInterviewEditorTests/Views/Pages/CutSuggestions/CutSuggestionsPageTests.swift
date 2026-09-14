@@ -475,6 +475,29 @@ struct CutSuggestionsPageTests {
     }
   }
 
+  @Test func legacyRejectedSuggestionsDoNotContributeTypeFilters() {
+    let pending = Fixtures.cutSuggestion(id: Fixtures.uuid(1), productType: .intro)
+    let rejected = {
+      var suggestion = Fixtures.cutSuggestion(id: Fixtures.uuid(2), status: .rejected)
+      suggestion.productType = ProductType(rawValue: "legacy-rejected")!
+      suggestion.naming = .init(
+        runID: Fixtures.uuid(3), typeID: "legacy-rejected", typeName: "Hidden Legacy",
+        typeGroup: .audioImages, discoveryLabel: "Hidden Legacy", extractedValues: [:],
+        missingFieldIDs: [], correctedValues: [:], reservation: nil)
+      return suggestion
+    }()
+    let store = LockIsolated<IdentifiedArrayOf<CutSuggestion>>([pending, rejected])
+
+    withDependencies { _ in
+    } operation: {
+      let model = CutSuggestionsPageModel(
+        editPlan: Fixtures.editPlan(), sourceFingerprint: "fp-legacy-filters")
+      wire(model, to: store)
+
+      expectNoDifference(model.typeFilterRows.map(\.id), [ProductType.intro.rawValue])
+    }
+  }
+
   // MARK: - Title editing
 
   @Test func editableTitleReadsTheCurrentSuggestionTitle() {

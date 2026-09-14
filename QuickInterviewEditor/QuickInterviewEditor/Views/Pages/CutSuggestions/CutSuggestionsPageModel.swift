@@ -233,7 +233,9 @@ final class CutSuggestionsPageModel: ViewModel {
       rows.append(.init(id: type.id, title: type.name, group: type.group, state: .none))
     }
     for candidate in currentSuggestions()
-    where !rows.contains(where: { $0.id == candidate.productType.rawValue }) {
+    where !candidate.isRejected
+      && !rows.contains(where: { $0.id == candidate.productType.rawValue })
+    {
       rows.append(
         .init(
           id: candidate.productType.rawValue,
@@ -281,7 +283,7 @@ final class CutSuggestionsPageModel: ViewModel {
     let document = run.currentDocument()
     var keys = document.suggestionStarts.groups.map(\.key)
     if let batch = document.suggestionBatch {
-      for candidate in document.cutSuggestions {
+      for candidate in document.cutSuggestions where !candidate.isRejected {
         if let key = reviewSequenceKey(candidate, batch: batch), !keys.contains(key) {
           keys.append(key)
         }
