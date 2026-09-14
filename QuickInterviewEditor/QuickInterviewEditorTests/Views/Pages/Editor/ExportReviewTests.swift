@@ -68,6 +68,19 @@ struct ExportReviewTests {
     #expect(model.showsConflictingNames)
     expectNoDifference(model.conflictingNames, ["ID 1.aiff"])
   }
+  @Test func conflictingNamesDeduplicateClipsRequestingTheSameName() async {
+    let model = withDependencies {
+      $0.exportCopy = .init(
+        listNames: { _ in [] },
+        copy: { _, _ in Issue.record("Review must precede copy") })
+    } operation: {
+      ExportReviewModel(
+        request: request([clip(1, name: "Same"), clip(2, name: "Same")]), scratchDirectory: nil)
+    }
+    _ = await model.copy(approved: nil)
+    #expect(model.showsConflictingNames)
+    expectNoDifference(model.conflictingNames, ["Same.aiff"])
+  }
   @Test func noConflictingNamesWhenEveryProposedNameMatchesTheRequest() async {
     let model = ExportReviewModel(request: request([clip(1, name: "ID 1")]), scratchDirectory: nil)
     #expect(!model.showsConflictingNames)
