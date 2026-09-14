@@ -33,6 +33,17 @@ final class ExportReviewModel: ViewModel, Identifiable {
   let title = "Review Export Filenames"
   let warning =
     "A file with this name already exists or is included twice. Check your clip names or starting numbers."
+  let conflictingNamesLabel = "Duplicate filenames:"
+  var conflictingNames: [String] {
+    var seen: Set<String> = []
+    return mappings.compactMap { mapping in
+      guard mapping.requestedName != mapping.proposedName,
+        seen.insert(mapping.requestedName).inserted
+      else { return nil }
+      return mapping.requestedName
+    }
+  }
+  var showsConflictingNames: Bool { !conflictingNames.isEmpty }
   let requestedLabel = "Clip filename"
   let proposedLabel = "Export filename"
   let reviewNamesLabel = "Review Names"
