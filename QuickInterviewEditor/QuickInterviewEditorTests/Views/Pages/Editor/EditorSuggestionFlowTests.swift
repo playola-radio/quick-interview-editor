@@ -83,15 +83,15 @@ struct EditorSuggestionFlowTests {
         model.cutSuggestions.rejectTapped(Fixtures.uuid(1))
         model.cutSuggestions.acceptTapped(Fixtures.uuid(3))
         model.cutSuggestions.acceptTapped(Fixtures.uuid(2))
-        expectNoDifference(model.slices.map(\.name), ["Spotlight 7", "Spotlight 8"])
+        expectNoDifference(model.slices.map(\.name), ["Spotlight 8", "Spotlight 7"])
         expectNoDifference(model.issuedSuggestionNumbers.map(\.number), [7, 8])
         await model.undoTapped()
         model.cutSuggestions.acceptTapped(Fixtures.uuid(2))
-        expectNoDifference(model.slices.map(\.name), ["Spotlight 7", "Spotlight 8"])
+        expectNoDifference(model.slices.map(\.name), ["Spotlight 8", "Spotlight 7"])
         expectNoDifference(model.issuedSuggestionNumbers.map(\.number), [7, 8])
         await model.deleteSlice(Fixtures.uuid(3))
         model.cutSuggestions.acceptTapped(Fixtures.uuid(4))
-        expectNoDifference(model.slices.map(\.name), ["Spotlight 8", "Spotlight 9"])
+        expectNoDifference(model.slices.map(\.name), ["Spotlight 9", "Spotlight 8"])
         expectNoDifference(model.issuedSuggestionNumbers.map(\.number), [7, 8, 9])
       }
     }

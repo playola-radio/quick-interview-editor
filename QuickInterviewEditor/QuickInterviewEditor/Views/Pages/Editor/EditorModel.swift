@@ -2223,8 +2223,9 @@ final class EditorModel: ViewModel {
     mutateDocument { doc in body(&doc.slices) }
   }
 
-  /// Accepts a cut suggestion in ONE document transaction: appends the accepted slice
-  /// (idempotently, by `Slice.id`) AND flips the suggestion to `.accepted` together, so the
+  /// Accepts a cut suggestion in ONE document transaction: inserts the accepted slice at the
+  /// top of the clips list (idempotently, by `Slice.id`) AND flips the suggestion to
+  /// `.accepted` together, so the
   /// pair moves as a unit — a single undo reverts both, and the transcript never shows the
   /// half-accepted state (a green slice beside its own amber pending band) that two separate
   /// mutations would leave between undos. The derived slice shares the suggestion's id, so
@@ -2243,7 +2244,7 @@ final class EditorModel: ViewModel {
       mutateDocument(
         selectionAfter: acceptedSelection, recordingPermanentReservations: reservations
       ) {
-        if $0.slices[id: id] == nil { $0.slices.append(nudged) }
+        if $0.slices[id: id] == nil { $0.slices.insert(nudged, at: 0) }
         $0.cutSuggestions[id: id] = validated.candidate
         $0.suggestionBatch = validated.batch
       }
