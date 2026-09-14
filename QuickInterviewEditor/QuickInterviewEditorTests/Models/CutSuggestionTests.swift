@@ -58,13 +58,6 @@ struct CutSuggestionTests {
     expectNoDifference(suggestion.isPending, false)
   }
 
-  @Test func rejectTransitionsPendingToRejected() {
-    var suggestion = Fixtures.cutSuggestion(id: Fixtures.uuid(1), status: .pending)
-    suggestion.reject()
-    expectNoDifference(suggestion.status, .rejected)
-    expectNoDifference(suggestion.isRejected, true)
-  }
-
   @Test func resetToPendingReturnsToPending() {
     var suggestion = Fixtures.cutSuggestion(id: Fixtures.uuid(1), status: .accepted)
     suggestion.resetToPending()

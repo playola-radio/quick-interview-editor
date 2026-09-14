@@ -151,7 +151,7 @@ final class SuggestionRunModel: ViewModel {
 
   func automaticSearchIfNeeded() async {
     guard canStart, automaticEnabled, currentDocument().cutSuggestions.isEmpty,
-      resolveAPIKey() != nil
+      currentDocument().suggestionBatch == nil, resolveAPIKey() != nil
     else { return }
     await startFresh(mode: .automatic)
   }
@@ -285,7 +285,9 @@ final class SuggestionRunModel: ViewModel {
       }
       let document = self.currentDocument()
       guard document.unfinishedSuggestionRun == nil,
-        mode != .automatic || (self.automaticEnabled && document.cutSuggestions.isEmpty)
+        mode != .automatic
+          || (self.automaticEnabled && document.cutSuggestions.isEmpty
+            && document.suggestionBatch == nil)
       else { throw CancellationError() }
       let extractionPromptVersion =
         switch self.options.promptVersion {

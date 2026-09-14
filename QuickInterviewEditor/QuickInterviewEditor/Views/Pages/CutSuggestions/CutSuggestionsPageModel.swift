@@ -37,7 +37,7 @@ final class CutSuggestionsPageModel: ViewModel {
   /// and flip the suggestion to `.accepted` in ONE undoable document transaction, so a single
   /// undo reverts both. Kept a closure so this model stays editor-agnostic.
   @ObservationIgnored var onAccept: (@MainActor (Slice, CutSuggestion.ID) -> Void)?
-  /// Asks the editor to flip a suggestion to `.rejected` in the document (undoably).
+  /// Asks the editor to remove a rejected suggestion from the document (undoably).
   @ObservationIgnored var onReject: (@MainActor (CutSuggestion.ID) -> Void)?
   /// Asks the editor to rename a suggestion in the document. Focus callbacks bracket the live
   /// changes so the editor can coalesce one typing session into one undoable action.
@@ -191,9 +191,19 @@ final class CutSuggestionsPageModel: ViewModel {
     }
   }
   var showsOrphanChoices: Bool { !orphanChoices.isEmpty }
-  /// The candidates to show, in ranked order, read from the editor's document.
+  /// The candidates to show, in ranked order, read from the editor's document. Rejecting now
+  /// removes a suggestion outright, but a sidecar written before that change may still hold
+  /// `.rejected` entries — filter them so they never resurface in the list.
   var suggestions: [CutSuggestion] {
     visibleSuggestions(currentSuggestions().ranked, selected: selectedTypeIDs)
+      .filter { !$0.isRejected }
+  }
+
+  /// Candidates that can still surface in the list — everything except the `.rejected` entries a
+  /// pre-removal sidecar may still hold. Empty-state checks read this so a legacy rejected-only
+  /// project reads as "nothing to review" instead of an unresolvable type-filter message.
+  private var liveSuggestions: [CutSuggestion] {
+    currentSuggestions().filter { !$0.isRejected }
   }
 
   /// The still-undecided candidates, in ranked order — the source of the amber clip
@@ -226,7 +236,9 @@ final class CutSuggestionsPageModel: ViewModel {
       rows.append(.init(id: type.id, title: type.name, group: type.group, state: .none))
     }
     for candidate in currentSuggestions()
-    where !rows.contains(where: { $0.id == candidate.productType.rawValue }) {
+    where !candidate.isRejected
+      && !rows.contains(where: { $0.id == candidate.productType.rawValue })
+    {
       rows.append(
         .init(
           id: candidate.productType.rawValue,
@@ -255,7 +267,7 @@ final class CutSuggestionsPageModel: ViewModel {
     if typeFilterRows.allSatisfy({ $0.state == .none }) { return .none }
     return typeFilterRows.allSatisfy({ $0.state == .all }) ? .all : .some
   }
-  var showsNoMatches: Bool { !currentSuggestions().isEmpty && suggestions.isEmpty }
+  var showsNoMatches: Bool { !liveSuggestions.isEmpty && suggestions.isEmpty }
 
   var futureStartRows: [SuggestionFutureStartRow] {
     let document = run.currentDocument()
@@ -274,7 +286,7 @@ final class CutSuggestionsPageModel: ViewModel {
     let document = run.currentDocument()
     var keys = document.suggestionStarts.groups.map(\.key)
     if let batch = document.suggestionBatch {
-      for candidate in document.cutSuggestions {
+      for candidate in document.cutSuggestions where !candidate.isRejected {
         if let key = reviewSequenceKey(candidate, batch: batch), !keys.contains(key) {
           keys.append(key)
         }
@@ -351,9 +363,9 @@ final class CutSuggestionsPageModel: ViewModel {
   var showsProgress: Bool { isSuggesting }
   /// The onboarding panel replaces the empty state when no key resolved and there's nothing
   /// to act on yet.
-  var showsOnboarding: Bool { !hasAPIKey && currentSuggestions().isEmpty && !isSuggesting }
+  var showsOnboarding: Bool { !hasAPIKey && liveSuggestions.isEmpty && !isSuggesting }
   var showsEmptyState: Bool {
-    hasAPIKey && currentSuggestions().isEmpty && !isSuggesting && errorMessage == nil
+    hasAPIKey && liveSuggestions.isEmpty && !isSuggesting && errorMessage == nil
   }
 
   // MARK: - User Actions

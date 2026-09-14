@@ -116,6 +116,30 @@ struct CutSuggestionPresentationTests {
     expectNoDifference(rows.map(\.id), [shorter.id, sameSpan.id, longer.id])
   }
 
+  @Test func acceptedRowsSinkBelowPendingRegardlessOfPosition() {
+    // The accepted row starts earliest, yet still sorts below every pending row.
+    let acceptedEarly = Fixtures.cutSuggestion(
+      id: Fixtures.uuid(1), startSample: 10_000, status: .accepted)
+    let pendingLate = Fixtures.cutSuggestion(
+      id: Fixtures.uuid(2), startSample: 88_200, status: .pending)
+    let pendingEarly = Fixtures.cutSuggestion(
+      id: Fixtures.uuid(3), startSample: 44_100, status: .pending)
+    let rows = suggestionRows(
+      from: [acceptedEarly, pendingLate, pendingEarly],
+      currentTranscriptHash: "h", currentFingerprint: "fp")
+    expectNoDifference(rows.map(\.id), [pendingEarly.id, pendingLate.id, acceptedEarly.id])
+  }
+
+  @Test func acceptedRowsKeepPositionOrderAmongThemselves() {
+    let acceptedLate = Fixtures.cutSuggestion(
+      id: Fixtures.uuid(1), startSample: 88_200, status: .accepted)
+    let acceptedEarly = Fixtures.cutSuggestion(
+      id: Fixtures.uuid(2), startSample: 44_100, status: .accepted)
+    let rows = suggestionRows(
+      from: [acceptedLate, acceptedEarly], currentTranscriptHash: "h", currentFingerprint: "fp")
+    expectNoDifference(rows.map(\.id), [acceptedEarly.id, acceptedLate.id])
+  }
+
   @Test func rowCarriesItsProductTypeLabel() {
     let spotlight = Fixtures.cutSuggestion(id: Fixtures.uuid(1), productType: .spotlight)
     let row = suggestionRow(spotlight, currentTranscriptHash: "h", currentFingerprint: "fp")

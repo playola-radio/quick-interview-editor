@@ -62,12 +62,6 @@ struct ProjectStateTests {
     expectNoDifference(state.cutSuggestions[id: Fixtures.uuid(2)]?.status, .pending)
   }
 
-  @Test func rejectSuggestionUpdatesStatus() {
-    var state = ProjectState(cutSuggestions: [Fixtures.cutSuggestion(id: Fixtures.uuid(1))])
-    state.rejectSuggestion(Fixtures.uuid(1))
-    expectNoDifference(state.cutSuggestions[id: Fixtures.uuid(1)]?.status, .rejected)
-  }
-
   @Test func acceptingUnknownIDIsANoOp() {
     var state = ProjectState(cutSuggestions: [Fixtures.cutSuggestion(id: Fixtures.uuid(1))])
     state.acceptSuggestion(Fixtures.uuid(99))

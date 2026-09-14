@@ -279,7 +279,7 @@ struct SuggestionReviewTests {
 
   @Test func groupFloorChangesOnlyFutureAcceptanceAndIsUndoable() async throws {
     let editor = try fixture()
-    editor.documentCutSuggestions[1].reject()
+    editor.documentCutSuggestions[1].status = .rejected
     let original = editor.documentState
     let model = SuggestionReviewModel(
       sequenceKey: try key(editor), currentDocument: { editor.documentState },
@@ -328,7 +328,7 @@ struct SuggestionReviewTests {
     expectNoDifference(editor.documentState, before)
     #expect(model.errorMessage != nil)
     editor.cutSuggestions.recoveryBlocksSuggestions = false
-    editor.documentCutSuggestions[0].reject()
+    editor.documentCutSuggestions[0].status = .rejected
     let rejected = editor.documentState
     model.applyFieldsTapped()
     expectNoDifference(editor.documentState, rejected)

@@ -335,7 +335,7 @@ struct DraftEditingTests {
     model.mutateDocument {
       switch reason {
       case "missing": $0.cutSuggestions.remove(id: candidate.id)
-      case "rejected": $0.cutSuggestions[id: candidate.id]?.reject()
+      case "rejected": $0.cutSuggestions[id: candidate.id]?.status = .rejected
       case "replaced": $0.cutSuggestions[id: candidate.id]?.wordIDs = [2, 3]
       case "source": $0.cutSuggestions[id: candidate.id]?.provenance.sourceFingerprint = "changed"
       default: $0.cutSuggestions[id: candidate.id]?.provenance.transcriptHash = "changed"
