@@ -50,6 +50,16 @@ struct OutputLatencyMathTests {
       0)
   }
 
+  @Test func presentationFramesClampsOverflowingLatencyToZero() {
+    expectNoDifference(
+      OutputLatencyMath.presentationFrames(
+        renderFrames: 1_000,
+        effectiveSeconds: .greatestFiniteMagnitude,
+        nativeSampleRate: 48_000,
+        rate: 1.0),
+      0)
+  }
+
   @Test func presentationFramesReturnsRenderFramesWhenNoDelay() {
     expectNoDifference(
       OutputLatencyMath.presentationFrames(

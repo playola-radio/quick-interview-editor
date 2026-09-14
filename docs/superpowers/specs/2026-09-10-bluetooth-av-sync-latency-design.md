@@ -176,7 +176,7 @@ Model owns all display text and derived values; the view holds no logic
 
 ## Data flow
 
-```
+```text
 outputPresentationLatency (auto, LivePlayerBox)
         +  manual[deviceUID]  (@Shared fileStorage, signed ms)
         =  effectiveSeconds (>= 0)

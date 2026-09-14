@@ -412,7 +412,7 @@ Expected: PASS.
 
 ```bash
 cd QuickInterviewEditor && make format-check && make lint
-git add QuickInterviewEditor/QuickInterviewEditor/Core/AudioOutputClient.swift QuickInterviewEditorTests/Core/AudioOutputClientTests.swift
+git add QuickInterviewEditor/QuickInterviewEditor/Core/AudioOutputClient.swift QuickInterviewEditor/QuickInterviewEditorTests/Core/AudioOutputClientTests.swift
 git commit -m "feat: AudioOutputClient dependency for default-output device identity + changes"
 ```
 

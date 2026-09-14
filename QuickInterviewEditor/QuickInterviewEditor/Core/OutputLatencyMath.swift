@@ -21,6 +21,9 @@ enum OutputLatencyMath {
     renderFrames: Int, effectiveSeconds: Double, nativeSampleRate: Double, rate: Double
   ) -> Int {
     let offset = effectiveSeconds * nativeSampleRate * rate
-    return max(0, Int((Double(renderFrames) - offset).rounded()))
+    let roundedFrames = (Double(renderFrames) - offset).rounded()
+    guard roundedFrames.isFinite, roundedFrames > 0 else { return 0 }
+    guard roundedFrames < Double(Int.max) else { return .max }
+    return Int(roundedFrames)
   }
 }
