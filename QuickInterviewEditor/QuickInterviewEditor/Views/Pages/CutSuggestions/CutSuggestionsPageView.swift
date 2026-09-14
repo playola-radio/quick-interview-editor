@@ -130,12 +130,14 @@ struct CutSuggestionsPageView: View {
   private var suggestionList: some View {
     ScrollViewReader { proxy in
       ScrollView {
-        VStack(alignment: .leading, spacing: 8) {
+        LazyVStack(alignment: .leading, spacing: 8) {
           ForEach(model.rows) { row in
             SuggestionCard(model: model, row: row).id(row.id)
           }
         }
+        .scrollTargetLayout()
       }
+      .scrollPosition(id: $model.scrollTopID)
       .onChange(of: model.sidebarReveal) { _, reveal in
         if case .suggestion(let id) = reveal?.objectID { proxy.scrollTo(id, anchor: .center) }
       }
