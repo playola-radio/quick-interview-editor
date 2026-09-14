@@ -67,6 +67,7 @@ struct SlicesPanelView: View {
           }
           .listStyle(.plain)
           .scrollContentBackground(.hidden)
+          .scrollPosition(id: $model.slicesScrollTopID)
           .animation(.default, value: model.visibleSliceRows.map(\.id))
           .onChange(of: model.sidebarReveal) { _, reveal in
             guard case .clip(let target) = reveal?.objectID else { return }

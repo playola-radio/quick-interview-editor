@@ -86,6 +86,9 @@ final class CutSuggestionsPageModel: ViewModel {
   }
 
   // MARK: - Properties
+  /// The suggestion list's top-visible row, remembered so switching away from and back to the tab
+  /// restores the scroll position for the current editor session.
+  var scrollTopID: CutSuggestion.ID?
   var orphanChoices: [SuggestionRecoveryOwner] = []
   var onOrphanSelected: @MainActor (SuggestionRecoveryOwner) async -> Void = { _ in }
   var onOrphanCancelled: @MainActor () -> Void = {}

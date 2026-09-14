@@ -410,6 +410,9 @@ final class EditorModel: ViewModel {
   /// Which pane the right column shows. The clips list and the cut-suggester share the
   /// column so accepting a suggestion visibly lands a clip in the Slices tab.
   var rightPanelTab: RightPanelTab = .slices
+  /// The Slices list's top-visible clip, remembered so switching away from and back to the tab
+  /// restores the scroll position for the current editor session.
+  var slicesScrollTopID: Slice.ID?
   /// The Slices panel's completion filter (All / In progress / Complete).
   var sliceFilter: SliceFilter = .all
   /// The number the next auto-named "Slice N" gets. Seeded in `init` from the loaded slices (so a
