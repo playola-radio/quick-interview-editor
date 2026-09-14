@@ -5,6 +5,18 @@ focus on changes that affect editing work rather than internal implementation.
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-09-14
+
+- New Playback Latency settings: correct the audio delay you hear on Bluetooth
+  headphones and speakers so the playhead lines up with the sound. The app
+  estimates the offset automatically and remembers a per-device adjustment you
+  can fine tune, and it now stops playback cleanly when the audio output changes.
+- Rejected cut suggestions now stay gone — dismissing a suggestion removes it
+  from the list instead of leaving it behind.
+- Accepted clips now move to the top of the slices panel and are revealed as
+  soon as you accept them.
+- The suggestions panel now remembers its scroll position.
+
 ## [2.2.0] - 2026-09-10
 
 - Edit words directly inside a clip: select and delete words from the transcript
