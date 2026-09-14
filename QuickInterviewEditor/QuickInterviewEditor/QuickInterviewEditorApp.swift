@@ -50,6 +50,7 @@ struct QuickInterviewEditorApp: App {
   @State private var settings = SettingsModel()
   @State private var suggestionSettings = SuggestionSettingsModel(isSettingsTab: true)
   @State private var clipSettings = ClipBoundarySettingsModel()
+  @State private var playbackLatencySettings = PlaybackLatencySettingsModel()
 
   var body: some Scene {
     DocumentGroup(
@@ -79,6 +80,8 @@ struct QuickInterviewEditorApp: App {
           .tabItem { Label(suggestionSettings.title, systemImage: "list.bullet.rectangle") }
         ClipBoundarySettingsView(model: clipSettings)
           .tabItem { Label("Editing", systemImage: "slider.horizontal.3") }
+        PlaybackLatencySettingsView(model: playbackLatencySettings)
+          .tabItem { Label("Playback Latency", systemImage: "wave.3.right") }
       }
       .preferredColorScheme(.dark)
     }

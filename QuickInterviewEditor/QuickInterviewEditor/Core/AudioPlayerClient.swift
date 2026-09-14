@@ -2,12 +2,39 @@ import AVFoundation
 import Dependencies
 import Foundation
 import IssueReporting
+import Sharing
 
 /// Identifies one continuous playback so a stale/superseded tick can never be mistaken for
 /// the current one. A fresh id is minted per `play`.
 struct PlaybackSessionID: Hashable, Sendable {
   var rawValue: UUID
   init(rawValue: UUID = UUID()) { self.rawValue = rawValue }
+}
+
+struct AudioPlaybackObservation: Equatable, Sendable {
+  var session: PlaybackSessionID?
+  var generation: Int
+}
+
+enum AudioPlaybackRouteChangeGate {
+  static func shouldStopPlayback(
+    observed: AudioPlaybackObservation, current: AudioPlaybackObservation
+  ) -> Bool {
+    observed.session != nil && observed == current
+  }
+}
+
+private final class AudioPlaybackObservationBox: @unchecked Sendable {
+  private let lock = NSLock()
+  private var observation = AudioPlaybackObservation(session: nil, generation: 0)
+
+  func current() -> AudioPlaybackObservation {
+    lock.withLock { observation }
+  }
+
+  func set(_ observation: AudioPlaybackObservation) {
+    lock.withLock { self.observation = observation }
+  }
 }
 
 /// Why a `play` call returned. `finished` = the segment played to its end (the caller may
@@ -94,7 +121,13 @@ enum PlaybackSample: Sendable, Equatable {
 /// lands in an unambiguous coordinate system (the native-frame conversion is internal).
 struct PlaybackPosition: Sendable, Equatable {
   var sessionID: PlaybackSessionID
-  var sample: PlaybackSample
+  /// The raw engine render position (frames actually rendered). Kept for debugging/tests and any
+  /// future consumer that needs the true render point rather than the audible one.
+  var renderSample: PlaybackSample
+  /// The latency-compensated position representing audio reaching the user's ears. This is what
+  /// the playhead, paused cursor, and transcript follow use. Equals `renderSample` when no
+  /// compensation applies (0 delay). See `OutputLatencyMath`.
+  var presentationSample: PlaybackSample
   var isPlaying: Bool
 }
 
@@ -145,7 +178,11 @@ extension AudioPlayerClient {
   /// AVFoundation range playback via a shared engine + player node. Not unit
   /// tested (real audio hardware); covered by manual verification.
   static func live() -> AudioPlayerClient {
-    let box = LivePlayerBox()
+    @Dependency(\.audioOutput) var audioOutput
+    @Shared(.outputLatencyOffsets) var offsets
+    @Shared(.outputLatencyEstimates) var estimates
+    let box = LivePlayerBox(
+      audioOutput: audioOutput, offsets: $offsets, estimates: $estimates)
     return AudioPlayerClient(
       play: { url, range, sampleRate, rate, session in
         try await box.play(
@@ -219,6 +256,36 @@ private actor LivePlayerBox {
   /// `pause`/`resume`/`stop` so a stale session's call is a no-op.
   private var currentSession: PlaybackSessionID?
 
+  private let audioOutput: AudioOutputClient
+  private let offsets: Shared<[String: Double]>
+  private let estimates: Shared<[String: Double]>
+  /// The file's native sample rate for the current playback, used to convert the latency delay
+  /// (wall-clock output seconds) into input frames. Set at the top of `play`/`playEdited`.
+  private var nativeSampleRate: Double = 44_100
+  /// The automatic latency estimate (seconds) read from the node after the engine starts.
+  private var automaticLatencySeconds: Double = 0
+  /// The current default output device's UID (for the manual-offset lookup), refreshed on play
+  /// start and on a device-change event.
+  private var currentDeviceUID: String?
+  private var routeChangeTask: Task<Void, Never>?
+  private var configChangeObserver: (any NSObjectProtocol)?
+  private let playbackObservation = AudioPlaybackObservationBox()
+
+  init(
+    audioOutput: AudioOutputClient,
+    offsets: Shared<[String: Double]>,
+    estimates: Shared<[String: Double]>
+  ) {
+    self.audioOutput = audioOutput
+    self.offsets = offsets
+    self.estimates = estimates
+    // `init` is nonisolated; hop onto the actor to start observing (the guard keeps it idempotent).
+    Task { [weak self] in
+      await self?.startObservingRouteChanges()
+      await self?.startObservingConfigurationChanges()
+    }
+  }
+
   func addPositionContinuation(
     id: UUID, _ continuation: AsyncStream<PlaybackPosition>.Continuation
   ) {
@@ -261,8 +328,10 @@ private actor LivePlayerBox {
     // tab's playhead before B's first position arrives. The new ticking task emits shortly.
     supersede(broadcastStop: false)
     currentSession = session
+    updatePlaybackObservation()
     startPlanSample = max(0, range.lowerBound)
     playRatio = ratio
+    nativeSampleRate = nativeRate
     positionCeiling = max(0, range.upperBound)
     if node.engine == nil { engine.attach(node) }
     if timePitch.engine == nil { engine.attach(timePitch) }
@@ -273,6 +342,7 @@ private actor LivePlayerBox {
     // Set the speed before starting so the first buffers already play at the intended rate.
     timePitch.rate = Float(currentRate)
     try engine.start()
+    refreshOutputLatency()
 
     let myGeneration = generation
     // `.dataPlayedBack` fires when the audio has actually been played through the
@@ -327,8 +397,10 @@ private actor LivePlayerBox {
 
     supersede(broadcastStop: false)
     currentSession = session
+    updatePlaybackObservation()
     startPlanSample = 0
     playRatio = ratio
+    nativeSampleRate = format.sampleRate
     // The cursor table is built from the RESOLVED entries — the frame counts that truly
     // reach the node — never from a second rounding of the plan. A clamped or dropped
     // item would otherwise leave every later entry's frame offset ahead of the audio.
@@ -355,6 +427,7 @@ private actor LivePlayerBox {
     engine.connect(timePitch, to: engine.mainMixerNode, format: format)
     timePitch.rate = Float(currentRate)
     try engine.start()
+    refreshOutputLatency()
 
     schedule(scheduledEntries, from: file)
     node.play()
@@ -528,7 +601,8 @@ private actor LivePlayerBox {
     if let nodeTime = node.lastRenderTime,
       let playerTime = node.playerTime(forNodeTime: nodeTime)
     {
-      restingSample = positionSample(forFramesPlayed: Int(max(0, playerTime.sampleTime)))
+      restingSample = positionSample(
+        forFramesPlayed: presentationFrames(for: Int(max(0, playerTime.sampleTime))))
     } else {
       restingSample = positionSample(forFramesPlayed: 0)
     }
@@ -565,6 +639,9 @@ private actor LivePlayerBox {
   func setRate(_ rate: Double) {
     currentRate = Self.clampedRate(rate)
     timePitch.rate = Float(currentRate)
+    // Spec §1: re-read the output-latency estimate on a rate change. Guard on `isPlaying` so a
+    // rate set while stopped doesn't publish a latency read from an idle engine.
+    if node.isPlaying { refreshOutputLatency() }
   }
 
   /// Clamps a requested speed to a hardware-safe range as a defensive backstop; the app's 0.5–3.0
@@ -585,6 +662,7 @@ private actor LivePlayerBox {
     stopTicking(broadcastStop: broadcastStop)
     stopNode()
     currentSession = nil
+    updatePlaybackObservation()
     waiter?.resume(returning: reason)
   }
 
@@ -594,7 +672,13 @@ private actor LivePlayerBox {
     stopTicking()
     stopNode()
     currentSession = nil
+    updatePlaybackObservation()
     waiter.resume(returning: .finished)
+  }
+
+  private func updatePlaybackObservation() {
+    playbackObservation.set(
+      AudioPlaybackObservation(session: currentSession, generation: generation))
   }
 
   /// Polls the node's render position ~30 Hz and yields plan-sample positions.
@@ -615,9 +699,10 @@ private actor LivePlayerBox {
     tickTask?.cancel()
     tickTask = nil
     if broadcastStop, let session = currentSession {
+      let zero = positionSample(forFramesPlayed: 0)
       broadcast(
         PlaybackPosition(
-          sessionID: session, sample: positionSample(forFramesPlayed: 0), isPlaying: false))
+          sessionID: session, renderSample: zero, presentationSample: zero, isPlaying: false))
     }
   }
 
@@ -633,8 +718,83 @@ private actor LivePlayerBox {
       let playerTime = node.playerTime(forNodeTime: nodeTime)
     else { return }
     let framesPlayed = Int(max(0, playerTime.sampleTime))
-    let sample = positionSample(forFramesPlayed: framesPlayed)
-    broadcast(PlaybackPosition(sessionID: session, sample: sample, isPlaying: true))
+    let renderSample = positionSample(forFramesPlayed: framesPlayed)
+    let presentationSample = positionSample(forFramesPlayed: presentationFrames(for: framesPlayed))
+    broadcast(
+      PlaybackPosition(
+        sessionID: session, renderSample: renderSample,
+        presentationSample: presentationSample, isPlaying: true))
+  }
+
+  /// The audible (latency-compensated) input-frame count for a render-frame count, using the
+  /// cached device estimate + this device's stored manual offset at the current rate.
+  private func presentationFrames(for renderFrames: Int) -> Int {
+    let manual = OutputLatencyOffsets.offsetSeconds(for: currentDeviceUID, in: offsets.wrappedValue)
+    let effective = OutputLatencyMath.effectiveSeconds(
+      automatic: automaticLatencySeconds, manual: manual)
+    return OutputLatencyMath.presentationFrames(
+      renderFrames: renderFrames, effectiveSeconds: effective,
+      nativeSampleRate: nativeSampleRate, rate: currentRate)
+  }
+
+  /// Reads the current output device and the node's downstream presentation latency, caches them
+  /// for the offset math, and publishes the estimate for Settings. Call after `engine.start()`.
+  private func refreshOutputLatency() {
+    let device = audioOutput.current()
+    currentDeviceUID = device?.uid
+    automaticLatencySeconds = max(0, node.outputPresentationLatency)
+    if let uid = device?.uid {
+      estimates.withLock { $0[uid] = automaticLatencySeconds }
+    }
+  }
+
+  private func startObservingRouteChanges() {
+    guard routeChangeTask == nil else { return }
+    routeChangeTask = Task { [weak self] in
+      guard let self else { return }
+      for await _ in self.audioOutput.changes() {
+        let observation = self.playbackObservation.current()
+        await self.handleOutputDeviceChanged(observed: observation)
+      }
+    }
+  }
+
+  private func handleOutputDeviceChanged(observed observation: AudioPlaybackObservation) {
+    // A default-output change tears down/retunes the engine graph; don't pair the new device with
+    // the old graph's latency. Stop cleanly (a normal `.stopped`) — v1 requires pressing Play again
+    // — then refresh identity for the next play.
+    stopPlaybackForRouteOrConfigurationChange(observed: observation)
+    currentDeviceUID = audioOutput.current()?.uid
+  }
+
+  private func startObservingConfigurationChanges() {
+    guard configChangeObserver == nil else { return }
+    configChangeObserver = NotificationCenter.default.addObserver(
+      forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil
+    ) { [weak self] _ in
+      let observation = self?.playbackObservation.current()
+      // The notification can fire on any thread; hop onto the actor to touch its state.
+      Task { [weak self] in
+        if let observation { await self?.handleConfigurationChanged(observed: observation) }
+      }
+    }
+  }
+
+  private func handleConfigurationChanged(observed observation: AudioPlaybackObservation) {
+    // A configuration change tears down/retunes the engine graph even when the default output UID is
+    // unchanged; the old graph's latency no longer applies. Stop cleanly (a normal `.stopped`) — v1
+    // requires pressing Play again — so playback can't wedge, then refresh identity for the next play.
+    stopPlaybackForRouteOrConfigurationChange(observed: observation)
+    currentDeviceUID = audioOutput.current()?.uid
+  }
+
+  private func stopPlaybackForRouteOrConfigurationChange(
+    observed observation: AudioPlaybackObservation
+  ) {
+    let current = AudioPlaybackObservation(session: currentSession, generation: generation)
+    if AudioPlaybackRouteChangeGate.shouldStopPlayback(observed: observation, current: current) {
+      supersede(reason: .stopped)
+    }
   }
 
   /// Converts the node's played input-frame count to the reported axis-tagged sample: an EDITED
