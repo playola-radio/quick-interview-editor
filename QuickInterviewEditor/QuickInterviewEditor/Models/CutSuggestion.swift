@@ -54,7 +54,6 @@ extension CutSuggestion {
   var isRejected: Bool { status == .rejected }
 
   mutating func accept() { status = .accepted }
-  mutating func reject() { status = .rejected }
   mutating func resetToPending() { status = .pending }
 }
 

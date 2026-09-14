@@ -173,7 +173,8 @@ final class EditorModel: ViewModel {
 
   /// Wires the cut-suggestions panel's intents to the document. The document owns the candidates
   /// (`currentSuggestions` reads them here so the panel stays in step with undo/redo and background
-  /// passes); accept/reject flip status undoably through `mutateDocument`, while a completed
+  /// passes); accepting flips status and rejecting removes the candidate, both undoably through
+  /// `mutateDocument`, while a completed
   /// analysis run stores its candidates non-undoably (a background pass must not fill the undo
   /// stack). Accepting also lands the derived slice, idempotently, through the same funnel.
   private func wireCutSuggestions() {
@@ -200,7 +201,11 @@ final class EditorModel: ViewModel {
     }
     cutSuggestions.onReject = { [weak self] id in
       guard let self, !self.cutSuggestions.candidateActionsDisabled else { return }
-      self.mutateDocument { $0.cutSuggestions[id: id]?.reject() }
+      // Rejecting removes the candidate; if it was the selected object, clear the selection in
+      // the same transaction so undo restores both — mirroring "Delete Suggestion".
+      let selectionAfter: EditorSelection? =
+        self.selection == .object(.suggestion(id)) ? EditorSelection.none : nil
+      self.mutateDocument(selectionAfter: selectionAfter) { $0.cutSuggestions[id: id] = nil }
     }
     cutSuggestions.onTitleEditingBegan = { [weak self] id in
       self?.cutSuggestionTitleEditingBegan(id)
@@ -2041,7 +2046,7 @@ final class EditorModel: ViewModel {
   /// changed the document, records the change on the undo stack and emits the new document
   /// through `onDocumentStateChanged` — the one dirtiness signal, which the owning tab wires
   /// to persistence. A no-op body (or one that leaves the document unchanged, e.g. rejecting
-  /// an already-rejected suggestion) returns early: no undo entry, and the dirtiness signal
+  /// an already-removed suggestion) returns early: no undo entry, and the dirtiness signal
   /// stays honest so a clean document is never marked dirty. A `recordUndo: false` change is
   /// rebased into the existing history (see `UndoStack.rebase`) so undoing an older edit can't
   /// rewind past it and drop it. Restoring history via `undoTapped`/`redoTapped` deliberately

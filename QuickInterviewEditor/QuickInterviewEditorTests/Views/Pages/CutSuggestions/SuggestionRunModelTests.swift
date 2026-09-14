@@ -610,6 +610,28 @@ struct SuggestionRunModelTests {
     }
   }
 
+  @Test func reopeningDoesNotAutoSearchAfterEverySuggestionWasRemoved() async {
+    await withMainSerialExecutor {
+      let fixture = SuggestionRunFixture()
+      await withDependencies {
+        fixture.install(&$0)
+      } operation: {
+        let model = fixture.model()
+        let task = Task { await model.automaticSearchIfNeeded() }
+        await fixture.waitForRequests()
+        fixture.finish([fixture.candidate()])
+        await task.value
+        expectNoDifference(fixture.state.value.requests.count, 1)
+        #expect(fixture.document.value.suggestionBatch != nil)
+
+        fixture.document.withValue { $0.cutSuggestions = [] }
+        let reopened = fixture.model()
+        await reopened.automaticSearchIfNeeded()
+        expectNoDifference(fixture.state.value.requests.count, 1)
+      }
+    }
+  }
+
   @Test func streamEndingWithoutCompletionIsVisibleAndDiagnosticSurvives() async throws {
     try await withMainSerialExecutor {
       let fixture = SuggestionRunFixture()

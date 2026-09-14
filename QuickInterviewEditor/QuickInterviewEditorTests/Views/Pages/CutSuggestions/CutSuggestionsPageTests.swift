@@ -206,7 +206,7 @@ struct CutSuggestionsPageTests {
   ) {
     model.currentSuggestions = { store.value }
     model.onAccept = { _, id in store.withValue { $0[id: id]?.accept() } }
-    model.onReject = { id in store.withValue { $0[id: id]?.reject() } }
+    model.onReject = { id in store.withValue { $0[id: id] = nil } }
     model.onTitleChanged = { id, title in store.withValue { $0[id: id]?.title = title } }
   }
 
@@ -425,7 +425,7 @@ struct CutSuggestionsPageTests {
     expectNoDifference(store.value[id: suggestion.id]?.status, .pending)
   }
 
-  @Test func rejectTappedMarksTheSuggestionRejected() {
+  @Test func rejectTappedRemovesTheSuggestion() {
     let fingerprint = "fp-reject"
     let plan = Fixtures.editPlan()
     let suggestion = Fixtures.cutSuggestion(id: Fixtures.uuid(1), wordIDs: [10, 11, 12])
@@ -439,7 +439,40 @@ struct CutSuggestionsPageTests {
       model.rejectTapped(suggestion.id)
     }
 
-    expectNoDifference(store.value[id: suggestion.id]?.status, .rejected)
+    expectNoDifference(store.value[id: suggestion.id], nil)
+  }
+
+  @Test func legacyRejectedSuggestionsDoNotAppearInTheList() {
+    let pending = Fixtures.cutSuggestion(id: Fixtures.uuid(1))
+    let rejected = Fixtures.cutSuggestion(id: Fixtures.uuid(2), status: .rejected)
+    let store = LockIsolated<IdentifiedArrayOf<CutSuggestion>>([pending, rejected])
+
+    withDependencies { _ in
+    } operation: {
+      let model = CutSuggestionsPageModel(
+        editPlan: Fixtures.editPlan(), sourceFingerprint: "fp-legacy")
+      wire(model, to: store)
+
+      expectNoDifference(model.rows.map(\.id), [pending.id])
+    }
+  }
+
+  @Test func legacyRejectedOnlySidecarShowsTheEmptyStateNotAnImpossibleFilter() {
+    let rejected = Fixtures.cutSuggestion(id: Fixtures.uuid(1), status: .rejected)
+    let store = LockIsolated<IdentifiedArrayOf<CutSuggestion>>([rejected])
+
+    withDependencies {
+      $0.keychain = .inMemory("sk-keychain")
+      $0.environment = .constant([:])
+    } operation: {
+      let model = CutSuggestionsPageModel(
+        editPlan: Fixtures.editPlan(), sourceFingerprint: "fp-legacy-empty")
+      wire(model, to: store)
+      model.viewAppeared()
+
+      expectNoDifference(model.showsNoMatches, false)
+      expectNoDifference(model.showsEmptyState, true)
+    }
   }
 
   // MARK: - Title editing

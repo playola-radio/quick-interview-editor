@@ -435,7 +435,7 @@ struct EditorSuggestionFlowTests {
     expectNoDifference(model.documentCutSuggestions[id: suggestion.id]?.id, suggestion.id)
   }
 
-  @Test func rejectingASuggestionFlipsStatusAndIsUndoable() async {
+  @Test func rejectingASuggestionRemovesItAndIsUndoable() async {
     let plan = Fixtures.editPlan()
     let model = editor(plan)
     let suggestion = freshSuggestion(Fixtures.uuid(1), plan: plan)
@@ -443,11 +443,28 @@ struct EditorSuggestionFlowTests {
 
     model.cutSuggestions.rejectTapped(suggestion.id)
 
-    expectNoDifference(model.documentCutSuggestions[id: suggestion.id]?.status, .rejected)
+    expectNoDifference(model.documentCutSuggestions[id: suggestion.id], nil)
     #expect(model.canUndo)
 
     await model.undoTapped()
     expectNoDifference(model.documentCutSuggestions[id: suggestion.id]?.status, .pending)
+  }
+
+  @Test func rejectingTheSelectedSuggestionClearsSelectionAndUndoRestoresBoth() async {
+    let plan = Fixtures.editPlan()
+    let model = editor(plan)
+    let suggestion = freshSuggestion(Fixtures.uuid(1), plan: plan)
+    model.mutateDocument(recordUndo: false) { $0.cutSuggestions = [suggestion] }
+    model.selection = .object(.suggestion(suggestion.id))
+
+    model.cutSuggestions.rejectTapped(suggestion.id)
+
+    expectNoDifference(model.documentCutSuggestions[id: suggestion.id], nil)
+    expectNoDifference(model.selection, EditorSelection.none)
+
+    await model.undoTapped()
+    expectNoDifference(model.documentCutSuggestions[id: suggestion.id]?.status, .pending)
+    expectNoDifference(model.selection, .object(.suggestion(suggestion.id)))
   }
 
   @Test func configuredAndLockedSuggestionsDoNotAllowInlineTitleEditing() throws {
@@ -665,7 +682,7 @@ struct EditorSuggestionFlowTests {
         await model.cutSuggestions.run.waitUntilStopped()
         await task.value
         model.cutSuggestions.rejectTapped(old.id)
-        expectNoDifference(model.documentCutSuggestions.first?.status, .rejected)
+        expectNoDifference(model.documentCutSuggestions[id: old.id], nil)
         let paused = model.cutSuggestions.run.phase
         model.cutSuggestions.run.phase = .needsNumbering(
           runID: Fixtures.uuid(500), message: "Choose a number")

@@ -81,17 +81,18 @@ struct SuggestionRow: Identifiable, Equatable, Sendable {
   var missingFieldsMessage: String?
 }
 
-/// Ranked suggestions flattened into one list ordered by position in the audio (earliest
-/// start first), so the list mirrors the transcript/waveform order rather than grouping by
-/// product type. `endSample` then `id` break ties for a deterministic ordering.
+/// Ranked suggestions flattened into one list: still-pending rows first, then accepted rows
+/// sunk to the bottom. Within each tier the order is position in the audio (earliest start
+/// first), so the list mirrors the transcript/waveform order rather than grouping by product
+/// type. `endSample` then `id` break ties for a deterministic ordering.
 func suggestionRows(
   from suggestions: [CutSuggestion], currentTranscriptHash: String, currentFingerprint: String,
   fieldNames: [String: String] = [:]
 ) -> [SuggestionRow] {
   suggestions
     .sorted {
-      ($0.startSample, $0.endSample, $0.id.uuidString)
-        < ($1.startSample, $1.endSample, $1.id.uuidString)
+      ($0.isPending ? 0 : 1, $0.startSample, $0.endSample, $0.id.uuidString)
+        < ($1.isPending ? 0 : 1, $1.startSample, $1.endSample, $1.id.uuidString)
     }
     .map {
       suggestionRow(
