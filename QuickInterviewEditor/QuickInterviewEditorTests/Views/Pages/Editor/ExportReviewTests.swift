@@ -55,6 +55,24 @@ struct ExportReviewTests {
     model.reviewNamesTapped()
     #expect(cancelled)
   }
+  @Test func conflictingNamesListTheRequestedNamesThatCollided() async {
+    let model = withDependencies {
+      $0.exportCopy = .init(
+        listNames: { _ in ["ID 1.aiff"] },
+        copy: { _, _ in Issue.record("Review must precede copy") })
+    } operation: {
+      ExportReviewModel(
+        request: request([clip(1, name: "ID 1"), clip(2, name: "ID 2")]), scratchDirectory: nil)
+    }
+    _ = await model.copy(approved: nil)
+    #expect(model.showsConflictingNames)
+    expectNoDifference(model.conflictingNames, ["ID 1.aiff"])
+  }
+  @Test func noConflictingNamesWhenEveryProposedNameMatchesTheRequest() async {
+    let model = ExportReviewModel(request: request([clip(1, name: "ID 1")]), scratchDirectory: nil)
+    #expect(!model.showsConflictingNames)
+    expectNoDifference(model.conflictingNames, [])
+  }
   private func clip(_ index: Int, name: String, generated: Bool = true) -> Slice {
     var slice = Slice(
       id: Fixtures.uuid(index), name: name, startSample: 0, endSample: 100, wordIDs: [], snippet: ""

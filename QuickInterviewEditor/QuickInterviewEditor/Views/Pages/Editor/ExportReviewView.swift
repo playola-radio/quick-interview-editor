@@ -7,6 +7,16 @@ struct ExportReviewView: View {
     VStack(alignment: .leading, spacing: 12) {
       Text(model.title).font(.title2)
       Text(model.warning).foregroundStyle(.orange)
+      if model.showsConflictingNames {
+        VStack(alignment: .leading, spacing: 2) {
+          Text(model.conflictingNamesLabel).font(.caption.weight(.semibold))
+          ForEach(model.conflictingNames, id: \.self) { name in
+            Text(name).font(.caption.monospaced())
+          }
+        }
+        .foregroundStyle(.orange)
+        .textSelection(.enabled)
+      }
       Text(model.helpText).foregroundStyle(.secondary)
       Text(model.progressLabel).font(.caption)
       if model.isCopying { ProgressView() }
