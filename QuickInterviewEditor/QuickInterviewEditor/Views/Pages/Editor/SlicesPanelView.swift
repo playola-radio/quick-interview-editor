@@ -72,8 +72,16 @@ struct SlicesPanelView: View {
             guard case .clip(let target) = reveal?.objectID else { return }
             withAnimation { proxy.scrollTo(target, anchor: .bottom) }
           }
+          // Any clip landing (accept, Mark as Clip, fine-tune) or reveal sets `sliceScrollTarget`.
+          // The `sidebarReveal` handler above only fires for the selected object, so while this
+          // panel is already mounted (e.g. `.both` mode) accepting a non-selected suggestion would
+          // otherwise leave the new clip off-screen. Watch the target directly to reveal it.
+          .onChange(of: model.sliceScrollTarget) { _, target in
+            guard let target else { return }
+            withAnimation { proxy.scrollTo(target, anchor: .bottom) }
+          }
           // A clip accepted from the Suggestions tab sets the target while this panel is
-          // unmounted, so `onChange` never sees it. Re-apply any pending target on appear so
+          // unmounted, so neither `onChange` sees it. Re-apply any pending target on appear so
           // switching to the Slices tab reveals the newly accepted clip.
           .onAppear {
             guard let target = model.sliceScrollTarget else { return }
