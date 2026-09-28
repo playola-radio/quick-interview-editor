@@ -128,14 +128,11 @@ enum ProjectPackage {
     // swiftlint:disable:next inclusive_language
     masteringStaged: [String: StagedMasteringArtifact] = [:], strictMissing: Bool = false
   ) throws -> FileWrapper {
-    var file = file
-    file.schemaVersion = ProjectFile.writtenSchemaVersion(for: file)
     audio.preferredFilename = "canonical.aiff"
     let audioDirWrapper = FileWrapper(directoryWithFileWrappers: ["canonical.aiff": audio])
     audioDirWrapper.preferredFilename = "audio"
 
     var children: [String: FileWrapper] = [
-      "project.json": try metadataWrapper(file),
       "plan.json": try metadataWrapper(plan),
       "audio": audioDirWrapper,
     ]
@@ -143,19 +140,28 @@ enum ProjectPackage {
       children["suggestion-recovery.json"] = FileWrapper(regularFileWithContents: recoveryArchive)
     }
     let root = FileWrapper(directoryWithFileWrappers: children)
-    let healed = try reconcileMastering(
+    var file = file
+    file.masteringRun = try reconcileMastering(
       in: root, run: file.masteringRun,
       staged: masteringStaged, strictMissing: strictMissing)
-    if healed != file.masteringRun {
-      var adjusted = file
-      adjusted.masteringRun = healed
-      adjusted.schemaVersion = ProjectFile.writtenSchemaVersion(for: adjusted)
-      let metadata = try metadataWrapper(adjusted)
-      metadata.preferredFilename = "project.json"
-      if let old = root.fileWrappers?["project.json"] { root.removeFileWrapper(old) }
-      root.addFileWrapper(metadata)
-    }
+    file.schemaVersion = ProjectFile.writtenSchemaVersion(for: file)
+    let metadata = try metadataWrapper(file)
+    metadata.preferredFilename = "project.json"
+    root.addFileWrapper(metadata)
     return root
+  }
+
+  static func replaceAudio(in root: FileWrapper, with audio: FileWrapper) {
+    audio.preferredFilename = "canonical.aiff"
+    if let directory = root.fileWrappers?["audio"], directory.isDirectory {
+      if let old = directory.fileWrappers?["canonical.aiff"] { directory.removeFileWrapper(old) }
+      directory.addFileWrapper(audio)
+    } else {
+      if let old = root.fileWrappers?["audio"] { root.removeFileWrapper(old) }
+      let directory = FileWrapper(directoryWithFileWrappers: ["canonical.aiff": audio])
+      directory.preferredFilename = "audio"
+      root.addFileWrapper(directory)
+    }
   }
 
   /// Rewrites `project.json` and `plan.json` inside an on-disk package's root wrapper and

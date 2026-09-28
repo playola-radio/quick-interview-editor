@@ -50,6 +50,14 @@ struct MasteringRun: Codable, Equatable, Sendable {
       })
   }
 
+  var isStructurallyValid: Bool {
+    var seenParts = Set<UUID>()
+    var seenPieces = Set<UUID>()
+    return parts.allSatisfy {
+      Self.validGeometry($0, seenParts: &seenParts, seenPieces: &seenPieces)
+    }
+  }
+
   func healed(available: [String: Int]) -> MasteringRun {
     var result = self
     var seen = Set<String>()
@@ -57,18 +65,8 @@ struct MasteringRun: Codable, Equatable, Sendable {
     var seenPieces = Set<UUID>()
     for partIndex in result.parts.indices {
       var part = result.parts[partIndex]
-      var end = 0
-      let validGeometry =
-        seenParts.insert(part.id).inserted
-        && part.frameCount > 0 && !part.pieces.isEmpty
-        && part.pieces.allSatisfy { piece in
-          guard seenPieces.insert(piece.id).inserted,
-            piece.frameCount > 0, piece.startFrame == end,
-            piece.frameCount <= part.frameCount - end
-          else { return false }
-          end += piece.frameCount
-          return true
-        } && end == part.frameCount
+      let validGeometry = Self.validGeometry(
+        part, seenParts: &seenParts, seenPieces: &seenPieces)
       part.prepared =
         validGeometry
         ? retained(
@@ -84,6 +82,23 @@ struct MasteringRun: Codable, Equatable, Sendable {
       result.parts[partIndex] = part
     }
     return result
+  }
+
+  private static func validGeometry(
+    _ part: MasteringPart, seenParts: inout Set<UUID>, seenPieces: inout Set<UUID>
+  ) -> Bool {
+    guard seenParts.insert(part.id).inserted, part.frameCount > 0, !part.pieces.isEmpty else {
+      return false
+    }
+    var end = 0
+    for piece in part.pieces {
+      guard seenPieces.insert(piece.id).inserted,
+        piece.frameCount > 0, piece.startFrame == end,
+        piece.frameCount <= part.frameCount - end
+      else { return false }
+      end += piece.frameCount
+    }
+    return end == part.frameCount
   }
 
   private func retained(

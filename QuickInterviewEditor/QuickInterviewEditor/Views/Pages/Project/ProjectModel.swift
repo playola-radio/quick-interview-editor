@@ -31,6 +31,8 @@ final class ProjectModel: ViewModel {
   @ObservationIgnored private var loadedAudio: CanonicalAudioSource?
   // swiftlint:disable:next inclusive_language
   @ObservationIgnored private var masteringStaged: [String: StagedMasteringArtifact]
+  // swiftlint:disable:next inclusive_language
+  private(set) var masteringStagingError: String?
   /// Session copies a re-transcribe has replaced. A save snapshot taken before the replacement
   /// commit may still point at one, so they are only deleted once the window closes.
   @ObservationIgnored private var retiredSessionAudio: [URL] = []
@@ -59,13 +61,16 @@ final class ProjectModel: ViewModel {
     sink: ProjectDocumentSink, saveStatus: SaveStatus = SaveStatus(), recoveryArchive: Data? = nil,
     recoveryInstanceID: UUID = UUID(),
     // swiftlint:disable:next inclusive_language
-    masteringStaged: [String: StagedMasteringArtifact] = [:]
+    masteringStaged: [String: StagedMasteringArtifact] = [:],
+    // swiftlint:disable:next inclusive_language
+    masteringStagingError: String? = nil
   ) {
     self.sink = sink
     self.file = file
     self.loadedPlan = plan
     self.loadedAudio = audio
     self.masteringStaged = masteringStaged
+    self.masteringStagingError = masteringStagingError
     self.packageURL = packageURL
     self.saveStatus = saveStatus
     self.recoveryArchive = recoveryArchive
@@ -88,6 +93,14 @@ final class ProjectModel: ViewModel {
   // swiftlint:disable:next inclusive_language
   var masteringRun: MasteringRun? { file?.masteringRun }
 
+  // swiftlint:disable:next inclusive_language
+  func masteringArtifact(_ ref: MasteringArtifactRef) -> StagedMasteringArtifact? {
+    guard ref.isWellFormed, let owner = masteringStaged[ref.fileName],
+      (try? owner.url.resourceValues(forKeys: [.fileSizeKey]).fileSize) == ref.byteCount
+    else { return nil }
+    return owner
+  }
+
   @discardableResult
   // swiftlint:disable:next inclusive_language
   func commitMastering(
@@ -98,14 +111,20 @@ final class ProjectModel: ViewModel {
     let names = Set(run.referencedArtifacts.map(\.fileName))
     let retained = masteringStaged.filter { names.contains($0.key) }
       .merging(staged.filter { names.contains($0.key) }) { existing, _ in existing }
-    let available = retained.compactMapValues {
+    var available = retained.compactMapValues {
       try? $0.url.resourceValues(forKeys: [.fileSizeKey]).fileSize
     }
-    guard run.healed(available: available) == run else { return false }
+    for ref in file.masteringRun?.referencedArtifacts ?? [] where available[ref.fileName] == nil {
+      available[ref.fileName] = ref.byteCount
+    }
+    guard run.isStructurallyValid, run.healed(available: available) == run else { return false }
     file.masteringRun = run
     file.schemaVersion = ProjectFile.writtenSchemaVersion(for: file)
     self.file = file
     masteringStaged = retained
+    if run.referencedArtifacts.allSatisfy({ retained[$0.fileName] != nil }) {
+      masteringStagingError = nil
+    }
     sink.commitMastering(file, retained)
     sink.registerChange()
     return true

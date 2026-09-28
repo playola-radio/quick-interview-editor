@@ -20,14 +20,8 @@ private final class MasteringWrapperLease: Sendable {
 // swiftlint:disable:next inclusive_language
 private func retainMasteringSources(_ sources: [StagedMasteringArtifact], on wrapper: FileWrapper) {
   let key = Unmanaged.passUnretained(masteringWrapperLeaseKey).toOpaque()
-  let prior = (objc_getAssociatedObject(wrapper, key) as? MasteringWrapperLease)?.sources ?? []
-  var retained = prior
-  var identities = Set(prior.map(ObjectIdentifier.init))
-  for source in sources where identities.insert(ObjectIdentifier(source)).inserted {
-    retained.append(source)
-  }
   objc_setAssociatedObject(
-    wrapper, key, MasteringWrapperLease(sources: retained),
+    wrapper, key, MasteringWrapperLease(sources: sources),
     .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
 }
 
@@ -184,8 +178,6 @@ final class ProjectDocument: ReferenceFileDocument {
   {
     masteringWriteLock.lock()
     defer { masteringWriteLock.unlock() }
-    var snapshot = snapshot
-    snapshot.file.schemaVersion = ProjectFile.writtenSchemaVersion(for: snapshot.file)
     let audio: FileWrapper
     switch snapshot.audio {
     case .packageChild(let sessionCopy):
@@ -205,6 +197,15 @@ final class ProjectDocument: ReferenceFileDocument {
       audio = try sessionAudioWrapper(at: sessionCopy, source: snapshot.file.source)
     case .sessionFile(let url):
       audio = try sessionAudioWrapper(at: url, source: snapshot.file.source)
+      if let existingFile {
+        let wrapper = try ProjectPackage.rewriteMetadata(
+          in: existingFile, file: snapshot.file, plan: snapshot.plan,
+          recoveryArchive: snapshot.recoveryArchive, masteringStaged: snapshot.masteringStaged,
+          strictMissing: true)
+        ProjectPackage.replaceAudio(in: wrapper, with: audio)
+        retainMasteringSources(Array(snapshot.masteringStaged.values), on: wrapper)
+        return wrapper
+      }
     }
     let wrapper = try ProjectPackage.encode(
       file: snapshot.file, plan: snapshot.plan, audio: audio,
@@ -274,7 +275,9 @@ final class ProjectDocument: ReferenceFileDocument {
       guard content != nil else { return }
       content?.file = file
       content?.masteringStaged = staged
-      content?.masteringStagingError = nil
+      if file.masteringRun?.referencedArtifacts.allSatisfy({ staged[$0.fileName] != nil }) ?? true {
+        content?.masteringStagingError = nil
+      }
     }
   }
 

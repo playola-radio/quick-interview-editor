@@ -11,7 +11,9 @@ import UniformTypeIdentifiers
 /// seams the system hooks delegate to.
 @MainActor
 struct ProjectDocumentTests {
-  @Test func stagingFailureKeepsManifestAndRefusesIncompleteSaveAs() throws {
+  @Test
+  // swiftlint:disable:next function_body_length
+  func stagingFailureKeepsManifestAndRefusesIncompleteSaveAs() throws {
     let name = Fixtures.uuid(86).uuidString.lowercased() + ".wav"
     let audio = Data("canonical".utf8)
     var file = Fixtures.projectFile(source: Fixtures.projectSource(canonicalByteCount: audio.count))
@@ -58,6 +60,60 @@ struct ProjectDocumentTests {
     }
     let ordinary = try ProjectDocument.makeFileWrapper(snapshot: content, existingFile: root)
     expectNoDifference(try ProjectPackage.decode(ordinary).file.masteringRun, file.masteringRun)
+    let replacementAudio = Data("new canonical".utf8)
+    let replacementURL = try tempAudioFile(replacementAudio)
+    defer { try? FileManager.default.removeItem(at: replacementURL) }
+    content.file.source.canonicalByteCount = replacementAudio.count
+    content.audio = .sessionFile(replacementURL)
+    let retranscribed = try ProjectDocument.makeFileWrapper(snapshot: content, existingFile: root)
+    expectNoDifference(
+      try ProjectPackage.decode(retranscribed).file.masteringRun, file.masteringRun)
+    expectNoDifference(try writtenAudio(of: retranscribed), replacementAudio)
+  }
+
+  @Test func replacingRunReleasesStagedMediaAfterTheLastSaveLease() throws {
+    let audio = Data("canonical".utf8)
+    let file = Fixtures.projectFile(source: Fixtures.projectSource(canonicalByteCount: audio.count))
+    let root = try ProjectPackage.encode(
+      file: file, plan: Fixtures.editPlan(),
+      audio: FileWrapper(regularFileWithContents: audio))
+    let base = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: base) }
+    let name = Fixtures.uuid(111).uuidString.lowercased() + ".wav"
+    let source = base.appendingPathComponent("source.wav")
+    try Data("file".utf8).write(to: source)
+    var stagedURL: URL?
+    do {
+      let owner = try MasteringStagingStore.adopt(source, as: name, in: base)
+      stagedURL = owner.url
+      var withRun = file
+      withRun.masteringRun = MasteringRun(
+        id: Fixtures.uuid(112), artist: "Artist",
+        inputsDigest: "v1:x",
+        parts: [
+          MasteringPart(
+            id: Fixtures.uuid(113), frameCount: 10,
+            prepared: MasteringArtifactRef(fileName: name, byteCount: 4),
+            pieces: [
+              MasteringPiece(
+                id: Fixtures.uuid(114), sliceID: Fixtures.uuid(115), title: "Intro",
+                startFrame: 0, frameCount: 10, lrc: "", finished: nil)
+            ])
+        ])
+      let snapshot = ProjectDocument.Content(
+        file: withRun, plan: Fixtures.editPlan(),
+        audio: .packageChild(sessionCopy: nil), recoveryArchive: nil,
+        masteringStaged: [name: owner])
+      _ = try ProjectDocument.makeFileWrapper(snapshot: snapshot, existingFile: root)
+    }
+    let url = try #require(stagedURL)
+    expectNoDifference(FileManager.default.fileExists(atPath: url.path), true)
+    let cleared = ProjectDocument.Content(
+      file: file, plan: Fixtures.editPlan(),
+      audio: .packageChild(sessionCopy: nil), recoveryArchive: nil)
+    _ = try ProjectDocument.makeFileWrapper(snapshot: cleared, existingFile: root)
+    expectNoDifference(FileManager.default.fileExists(atPath: url.path), false)
   }
   // swiftlint:disable:next inclusive_language
   @Test func saveAsRetainsLoadedMasteringAfterSnapshotAndDocumentRelease() throws {

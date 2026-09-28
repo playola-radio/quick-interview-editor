@@ -11,6 +11,83 @@ import Testing
 
 @MainActor
 struct ProjectModelTests {
+  @Test func malformedPartTimingCannotBeCommitted() {
+    let run = MasteringRun(
+      id: Fixtures.uuid(123), artist: "Artist", inputsDigest: "v1:x",
+      parts: [
+        MasteringPart(
+          id: Fixtures.uuid(124), frameCount: 10, prepared: nil,
+          pieces: [
+            MasteringPiece(
+              id: Fixtures.uuid(125), sliceID: Fixtures.uuid(126), title: "Intro",
+              startFrame: 2, frameCount: 8, lrc: "", finished: nil)
+          ])
+      ])
+    let (sink, record) = ProjectDocumentSink.recorder()
+    let model = ProjectModel(
+      file: Fixtures.projectFile(), plan: Fixtures.editPlan(),
+      audio: .sessionFile(Fixtures.canonicalAudioURL), sink: sink)
+    expectNoDifference(model.commitMastering(run, staged: [:], expectedRunID: nil), false)
+    expectNoDifference(record.masteringCommits.count, 0)
+  }
+  @Test func updatedRunKeepsExistingPackageArtifactWhenItsStagingFailed() throws {
+    let prepared = MasteringArtifactRef(
+      fileName: Fixtures.uuid(116).uuidString.lowercased() + ".wav",
+      byteCount: 4)
+    let finished = MasteringArtifactRef(
+      fileName: Fixtures.uuid(117).uuidString.lowercased() + ".m4a",
+      byteCount: 4)
+    let piece = MasteringPiece(
+      id: Fixtures.uuid(118), sliceID: Fixtures.uuid(119), title: "Intro",
+      startFrame: 0, frameCount: 10, lrc: "", finished: nil)
+    let run = MasteringRun(
+      id: Fixtures.uuid(120), artist: "Artist", inputsDigest: "v1:x",
+      parts: [
+        MasteringPart(
+          id: Fixtures.uuid(121), frameCount: 10,
+          prepared: prepared, pieces: [piece])
+      ])
+    var file = Fixtures.projectFile()
+    file.masteringRun = run
+    let base = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: base) }
+    let source = base.appendingPathComponent("source.m4a")
+    try Data("file".utf8).write(to: source)
+    let owner = try MasteringStagingStore.adopt(source, as: finished.fileName, in: base)
+    var updated = run
+    updated.parts[0].pieces[0].finished = finished
+    let (sink, record) = ProjectDocumentSink.recorder()
+    let model = ProjectModel(
+      file: file, plan: Fixtures.editPlan(),
+      audio: .packageChild(sessionCopy: nil), sink: sink)
+    expectNoDifference(
+      model.commitMastering(
+        updated, staged: [finished.fileName: owner],
+        expectedRunID: run.id), true)
+    expectNoDifference(record.masteringCommits.last?.file.masteringRun, updated)
+    expectNoDifference(record.masteringCommits.last?.staged[prepared.fileName], nil)
+  }
+
+  @Test
+  // swiftlint:disable:next inclusive_language
+  func loadedArtifactIsAvailableToTheMasteringWorkflow() throws {
+    let name = Fixtures.uuid(122).uuidString.lowercased() + ".wav"
+    let ref = MasteringArtifactRef(fileName: name, byteCount: 4)
+    let base = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: base) }
+    let source = base.appendingPathComponent("source.wav")
+    try Data("file".utf8).write(to: source)
+    let owner = try MasteringStagingStore.adopt(source, as: name, in: base)
+    let (sink, _) = ProjectDocumentSink.recorder()
+    let model = ProjectModel(
+      file: Fixtures.projectFile(), plan: Fixtures.editPlan(),
+      audio: .sessionFile(Fixtures.canonicalAudioURL), sink: sink,
+      masteringStaged: [name: owner], masteringStagingError: "Copy failed")
+    #expect(model.masteringArtifact(ref) === owner)
+    expectNoDifference(model.masteringStagingError, "Copy failed")
+  }
   // swiftlint:disable:next inclusive_language
   @Test func importingADifferentSourceAfterFailureDoesNotCarryOldMastering() async throws {
     let canonical = try temporaryCanonicalAudio(bytes: 1234)

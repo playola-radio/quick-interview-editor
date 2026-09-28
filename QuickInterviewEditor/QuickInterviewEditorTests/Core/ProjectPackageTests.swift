@@ -107,15 +107,6 @@ struct ProjectPackageTests {
     let decoded = try ProjectPackage.decode(root)
     expectNoDifference(decoded.file.masteringRun?.parts[0].prepared, nil)
     expectNoDifference(decoded.file.masteringRun?.parts.count, 1)
-    var json = try #require(root.fileWrappers?["project.json"]?.regularFileContents)
-    json = Data(
-      (try #require(String(bytes: json, encoding: .utf8)))
-        .replacingOccurrences(of: "\"schemaVersion\":3", with: "\"schemaVersion\":4").utf8)
-    let project = FileWrapper(regularFileWithContents: json)
-    project.preferredFilename = "project.json"
-    if let old = root.fileWrappers?["project.json"] { root.removeFileWrapper(old) }
-    root.addFileWrapper(project)
-    #expect(throws: ProjectPackageError.unsupportedSchema(4)) { try ProjectPackage.decode(root) }
   }
 
   // swiftlint:disable:next inclusive_language

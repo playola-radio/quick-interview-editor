@@ -60,7 +60,7 @@ enum MasteringStagingStore {
     let dir = try makeWorkDirectory(in: base)
     do {
       let lock = dir.appendingPathComponent(".lease")
-      let descriptor = open(lock.path, O_CREAT | O_RDWR, 0o600)
+      let descriptor = open(lock.path, O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
       guard descriptor >= 0 else { throw CocoaError(.fileWriteUnknown) }
       guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else {
         close(descriptor)
