@@ -20,7 +20,8 @@ struct ProjectHostView: View {
     _model = State(
       initialValue: ProjectModel(
         file: content?.file, plan: content?.plan, audio: content?.audio, packageURL: fileURL,
-        sink: document.sink, recoveryArchive: content?.recoveryArchive))
+        sink: document.sink, recoveryArchive: content?.recoveryArchive,
+        masteringStaged: content?.masteringStaged ?? [:]))
   }
 
   var body: some View {

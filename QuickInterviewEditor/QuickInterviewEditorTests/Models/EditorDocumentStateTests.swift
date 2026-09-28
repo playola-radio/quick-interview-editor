@@ -6,6 +6,20 @@ import Testing
 @testable import PlayolaInterviewEditor
 
 struct EditorDocumentStateTests {
+  @Test func rekeyedPersistsLegacyIntroProvenanceBeforeDroppingSuggestions() {
+    let id = Fixtures.uuid(96)
+    var candidate = Fixtures.cutSuggestion(id: id)
+    candidate.productType = .intro
+    candidate.accept()
+    candidate.naming = SuggestionNamingRecord(
+      runID: Fixtures.uuid(97), typeID: "intro", typeName: "Intro", typeGroup: .songIntros,
+      discoveryLabel: "Intro", extractedValues: [:], missingFieldIDs: [],
+      correctedValues: [:], reservation: nil)
+    let state = EditorDocumentState(slices: [Fixtures.slice(id: id)], cutSuggestions: [candidate])
+    let rekeyed = state.rekeyed(to: Fixtures.editPlan())
+    expectNoDifference(rekeyed.slices[id: id]?.suggestionTypeID, "intro")
+    expectNoDifference(rekeyed.cutSuggestions, [])
+  }
   @Test func decodesLegacyShapeWithNewFieldDefaults() throws {
     let json = Data(#"{"slices":[],"timelineRemovals":[]}"#.utf8)
     let state = try JSONDecoder().decode(EditorDocumentState.self, from: json)
