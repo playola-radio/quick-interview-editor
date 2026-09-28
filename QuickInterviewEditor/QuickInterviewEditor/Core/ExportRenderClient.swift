@@ -96,56 +96,73 @@ enum ExportAudioRenderer {
   private static let chunkFrames = 1 << 16
 
   static func render(_ job: ExportRenderJob) throws {
-    let file = try AVAudioFile(forReading: job.canonicalAudioURL)
+    let file = try openCanonical(
+      job.canonicalAudioURL, sampleRate: job.sampleRate,
+      sourceDurationSamples: job.sourceDurationSamples)
+    // Preserve the canonical file's exact format for legacy AIFF export.
+    let output = try AVAudioFile(forWriting: job.outputURL, settings: file.fileFormat.settings)
+    _ = try renderEdited(
+      from: file, plan: job.plan, editedDurationSamples: job.editedDurationSamples,
+      sampleRate: job.sampleRate, emit: { try output.write(from: $0) })
+  }
+
+  static func openCanonical(
+    _ url: URL, sampleRate: Int, sourceDurationSamples: Int
+  ) throws -> AVAudioFile {
+    let file = try AVAudioFile(forReading: url)
     // Fail loud on a stale/swapped/wrong-rate file rather than exporting audio that
     // doesn't match the plan the user edited (mirrors the engine's run_render checks).
-    guard Int(file.length) == job.sourceDurationSamples else {
+    guard Int(file.length) == sourceDurationSamples else {
       throw ExportRenderError.frameCountMismatch(
-        actual: Int(file.length), expected: job.sourceDurationSamples)
+        actual: Int(file.length), expected: sourceDurationSamples)
     }
     let actualRate = Int(file.processingFormat.sampleRate.rounded())
-    guard actualRate == job.sampleRate else {
-      throw ExportRenderError.sampleRateMismatch(actual: actualRate, expected: job.sampleRate)
+    guard actualRate == sampleRate else {
+      throw ExportRenderError.sampleRateMismatch(actual: actualRate, expected: sampleRate)
     }
+    return file
+  }
 
-    // The slice keeps the canonical file's exact format (the analog of the Python
-    // slicer reusing the source COMM chunk); buffers move in the processing format.
-    let output = try AVAudioFile(forWriting: job.outputURL, settings: file.fileFormat.settings)
-
+  static func renderEdited(
+    from file: AVAudioFile, plan: AudioEditRenderPlan, editedDurationSamples: Int,
+    sampleRate: Int, emit: (AVAudioPCMBuffer) throws -> Void
+  ) throws -> Int {
     // A short declick ramp at the clip's own outer start/end — never at an internal seam,
     // which already gets its own crossfade. Same envelope live audition applies (locked
     // decision 1: one shared render path), so a hard cut at a clip boundary never clicks
     // whichever path the user hears it through.
     let declickCount = DeclickFade.frameCount(
-      totalFrames: job.editedDurationSamples, sampleRate: job.sampleRate)
+      totalFrames: editedDurationSamples, sampleRate: sampleRate)
 
     var framesWritten = 0
-    for item in job.plan.items {
+    for item in plan.items {
       try Task.checkCancellation()
       switch item {
       case .segment(let source, _):
         framesWritten += try writeSegment(
-          source, from: file, to: output, globalStart: framesWritten,
-          totalFrames: job.editedDurationSamples, fadeInCount: declickCount,
+          source, from: file, emit: emit, globalStart: framesWritten,
+          totalFrames: editedDurationSamples, fadeInCount: declickCount,
           fadeOutCount: declickCount)
       case .seam(_, let leftTail, let rightHead, _, _, let fadeOffset):
         framesWritten += try writeSeam(
           leftTail: leftTail, rightHead: rightHead, fadeOffset: fadeOffset,
-          from: file, to: output, globalStart: framesWritten,
-          totalFrames: job.editedDurationSamples, fadeInCount: declickCount,
+          from: file, emit: emit, globalStart: framesWritten,
+          totalFrames: editedDurationSamples, fadeInCount: declickCount,
           fadeOutCount: declickCount)
       }
     }
 
-    guard framesWritten == job.editedDurationSamples else {
+    guard framesWritten == editedDurationSamples else {
       throw ExportRenderError.shortRender(
-        written: framesWritten, expected: job.editedDurationSamples)
+        written: framesWritten, expected: editedDurationSamples)
     }
+    return framesWritten
   }
 
   // swiftlint:disable:next function_parameter_count
   private static func writeSegment(
-    _ source: Range<Int>, from file: AVAudioFile, to output: AVAudioFile,
+    _ source: Range<Int>, from file: AVAudioFile,
+    emit: (AVAudioPCMBuffer) throws -> Void,
     globalStart: Int, totalFrames: Int, fadeInCount: Int, fadeOutCount: Int
   ) throws -> Int {
     guard !source.isEmpty else { return 0 }
@@ -173,7 +190,7 @@ enum ExportAudioRenderer {
       applyDeclick(
         to: buffer, chunkStart: globalStart + written, totalFrames: totalFrames,
         fadeInCount: fadeInCount, fadeOutCount: fadeOutCount)
-      try output.write(from: buffer)
+      try emit(buffer)
       written += Int(buffer.frameLength)
       remaining -= Int(buffer.frameLength)
     }
@@ -220,7 +237,7 @@ enum ExportAudioRenderer {
   /// is the same continuation math a seek into a seam already uses.
   private static func writeSeam(
     leftTail: Range<Int>, rightHead: Range<Int>, fadeOffset: Int,
-    from file: AVAudioFile, to output: AVAudioFile,
+    from file: AVAudioFile, emit: (AVAudioPCMBuffer) throws -> Void,
     globalStart: Int, totalFrames: Int, fadeInCount: Int, fadeOutCount: Int
   ) throws -> Int {
     let length = leftTail.count
@@ -257,7 +274,7 @@ enum ExportAudioRenderer {
         let destination = channels[channel]
         for frame in 0..<chunkLength { destination[frame] = source[frame] }
       }
-      try output.write(from: buffer)
+      try emit(buffer)
       chunkStart += chunkLength
     }
     return length

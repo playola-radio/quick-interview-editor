@@ -6,7 +6,7 @@ import Foundation
 // unrecognized legacy keys — e.g. the top-level "warnings" array a sidecar persisted before the
 // tight-join concept was retired still carries — see `SliceLegacySidecarDecodingTests` for the
 // regression coverage.
-struct Slice: Identifiable, Equatable, Codable {
+struct Slice: Identifiable, Equatable, Codable, Sendable {
   var id: UUID
   var name: String
   var startSample: Int  // inclusive

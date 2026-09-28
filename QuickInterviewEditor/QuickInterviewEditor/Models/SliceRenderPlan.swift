@@ -19,6 +19,11 @@ struct SliceRenderPlan: Equatable {
 /// nothing to export.
 enum SliceRenderPlanBuilder {
 
+  static func hasAudio(sliceRange: Range<Int>, removals: [TimelineRemoval]) -> Bool {
+    !sliceRange.isEmpty
+      && localTimeline(sliceRange: sliceRange, removals: removals).editedDurationSamples > 0
+  }
+
   /// The slice-local timeline: removals clipped to `sliceRange` and rebased so source
   /// sample 0 is the slice's first sample. Crossfade lengths are passed through as
   /// stored — `EditedTimeline.init` owns all clamping.

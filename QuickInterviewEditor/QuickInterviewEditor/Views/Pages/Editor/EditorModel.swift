@@ -1272,9 +1272,8 @@ final class EditorModel: ViewModel {
     // range — this runs from `sliceRows` on every render, long before `renderTargets`
     // reaches its own `invalidSliceRange` check.
     guard slice.startSample < slice.endSample else { return false }
-    return SliceRenderPlanBuilder.localTimeline(
-      sliceRange: slice.startSample..<slice.endSample, removals: Array(timelineRemovals)
-    ).editedDurationSamples > 0
+    return SliceRenderPlanBuilder.hasAudio(
+      sliceRange: slice.startSample..<slice.endSample, removals: Array(timelineRemovals))
   }
 
   var exportStatusMessage: String {
