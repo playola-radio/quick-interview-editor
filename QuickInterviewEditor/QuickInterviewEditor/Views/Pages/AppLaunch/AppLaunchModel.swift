@@ -37,6 +37,7 @@ final class AppLaunchModel: ViewModel {
     // relaunch, relocation's second instance, a manual double-launch), and wiping the
     // shared cache would strand that instance's export mid-session.
     CanonicalAudioStore.reapStale()
+    MasteringStagingStore.reapStale()
     // Warm the engine-fingerprint memo off the main actor so the first import
     // doesn't stall on hashing the engine (notably the frozen binary in packaged builds).
     Task.detached(priority: .utility) { _ = EngineFingerprint.current() }
