@@ -71,6 +71,43 @@ struct ProjectModelTests {
 
   @Test
   // swiftlint:disable:next inclusive_language
+  func masteringCommitRejectsAReplacementWithTheSameArtifactName() throws {
+    let name = Fixtures.uuid(127).uuidString.lowercased() + ".wav"
+    let ref = MasteringArtifactRef(fileName: name, byteCount: 4)
+    let run = MasteringRun(
+      id: Fixtures.uuid(128), artist: "Artist", inputsDigest: "v1:x",
+      parts: [
+        MasteringPart(
+          id: Fixtures.uuid(129), frameCount: 4, prepared: ref,
+          pieces: [
+            MasteringPiece(
+              id: Fixtures.uuid(131), sliceID: Fixtures.uuid(132), title: "Intro",
+              startFrame: 0, frameCount: 4, lrc: "", finished: nil)
+          ])
+      ])
+    let base = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: base) }
+    let first = base.appendingPathComponent("first.wav")
+    let second = base.appendingPathComponent("second.wav")
+    try Data("one!".utf8).write(to: first)
+    try Data("two!".utf8).write(to: second)
+    let current = try MasteringStagingStore.adopt(first, as: name, in: base)
+    let replacement = try MasteringStagingStore.adopt(second, as: name, in: base)
+    var file = Fixtures.projectFile()
+    file.masteringRun = run
+    let (sink, record) = ProjectDocumentSink.recorder()
+    let model = ProjectModel(
+      file: file, plan: Fixtures.editPlan(), audio: .packageChild(sessionCopy: nil),
+      sink: sink, masteringStaged: [name: current])
+    expectNoDifference(
+      model.commitMastering(run, staged: [name: replacement], expectedRunID: run.id), false)
+    expectNoDifference(model.masteringArtifact(ref) === current, true)
+    expectNoDifference(record.masteringCommits.count, 0)
+  }
+
+  @Test
+  // swiftlint:disable:next inclusive_language
   func loadedArtifactIsAvailableToTheMasteringWorkflow() throws {
     let name = Fixtures.uuid(122).uuidString.lowercased() + ".wav"
     let ref = MasteringArtifactRef(fileName: name, byteCount: 4)
@@ -96,10 +133,18 @@ struct ProjectModelTests {
     file.masteringRun = MasteringRun(
       id: Fixtures.uuid(110), artist: "Artist",
       inputsDigest: "v1:x", parts: [])
+    let name = Fixtures.uuid(130).uuidString.lowercased() + ".wav"
+    let base = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: base) }
+    let source = base.appendingPathComponent("source.wav")
+    try Data("file".utf8).write(to: source)
+    let owner = try MasteringStagingStore.adopt(source, as: name, in: base)
     let (sink, record) = ProjectDocumentSink.recorder()
     let model = ProjectModel(
       file: file, plan: Fixtures.editPlan(),
-      audio: .sessionFile(Fixtures.canonicalAudioURL), sink: sink)
+      audio: .sessionFile(Fixtures.canonicalAudioURL), sink: sink,
+      masteringStaged: [name: owner])
     model.phase = .failed("Previous import failed")
     await withDependencies {
       $0.continuousClock = TestClock()
@@ -111,6 +156,7 @@ struct ProjectModelTests {
       await model.importAudioTapped(URL(fileURLWithPath: "/different-interview.m4a"))
     }
     expectNoDifference(record.commits.last?.file.masteringRun, nil)
+    expectNoDifference(record.masteringCommits.last?.staged.count, 0)
   }
   // swiftlint:disable:next inclusive_language
   @Test func masteringCommitRejectsStaleRunAndSurvivesEditorUndo() async throws {

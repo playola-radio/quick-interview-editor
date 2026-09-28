@@ -109,8 +109,14 @@ final class ProjectModel: ViewModel {
   ) -> Bool {
     guard var file, file.masteringRun?.id == expectedRunID else { return false }
     let names = Set(run.referencedArtifacts.map(\.fileName))
+    let incoming = staged.filter { names.contains($0.key) }
+    guard
+      incoming.allSatisfy({ name, owner in
+        masteringStaged[name].map { $0 === owner } ?? true
+      })
+    else { return false }
     let retained = masteringStaged.filter { names.contains($0.key) }
-      .merging(staged.filter { names.contains($0.key) }) { existing, _ in existing }
+      .merging(incoming) { existing, _ in existing }
     var available = retained.compactMapValues {
       try? $0.url.resourceValues(forKeys: [.fileSizeKey]).fileSize
     }
@@ -420,6 +426,7 @@ final class ProjectModel: ViewModel {
     }
   }
 
+  // swiftlint:disable:next function_body_length
   private func loadCompletedTranscription(
     _ result: TranscriptionResult, input: TranscriptionInput, sourceFingerprint: String,
     seed: DocumentSeed
@@ -469,6 +476,7 @@ final class ProjectModel: ViewModel {
     if file?.source.originalFingerprint == newSource.originalFingerprint {
       newFile.masteringRun = file?.masteringRun
     }
+    let dropsRun = file?.masteringRun != nil && newFile.masteringRun == nil
     newFile.schemaVersion = ProjectFile.writtenSchemaVersion(for: newFile)
     let replacedAudio = loadedAudio
     self.editor = editor
@@ -477,6 +485,11 @@ final class ProjectModel: ViewModel {
     loadedAudio = .sessionFile(result.canonicalAudioURL)
     wireEditor(editor)
     sink.commit(newFile, result.editPlan, .sessionFile(result.canonicalAudioURL))
+    if dropsRun {
+      masteringStaged = [:]
+      masteringStagingError = nil
+      sink.commitMastering(newFile, [:])
+    }
     // A completed transcription is the first thing worth keeping (spec A7): an untitled window
     // must go dirty here so closing it asks to save and autosave arms.
     sink.registerChange()

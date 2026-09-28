@@ -6,7 +6,7 @@ final class StagedMasteringArtifact: Sendable, Equatable {
   let url: URL
   private let leaseDescriptor: Int32
 
-  init(url: URL, leaseDescriptor: Int32) {
+  fileprivate init(url: URL, leaseDescriptor: Int32) {
     self.url = url
     self.leaseDescriptor = leaseDescriptor
   }
