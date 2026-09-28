@@ -4,11 +4,34 @@ import Foundation
 /// about a project except the audio and the engine's own `plan.json` (spec A2/A4).
 struct ProjectFile: Codable, Equatable, Sendable {
   static let currentSchemaVersion = 2
+  static let maximumReadableSchemaVersion = 3
 
   var schemaVersion: Int
   var source: ProjectSource
   var engine: ProjectEngineInfo
   var content: EditorDocumentState
+  // swiftlint:disable:next inclusive_language
+  var masteringRun: MasteringRun?
+
+  static func writtenSchemaVersion(for file: ProjectFile) -> Int {
+    file.masteringRun == nil ? currentSchemaVersion : maximumReadableSchemaVersion
+  }
+}
+
+extension ProjectFile {
+  enum CodingKeys: String, CodingKey {
+    // swiftlint:disable:next inclusive_language
+    case schemaVersion, source, engine, content, masteringRun
+  }
+
+  init(from decoder: any Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
+    source = try container.decode(ProjectSource.self, forKey: .source)
+    engine = try container.decode(ProjectEngineInfo.self, forKey: .engine)
+    content = try container.decode(EditorDocumentState.self, forKey: .content)
+    masteringRun = (try? container.decodeIfPresent(MasteringRun.self, forKey: .masteringRun)) ?? nil
+  }
 }
 
 /// Where the imported audio came from and how the bundled canonical AIFF is
