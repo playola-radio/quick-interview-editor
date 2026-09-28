@@ -2,6 +2,11 @@ import AVFoundation
 import CEbur128
 import Foundation
 
+/// libebur128's `ebur128_init` recomputes process-wide static constants on every
+/// call (see `Vendor/libebur128/ebur128/ebur128.c`), so concurrent init/measure
+/// calls across meter instances race. Serialize the whole lifecycle on this lock.
+private let ebur128Lock = NSLock()
+
 /// Owns one libebur128 state. Its caller keeps it on a single audio worker.
 final class LoudnessMeter {
   enum Mode { case integratedAndTruePeak, truePeakOnly }
@@ -14,14 +19,19 @@ final class LoudnessMeter {
     let flags =
       Int32(EBUR128_MODE_TRUE_PEAK.rawValue)
       | (mode == .integratedAndTruePeak ? Int32(EBUR128_MODE_I.rawValue) : 0)
-    guard let state = ebur128_init(UInt32(channels), UInt(sampleRate), flags) else {
-      throw MasteringPreparationError.meterUnavailable
-    }
+    ebur128Lock.lock()
+    let state = ebur128_init(UInt32(channels), UInt(sampleRate), flags)
+    ebur128Lock.unlock()
+    guard let state else { throw MasteringPreparationError.meterUnavailable }
     self.state = state
     self.channelCount = channels
   }
 
-  deinit { ebur128_destroy(&state) }
+  deinit {
+    ebur128Lock.lock()
+    ebur128_destroy(&state)
+    ebur128Lock.unlock()
+  }
 
   func add(_ buffer: AVAudioPCMBuffer) throws {
     guard Int(buffer.format.channelCount) == channelCount,
@@ -37,7 +47,10 @@ final class LoudnessMeter {
         interleaved[frame * channelCount + channel] = value
       }
     }
-    guard ebur128_add_frames_float(state, &interleaved, count) == EBUR128_SUCCESS.rawValue else {
+    ebur128Lock.lock()
+    let result = ebur128_add_frames_float(state, &interleaved, count)
+    ebur128Lock.unlock()
+    guard result == EBUR128_SUCCESS.rawValue else {
       throw MasteringPreparationError.meterUnavailable
     }
   }
@@ -45,7 +58,10 @@ final class LoudnessMeter {
   func integratedLUFS() throws -> Double {
     guard let state else { throw MasteringPreparationError.meterUnavailable }
     var value = 0.0
-    guard ebur128_loudness_global(state, &value) == EBUR128_SUCCESS.rawValue else {
+    ebur128Lock.lock()
+    let result = ebur128_loudness_global(state, &value)
+    ebur128Lock.unlock()
+    guard result == EBUR128_SUCCESS.rawValue else {
       throw MasteringPreparationError.meterUnavailable
     }
     return value
@@ -54,6 +70,8 @@ final class LoudnessMeter {
   func truePeakDBTP() throws -> Double {
     guard let state else { throw MasteringPreparationError.meterUnavailable }
     var peak = 0.0
+    ebur128Lock.lock()
+    defer { ebur128Lock.unlock() }
     for channel in 0..<channelCount {
       var value = 0.0
       guard ebur128_true_peak(state, UInt32(channel), &value) == EBUR128_SUCCESS.rawValue else {

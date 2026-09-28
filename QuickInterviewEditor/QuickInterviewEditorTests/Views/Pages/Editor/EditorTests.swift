@@ -1244,6 +1244,31 @@ struct EditorTests {
     expectNoDifference(model.exportPhase, .failed(model.canonicalMissingMessage))
   }
 
+  @Test func exportFailsClearlyWhenAWordHasAnInvalidStartTime() async throws {
+    // A corrupt or hand-edited plan word with neither a sample position nor a
+    // finite time must fail export up front, never reach the renderer.
+    var plan = Fixtures.editPlan()
+    let lastIndex = plan.words.count - 1
+    plan.words[lastIndex].startSample = nil
+    plan.words[lastIndex].start = .nan
+    let model = editor(plan)
+    addSlices(model, [(0, 1)])
+    model.destinationURL = try makeTempDir()
+    defer { try? FileManager.default.removeItem(at: model.destinationURL!) }
+
+    await withDependencies {
+      $0.exportRender.renderSlice = { _ in
+        Issue.record("export must not render when a word has an invalid start time")
+      }
+    } operation: {
+      model.exportAllTapped()
+      await model.exportTask?.value
+    }
+
+    expectNoDifference(
+      model.exportPhase, .failed(ExportRenderError.invalidWordStart.localizedDescription))
+  }
+
   @Test func awaitExportTeardownWaitsForTheInFlightRender() async throws {
     // A tab close / re-import must not delete the canonical AIFF mid-render. This proves the
     // teardown await only returns AFTER the render finishes, so the discard that follows it
