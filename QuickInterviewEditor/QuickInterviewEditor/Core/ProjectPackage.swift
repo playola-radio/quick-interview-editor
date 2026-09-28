@@ -16,7 +16,7 @@ enum ProjectPackageError: Error, Equatable, LocalizedError {
     case .missingPlanJSON: return "The project is missing its plan.json."
     case .missingAudio: return "The project is missing its bundled audio (audio/canonical.aiff)."
     case .unsupportedSchema(let version):
-      if version > ProjectFile.currentSchemaVersion {
+      if version > ProjectFile.maximumReadableSchemaVersion {
         return "This project (format \(version)) was saved by a newer version of the app."
       }
       return "This project uses an unsupported format version (\(version))."
@@ -32,7 +32,7 @@ enum ProjectPackageError: Error, Equatable, LocalizedError {
 
   var recoverySuggestion: String? {
     guard case .unsupportedSchema(let version) = self,
-      version > ProjectFile.currentSchemaVersion
+      version > ProjectFile.maximumReadableSchemaVersion
     else { return nil }
     return "Open this project with the version of the app that last saved it, or a newer version."
   }
@@ -93,10 +93,16 @@ enum ProjectPackage {
     // opaque `DecodingError`. Only versions in `1...current` are accepted; 0, negative,
     // and future versions are all refused (spec A8).
     let probe = try JSONDecoder().decode(SchemaProbe.self, from: projectData)
-    guard (1...ProjectFile.currentSchemaVersion).contains(probe.schemaVersion) else {
+    guard (1...ProjectFile.maximumReadableSchemaVersion).contains(probe.schemaVersion) else {
       throw ProjectPackageError.unsupportedSchema(probe.schemaVersion)
     }
-    let file = try projectDecoder().decode(ProjectFile.self, from: projectData)
+    var file = try projectDecoder().decode(ProjectFile.self, from: projectData)
+    if probe.schemaVersion < 3 {
+      file.masteringRun = nil
+    } else if let run = file.masteringRun {
+      let children = root.fileWrappers?["mastering"]?.fileWrappers ?? [:]
+      file.masteringRun = run.healed(available: children.compactMapValues(masteringSize))
+    }
 
     guard let planData = root.fileWrappers?["plan.json"]?.regularFileContents else {
       throw ProjectPackageError.missingPlanJSON
@@ -118,8 +124,12 @@ enum ProjectPackage {
   }
 
   static func encode(
-    file: ProjectFile, plan: EditPlan, audio: FileWrapper, recoveryArchive: Data? = nil
+    file: ProjectFile, plan: EditPlan, audio: FileWrapper, recoveryArchive: Data? = nil,
+    // swiftlint:disable:next inclusive_language
+    masteringStaged: [String: StagedMasteringArtifact] = [:], strictMissing: Bool = false
   ) throws -> FileWrapper {
+    var file = file
+    file.schemaVersion = ProjectFile.writtenSchemaVersion(for: file)
     audio.preferredFilename = "canonical.aiff"
     let audioDirWrapper = FileWrapper(directoryWithFileWrappers: ["canonical.aiff": audio])
     audioDirWrapper.preferredFilename = "audio"
@@ -132,7 +142,20 @@ enum ProjectPackage {
     if let recoveryArchive {
       children["suggestion-recovery.json"] = FileWrapper(regularFileWithContents: recoveryArchive)
     }
-    return FileWrapper(directoryWithFileWrappers: children)
+    let root = FileWrapper(directoryWithFileWrappers: children)
+    let healed = try reconcileMastering(
+      in: root, run: file.masteringRun,
+      staged: masteringStaged, strictMissing: strictMissing)
+    if healed != file.masteringRun {
+      var adjusted = file
+      adjusted.masteringRun = healed
+      adjusted.schemaVersion = ProjectFile.writtenSchemaVersion(for: adjusted)
+      let metadata = try metadataWrapper(adjusted)
+      metadata.preferredFilename = "project.json"
+      if let old = root.fileWrappers?["project.json"] { root.removeFileWrapper(old) }
+      root.addFileWrapper(metadata)
+    }
+    return root
   }
 
   /// Rewrites `project.json` and `plan.json` inside an on-disk package's root wrapper and
@@ -141,10 +164,17 @@ enum ProjectPackage {
   /// parent bookkeeping), and NSDocument sees it as unchanged so a save never re-copies the
   /// AIFF.
   static func rewriteMetadata(
-    in root: FileWrapper, file: ProjectFile, plan: EditPlan, recoveryArchive: Data? = nil
+    in root: FileWrapper, file: ProjectFile, plan: EditPlan, recoveryArchive: Data? = nil,
+    // swiftlint:disable:next inclusive_language
+    masteringStaged: [String: StagedMasteringArtifact] = [:], strictMissing: Bool = false
   ) throws
     -> FileWrapper
   {
+    var file = file
+    file.masteringRun = try reconcileMastering(
+      in: root, run: file.masteringRun,
+      staged: masteringStaged, strictMissing: strictMissing)
+    file.schemaVersion = ProjectFile.writtenSchemaVersion(for: file)
     let project = try metadataWrapper(file)
     let planWrapper = try metadataWrapper(plan)
     for name in ["project.json", "plan.json", "suggestion-recovery.json"] {
@@ -160,6 +190,76 @@ enum ProjectPackage {
       root.addFileWrapper(archive)
     }
     return root
+  }
+
+  // swiftlint:disable:next inclusive_language
+  enum MasteringReconcileError: Error, Equatable, LocalizedError {
+    case missingArtifact(String)
+
+    var errorDescription: String? {
+      switch self {
+      case .missingArtifact(let name):
+        return
+          "Couldn't copy the mastering file \(name) into this project. The original project is unchanged."
+      }
+    }
+  }
+
+  // swiftlint:disable:next inclusive_language
+  static func reconcileMastering(
+    in root: FileWrapper, run: MasteringRun?, staged: [String: StagedMasteringArtifact],
+    strictMissing: Bool = false
+  ) throws -> MasteringRun? {
+    let existingDirectory = root.fileWrappers?["mastering"]
+    let existing =
+      existingDirectory?.isDirectory == true ? existingDirectory?.fileWrappers ?? [:] : [:]
+    var available: [String: FileWrapper] = [:]
+    for ref in run?.referencedArtifacts ?? [] where ref.isWellFormed {
+      if let child = existing[ref.fileName], masteringSize(child) == ref.byteCount {
+        available[ref.fileName] = child
+      } else if let owner = staged[ref.fileName],
+        (try? owner.url.resourceValues(forKeys: [.fileSizeKey]).fileSize) == ref.byteCount
+      {
+        let wrapper = try FileWrapper(url: owner.url, options: [])
+        wrapper.preferredFilename = ref.fileName
+        available[ref.fileName] = wrapper
+      } else if strictMissing {
+        throw MasteringReconcileError.missingArtifact(ref.fileName)
+      }
+    }
+    let healed = run?.healed(available: available.compactMapValues(masteringSize))
+    let retainedNames = Set(healed?.referencedArtifacts.map(\.fileName) ?? [])
+    if retainedNames.isEmpty {
+      if let existingDirectory { root.removeFileWrapper(existingDirectory) }
+    } else if let existingDirectory, existingDirectory.isDirectory {
+      for (name, child) in existing
+      where !retainedNames.contains(name)
+        || available[name] !== child
+      {
+        existingDirectory.removeFileWrapper(child)
+      }
+      for (name, child) in available
+      where retainedNames.contains(name)
+        && existingDirectory.fileWrappers?[name] == nil
+      {
+        child.preferredFilename = name
+        existingDirectory.addFileWrapper(child)
+      }
+    } else {
+      if let existingDirectory { root.removeFileWrapper(existingDirectory) }
+      let wrappers = available.filter { retainedNames.contains($0.key) }
+      let directory = FileWrapper(directoryWithFileWrappers: wrappers)
+      directory.preferredFilename = "mastering"
+      root.addFileWrapper(directory)
+    }
+    return healed
+  }
+
+  // swiftlint:disable:next inclusive_language
+  static func masteringSize(_ wrapper: FileWrapper) -> Int? {
+    guard wrapper.isRegularFile, !wrapper.isSymbolicLink else { return nil }
+    return (wrapper.fileAttributes[FileAttributeKey.size.rawValue] as? NSNumber)?.intValue
+      ?? wrapper.regularFileContents?.count
   }
 
   private static func metadataWrapper(_ file: ProjectFile) throws -> FileWrapper {
