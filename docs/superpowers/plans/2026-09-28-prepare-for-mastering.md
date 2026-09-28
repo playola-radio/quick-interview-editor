@@ -694,7 +694,7 @@ Commands below run from `QuickInterviewEditor/`; the exact focused suites are li
 - Returned parts are excluded unless passed as a replace target.
 
 **C2. `inspect`.**
-- WAV, AIFF and FLAC fixtures (written with AVAudioFile, FLAC via `kAudioFormatFLAC`) all pass.
+- WAV and AIFF fixtures written natively, plus a tiny committed FLAC fixture generated once with a development encoder such as ffmpeg, all decode successfully. Record the FLAC fixture recipe; the app needs FLAC decoding, not FLAC encoding, and tests must not require an external encoder at runtime.
 - Renaming an m4a to `.wav` → `.unsupportedContainer`.
 - Random bytes → `.unreadable`.
 - 6-channel WAV → `.unsupportedChannelCount`.
