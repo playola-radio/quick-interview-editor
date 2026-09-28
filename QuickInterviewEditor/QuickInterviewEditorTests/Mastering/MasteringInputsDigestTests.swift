@@ -71,6 +71,26 @@ struct MasteringInputsDigestTests {
     expectNoDifference(result, .failure(.invalidTimeline))
   }
 
+  @Test func nonfiniteIntroCrossfadeCannotCrashDigestSerialization() {
+    var intro = Fixtures.slice(id: Fixtures.uuid(121), start: 0, end: 100)
+    intro.suggestionTypeID = "intro"
+    let removal = TimelineRemoval(
+      id: UUID(), removedRange: 20..<30,
+      crossfade: Crossfade(lengthSamples: 2, curveAmount: .nan))
+    let plan = EditPlan(
+      schemaVersion: 1,
+      source: EditPlan.Source(
+        path: "fixture", sampleRate: 48_000, channels: 1, durationSamples: 100),
+      words: [], silences: [], segments: [])
+    let document = EditorDocumentState(
+      slices: [intro], timelineRemovals: [removal], interviewArtist: "Artist")
+    let result = MasteringSnapshotBuilder.build(
+      document: document, plan: plan,
+      source: Fixtures.projectSource(sampleRate: 48_000, durationSamples: 100),
+      canonicalAudioURL: URL(fileURLWithPath: "/tmp/canonical.aiff"))
+    expectNoDifference(result, .failure(.invalidTimeline))
+  }
+
   @Test func digestIsStableAndTracksFrozenIntroInputs() throws {
     let source = ProjectSource(
       originalFileName: "source.aiff", originalPath: nil, originalFingerprint: "old",

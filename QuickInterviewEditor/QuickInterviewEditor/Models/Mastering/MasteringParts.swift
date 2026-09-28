@@ -39,8 +39,6 @@ enum MasteringLRC {
     wordStarts.compactMap { word -> String? in
       guard word.frame >= 0 else { return nil }
       let normalized = word.text.replacingOccurrences(of: "\r\n", with: "\n")
-        .replacingOccurrences(of: "\u{2028}", with: " ")
-        .replacingOccurrences(of: "\u{2029}", with: " ")
         .components(separatedBy: .newlines).joined(separator: " ")
         .trimmingCharacters(in: .whitespacesAndNewlines)
       guard !normalized.isEmpty else { return nil }

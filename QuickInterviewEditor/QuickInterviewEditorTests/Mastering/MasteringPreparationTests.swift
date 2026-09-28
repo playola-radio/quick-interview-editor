@@ -8,94 +8,64 @@ import Testing
 
 // swiftlint:disable:next inclusive_language
 struct MasteringPreparationTests {
-  private func fixture(directory: URL, amplitude: Float = 0.1) throws
-    -> MasteringPreparationRequest
-  {
+  private func fixture(
+    directory: URL, amplitude: Float = 0.1, sampleRate: Int = 48_000,
+    channels: Int = 1, transient: Bool = false
+  ) throws -> MasteringPreparationRequest {
     let source = directory.appendingPathComponent("source.aiff")
     let settings: [String: Any] = [
-      AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: 48_000.0,
-      AVNumberOfChannelsKey: 1, AVLinearPCMBitDepthKey: 16,
+      AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: Double(sampleRate),
+      AVNumberOfChannelsKey: channels, AVLinearPCMBitDepthKey: 16,
       AVLinearPCMIsBigEndianKey: true, AVLinearPCMIsFloatKey: false,
     ]
     do {
       let file = try AVAudioFile(forWriting: source, settings: settings)
       let buffer = try #require(
         AVAudioPCMBuffer(
-          pcmFormat: file.processingFormat, frameCapacity: 48_000))
-      buffer.frameLength = 48_000
-      let channel = try #require(buffer.floatChannelData)[0]
-      for frame in 0..<48_000 {
-        channel[frame] = amplitude * sin(2 * Float.pi * 997 * Float(frame) / 48_000)
+          pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(sampleRate)))
+      buffer.frameLength = AVAudioFrameCount(sampleRate)
+      let output = try #require(buffer.floatChannelData)
+      for frame in 0..<sampleRate {
+        let base = amplitude * sin(2 * Float.pi * 997 * Float(frame) / Float(sampleRate))
+        let value =
+          transient && (frame == sampleRate / 4 || frame == 3 * sampleRate / 4)
+          ? 0.9 : base
+        for channel in 0..<channels { output[channel][frame] = value }
       }
       try file.write(from: buffer)
     }
-    let pieces = [0..<24_000, 24_000..<48_000].map { range in
+    let half = sampleRate / 2
+    let pieces = [0..<half, half..<sampleRate].enumerated().map { index, range in
       let built = SliceRenderPlanBuilder.plan(sliceRange: range, removals: [])
       return MasteringPieceInput(
-        sliceID: UUID(), title: "Intro", render: built.plan,
+        sliceID: UUID(), title: index == 0 ? "First" : "Second", render: built.plan,
         editedDurationSamples: built.editedDurationSamples, sourceRange: range,
         localRemovals: [],
         wordStarts: [
-          RenderMarker(position: 1_000, name: "inside"),
-          RenderMarker(position: 24_000, name: "outside"),
+          RenderMarker(position: 1_000, name: "word"),
+          RenderMarker(position: half, name: "outside"),
         ], typeProvenance: "explicit")
     }
     let work = directory.appendingPathComponent("work")
     try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
     return MasteringPreparationRequest(
       snapshot: MasteringSnapshot(
-        artist: "Artist", canonicalAudioURL: source, sourceSampleRate: 48_000,
-        sourceDurationSamples: 48_000, pieces: pieces, inputsDigest: "v1:test"),
+        artist: "Artist", canonicalAudioURL: source,
+        canonicalFingerprint: SourceFingerprint.compute(for: source),
+        sourceSampleRate: sampleRate,
+        sourceDurationSamples: sampleRate, pieces: pieces, inputsDigest: "v1:test"),
       workDirectory: work)
   }
 
-  // swiftlint:disable:next function_body_length
   @Test func writesWholePiecesAtActualFrameOffsetsIn24BitStereoWAV() async throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: directory) }
-    let source = directory.appendingPathComponent("source.aiff")
-    let settings: [String: Any] = [
-      AVFormatIDKey: kAudioFormatLinearPCM,
-      AVSampleRateKey: 48_000.0,
-      AVNumberOfChannelsKey: 1,
-      AVLinearPCMBitDepthKey: 16,
-      AVLinearPCMIsBigEndianKey: true,
-      AVLinearPCMIsFloatKey: false,
-    ]
-    do {
-      let file = try AVAudioFile(forWriting: source, settings: settings)
-      let buffer = try #require(
-        AVAudioPCMBuffer(
-          pcmFormat: file.processingFormat, frameCapacity: 48_000))
-      buffer.frameLength = 48_000
-      let channel = try #require(buffer.floatChannelData)[0]
-      for frame in 0..<48_000 {
-        channel[frame] = 0.1 * sin(2 * Float.pi * 997 * Float(frame) / 48_000)
-      }
-      try file.write(from: buffer)
-    }
-    let first = SliceRenderPlanBuilder.plan(sliceRange: 0..<24_000, removals: [])
-    let second = SliceRenderPlanBuilder.plan(sliceRange: 24_000..<48_000, removals: [])
-    let pieces = [(first, 0..<24_000, "First"), (second, 24_000..<48_000, "Second")]
-      .map { built, range, title in
-        MasteringPieceInput(
-          sliceID: UUID(), title: title, render: built.plan,
-          editedDurationSamples: built.editedDurationSamples, sourceRange: range,
-          localRemovals: [], wordStarts: [RenderMarker(position: 1_000, name: "word")],
-          typeProvenance: "explicit")
-      }
-    let snapshot = MasteringSnapshot(
-      artist: "Artist", canonicalAudioURL: source, sourceSampleRate: 48_000,
-      sourceDurationSamples: 48_000, pieces: pieces, inputsDigest: "v1:test")
-    let work = directory.appendingPathComponent("work")
-    try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
+    let request = try fixture(directory: directory)
     let result = try await withDependencies {
       $0.loudness = .liveValue
     } operation: {
-      try await MasteringAudioClient.liveValue.prepare(
-        MasteringPreparationRequest(snapshot: snapshot, workDirectory: work)
-      ) { _ in }
+      try await MasteringAudioClient.liveValue.prepare(request) { _ in }
     }
     expectNoDifference(result.parts.count, 1)
     let part = try #require(result.parts.first)
@@ -125,6 +95,55 @@ struct MasteringPreparationTests {
     expectNoDifference(result.parts.map(\.frameCount), [22_050, 22_050])
     expectNoDifference(result.parts.flatMap(\.pieces).map(\.startFrame), [0, 0])
     #expect(result.parts.flatMap(\.pieces).allSatisfy { !$0.lrc.contains("outside") })
+  }
+
+  @Test func prepares44kStereoWithoutChangingItsFrameCount() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let request = try fixture(directory: directory, sampleRate: 44_100, channels: 2)
+    let result = try await withDependencies {
+      $0.loudness = .liveValue
+    } operation: {
+      try await MasteringAudioClient.liveValue.prepare(request) { _ in }
+    }
+    expectNoDifference(result.parts.map(\.frameCount), [44_100])
+    expectNoDifference(result.parts[0].pieces.map(\.frameCount), [22_050, 22_050])
+  }
+
+  @Test func successfulPeakLimitedRunStaysUnderQuantizedCeiling() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let request = try fixture(directory: directory, amplitude: 0.05, transient: true)
+    let result = try await withDependencies {
+      $0.loudness = .liveValue
+    } operation: {
+      try await MasteringAudioClient.liveValue.prepare(request) { _ in }
+    }
+    #expect(
+      result.warnings.contains { warning in
+        if case .peakLimitedGain = warning { return true }
+        return false
+      })
+    let part = try #require(result.parts.first)
+    let measured = try LoudnessMeter.measure(url: part.wavURL, mode: .truePeakOnly)
+    #expect(measured.truePeakDBTP <= -1.5 + MasteringFormat.truePeakToleranceDB)
+  }
+
+  @Test func sourceIdentityMismatchCannotStampTheFrozenDigest() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    var request = try fixture(directory: directory)
+    request.snapshot.canonicalFingerprint = "sha256:wrong"
+    await #expect(throws: MasteringPreparationError.canonicalSourceMismatch) {
+      try await withDependencies {
+        $0.loudness = .liveValue
+      } operation: {
+        try await MasteringAudioClient.liveValue.prepare(request) { _ in }
+      }
+    }
   }
 
   @Test func cancellationAfterProgressReturnsNoPreparedRun() async throws {

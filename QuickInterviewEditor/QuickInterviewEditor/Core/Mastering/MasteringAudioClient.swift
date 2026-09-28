@@ -54,9 +54,9 @@ struct MasteringAudioClient: Sendable {
 
 extension MasteringAudioClient: DependencyKey {
   static var liveValue: MasteringAudioClient {
-    @Dependency(\.loudness) var loudness
-    let meter = loudness
     return MasteringAudioClient(prepare: { request, progress in
+      @Dependency(\.loudness) var loudness
+      let meter = loudness
       let worker = Task.detached {
         try await MasteringPreparer.prepare(request, loudness: meter, progress: progress)
       }
@@ -92,10 +92,10 @@ enum MasteringPreparationError: Error, Equatable, LocalizedError {
   case invalidLoudnessMeasurement
   case conversionFailed(String)
   case meterUnavailable
-  case meterFailed(title: String)
   case truePeakCeilingExceeded(part: Int, measuredDBTP: Double)
   case partTooLarge(part: Int)
   case noPieces
+  case canonicalSourceMismatch
 
   var errorDescription: String? {
     switch self {
@@ -103,11 +103,11 @@ enum MasteringPreparationError: Error, Equatable, LocalizedError {
     case .invalidLoudnessMeasurement: "The audio loudness measurement was invalid."
     case .conversionFailed(let reason): "Audio conversion failed: \(reason)"
     case .meterUnavailable: "The loudness meter could not start."
-    case .meterFailed(let title): "Could not measure loudness for \(title)."
     case .truePeakCeilingExceeded(let part, _):
       "Prepared part \(part) exceeds the true-peak ceiling."
     case .partTooLarge(let part): "Prepared part \(part) exceeds the WAV size limit."
     case .noPieces: "There are no intros to prepare."
+    case .canonicalSourceMismatch: "The source audio changed after preparation was started."
     }
   }
 }
@@ -128,23 +128,31 @@ private enum MasteringPreparer {
   ) async throws -> MasteringPreparationResult {
     let snapshot = request.snapshot
     guard !snapshot.pieces.isEmpty else { throw MasteringPreparationError.noPieces }
-    guard request.partLimitFrames > 0 else { throw MasteringPreparationError.noPieces }
+    guard request.partLimitFrames > 0 else {
+      throw MasteringPreparationError.conversionFailed("Part length must be positive")
+    }
+    try Task.checkCancellation()
+    guard
+      SourceFingerprint.compute(for: snapshot.canonicalAudioURL)
+        == snapshot.canonicalFingerprint
+    else { throw MasteringPreparationError.canonicalSourceMismatch }
+    try Task.checkCancellation()
     let source = try ExportAudioRenderer.openCanonical(
       snapshot.canonicalAudioURL, sampleRate: snapshot.sourceSampleRate,
       sourceDurationSamples: snapshot.sourceDurationSamples)
-    let channels = Int(source.processingFormat.channelCount)
-    guard channels == 1 || channels == 2 else {
-      throw MasteringPreparationError.unsupportedChannelCount(channels)
-    }
     var staged: [StagedPiece] = []
     var warnings: [MasteringPreparationWarning] = []
     for (index, piece) in snapshot.pieces.enumerated() {
       try Task.checkCancellation()
-      guard piece.editedDurationSamples > 0 else { throw MasteringPreparationError.noPieces }
+      guard piece.editedDurationSamples > 0 else {
+        throw MasteringPreparationError.conversionFailed("Intro has no rendered audio")
+      }
       let cafURL = request.workDirectory.appendingPathComponent("piece-\(index).caf")
       let frameCount = try render(
         piece, from: source, sampleRate: snapshot.sourceSampleRate, to: cafURL)
-      guard frameCount > 0 else { throw MasteringPreparationError.noPieces }
+      guard frameCount > 0 else {
+        throw MasteringPreparationError.conversionFailed("Intro converted to no audio")
+      }
       let measurement = try await loudness.measure(cafURL)
       let gain = try MasteringGain.decibels(
         integratedLUFS: measurement.integratedLUFS,
@@ -298,9 +306,11 @@ private enum MasteringPreparer {
         try writer.write(from: output)
         frames += Int(output.frameLength)
       }
-      guard conformer.outputFrameCount == frames else {
-        throw MasteringPreparationError.conversionFailed("Conformed frame count mismatch")
-      }
+    }
+    let expected = MasteringFrames.conformed(piece.editedDurationSamples, fromRate: sampleRate)
+    guard abs(frames - expected) <= 1 else {
+      throw MasteringPreparationError.conversionFailed(
+        "Conformed intro length \(frames) differs from expected \(expected)")
     }
     let readback = try AVAudioFile(forReading: url)
     guard Int(readback.length) == frames else {

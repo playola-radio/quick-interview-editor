@@ -4119,10 +4119,10 @@ final class EditorModel: ViewModel {
     // RAW absolute source-sample marker positions straight from the loaded plan words —
     // no global tie-nudge here. `SliceRenderPlanBuilder.markers` maps each marker into
     // slice-relative EDITED space and applies the strictly-increasing nudge itself.
-    let sourceMarkers = editPlan.words.map { word in
-      RenderMarker(
-        position: word.startSample ?? Int(word.start * Double(sampleRate)), name: word.text)
-    }
+    guard
+      let sourceMarkers = SliceRenderPlanBuilder.sourceMarkers(
+        editPlan.words, sampleRate: sampleRate)
+    else { throw ExportRenderError.invalidWordStart }
 
     var outputsByID: [Slice.ID: URL] = [:]
     var injectionFiles: [MarkerInjectionFile] = []

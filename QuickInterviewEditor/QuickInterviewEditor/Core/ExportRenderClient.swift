@@ -68,6 +68,7 @@ enum ExportRenderError: Error, Equatable, LocalizedError {
   case shortRead(requested: Int, got: Int, atFrame: Int)
   case invalidSliceRange(name: String, start: Int, end: Int, duration: Int)
   case bufferAllocationFailed
+  case invalidWordStart
 
   var errorDescription: String? {
     switch self {
@@ -84,6 +85,8 @@ enum ExportRenderError: Error, Equatable, LocalizedError {
         "\"\(name)\" spans samples \(start)..<\(end), which is not a valid range in a \(duration)-sample recording"
     case .bufferAllocationFailed:
       return "Could not allocate an audio buffer for the export."
+    case .invalidWordStart:
+      return "A transcript word has an invalid start time."
     }
   }
 }

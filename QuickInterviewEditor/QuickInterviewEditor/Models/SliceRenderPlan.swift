@@ -19,6 +19,27 @@ struct SliceRenderPlan: Equatable {
 /// nothing to export.
 enum SliceRenderPlanBuilder {
 
+  /// Absolute source word starts shared by AIFF export and mastering snapshots.
+  /// Returns nil for timestamps that cannot be represented as sample positions.
+  static func sourceMarkers(_ words: [Word], sampleRate: Int) -> [RenderMarker]? {
+    guard sampleRate > 0 else { return nil }
+    var markers: [RenderMarker] = []
+    for word in words {
+      let position: Int
+      if let sample = word.startSample {
+        position = sample
+      } else {
+        let scaled = word.start * Double(sampleRate)
+        guard scaled.isFinite, scaled >= Double(Int.min), scaled < Double(Int.max) else {
+          return nil
+        }
+        position = Int(scaled)
+      }
+      markers.append(RenderMarker(position: position, name: word.text))
+    }
+    return markers
+  }
+
   static func hasAudio(sliceRange: Range<Int>, removals: [TimelineRemoval]) -> Bool {
     !sliceRange.isEmpty
       && localTimeline(sliceRange: sliceRange, removals: removals).editedDurationSamples > 0

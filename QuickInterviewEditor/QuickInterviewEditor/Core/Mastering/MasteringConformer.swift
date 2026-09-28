@@ -16,7 +16,9 @@ final class MasteringConformer {
     guard channels == 1 || channels == 2 else {
       throw MasteringPreparationError.unsupportedChannelCount(channels)
     }
-    if inputFormat.sampleRate == 44_100 {
+    if inputFormat.sampleRate == 44_100,
+      inputFormat.commonFormat == .pcmFormatFloat32, !inputFormat.isInterleaved
+    {
       path = channels == 2 ? .stereoCopy : .monoCopy
     } else {
       guard

@@ -16,6 +16,7 @@ struct MasteringPieceInput: Equatable, Sendable {
 struct MasteringSnapshot: Equatable, Sendable {
   var artist: String
   var canonicalAudioURL: URL
+  var canonicalFingerprint: String
   var sourceSampleRate: Int
   var sourceDurationSamples: Int
   var pieces: [MasteringPieceInput]
@@ -47,20 +48,10 @@ enum MasteringSnapshotBuilder {
       plan.source.sampleRate == source.sampleRate,
       plan.source.durationSamples == source.durationSamples
     else { return .failure(.invalidTimeline) }
-    var rawMarkers: [RenderMarker] = []
-    for word in plan.words {
-      let position: Int
-      if let startSample = word.startSample {
-        position = startSample
-      } else {
-        let scaled = word.start * Double(source.sampleRate)
-        guard scaled.isFinite, scaled >= Double(Int.min), scaled < Double(Int.max) else {
-          return .failure(.invalidTimeline)
-        }
-        position = Int(scaled)
-      }
-      rawMarkers.append(RenderMarker(position: position, name: word.text))
-    }
+    guard
+      let rawMarkers = SliceRenderPlanBuilder.sourceMarkers(
+        plan.words, sampleRate: source.sampleRate)
+    else { return .failure(.invalidTimeline) }
     var pieces: [MasteringPieceInput] = []
     var typeIDs: [Slice.ID: String] = [:]
     for slice in eligibility.intros {
@@ -71,6 +62,9 @@ enum MasteringSnapshotBuilder {
       let built = SliceRenderPlanBuilder.plan(
         sliceRange: range, removals: Array(document.timelineRemovals))
       guard built.localTimeline.isValid else { return .failure(.invalidTimeline) }
+      guard built.localTimeline.removals.allSatisfy({ $0.crossfade.curveAmount.isFinite }) else {
+        return .failure(.invalidTimeline)
+      }
       let typeID = MasteringEligibilityRule.typeID(of: slice, in: document)!
       typeIDs[slice.id] = typeID
       let provenance =
@@ -91,6 +85,7 @@ enum MasteringSnapshotBuilder {
     return .success(
       MasteringSnapshot(
         artist: artist, canonicalAudioURL: canonicalAudioURL,
+        canonicalFingerprint: source.canonicalFingerprint,
         sourceSampleRate: source.sampleRate, sourceDurationSamples: source.durationSamples,
         pieces: pieces, inputsDigest: digest))
   }

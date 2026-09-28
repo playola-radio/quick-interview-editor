@@ -12,6 +12,7 @@ enum MasteringFormat {
   // swiftlint:disable:next inclusive_language
   static let masterDurationToleranceSeconds = 5.0
   static var processingFormat: AVAudioFormat {
-    AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 2)!
+    AVAudioFormat(
+      standardFormatWithSampleRate: Double(sampleRate), channels: AVAudioChannelCount(channels))!
   }
 }

@@ -7,6 +7,28 @@ import Testing
 
 // swiftlint:disable:next inclusive_language
 struct MasteringConformerTests {
+  @Test func varied48kLengthsStayWithinOneFrameOfRoundedRate() throws {
+    let format = try #require(AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 2))
+    for length in [1_023, 1_024, 1_025, 44_099, 44_101] {
+      let converter = try MasteringConformer(inputFormat: format)
+      let input = try #require(
+        AVAudioPCMBuffer(
+          pcmFormat: format, frameCapacity: AVAudioFrameCount(length)))
+      input.frameLength = AVAudioFrameCount(length)
+      let channels = try #require(input.floatChannelData)
+      for frame in 0..<length {
+        channels[0][frame] = 0
+        channels[1][frame] = 0
+      }
+      var written = 0
+      try converter.push(input) { written += Int($0.frameLength) }
+      try converter.finish { written += Int($0.frameLength) }
+      let expected = MasteringFrames.conformed(length, fromRate: 48_000)
+      expectNoDifference(written, expected)
+      expectNoDifference(converter.outputFrameCount, written)
+    }
+  }
+
   @Test func stereo48kImpulsePositionsSurviveConversion() throws {
     let format = try #require(AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 2))
     let converter = try MasteringConformer(inputFormat: format)
@@ -54,6 +76,30 @@ struct MasteringConformerTests {
     }
     try converter.finish { _ in }
     expectNoDifference(converter.outputFrameCount, 5)
+  }
+
+  @Test func stereoIntegerPCMIsConvertedToProcessingFloatFormat() throws {
+    let format = try #require(
+      AVAudioFormat(
+        commonFormat: .pcmFormatInt16, sampleRate: 44_100,
+        channels: 2, interleaved: false))
+    let input = try #require(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 100))
+    input.frameLength = 100
+    let channels = try #require(input.int16ChannelData)
+    for frame in 0..<100 {
+      channels[0][frame] = 8_192
+      channels[1][frame] = -8_192
+    }
+    let converter = try MasteringConformer(inputFormat: format)
+    var written = 0
+    try converter.push(input) { output in
+      written += Int(output.frameLength)
+      let floats = try #require(output.floatChannelData)
+      #expect(abs(floats[0][0] - 0.25) < 0.001)
+      #expect(abs(floats[1][0] + 0.25) < 0.001)
+    }
+    try converter.finish { output in written += Int(output.frameLength) }
+    expectNoDifference(written, 100)
   }
 
   @Test func rejectsMultichannelSource() throws {
