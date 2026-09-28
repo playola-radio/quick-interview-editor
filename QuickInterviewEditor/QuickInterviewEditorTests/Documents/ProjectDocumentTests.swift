@@ -11,6 +11,95 @@ import UniformTypeIdentifiers
 /// seams the system hooks delegate to.
 @MainActor
 struct ProjectDocumentTests {
+  @Test func stagingFailureKeepsManifestAndRefusesIncompleteSaveAs() throws {
+    let name = Fixtures.uuid(86).uuidString.lowercased() + ".wav"
+    let audio = Data("canonical".utf8)
+    var file = Fixtures.projectFile(source: Fixtures.projectSource(canonicalByteCount: audio.count))
+    file.schemaVersion = 3
+    file.masteringRun = MasteringRun(
+      id: Fixtures.uuid(87), artist: "Artist", inputsDigest: "v1:x",
+      parts: [
+        MasteringPart(
+          id: Fixtures.uuid(88), frameCount: 10,
+          prepared: MasteringArtifactRef(fileName: name, byteCount: 3),
+          pieces: [
+            MasteringPiece(
+              id: Fixtures.uuid(89), sliceID: Fixtures.uuid(90), title: "Intro",
+              startFrame: 0, frameCount: 10, lrc: "", finished: nil)
+          ])
+      ])
+    let root = try ProjectPackage.encode(
+      file: Fixtures.projectFile(source: file.source),
+      plan: Fixtures.editPlan(), audio: FileWrapper(regularFileWithContents: audio))
+    let project = FileWrapper(
+      regularFileWithContents: try ProjectPackage.projectEncoder().encode(file))
+    project.preferredFilename = "project.json"
+    if let old = root.fileWrappers?["project.json"] { root.removeFileWrapper(old) }
+    root.addFileWrapper(project)
+    let media = FileWrapper(regularFileWithContents: Data("wav".utf8))
+    media.preferredFilename = name
+    let dir = FileWrapper(directoryWithFileWrappers: [name: media])
+    dir.preferredFilename = "mastering"
+    root.addFileWrapper(dir)
+    let document = try ProjectDocument(
+      reading: root,
+      stageMastering: { _, _ in
+        throw CocoaError(.fileWriteOutOfSpace)
+      })
+    var content = try #require(document.content)
+    expectNoDifference(content.file.masteringRun, file.masteringRun)
+    expectNoDifference(content.masteringStaged.count, 0)
+    #expect(content.masteringStagingError != nil)
+    let audioURL = try tempAudioFile(audio)
+    defer { try? FileManager.default.removeItem(at: audioURL) }
+    content.audio = .packageChild(sessionCopy: audioURL)
+    #expect(throws: ProjectPackage.MasteringReconcileError.missingArtifact(name)) {
+      try ProjectDocument.makeFileWrapper(snapshot: content, existingFile: nil)
+    }
+    let ordinary = try ProjectDocument.makeFileWrapper(snapshot: content, existingFile: root)
+    expectNoDifference(try ProjectPackage.decode(ordinary).file.masteringRun, file.masteringRun)
+  }
+  // swiftlint:disable:next inclusive_language
+  @Test func saveAsRetainsLoadedMasteringAfterSnapshotAndDocumentRelease() throws {
+    let rootDir = FileManager.default.temporaryDirectory
+      .appendingPathComponent("mastering-document-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: rootDir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: rootDir) }
+    let fixture = try savedMediaFixture(in: rootDir)
+    var document: ProjectDocument? = try ProjectDocument(
+      reading: FileWrapper(url: fixture.original, options: []))
+    var content = try #require(document?.content)
+    expectNoDifference(content.file.masteringRun, fixture.file.masteringRun)
+    let staged = try #require(content.masteringStaged[fixture.name]?.url)
+    content.audio = .packageChild(sessionCopy: fixture.audioCopy)
+    var snapshot: ProjectDocument.Content? = content
+    var replaced = fixture.file
+    replaced.masteringRun = nil
+    document?.sink.commitMastering(replaced, [:])
+    let current = try #require(document?.content)
+    let currentWrapper = try ProjectDocument.makeFileWrapper(
+      snapshot: current,
+      existingFile: FileWrapper(url: fixture.original, options: []))
+    let currentURL = rootDir.appendingPathComponent("current.pie")
+    try currentWrapper.write(to: currentURL, options: [], originalContentsURL: nil)
+    expectNoDifference(currentWrapper.fileWrappers?["mastering"], nil)
+    try FileManager.default.removeItem(at: fixture.original)
+    let wrapper = try ProjectDocument.makeFileWrapper(
+      snapshot: try #require(snapshot),
+      existingFile: nil)
+    snapshot = nil
+    content.masteringStaged = [:]
+    document = nil
+    expectNoDifference(FileManager.default.fileExists(atPath: staged.path), true)
+    let copied = rootDir.appendingPathComponent("copy.pie")
+    try wrapper.write(to: copied, options: [], originalContentsURL: nil)
+    expectNoDifference(
+      try Data(contentsOf: copied.appendingPathComponent("mastering/\(fixture.name)")),
+      fixture.bytes)
+    expectNoDifference(
+      try ProjectPackage.decode(FileWrapper(url: copied, options: [])).file.masteringRun,
+      fixture.file.masteringRun)
+  }
 
   @Test func recoveryPublicationIsAtomicAndOrdinaryEditsRetainArchive() throws {
     let root = try fixturePackage()
@@ -43,6 +132,46 @@ struct ProjectDocumentTests {
   }
 
   // MARK: - Helpers
+
+  private struct SavedMediaFixture {
+    var file: ProjectFile
+    var original: URL
+    var name: String
+    var bytes: Data
+    var audioCopy: URL
+  }
+
+  private func savedMediaFixture(in rootDir: URL) throws -> SavedMediaFixture {
+    let name = Fixtures.uuid(81).uuidString.lowercased() + ".wav"
+    let bytes = Data("prepared WAV".utf8)
+    let audio = Data("canonical".utf8)
+    var file = Fixtures.projectFile(source: Fixtures.projectSource(canonicalByteCount: audio.count))
+    file.schemaVersion = 3
+    file.masteringRun = MasteringRun(
+      id: Fixtures.uuid(82), artist: "Artist", inputsDigest: "v1:x",
+      parts: [
+        MasteringPart(
+          id: Fixtures.uuid(83), frameCount: 10,
+          prepared: MasteringArtifactRef(fileName: name, byteCount: bytes.count),
+          pieces: [
+            MasteringPiece(
+              id: Fixtures.uuid(84), sliceID: Fixtures.uuid(85), title: "Intro",
+              startFrame: 0, frameCount: 10, lrc: "", finished: nil)
+          ])
+      ])
+    let source = rootDir.appendingPathComponent("source.wav")
+    try bytes.write(to: source)
+    let owner = try MasteringStagingStore.adopt(source, as: name, in: rootDir)
+    let root = try ProjectPackage.encode(
+      file: file, plan: Fixtures.editPlan(),
+      audio: FileWrapper(regularFileWithContents: audio), masteringStaged: [name: owner])
+    let original = rootDir.appendingPathComponent("original.pie")
+    try root.write(to: original, options: [], originalContentsURL: nil)
+    let audioCopy = rootDir.appendingPathComponent("session.aiff")
+    try audio.write(to: audioCopy)
+    return SavedMediaFixture(
+      file: file, original: original, name: name, bytes: bytes, audioCopy: audioCopy)
+  }
 
   private func fixturePackage() throws -> FileWrapper {
     let url = try #require(

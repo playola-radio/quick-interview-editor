@@ -1,9 +1,35 @@
 import AppKit
 import Foundation
 import IssueReporting
+import ObjectiveC
 import SwiftUI
 import Synchronization
 import UniformTypeIdentifiers
+
+// swiftlint:disable:next inclusive_language
+private final class MasteringWrapperLeaseKey: Sendable {}
+// swiftlint:disable:next inclusive_language
+private let masteringWrapperLeaseKey = MasteringWrapperLeaseKey()
+
+// swiftlint:disable:next inclusive_language
+private final class MasteringWrapperLease: Sendable {
+  let sources: [StagedMasteringArtifact]
+  init(sources: [StagedMasteringArtifact]) { self.sources = sources }
+}
+
+// swiftlint:disable:next inclusive_language
+private func retainMasteringSources(_ sources: [StagedMasteringArtifact], on wrapper: FileWrapper) {
+  let key = Unmanaged.passUnretained(masteringWrapperLeaseKey).toOpaque()
+  let prior = (objc_getAssociatedObject(wrapper, key) as? MasteringWrapperLease)?.sources ?? []
+  var retained = prior
+  var identities = Set(prior.map(ObjectIdentifier.init))
+  for source in sources where identities.insert(ObjectIdentifier(source)).inserted {
+    retained.append(source)
+  }
+  objc_setAssociatedObject(
+    wrapper, key, MasteringWrapperLease(sources: retained),
+    .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+}
 
 extension UTType {
   /// The `.pie` project package, exported from Info.plist (spec A2).
@@ -38,6 +64,10 @@ final class ProjectDocument: ReferenceFileDocument {
     var plan: EditPlan
     var audio: CanonicalAudioSource
     var recoveryArchive: Data?
+    // swiftlint:disable:next inclusive_language
+    var masteringStaged: [String: StagedMasteringArtifact] = [:]
+    // swiftlint:disable:next inclusive_language
+    var masteringStagingError: String?
   }
 
   /// The value `snapshot` hands to `fileWrapper`: the content to write plus the edit
@@ -70,6 +100,8 @@ final class ProjectDocument: ReferenceFileDocument {
   /// Bumped on the main actor for every dirtying change and read off the main actor by the save
   /// pipeline, so the generation a save captures is comparable to the latest edit.
   private nonisolated let editGeneration = Mutex(0)
+  // swiftlint:disable:next inclusive_language
+  private nonisolated static let masteringWriteLock = NSLock()
 
   nonisolated init() {}
 
@@ -79,12 +111,44 @@ final class ProjectDocument: ReferenceFileDocument {
 
   /// Decodes a package tree and checks the bundled audio's byte count against `project.json`
   /// (spec A4). A mismatch fails the open with the document system's alert (spec A9).
-  nonisolated init(reading root: FileWrapper) throws {
+  nonisolated convenience init(reading root: FileWrapper) throws {
+    try self.init(reading: root, stageMastering: Self.stageMasteringWrapper)
+  }
+
+  nonisolated init(
+    reading root: FileWrapper,
+    // swiftlint:disable:next inclusive_language
+    stageMastering: (FileWrapper, String) throws -> StagedMasteringArtifact
+  ) throws {
     let decoded = try ProjectPackage.decode(root)
     try ProjectPackage.verifyAudio(decoded.audioWrapper, against: decoded.file.source)
+    var staged: [String: StagedMasteringArtifact] = [:]
+    var stagingError: String?
+    for ref in decoded.file.masteringRun?.referencedArtifacts ?? [] {
+      guard let wrapper = root.fileWrappers?["mastering"]?.fileWrappers?[ref.fileName] else {
+        continue
+      }
+      do {
+        staged[ref.fileName] = try stageMastering(wrapper, ref.fileName)
+      } catch {
+        stagingError = "Couldn't stage mastering media for saving: \(error.localizedDescription)"
+      }
+    }
     content = Content(
       file: decoded.file, plan: decoded.plan, audio: .packageChild(sessionCopy: nil),
-      recoveryArchive: decoded.recoveryArchive)
+      recoveryArchive: decoded.recoveryArchive, masteringStaged: staged,
+      masteringStagingError: stagingError)
+  }
+
+  // swiftlint:disable:next inclusive_language
+  private nonisolated static func stageMasteringWrapper(_ wrapper: FileWrapper, _ name: String)
+    throws -> StagedMasteringArtifact
+  {
+    let work = try MasteringStagingStore.makeWorkDirectory()
+    defer { MasteringStagingStore.removeDirectory(work) }
+    let target = work.appendingPathComponent(name)
+    try wrapper.write(to: target, options: [], originalContentsURL: nil)
+    return try MasteringStagingStore.adopt(target, as: name)
   }
 
   nonisolated func snapshot(contentType: UTType) throws -> Snapshot {
@@ -118,8 +182,10 @@ final class ProjectDocument: ReferenceFileDocument {
   nonisolated static func makeFileWrapper(snapshot: Content, existingFile: FileWrapper?) throws
     -> FileWrapper
   {
+    masteringWriteLock.lock()
+    defer { masteringWriteLock.unlock() }
     var snapshot = snapshot
-    snapshot.file.schemaVersion = ProjectFile.currentSchemaVersion
+    snapshot.file.schemaVersion = ProjectFile.writtenSchemaVersion(for: snapshot.file)
     let audio: FileWrapper
     switch snapshot.audio {
     case .packageChild(let sessionCopy):
@@ -128,18 +194,24 @@ final class ProjectDocument: ReferenceFileDocument {
         existing.isRegularFile
       {
         try ProjectPackage.verifyAudio(existing, against: snapshot.file.source)
-        return try ProjectPackage.rewriteMetadata(
+        let wrapper = try ProjectPackage.rewriteMetadata(
           in: existingFile, file: snapshot.file, plan: snapshot.plan,
-          recoveryArchive: snapshot.recoveryArchive)
+          recoveryArchive: snapshot.recoveryArchive, masteringStaged: snapshot.masteringStaged,
+          strictMissing: true)
+        retainMasteringSources(Array(snapshot.masteringStaged.values), on: wrapper)
+        return wrapper
       }
       guard let sessionCopy else { throw ProjectDocumentError.missingPackageAudio }
       audio = try sessionAudioWrapper(at: sessionCopy, source: snapshot.file.source)
     case .sessionFile(let url):
       audio = try sessionAudioWrapper(at: url, source: snapshot.file.source)
     }
-    return try ProjectPackage.encode(
+    let wrapper = try ProjectPackage.encode(
       file: snapshot.file, plan: snapshot.plan, audio: audio,
-      recoveryArchive: snapshot.recoveryArchive)
+      recoveryArchive: snapshot.recoveryArchive, masteringStaged: snapshot.masteringStaged,
+      strictMissing: true)
+    retainMasteringSources(Array(snapshot.masteringStaged.values), on: wrapper)
+    return wrapper
   }
 
   private nonisolated static func sessionAudioWrapper(at url: URL, source: ProjectSource) throws
@@ -163,6 +235,7 @@ final class ProjectDocument: ReferenceFileDocument {
     ProjectDocumentSink(
       commit: { [weak self] file, plan, audio in self?.commit(file, plan: plan, audio: audio) },
       commitRecovery: { [weak self] file, archive in self?.commitRecovery(file, archive: archive) },
+      commitMastering: { [weak self] file, staged in self?.commitMastering(file, staged: staged) },
       registerChange: { [weak self] in self?.registerChange() })
   }
 
@@ -192,6 +265,16 @@ final class ProjectDocument: ReferenceFileDocument {
       guard content != nil else { return }
       content?.file = file
       content?.recoveryArchive = archive
+    }
+  }
+
+  // swiftlint:disable:next inclusive_language
+  private func commitMastering(_ file: ProjectFile, staged: [String: StagedMasteringArtifact]) {
+    latest.withLock { content in
+      guard content != nil else { return }
+      content?.file = file
+      content?.masteringStaged = staged
+      content?.masteringStagingError = nil
     }
   }
 
