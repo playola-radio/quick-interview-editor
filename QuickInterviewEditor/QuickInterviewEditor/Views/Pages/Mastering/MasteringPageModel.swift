@@ -50,7 +50,7 @@ extension DependencyValues {
 
 @MainActor
 @Observable
-final class MasteringPageModel: ViewModel, Identifiable {
+final class MasteringPageModel: ViewModel {
   struct Host {
     var finishTitleEdit: @MainActor () -> Void
     var inputs: @MainActor () -> Result<MasteringSnapshot, MasteringBlocker>
@@ -60,6 +60,7 @@ final class MasteringPageModel: ViewModel, Identifiable {
     var artifact: @MainActor (MasteringArtifactRef) -> StagedMasteringArtifact?
     var commit: @MainActor (MasteringRun, [String: StagedMasteringArtifact], UUID?) -> Bool
     var stagingError: @MainActor () -> String? = { nil }
+    var dismiss: @MainActor () -> Void = {}
   }
   enum Activity: Equatable {
     case idle
@@ -69,7 +70,6 @@ final class MasteringPageModel: ViewModel, Identifiable {
     case copying
   }
   struct AmbiguousReturn: Equatable {
-    var master: URL
     var candidatePartIDs: [UUID]
   }
   struct DestinationPrompt: Equatable {
@@ -99,7 +99,8 @@ final class MasteringPageModel: ViewModel, Identifiable {
   @ObservationIgnored private var generation = 0
   @ObservationIgnored private var pendingMasters: [StagedMasteringArtifact] = []
   @ObservationIgnored private var ambiguousOwner: StagedMasteringArtifact?
-  @ObservationIgnored private var dragOwners: [UUID: StagedMasteringArtifact] = [:]
+  private var dragOwners: [UUID: StagedMasteringArtifact] = [:]
+  private var dragRevision = 0
   @ObservationIgnored private var saveOwners: [StagedMasteringArtifact] = []
   @ObservationIgnored private var copied: [ExportCopiedFile] = []
   @ObservationIgnored private var destination: URL?
@@ -107,7 +108,7 @@ final class MasteringPageModel: ViewModel, Identifiable {
   private(set) var activity: Activity = .idle
   var confirmingPrepareAgain = false
   var ambiguousReturn: AmbiguousReturn?
-  private(set) var replaceTargetPartID: UUID?
+  @ObservationIgnored private var replaceTargetPartID: UUID?
   var destinationPrompt: DestinationPrompt?
   var exportReview: ExportReviewModel?
   private(set) var savedFiles: [URL] = []
@@ -129,6 +130,7 @@ final class MasteringPageModel: ViewModel, Identifiable {
   let showInFinderLabel = "Show in Finder"
   let dragLabel = "Drag WAV"
   let replaceLabel = "Replace"
+  let doneLabel = "Done"
   let dropHelp = "Drop lossless mastered audio here"
   let noRunMessage = "Prepare intro clips to start a mastering run."
   let staleMessage =
@@ -144,6 +146,7 @@ final class MasteringPageModel: ViewModel, Identifiable {
     "A saved mastering file is damaged or has the wrong audio format. Prepare or return that part again."
 
   var run: MasteringRun? { host.run() }
+  var dragReloadKey: String { "\(run?.id.uuidString ?? "none"):\(dragRevision)" }
   var hasRun: Bool { run != nil }
   var eligibilitySummary: String {
     guard let eligibility = host.eligibility() else { return "" }
@@ -188,14 +191,8 @@ final class MasteringPageModel: ViewModel, Identifiable {
   }
   let ambiguityMessage = "Which part is this master for?"
   var destinationMessage: String { destinationPrompt?.message ?? "" }
-  var isAmbiguityPresented: Bool {
-    get { ambiguousReturn != nil }
-    set { if !newValue { ambiguousReturnCancelled() } }
-  }
-  var isDestinationPresented: Bool {
-    get { destinationPrompt != nil }
-    set { if !newValue { destinationCancelTapped() } }
-  }
+  var showsAmbiguityPrompt: Bool { ambiguousReturn != nil }
+  var showsDestinationPrompt: Bool { destinationPrompt != nil }
   var showsStaleNotice: Bool {
     guard let run else { return false }
     guard case .success(let snapshot) = host.inputs() else { return true }
@@ -245,8 +242,14 @@ final class MasteringPageModel: ViewModel, Identifiable {
     }
   }
   func prepareAgainCancelled() { confirmingPrepareAgain = false }
+  func doneTapped() {
+    guard !isBusy else { return }
+    confirmingPrepareAgain = false
+    host.dismiss()
+  }
 
   private func launchPrepare(_ snapshot: MasteringSnapshot, expectedID: UUID?) async {
+    generation += 1
     let token = generation
     activity = .preparing(completed: 0, total: snapshot.pieces.count)
     message = nil
@@ -265,7 +268,9 @@ final class MasteringPageModel: ViewModel, Identifiable {
       let result = try await audio.prepare(.init(snapshot: snapshot, workDirectory: work)) {
         [weak self] progress in
         Task { @MainActor [weak self] in
-          guard let self, self.generation == token else { return }
+          guard let self, self.generation == token,
+            case .preparing = self.activity
+          else { return }
           self.activity = .preparing(
             completed: progress.completedPieces, total: progress.totalPieces)
         }
@@ -292,7 +297,6 @@ final class MasteringPageModel: ViewModel, Identifiable {
         message = "The project changed while preparing; prepare again."
         return
       }
-      dragOwners = [:]
       warningMessages = result.warnings.map(Self.warningText)
       message = "Prepared \(parts.count) part\(parts.count == 1 ? "" : "s") for mastering."
     } catch is CancellationError {
@@ -314,6 +318,9 @@ final class MasteringPageModel: ViewModel, Identifiable {
     ambiguousReturn = nil
     ambiguousOwner = nil
     pendingMasters = []
+    replaceTargetPartID = nil
+    destinationPrompt = nil
+    confirmingPrepareAgain = false
   }
   func openMasterchannelTapped() {
     workspace.open(URL(string: "https://masterchannel.ai/studio")!)
@@ -350,39 +357,20 @@ final class MasteringPageModel: ViewModel, Identifiable {
       _ = await dragURL(for: part.id)
     }
   }
-  func mastersDropped(_ urls: [URL]) async {
-    guard !isBusy, !urls.isEmpty else {
+  @discardableResult
+  func providersDropped(_ providers: [NSItemProvider]) -> Task<Void, Never>? {
+    guard !isBusy, !providers.isEmpty else {
       busyMessage()
-      return
-    }
-    batchBusy = true
-    await runWorker { [weak self] in await self?.retainURLs(urls) }
-  }
-  private func retainURLs(_ urls: [URL]) async {
-    do {
-      for url in urls {
-        pendingMasters.append(try await staging.sessionCopy(url, url.lastPathComponent))
-        try Task.checkCancellation()
-      }
-      await continueDropBatch()
-    } catch {
-      pendingMasters = []
-      batchBusy = false
-      message = "Could not retain the dropped audio: \(error.localizedDescription)"
-    }
-  }
-  func providersDropped(_ providers: [NSItemProvider]) {
-    guard !isBusy else {
-      busyMessage()
-      return
+      return nil
     }
     batchBusy = true
     let token = generation
-    worker = Task { [weak self] in
+    let task = Task { [weak self] in
       guard let self else { return }
       do {
         for provider in providers {
-          let owner = try await Self.retainProvider(provider)
+          let owner = try await Self.retainProvider(
+            provider, copy: staging.retainTemporaryFile)
           try Task.checkCancellation()
           guard generation == token else { throw CancellationError() }
           pendingMasters.append(owner)
@@ -395,8 +383,13 @@ final class MasteringPageModel: ViewModel, Identifiable {
       }
       worker = nil
     }
+    worker = task
+    return task
   }
-  private static func retainProvider(_ provider: NSItemProvider) async throws
+  private static func retainProvider(
+    _ provider: NSItemProvider,
+    copy: @escaping @Sendable (URL, String) throws -> StagedMasteringArtifact
+  ) async throws
     -> StagedMasteringArtifact
   {
     try await withCheckedThrowingContinuation { continuation in
@@ -409,8 +402,7 @@ final class MasteringPageModel: ViewModel, Identifiable {
               URL(dataRepresentation: $0, relativeTo: nil)
             }
           guard let url, url.isFileURL else { throw CocoaError(.fileReadNoSuchFile) }
-          continuation.resume(
-            returning: try MasteringStagingStore.copy(url, as: url.lastPathComponent))
+          continuation.resume(returning: try copy(url, url.lastPathComponent))
         } catch { continuation.resume(throwing: error) }
       }
     }
@@ -439,7 +431,7 @@ final class MasteringPageModel: ViewModel, Identifiable {
         }
         if matches.count > 1 {
           ambiguousOwner = owner
-          ambiguousReturn = .init(master: owner.url, candidatePartIDs: matches)
+          ambiguousReturn = .init(candidatePartIDs: matches)
           activity = .idle
           return
         }
@@ -450,31 +442,21 @@ final class MasteringPageModel: ViewModel, Identifiable {
     batchBusy = false
     replaceTargetPartID = nil
   }
-  func ambiguousPartChosen(_ partID: UUID) async {
-    guard let ambiguousReturn, ambiguousReturn.candidatePartIDs.contains(partID),
-      let owner = ambiguousOwner
-    else { return }
-    self.ambiguousReturn = nil
-    ambiguousOwner = nil
-    await runWorker { [weak self] in
-      guard let self else { return }
-      await encode(owner, partID: partID, token: generation)
-      await continueDropBatch()
-    }
-  }
-  func ambiguousChoiceTapped(_ partID: UUID) {
+  func ambiguousChoiceTapped(_ partID: UUID) async {
     guard let ambiguousReturn, ambiguousReturn.candidatePartIDs.contains(partID),
       let owner = ambiguousOwner
     else { return }
     self.ambiguousReturn = nil
     ambiguousOwner = nil
     let token = generation
-    worker = Task { [weak self] in
+    let task = Task { [weak self] in
       guard let self else { return }
       await encode(owner, partID: partID, token: token)
       await continueDropBatch()
       worker = nil
     }
+    worker = task
+    await task.value
   }
   func ambiguousReturnCancelled() {
     guard ambiguousReturn != nil else { return }
@@ -496,6 +478,7 @@ final class MasteringPageModel: ViewModel, Identifiable {
     guard let currentRun = run,
       let partIndex = currentRun.parts.firstIndex(where: { $0.id == partID })
     else { return }
+    defer { if replaceTargetPartID == partID { replaceTargetPartID = nil } }
     let part = currentRun.parts[partIndex]
     guard !part.isReturned || replaceTargetPartID == partID else {
       message = "That part has already been returned. Choose Replace to change it."
@@ -534,6 +517,10 @@ final class MasteringPageModel: ViewModel, Identifiable {
         message = "The project changed while returning this master. Drop it again."
         return
       }
+      copied = []
+      savedFiles = []
+      destination = nil
+      saveOwners = []
       message = "Part \(partIndex + 1) returned."
     } catch is CancellationError {
       message = "Return cancelled. Completed parts are unchanged."
@@ -551,43 +538,12 @@ final class MasteringPageModel: ViewModel, Identifiable {
       suggested: suggested,
       message: "Save to “mastered” next to “\(package.lastPathComponent)”?")
   }
-  func destinationSaveTapped() async {
-    guard let prompt = destinationPrompt else { return }
-    destinationPrompt = nil
-    activity = .copying
-    do {
-      try workspace.createDirectory(prompt.suggested)
-      await runWorker { [weak self] in await self?.copyFinals(to: prompt.suggested) }
-    } catch {
-      message = "Could not create the destination: \(error.localizedDescription)"
-      activity = .idle
-    }
-  }
-  func destinationChooseOtherTapped() async {
-    guard let prompt = destinationPrompt else { return }
-    destinationPrompt = nil
-    let token = generation
-    let runID = run?.id
-    activity = .copying
-    guard
-      let url = await workspace.chooseDirectoryNear(
-        prompt.suggested, "Save Here", "Choose a folder for the mastered m4a files")
-    else {
-      activity = .idle
-      return
-    }
-    guard generation == token, run?.id == runID, !Task.isCancelled else {
-      activity = .idle
-      return
-    }
-    await runWorker { [weak self] in await self?.copyFinals(to: url) }
-  }
   func destinationCancelTapped() { destinationPrompt = nil }
-  func destinationSaveSelected() {
+  func destinationSaveSelected() async {
     guard let prompt = destinationPrompt else { return }
     destinationPrompt = nil
     activity = .copying
-    worker = Task { [weak self] in
+    let task = Task { [weak self] in
       guard let self else { return }
       do {
         try workspace.createDirectory(prompt.suggested)
@@ -598,14 +554,16 @@ final class MasteringPageModel: ViewModel, Identifiable {
       }
       worker = nil
     }
+    worker = task
+    await task.value
   }
-  func destinationChooseOtherSelected() {
+  func destinationChooseOtherSelected() async {
     guard let prompt = destinationPrompt else { return }
     destinationPrompt = nil
     let token = generation
     let runID = run?.id
     activity = .copying
-    worker = Task { [weak self] in
+    let task = Task { [weak self] in
       guard let self else { return }
       if let url = await workspace.chooseDirectoryNear(
         prompt.suggested, "Save Here", "Choose a folder for the mastered m4a files")
@@ -620,6 +578,8 @@ final class MasteringPageModel: ViewModel, Identifiable {
       }
       worker = nil
     }
+    worker = task
+    await task.value
   }
   // swiftlint:disable:next cyclomatic_complexity function_body_length
   private func copyFinals(to url: URL) async {
@@ -627,37 +587,41 @@ final class MasteringPageModel: ViewModel, Identifiable {
     let token = generation
     activity = .copying
     do {
-      if destination != url {
+      if destination?.standardizedFileURL.path != url.standardizedFileURL.path {
         copied = []
         savedFiles = []
-        saveOwners = []
         destination = url
       }
+      saveOwners = []
+      let alreadyCopied = Set(copied.map(\.id))
       var rendered: [UUID: URL] = [:]
       var targets: [Slice] = []
       for part in run.parts {
         for piece in part.pieces {
           guard let ref = piece.finished else { throw MasteringArtifactError.corrupt }
-          guard let owner = host.artifact(ref) else { throw MasteringArtifactError.unavailable }
-          try validation.validate(owner.url, "m4a", piece.frameCount)
-          let copy = try await staging.sessionCopy(owner.url, ref.fileName)
-          try current(token, runID: run.id)
-          saveOwners.append(copy)
-          rendered[piece.id] = copy.url
+          if !alreadyCopied.contains(piece.id) {
+            guard let owner = host.artifact(ref) else { throw MasteringArtifactError.unavailable }
+            try validation.validate(owner.url, "m4a", piece.frameCount)
+            let copy = try await staging.sessionCopy(owner.url, ref.fileName)
+            try current(token, runID: run.id)
+            saveOwners.append(copy)
+            rendered[piece.id] = copy.url
+          }
           targets.append(
             Slice(
               id: piece.id, name: piece.title, startSample: 0,
               endSample: 0, wordIDs: [], snippet: ""))
         }
       }
-      let review = ExportReviewModel(
-        request: .init(
-          targets: targets, sourceStem: "",
-          renderedByID: rendered, destination: url, kind: .masteredM4A, copied: copied),
-        scratchDirectory: nil)
-      exportReview = review
-      review.onExport = { [weak self] approved in
-        guard let self else { return }
+      let review = withDependencies(from: self) {
+        ExportReviewModel(
+          request: .init(
+            targets: targets, sourceStem: "",
+            renderedByID: rendered, destination: url, kind: .masteredM4A, copied: copied),
+          scratchDirectory: nil)
+      }
+      review.onExport = { [weak self, weak review] approved in
+        guard let self, let review else { return }
         self.activity = .copying
         self.worker = Task { [weak self] in
           await self?.finishCopy(review, approved: approved, token: token, runID: run.id)
@@ -676,6 +640,7 @@ final class MasteringPageModel: ViewModel, Identifiable {
     { message = unavailableMessage } catch is CancellationError {
       message = "Save cancelled. Files already copied remain."
     } catch { message = "Could not stage the final files: \(error.localizedDescription)" }
+    if exportReview == nil { saveOwners = [] }
     activity = .idle
   }
   private func finishCopy(
@@ -688,27 +653,33 @@ final class MasteringPageModel: ViewModel, Identifiable {
     savedFiles = copied.map(\.url)
     if let error = outcome.errorMessage {
       message = error
+      exportReview = nil
+      saveOwners = []
     } else if outcome.reviewMappings != nil {
       exportReview = review
     } else if !outcome.cancelled {
       exportReview = nil
       message = "Saved \(savedFiles.count) mastered files."
+      copied = []
+      saveOwners = []
+    } else {
+      exportReview = nil
       saveOwners = []
     }
     activity = .idle
   }
   func showInFinderTapped() { workspace.reveal(savedFiles) }
-  private func runWorker(_ action: @escaping @MainActor () async -> Void) async {
-    let task = Task { await action() }
-    worker = task
-    await task.value
-    if worker != nil { worker = nil }
-  }
   func teardown() async {
     await cancelTapped()
     dragOwners = [:]
+    dragRevision += 1
     saveOwners = []
     exportReview = nil
+    savedFiles = []
+    copied = []
+    destination = nil
+    warningMessages = []
+    message = nil
   }
   private func current(_ token: Int, runID: UUID?) throws {
     try Task.checkCancellation()

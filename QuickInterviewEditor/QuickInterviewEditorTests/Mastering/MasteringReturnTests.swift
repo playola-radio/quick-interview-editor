@@ -118,6 +118,7 @@ struct MasteringReturnTests {
     for (index, piece) in result.enumerated() {
       let audio = try AVAudioFile(forReading: piece.url)
       expectNoDifference(Int(audio.length), 44_100)
+      try MasteringArtifactValidationClient.liveValue.validate(piece.url, "m4a", 44_100)
       let buffer = try #require(
         AVAudioPCMBuffer(pcmFormat: audio.processingFormat, frameCapacity: 44_100))
       try audio.read(into: buffer)

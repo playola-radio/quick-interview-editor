@@ -342,7 +342,6 @@ final class ProjectModel: ViewModel {
     stopTicking()
     await transcriptionTask?.value
     await tearDownEditor()
-    await mastering?.teardown()
     await suggestionRecovery.releaseOwner(recoveryInstanceID)
     releaseSessionAudio()
   }
@@ -1089,8 +1088,7 @@ final class ProjectModel: ViewModel {
 
   // swiftlint:disable inclusive_language
   func prepareForMasteringTapped() {
-    ensureMastering()
-    isMasteringSheetPresented = mastering != nil
+    isMasteringSheetPresented = true
   }
 
   private func masteringInputs() -> Result<MasteringSnapshot, MasteringBlocker> {
@@ -1121,7 +1119,8 @@ final class ProjectModel: ViewModel {
           commit: { [weak self] run, staged, expectedID in
             self?.commitMastering(run, staged: staged, expectedRunID: expectedID) ?? false
           },
-          stagingError: { [weak self] in self?.masteringStagingError }))
+          stagingError: { [weak self] in self?.masteringStagingError },
+          dismiss: { [weak self] in self?.isMasteringSheetPresented = false }))
     }
   }
   // swiftlint:enable inclusive_language

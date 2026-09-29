@@ -1,3 +1,4 @@
+import ConcurrencyExtras
 import CustomDump
 import Dependencies
 import Foundation
@@ -12,8 +13,37 @@ private actor CapturedMasterTarget {
   func set(_ target: MasteredPartTarget) { value = target }
 }
 
+private actor CancelledPreparation {
+  private var started = false
+  private var cancelled = false
+  private var startWaiter: CheckedContinuation<Void, Never>?
+  private var cancelWaiter: CheckedContinuation<Void, Never>?
+
+  func waitUntilStarted() async {
+    if started { return }
+    await withCheckedContinuation { startWaiter = $0 }
+  }
+  func prepareUntilCancelled() async -> MasteringPreparationResult {
+    started = true
+    startWaiter?.resume()
+    startWaiter = nil
+    if !cancelled { await withCheckedContinuation { cancelWaiter = $0 } }
+    return .init(parts: [], warnings: [], inputsDigest: "new")
+  }
+  func cancel() {
+    cancelled = true
+    cancelWaiter?.resume()
+    cancelWaiter = nil
+  }
+}
+
 @MainActor
 struct MasteringPageTests {
+  private func drop(_ urls: [URL], onto model: MasteringPageModel) async throws {
+    let providers = try urls.map { try #require(NSItemProvider(contentsOf: $0)) }
+    let task = try #require(model.providersDropped(providers))
+    await task.value
+  }
   private func run(returned: Bool = false) -> MasteringRun {
     .init(
       id: Fixtures.uuid(70), artist: "Frozen Artist", inputsDigest: "digest",
@@ -170,7 +200,7 @@ struct MasteringPageTests {
             return true
           }))
     }
-    await model.mastersDropped([source])
+    try await drop([source], onto: model)
     expectNoDifference(commits, 0)
     #expect(model.message?.contains("second piece failed") == true)
     #expect(!current.parts[0].isReturned)
@@ -210,7 +240,7 @@ struct MasteringPageTests {
             return true
           }))
     }
-    await model.mastersDropped([source])
+    try await drop([source], onto: model)
     let target = await capture.value
     expectNoDifference(target?.pieces[0].artist, "Frozen Artist")
     expectNoDifference(target?.pieces[0].title, "Frozen Title")
@@ -250,13 +280,259 @@ struct MasteringPageTests {
           eligibility: { nil }, run: { current }, packageURL: { nil }, artifact: { _ in nil },
           commit: { _, _, _ in false }))
     }
-    await model.mastersDropped([source])
+    try await drop([source], onto: model)
     expectNoDifference(
       model.ambiguousReturn?.candidatePartIDs,
       [Fixtures.uuid(71), Fixtures.uuid(81)])
-    await model.mastersDropped([source])
+    #expect(model.providersDropped([try #require(NSItemProvider(contentsOf: source))]) == nil)
     expectNoDifference(model.message, "Wait for the current step to finish.")
     model.ambiguousReturnCancelled()
+  }
+
+  @Test func choosingAmbiguousPartResumesRemainingDropInOrder() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let sources = ["first.wav", "second.wav"].map { directory.appendingPathComponent($0) }
+    for source in sources { try Data([1, 2, 3, 4]).write(to: source) }
+    var current = run()
+    var second = current.parts[0]
+    second.id = Fixtures.uuid(81)
+    second.pieces[0].id = Fixtures.uuid(82)
+    current.parts.append(second)
+    let encodedNames = LockIsolated<[String]>([])
+    let model = withDependencies {
+      $0.uuid = .incrementing
+      $0.masteringStaging = .liveValue
+      $0.masteringReturn = .init(
+        inspect: { url in
+          .init(
+            fileName: url.lastPathComponent, sampleRate: 44_100, channels: 2,
+            sourceFrames: 44_100)
+        },
+        encodePart: { url, target, work in
+          encodedNames.withValue { $0.append(url.lastPathComponent) }
+          let output = work.appendingPathComponent("encoded.m4a")
+          try Data([1, 2, 3, 4]).write(to: output)
+          return [.init(pieceID: target.pieces[0].pieceID, url: output, byteCount: 4)]
+        })
+    } operation: {
+      MasteringPageModel(
+        host: .init(
+          finishTitleEdit: {}, inputs: { .failure(.notLoaded) }, eligibility: { nil },
+          run: { current }, packageURL: { nil }, artifact: { _ in nil },
+          commit: { next, _, _ in
+            current = next
+            return true
+          }))
+    }
+    try await drop(sources, onto: model)
+    #expect(model.ambiguousReturn != nil)
+    await model.ambiguousChoiceTapped(current.parts[0].id)
+    let allReturned = current.parts.allSatisfy { $0.isReturned }
+    #expect(allReturned)
+    expectNoDifference(encodedNames.value, ["first.wav", "second.wav"])
+  }
+
+  @Test func selectedDestinationIsCreatedOnceAndFinalIsCopied() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let current = run(returned: true)
+    let source = directory.appendingPathComponent("source.m4a")
+    try Data([1, 2, 3, 4]).write(to: source)
+    let owner = try MasteringStagingStore.copy(
+      source, as: current.parts[0].pieces[0].finished!.fileName)
+    let created = LockIsolated<[URL]>([])
+    let model = withDependencies {
+      $0.masteringStaging = .liveValue
+      $0.workspace.createDirectory = { url in
+        created.withValue { $0.append(url) }
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+      }
+      $0.exportCopy = .liveValue
+    } operation: {
+      MasteringPageModel(
+        host: .init(
+          finishTitleEdit: {}, inputs: { .failure(.notLoaded) }, eligibility: { nil },
+          run: { current }, packageURL: { directory.appendingPathComponent("interview.pie") },
+          artifact: { _ in owner }, commit: { _, _, _ in false }))
+    }
+    model.saveFinalsTapped()
+    await model.destinationSaveSelected()
+    expectNoDifference(
+      created.value.map(\.path), [directory.appendingPathComponent("mastered").path])
+    expectNoDifference(model.savedFiles.map(\.lastPathComponent), ["Frozen Title.m4a"])
+    #expect(FileManager.default.fileExists(atPath: model.savedFiles[0].path))
+  }
+
+  @Test func partialSaveRetriesOnlyTheRemainingFile() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    var current = run(returned: true)
+    var second = current.parts[0].pieces[0]
+    second.id = Fixtures.uuid(83)
+    second.title = "Second Title"
+    second.finished = .init(
+      fileName: Fixtures.uuid(84).uuidString.lowercased() + ".m4a", byteCount: 4)
+    current.parts[0].pieces.append(second)
+    let refs = try Dictionary(
+      uniqueKeysWithValues: current.parts[0].pieces.map { piece in
+        let source = directory.appendingPathComponent(piece.title + ".m4a")
+        try Data([1, 2, 3, 4]).write(to: source)
+        let ref = try #require(piece.finished)
+        return (ref.fileName, try MasteringStagingStore.copy(source, as: ref.fileName))
+      })
+    let attempts = LockIsolated<[String]>([])
+    let model = withDependencies {
+      $0.masteringStaging = .liveValue
+      $0.workspace.createDirectory = {
+        try FileManager.default.createDirectory(at: $0, withIntermediateDirectories: true)
+      }
+      $0.exportCopy = .init(
+        listNames: ExportCopyClient.liveValue.listNames,
+        copy: { source, target in
+          let shouldFail = attempts.withValue { names -> Bool in
+            names.append(target.lastPathComponent)
+            return target.lastPathComponent == "Second Title.m4a" && names.count == 2
+          }
+          if shouldFail { throw CocoaError(.fileWriteOutOfSpace) }
+          try FileManager.default.copyItem(at: source, to: target)
+        })
+    } operation: {
+      MasteringPageModel(
+        host: .init(
+          finishTitleEdit: {}, inputs: { .failure(.notLoaded) }, eligibility: { nil },
+          run: { current }, packageURL: { directory.appendingPathComponent("interview.pie") },
+          artifact: { refs[$0.fileName] }, commit: { _, _, _ in false }))
+    }
+    model.saveFinalsTapped()
+    await model.destinationSaveSelected()
+    expectNoDifference(model.savedFiles.map(\.lastPathComponent), ["Frozen Title.m4a"])
+    model.saveFinalsTapped()
+    await model.destinationSaveSelected()
+    expectNoDifference(
+      attempts.value, ["Frozen Title.m4a", "Second Title.m4a", "Second Title.m4a"])
+    expectNoDifference(
+      Set(model.savedFiles.map(\.lastPathComponent)),
+      Set(["Frozen Title.m4a", "Second Title.m4a"]))
+  }
+
+  @Test func replacingReturnedPartUsesFreshArtifactName() async throws {
+    let source = FileManager.default.temporaryDirectory.appendingPathComponent(
+      UUID().uuidString + ".wav")
+    try Data([1, 2, 3, 4]).write(to: source)
+    defer { try? FileManager.default.removeItem(at: source) }
+    var current = run(returned: true)
+    let previous = current.parts[0].pieces[0].finished
+    let model = withDependencies {
+      $0.uuid = .incrementing
+      $0.masteringStaging = .liveValue
+      $0.masteringReturn = .init(
+        inspect: { url in
+          .init(
+            fileName: url.lastPathComponent, sampleRate: 44_100, channels: 2,
+            sourceFrames: 44_100)
+        },
+        encodePart: { _, target, work in
+          let output = work.appendingPathComponent("encoded.m4a")
+          try Data([1, 2, 3, 4]).write(to: output)
+          return [.init(pieceID: target.pieces[0].pieceID, url: output, byteCount: 4)]
+        })
+    } operation: {
+      MasteringPageModel(
+        host: .init(
+          finishTitleEdit: {}, inputs: { .failure(.notLoaded) }, eligibility: { nil },
+          run: { current }, packageURL: { nil }, artifact: { _ in nil },
+          commit: { next, _, _ in
+            current = next
+            return true
+          }))
+    }
+    model.replacePartTapped(current.parts[0].id)
+    try await drop([source], onto: model)
+    #expect(current.parts[0].isReturned)
+    #expect(current.parts[0].pieces[0].finished != previous)
+    #expect(current.parts[0].pieces[0].finished?.byteCount == previous?.byteCount)
+  }
+
+  @Test func truePeakFailureKeepsOldRunAndRemovesWorkDirectory() async throws {
+    let current = run()
+    let work = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    let removed = LockIsolated<[URL]>([])
+    let model = withDependencies {
+      $0.masteringAudio = .init(prepare: { _, _ in
+        throw MasteringPreparationError.truePeakCeilingExceeded(part: 1, measuredDBTP: -1.0)
+      })
+      $0.masteringStaging = .liveValue
+      $0.masteringStaging.makeWorkDirectory = {
+        try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
+        return work
+      }
+      $0.masteringStaging.removeDirectory = { url in
+        removed.withValue { $0.append(url) }
+        try? FileManager.default.removeItem(at: url)
+      }
+    } operation: {
+      MasteringPageModel(
+        host: .init(
+          finishTitleEdit: {},
+          inputs: {
+            .success(
+              .init(
+                artist: "Artist", canonicalAudioURL: URL(fileURLWithPath: "/tmp/audio"),
+                canonicalFingerprint: "sha256:test", sourceSampleRate: 44_100,
+                sourceDurationSamples: 44_100, pieces: [], inputsDigest: "new"))
+          }, eligibility: { nil }, run: { current }, packageURL: { nil },
+          artifact: { _ in nil },
+          commit: { _, _, _ in
+            Issue.record("Failed preparation committed")
+            return false
+          }))
+    }
+    await model.prepareTapped()
+    await model.prepareAgainConfirmed()
+    #expect(model.message?.contains("above the −1.5 dBTP ceiling") == true)
+    expectNoDifference(removed.value, [work])
+    #expect(!FileManager.default.fileExists(atPath: work.path))
+  }
+
+  @Test func cancelledPreparationCannotReplaceTheOldRun() async {
+    let current = run()
+    let gate = CancelledPreparation()
+    let model = withDependencies {
+      $0.masteringStaging = .liveValue
+      $0.masteringAudio = .init(prepare: { _, _ in
+        await withTaskCancellationHandler {
+          await gate.prepareUntilCancelled()
+        } onCancel: {
+          Task { await gate.cancel() }
+        }
+      })
+    } operation: {
+      MasteringPageModel(
+        host: .init(
+          finishTitleEdit: {},
+          inputs: {
+            .success(
+              .init(
+                artist: "Artist", canonicalAudioURL: URL(fileURLWithPath: "/tmp/audio"),
+                canonicalFingerprint: "sha256:test", sourceSampleRate: 44_100,
+                sourceDurationSamples: 44_100, pieces: [], inputsDigest: "new"))
+          }, eligibility: { nil }, run: { current }, packageURL: { nil },
+          artifact: { _ in nil },
+          commit: { _, _, _ in
+            Issue.record("Cancelled preparation committed")
+            return false
+          }))
+    }
+    let preparation = Task { await model.prepareAgainConfirmed() }
+    await gate.waitUntilStarted()
+    await model.cancelTapped()
+    await preparation.value
+    expectNoDifference(model.run?.id, current.id)
+    #expect(model.activity == .idle)
   }
   @Test func preparationBlockersNeverCommit() async {
     var commits = 0

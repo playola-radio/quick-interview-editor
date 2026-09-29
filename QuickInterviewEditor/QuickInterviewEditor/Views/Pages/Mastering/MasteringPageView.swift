@@ -58,28 +58,42 @@ struct MasteringPageView: View {
         if !model.savedFiles.isEmpty {
           Button(model.showInFinderLabel) { model.showInFinderTapped() }
         }
+        Spacer()
+        Button(model.doneLabel) { model.doneTapped() }
+          .disabled(model.isBusy)
+          .keyboardShortcut(.cancelAction)
+      }
+      if model.showsDestinationPrompt {
+        VStack(alignment: .leading) {
+          Text(model.destinationMessage)
+          HStack {
+            Button(model.saveLabel) { Task { await model.destinationSaveSelected() } }
+            Button(model.chooseOtherLabel) { Task { await model.destinationChooseOtherSelected() } }
+            Button(model.cancelLabel) { model.destinationCancelTapped() }
+          }
+        }
+      }
+      if model.showsAmbiguityPrompt {
+        VStack(alignment: .leading) {
+          Text(model.ambiguityMessage)
+          HStack {
+            ForEach(model.ambiguityChoices) { choice in
+              Button(choice.title) { Task { await model.ambiguousChoiceTapped(choice.id) } }
+            }
+            Button(model.cancelLabel) { model.ambiguousReturnCancelled() }
+          }
+        }
       }
     }
     .padding(20)
     .frame(minWidth: 650, minHeight: 420)
-    .task(id: model.run?.id) { await model.preloadDragSources() }
+    .task(id: model.dragReloadKey) { await model.preloadDragSources() }
     .confirmationDialog(model.confirmAgainMessage, isPresented: $model.confirmingPrepareAgain) {
       Button(model.prepareAgainLabel) { Task { await model.prepareAgainConfirmed() } }
       Button(model.cancelLabel, role: .cancel) { model.prepareAgainCancelled() }
     }
-    .confirmationDialog(model.destinationMessage, isPresented: $model.isDestinationPresented) {
-      Button(model.saveLabel) { model.destinationSaveSelected() }
-      Button(model.chooseOtherLabel) { model.destinationChooseOtherSelected() }
-      Button(model.cancelLabel, role: .cancel) { model.destinationCancelTapped() }
-    }
     .sheet(item: $model.exportReview) { ExportReviewView(model: $0) }
     .interactiveDismissDisabled(model.isBusy)
-    .confirmationDialog(model.ambiguityMessage, isPresented: $model.isAmbiguityPresented) {
-      ForEach(model.ambiguityChoices) { choice in
-        Button(choice.title) { model.ambiguousChoiceTapped(choice.id) }
-      }
-      Button(model.cancelLabel, role: .cancel) { model.ambiguousReturnCancelled() }
-    }
   }
 }
 

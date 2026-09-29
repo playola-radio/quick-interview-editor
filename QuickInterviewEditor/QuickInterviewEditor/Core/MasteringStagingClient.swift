@@ -7,6 +7,7 @@ struct MasteringStagingClient: Sendable {
   var makeWorkDirectory: @Sendable () throws -> URL
   var adopt: @Sendable (URL, String) throws -> StagedMasteringArtifact
   var sessionCopy: @Sendable (URL, String) async throws -> StagedMasteringArtifact
+  var retainTemporaryFile: @Sendable (URL, String) throws -> StagedMasteringArtifact
   var removeDirectory: @Sendable (URL) -> Void
 }
 
@@ -20,6 +21,7 @@ extension MasteringStagingClient: DependencyKey {
           try MasteringStagingStore.copy(source, as: name)
         }.value
       },
+      retainTemporaryFile: { try MasteringStagingStore.copy($0, as: $1) },
       removeDirectory: { MasteringStagingStore.removeDirectory($0) })
   }
 }
@@ -33,6 +35,9 @@ extension MasteringStagingClient: TestDependencyKey {
       adopt: { _, _ in throw EngineClientError.unimplemented("MasteringStagingClient.adopt") },
       sessionCopy: { _, _ in
         throw EngineClientError.unimplemented("MasteringStagingClient.sessionCopy")
+      },
+      retainTemporaryFile: { _, _ in
+        throw EngineClientError.unimplemented("MasteringStagingClient.retainTemporaryFile")
       },
       removeDirectory: { _ in reportIssue("Unimplemented: MasteringStagingClient.removeDirectory") }
     )
