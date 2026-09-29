@@ -306,6 +306,37 @@ struct ExportAudioRendererTests {
     #expect(worst <= tolerance)
   }
 
+  @Test func renderEditedEmitsSameSamplesAsRenderSlice() throws {
+    let dir = try makeSandbox()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let source = dir.appendingPathComponent("canonical.aiff")
+    let output = dir.appendingPathComponent("slice.aiff")
+    try writeFixture(to: source)
+    let removal = TimelineRemoval(
+      id: UUID(), removedRange: 3000..<5000,
+      crossfade: Crossfade(lengthSamples: 200))
+    let built = SliceRenderPlanBuilder.plan(
+      sliceRange: 0..<Self.sourceFrames, removals: [removal])
+    try ExportAudioRenderer.render(
+      job(
+        source: source, output: output, plan: built.plan,
+        editedDuration: built.editedDurationSamples))
+    let file = try ExportAudioRenderer.openCanonical(
+      source, sampleRate: Self.sampleRate, sourceDurationSamples: Self.sourceFrames)
+    var emitted: [Float] = []
+    let count = try ExportAudioRenderer.renderEdited(
+      from: file, plan: built.plan, editedDurationSamples: built.editedDurationSamples,
+      sampleRate: Self.sampleRate
+    ) { buffer in
+      let channel = try #require(buffer.floatChannelData)[0]
+      emitted.append(contentsOf: (0..<Int(buffer.frameLength)).map { channel[$0] })
+    }
+    expectNoDifference(count, built.editedDurationSamples)
+    let rendered = try readFrames(output, from: 0, count: count)
+    let worst = zip(rendered, emitted).map { abs($0 - $1) }.max() ?? 0
+    #expect(worst <= 1.0 / 32768)
+  }
+
   /// A seam can itself be the render's FIRST item — a removal that starts right at the clip's own
   /// edge leaves no leading kept segment. The leading boundary declick must still reach into the
   /// blended seam samples exactly as it would an ordinary segment's, since `writeSeam` applies

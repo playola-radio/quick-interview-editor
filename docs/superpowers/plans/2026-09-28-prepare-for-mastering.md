@@ -167,10 +167,12 @@ struct MasteringPieceInput: Equatable, Sendable {
   var sourceRange: Range<Int>
   var localRemovals: [TimelineRemoval] // rebased snapshot values used by the stable digest
   var wordStarts: [RenderMarker]   // SliceRenderPlanBuilder.markers(...) — edited-local, source-rate, tie-nudged
+  var typeProvenance: String       // "explicit" / "naming" / "legacy" — feeds the stable digest
 }
 struct MasteringSnapshot: Equatable, Sendable {
   var artist: String
   var canonicalAudioURL: URL       // the session copy (ephemeral)
+  var canonicalFingerprint: String // ProjectSource.canonicalFingerprint, revalidated before preparation
   var sourceSampleRate: Int        // ProjectSource.sampleRate / EditPlan.source.sampleRate
   var sourceDurationSamples: Int
   var pieces: [MasteringPieceInput]
@@ -182,7 +184,7 @@ enum MasteringBlocker: Error, Equatable, Sendable {
 enum MasteringSnapshotBuilder {
   static func build(
     document: EditorDocumentState, plan: EditPlan, source: ProjectSource, canonicalAudioURL: URL
-  ) -> Result<MasteringSnapshot, MasteringBlocker>   // covers missingArtist/noIntros/blankTitles only
+  ) -> Result<MasteringSnapshot, MasteringBlocker>   // covers missingArtist/noIntros/blankTitles/invalidTimeline
 }
 
 // MasteringInputsDigest.swift
