@@ -23,6 +23,14 @@ packages:
     url: https://github.com/sparkle-project/Sparkle
     exactVersion: "2.9.6"
 targets:
+  CEbur128:
+    type: library.static
+    platform: macOS
+    sources:
+      - path: Vendor/libebur128/ebur128/ebur128.c
+    settings:
+      base:
+        CLANG_ENABLE_MODULES: YES
   PlayolaInterviewEditor:
     type: application
     platform: macOS
@@ -83,6 +91,7 @@ targets:
         # display name lives in CFBundleDisplayName above.
         PRODUCT_NAME: PlayolaInterviewEditor
         SWIFT_VERSION: "6.0"
+        SWIFT_INCLUDE_PATHS: "$(SRCROOT)/Vendor/libebur128/include"
         # Single source of truth for the app version. sparkle:version ==
         # CFBundleVersion (CURRENT_PROJECT_VERSION) — a monotonically increasing
         # integer; CFBundleShortVersionString (MARKETING_VERSION) is the display.
@@ -94,6 +103,7 @@ targets:
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: FSRSPV9N9Q
     dependencies:
+      - target: CEbur128
       - package: Dependencies
         product: Dependencies
       - package: Sharing
@@ -139,6 +149,7 @@ targets:
     settings:
       base:
         SWIFT_VERSION: "6.0"
+        SWIFT_INCLUDE_PATHS: "$(SRCROOT)/Vendor/libebur128/include"
         GENERATE_INFOPLIST_FILE: YES
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: FSRSPV9N9Q
