@@ -14,9 +14,6 @@ enum MasteringAACEncoder {
     do {
       try Task.checkCancellation()
       let source = try AVAudioFile(forReading: sourceURL)
-      guard source.processingFormat.sampleRate == 44_100,
-        source.processingFormat.channelCount == 2
-      else { throw failed(target, "Conformed source format changed") }
       let format = try audioFormatDescription(source.processingFormat, target: target)
       let settings: [String: Any] = [
         AVFormatIDKey: kAudioFormatMPEG4AAC,
@@ -28,11 +25,12 @@ enum MasteringAACEncoder {
         mediaType: .audio, outputSettings: settings, sourceFormatHint: format)
       guard writer.canAdd(input) else { throw failed(target, "AAC writer rejected its input") }
       writer.add(input)
-      writer.metadata = [
+      var items = [
         metadata(.iTunesMetadataArtist, target.artist),
         metadata(.iTunesMetadataSongName, target.title),
-        metadata(.iTunesMetadataLyrics, target.lrc),
       ]
+      if !target.lrc.isEmpty { items.append(metadata(.iTunesMetadataLyrics, target.lrc)) }
+      writer.metadata = items
       guard writer.startWriting() else {
         throw failed(target, writer.error?.localizedDescription ?? "Could not start AAC writer")
       }
@@ -57,7 +55,7 @@ enum MasteringAACEncoder {
           guard writer.status == .writing else {
             throw failed(target, writer.error?.localizedDescription ?? "AAC writer stopped")
           }
-          await Task.yield()
+          try await Task.sleep(for: .milliseconds(1))
         }
         guard input.append(sample) else {
           throw failed(target, writer.error?.localizedDescription ?? "AAC writer rejected samples")
@@ -79,12 +77,12 @@ enum MasteringAACEncoder {
           title: target.title, expected: target.frameCount, actual: Int(decoded.length))
       }
       let attributes = try FileManager.default.attributesOfItem(atPath: outputURL.path)
-      guard let byteCount = (attributes[.size] as? NSNumber)?.intValue, byteCount > 0 else {
-        throw failed(target, "AAC output is empty")
+      guard let byteCount = (attributes[.size] as? NSNumber)?.intValue else {
+        throw failed(target, "Could not read AAC output size")
       }
       return EncodedPiece(pieceID: target.pieceID, url: outputURL, byteCount: byteCount)
     } catch {
-      writer.cancelWriting()
+      if writer.status == .writing { writer.cancelWriting() }
       try? FileManager.default.removeItem(at: outputURL)
       throw error
     }

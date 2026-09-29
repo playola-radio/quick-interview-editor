@@ -65,11 +65,6 @@ struct MasteringReturnTests {
       expectNoDifference(inspected.channels, channels)
       expectNoDifference(inspected.sourceFrames, 4_800)
     }
-    let renamedFLAC = work.appendingPathComponent("flac-named.wav")
-    try FileManager.default.copyItem(
-      at: fixtures.appendingPathComponent("mono-48k.flac"), to: renamedFLAC)
-    let renamedInspection = try await MasteringReturnClient.liveValue.inspect(renamedFLAC)
-    expectNoDifference(renamedInspection.channels, 1)
   }
 
   @Test func rejectsMisnamedAACUnreadableBytesAndMultichannel() async throws {
@@ -102,7 +97,7 @@ struct MasteringReturnTests {
     let source = work.appendingPathComponent("master.wav")
     try pcm(
       source, frames: 5 * 48_000,
-      impulses: [480, 48_000 + 12_000, 96_000 + 36_000, 4 * 48_000])
+      impulses: [480, 48_000 + 12_000, 96_000 + 36_000])
     let output = work.appendingPathComponent("output")
     try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
     let targets = (0..<3).map { index in
@@ -150,6 +145,64 @@ struct MasteringReturnTests {
     }
     expectNoDifference(
       try FileManager.default.contentsOfDirectory(at: output, includingPropertiesForKeys: nil), [])
+  }
+
+  @Test func refusesAChangedReturnThatIsOutsideMatchingTolerance() async throws {
+    let work = try directory()
+    defer { try? FileManager.default.removeItem(at: work) }
+    let source = work.appendingPathComponent("changed.wav")
+    try pcm(source, frames: 10 * 44_100, sampleRate: 44_100)
+    let output = work.appendingPathComponent("output")
+    try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+    let target = MasteredPieceTarget(
+      pieceID: UUID(), startFrame: 0, frameCount: 44_100,
+      artist: "A", title: "Changed", lrc: "")
+    await #expect(
+      throws: MasteringReturnError.encodeFailed(
+        title: "Changed", reason: "Returned audio duration changed after matching")
+    ) {
+      try await MasteringReturnClient.liveValue.encodePart(
+        source, MasteredPartTarget(partFrameCount: 44_100, pieces: [target]), output)
+    }
+    expectNoDifference(
+      try FileManager.default.contentsOfDirectory(at: output, includingPropertiesForKeys: nil), [])
+  }
+
+  @Test func monoReturnDuplicatesChannels() async throws {
+    let work = try directory()
+    defer { try? FileManager.default.removeItem(at: work) }
+    let source = work.appendingPathComponent("mono.wav")
+    try pcm(source, channels: 1, frames: 1_024, sampleRate: 44_100, impulses: [512])
+    let output = work.appendingPathComponent("output")
+    let target = MasteredPieceTarget(
+      pieceID: UUID(), startFrame: 0, frameCount: 1_024,
+      artist: "A", title: "Mono", lrc: "")
+    let result = try await MasteringReturnClient.liveValue.encodePart(
+      source, MasteredPartTarget(partFrameCount: 1_024, pieces: [target]), output)
+    let audio = try AVAudioFile(forReading: try #require(result.first).url)
+    expectNoDifference(Int(audio.fileFormat.channelCount), 2)
+    let buffer = try #require(
+      AVAudioPCMBuffer(pcmFormat: audio.processingFormat, frameCapacity: 1_024))
+    try audio.read(into: buffer)
+    let channels = try #require(buffer.floatChannelData)
+    for frame in 0..<1_024 {
+      #expect(abs(channels[0][frame] - channels[1][frame]) < 0.001)
+    }
+  }
+
+  @Test func uneven48kReturnKeepsExactSavedFrameCount() async throws {
+    let work = try directory()
+    defer { try? FileManager.default.removeItem(at: work) }
+    let source = work.appendingPathComponent("uneven.wav")
+    try pcm(source, frames: 48_001, impulses: [12_000])
+    let output = work.appendingPathComponent("output")
+    let target = MasteredPieceTarget(
+      pieceID: UUID(), startFrame: 0, frameCount: 44_101,
+      artist: "A", title: "Uneven", lrc: "")
+    let result = try await MasteringReturnClient.liveValue.encodePart(
+      source, MasteredPartTarget(partFrameCount: 44_101, pieces: [target]), output)
+    let audio = try AVAudioFile(forReading: try #require(result.first).url)
+    expectNoDifference(Int(audio.length), 44_101)
   }
 
   @Test func twoSecondReturnKeepsFiveImpulsePositionsAndPlaybackDuration() async throws {

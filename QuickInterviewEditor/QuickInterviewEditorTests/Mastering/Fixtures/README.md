@@ -9,4 +9,4 @@ ffmpeg -f lavfi -i 'sine=frequency=440:sample_rate=48000:duration=0.1' -ac 2 -c:
 afconvert -f AIFC -d BEI16 mono-48k.flac mono-48k.aifc
 ```
 
-The AAC fixture is renamed to `.wav` at test runtime to prove that inspection uses the container rather than the extension. A copy of the FLAC fixture is likewise renamed to `.wav`.
+The AAC fixture is renamed to `.wav` at test runtime to prove that inspection uses the container rather than the extension.

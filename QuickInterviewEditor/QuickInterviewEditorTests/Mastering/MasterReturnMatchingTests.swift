@@ -16,6 +16,11 @@ struct MasterReturnMatchingTests {
     expectNoDifference(
       MasterReturnMatching.candidates(durationSeconds: 609 - 1.0 / 44_100, parts: parts), [second])
     expectNoDifference(MasterReturnMatching.candidates(durationSeconds: .nan, parts: parts), [])
+    expectNoDifference(
+      MasterReturnMatching.candidates(
+        durationSeconds: 604.9,
+        parts: [(id: first, frameCount: 600 * 44_100), (id: second, frameCount: 700 * 44_100)]),
+      [first])
   }
 }
 

@@ -74,7 +74,12 @@ extension MasteringReturnClient: DependencyKey {
           try await MasteringReturnWorker.encodePart(master, target, workDirectory)
         }
         return try await withTaskCancellationHandler {
-          try await worker.value
+          let result = try await worker.value
+          if Task.isCancelled {
+            for piece in result { try? FileManager.default.removeItem(at: piece.url) }
+            throw CancellationError()
+          }
+          return result
         } onCancel: {
           worker.cancel()
         }
@@ -142,7 +147,12 @@ private enum MasteringReturnWorker {
   ) async throws -> [EncodedPiece] {
     try Task.checkCancellation()
     try validate(target)
-    _ = try MasteringReturnInspector.inspect(master)
+    let inspection = try MasteringReturnInspector.inspect(master)
+    let difference = abs(inspection.durationSeconds - Double(target.partFrameCount) / 44_100)
+    guard difference < MasteringFormat.masterDurationToleranceSeconds else {
+      throw MasteringReturnError.encodeFailed(
+        title: target.pieces[0].title, reason: "Returned audio duration changed after matching")
+    }
     try FileManager.default.createDirectory(at: workDirectory, withIntermediateDirectories: true)
     let caf = workDirectory.appendingPathComponent(UUID().uuidString + ".caf")
     var completed: [EncodedPiece] = []
@@ -164,7 +174,10 @@ private enum MasteringReturnWorker {
       return completed
     } catch {
       for piece in completed { try? FileManager.default.removeItem(at: piece.url) }
-      throw error
+      if error is CancellationError { throw error }
+      if let error = error as? MasteringReturnError { throw error }
+      throw MasteringReturnError.encodeFailed(
+        title: target.pieces[0].title, reason: error.localizedDescription)
     }
   }
 
@@ -172,16 +185,12 @@ private enum MasteringReturnWorker {
     guard target.partFrameCount > 0, !target.pieces.isEmpty else {
       throw invalidTarget(target)
     }
-    var next = 0
-    var identities = Set<UUID>()
     for piece in target.pieces {
-      guard piece.startFrame == next, piece.frameCount > 0,
-        piece.frameCount <= target.partFrameCount - next,
-        identities.insert(piece.pieceID).inserted
+      guard piece.startFrame >= 0, piece.startFrame < target.partFrameCount,
+        piece.frameCount > 0,
+        piece.frameCount <= target.partFrameCount - piece.startFrame
       else { throw invalidTarget(target) }
-      next += piece.frameCount
     }
-    guard next == target.partFrameCount else { throw invalidTarget(target) }
   }
 
   private static func invalidTarget(_ target: MasteredPartTarget) -> MasteringReturnError {
@@ -228,6 +237,10 @@ private enum MasteringReturnWorker {
         frames += Int(output.frameLength)
       }
     } catch let error as MasteringPreparationError {
+      if error == .invalidLoudnessMeasurement {
+        throw MasteringReturnError.encodeFailed(
+          title: master.lastPathComponent, reason: "Returned audio contains invalid samples")
+      }
       throw MasteringReturnError.encodeFailed(
         title: master.lastPathComponent, reason: error.localizedDescription)
     }
