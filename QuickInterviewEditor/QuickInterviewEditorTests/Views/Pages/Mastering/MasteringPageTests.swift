@@ -63,6 +63,17 @@ struct MasteringPageTests {
     let task = try #require(model.providersDropped(providers))
     await task.value
   }
+  private func stageFinishedPieces(_ pieces: [MasteringPiece], in directory: URL) throws
+    -> [String: StagedMasteringArtifact]
+  {
+    try Dictionary(
+      uniqueKeysWithValues: pieces.map { piece in
+        let source = directory.appendingPathComponent(piece.title + ".m4a")
+        try Data([1, 2, 3, 4]).write(to: source)
+        let ref = try #require(piece.finished)
+        return (ref.fileName, try MasteringStagingStore.copy(source, as: ref.fileName))
+      })
+  }
   private func run(returned: Bool = false) -> MasteringRun {
     .init(
       id: Fixtures.uuid(70), artist: "Frozen Artist", inputsDigest: "digest",
@@ -607,6 +618,65 @@ struct MasteringPageTests {
       model.exportReview?.mappings.first?.proposedName, "Frozen Title 2.m4a")
   }
 
+  @Test func cancellingFilenameReviewKeepsFilesAlreadyCopiedInThisSaveAttempt() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    var current = run(returned: true)
+    var second = current.parts[0].pieces[0]
+    second.id = Fixtures.uuid(85)
+    second.title = "Second Title"
+    second.finished = .init(
+      fileName: Fixtures.uuid(86).uuidString.lowercased() + ".m4a", byteCount: 4)
+    current.parts[0].pieces.append(second)
+    let refs = try stageFinishedPieces(current.parts[0].pieces, in: directory)
+    let mastered = directory.appendingPathComponent("mastered")
+    let model = withDependencies {
+      $0.masteringStaging = .liveValue
+      $0.workspace.createDirectory = {
+        try FileManager.default.createDirectory(at: $0, withIntermediateDirectories: true)
+      }
+      $0.exportCopy = .init(
+        listNames: ExportCopyClient.liveValue.listNames,
+        copy: { source, target in
+          try FileManager.default.copyItem(at: source, to: target)
+          // Simulate another process writing a same-named file right after "Frozen Title.m4a"
+          // finishes copying, forcing a NEW collision on "Second Title.m4a" mid-batch — after
+          // real progress has already landed on disk for this save attempt.
+          if target.lastPathComponent == "Frozen Title.m4a" {
+            try Data([9, 9, 9, 9]).write(
+              to: target.deletingLastPathComponent().appendingPathComponent("Second Title.m4a"))
+          }
+        })
+    } operation: {
+      MasteringPageModel(
+        host: .init(
+          finishTitleEdit: {}, inputs: { .failure(.notLoaded) }, eligibility: { nil },
+          run: { current }, packageURL: { directory.appendingPathComponent("interview.pie") },
+          artifact: { refs[$0.fileName] }, commit: { _, _, _ in false }))
+    }
+    model.saveFinalsTapped()
+    await model.destinationSaveSelected()
+    // "Frozen Title.m4a" copied cleanly, then "Second Title.m4a" collided mid-batch, so the
+    // filename-review sheet appeared with real progress already tracked.
+    #expect(model.exportReview != nil)
+    expectNoDifference(model.savedFiles.map(\.lastPathComponent), ["Frozen Title.m4a"])
+
+    // Cancelling the review must not discard "Frozen Title.m4a", which is genuinely on disk.
+    model.exportReview?.reviewNamesTapped()
+    await Task.yield()
+    expectNoDifference(model.savedFiles.map(\.lastPathComponent), ["Frozen Title.m4a"])
+
+    // Retrying must not recopy or duplicate-suffix the already-saved file.
+    model.saveFinalsTapped()
+    await model.destinationSaveSelected()
+    #expect(model.exportReview != nil)
+    expectNoDifference(
+      model.exportReview?.mappings.map(\.proposedName), ["Second Title 2.m4a"])
+    let onDisk = try FileManager.default.contentsOfDirectory(atPath: mastered.path)
+    expectNoDifference(Set(onDisk), Set(["Frozen Title.m4a", "Second Title.m4a"]))
+  }
+
   @Test func replacingReturnedPartUsesFreshArtifactName() async throws {
     let source = FileManager.default.temporaryDirectory.appendingPathComponent(
       UUID().uuidString + ".wav")
@@ -735,6 +805,93 @@ struct MasteringPageTests {
     #expect(removed.value)
     #expect(!FileManager.default.fileExists(atPath: work.path))
   }
+
+  @Test func prepareAgainKeepsPriorDragCopyAliveForOneMoreRun() async throws {
+    let source = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try Data([1, 2, 3, 4]).write(to: source)
+    defer { try? FileManager.default.removeItem(at: source) }
+    var current = run()
+    let ref = MasteringArtifactRef(
+      fileName: Fixtures.uuid(21).uuidString.lowercased() + ".wav", byteCount: 4)
+    current.parts[0].prepared = ref
+    let owner = try MasteringStagingStore.copy(source, as: ref.fileName)
+    let work = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    let model = withDependencies {
+      $0.uuid = .incrementing
+      $0.masteringStaging = .liveValue
+      $0.masteringStaging.makeWorkDirectory = {
+        try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
+        return work
+      }
+      $0.masteringAudio = .init(prepare: { _, _ in
+        .init(parts: [], warnings: [], inputsDigest: "new")
+      })
+    } operation: {
+      MasteringPageModel(
+        host: .init(
+          finishTitleEdit: {},
+          inputs: {
+            .success(
+              .init(
+                artist: "Artist", canonicalAudioURL: URL(fileURLWithPath: "/tmp/audio"),
+                canonicalFingerprint: "sha256:test", sourceSampleRate: 44_100,
+                sourceDurationSamples: 44_100, pieces: [], inputsDigest: "new"))
+          }, eligibility: { nil }, run: { current }, packageURL: { nil },
+          artifact: { _ in owner },
+          commit: { next, _, _ in
+            current = next
+            return true
+          }))
+    }
+    let draggedURL = try #require(await model.dragURL(for: current.parts[0].id))
+    #expect(FileManager.default.fileExists(atPath: draggedURL.path))
+    await model.prepareAgainConfirmed()
+    #expect(
+      FileManager.default.fileExists(atPath: draggedURL.path),
+      "a browser reading the dragged file mid-upload must not have it deleted out from under it")
+  }
+
+  @Test func prepareAgainTwiceEventuallyRetiresOldDragCopies() async throws {
+    let source = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try Data([1, 2, 3, 4]).write(to: source)
+    defer { try? FileManager.default.removeItem(at: source) }
+    var current = run()
+    let ref = MasteringArtifactRef(
+      fileName: Fixtures.uuid(21).uuidString.lowercased() + ".wav", byteCount: 4)
+    current.parts[0].prepared = ref
+    let owner = try MasteringStagingStore.copy(source, as: ref.fileName)
+    let model = withDependencies {
+      $0.uuid = .incrementing
+      $0.masteringStaging = .liveValue
+      $0.masteringAudio = .init(prepare: { _, _ in
+        .init(parts: [], warnings: [], inputsDigest: "new")
+      })
+    } operation: {
+      MasteringPageModel(
+        host: .init(
+          finishTitleEdit: {},
+          inputs: {
+            .success(
+              .init(
+                artist: "Artist", canonicalAudioURL: URL(fileURLWithPath: "/tmp/audio"),
+                canonicalFingerprint: "sha256:test", sourceSampleRate: 44_100,
+                sourceDurationSamples: 44_100, pieces: [], inputsDigest: "new"))
+          }, eligibility: { nil }, run: { current }, packageURL: { nil },
+          artifact: { _ in owner },
+          commit: { next, _, _ in
+            current = next
+            return true
+          }))
+    }
+    let firstDragURL = try #require(await model.dragURL(for: current.parts[0].id))
+    await model.prepareAgainConfirmed()
+    #expect(FileManager.default.fileExists(atPath: firstDragURL.path))
+    await model.prepareAgainConfirmed()
+    #expect(
+      !FileManager.default.fileExists(atPath: firstDragURL.path),
+      "retired drag copies must not accumulate indefinitely across runs")
+  }
+
   @Test func preparationBlockersNeverCommit() async {
     var commits = 0
     let host = MasteringPageModel.Host(

@@ -100,6 +100,11 @@ final class MasteringPageModel: ViewModel {
   @ObservationIgnored private var pendingMasters: [StagedMasteringArtifact] = []
   @ObservationIgnored private var ambiguousOwner: StagedMasteringArtifact?
   private var dragOwners: [UUID: StagedMasteringArtifact] = [:]
+  // A browser or other app can still be reading a dragged file's bytes asynchronously, well
+  // after the drag gesture ends. Retiring the previous run's owners here (instead of dropping
+  // them immediately) keeps that read from failing out from under an in-flight upload, while
+  // freeing the run before that bounds growth to at most two runs' worth of staged files.
+  @ObservationIgnored private var retiredDragOwners: [UUID: StagedMasteringArtifact] = [:]
   private var dragRevision = 0
   @ObservationIgnored private var saveOwners: [StagedMasteringArtifact] = []
   @ObservationIgnored private var copied: [ExportCopiedFile] = []
@@ -301,6 +306,7 @@ final class MasteringPageModel: ViewModel {
         message = "The project changed while preparing; prepare again."
         return
       }
+      retiredDragOwners = dragOwners
       dragOwners = [:]
       warningMessages = result.warnings.map(Self.warningText)
       message = "Prepared \(parts.count) part\(parts.count == 1 ? "" : "s") for mastering."
@@ -650,9 +656,6 @@ final class MasteringPageModel: ViewModel {
           await self?.cancelTapped()
           self?.exportReview = nil
           self?.saveOwners = []
-          self?.copied = []
-          self?.savedFiles = []
-          self?.destination = nil
         }
       }
       await finishCopy(review, approved: nil, token: token, runID: run.id)
@@ -700,6 +703,7 @@ final class MasteringPageModel: ViewModel {
   func teardown() async {
     await cancelTapped()
     dragOwners = [:]
+    retiredDragOwners = [:]
     dragRevision += 1
     saveOwners = []
     exportReview = nil
