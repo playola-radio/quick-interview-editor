@@ -148,6 +148,55 @@ struct ProjectPackageTests {
     }
   }
 
+  // swiftlint:disable:next inclusive_language
+  @Test func malformedMasteringManifestIsNotSilentlyDropped() throws {
+    let mediaName = Fixtures.uuid(80).uuidString.lowercased() + ".wav"
+    var file = Fixtures.projectFile()
+    file.masteringRun = masteringRun(preparedName: mediaName, byteCount: 4)
+    let root = try ProjectPackage.encode(
+      file: file, plan: Fixtures.editPlan(),
+      audio: FileWrapper(regularFileWithContents: Data("audio".utf8)),
+      masteringStaged: [
+        mediaName: try MasteringStagingStore.adopt(
+          Self.makeStagingSource(named: mediaName, contents: Data("file".utf8)), as: mediaName)
+      ], strictMissing: true)
+    guard let projectJSON = root.fileWrappers?["project.json"]?.regularFileContents,
+      let text = String(bytes: projectJSON, encoding: .utf8)
+    else { throw TestFailure() }
+    let corruptedText = text.replacingOccurrences(
+      of: "\"artist\":\"Artist\"", with: "\"artist\":42")
+    #expect(corruptedText != text)
+    let corrupted = FileWrapper(regularFileWithContents: Data(corruptedText.utf8))
+    corrupted.preferredFilename = "project.json"
+    root.removeFileWrapper(root.fileWrappers!["project.json"]!)
+    root.addFileWrapper(corrupted)
+
+    let decoded = try ProjectPackage.decode(root)
+    expectNoDifference(decoded.file.masteringRun, nil)
+    expectNoDifference(decoded.masteringManifestCorrupt, true)
+
+    // A save after a corrupt-manifest open must not treat the still-present media as
+    // orphaned and delete it — only a run that decoded successfully may retire artifacts.
+    // `ProjectDocument` threads `decoded.masteringManifestCorrupt` into this flag.
+    let resaved = try ProjectPackage.rewriteMetadata(
+      in: root, file: decoded.file, plan: decoded.plan,
+      preserveMasteringWhenAbsent: decoded.masteringManifestCorrupt)
+    expectNoDifference(resaved.fileWrappers?["mastering"]?.fileWrappers?[mediaName] != nil, true)
+    expectNoDifference(resaved.fileWrappers?["project.json"] != nil, true)
+    let reopened = try ProjectPackage.decode(resaved)
+    expectNoDifference(reopened.masteringManifestCorrupt, true)
+  }
+
+  private struct TestFailure: Error {}
+
+  private static func makeStagingSource(named name: String, contents: Data) throws -> URL {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    let url = dir.appendingPathComponent(name)
+    try contents.write(to: url)
+    return url
+  }
+
   // MARK: - Helpers
 
   private func tree(projectJSON: Data, planJSON: Data, audio: Data?) -> FileWrapper {

@@ -12,8 +12,7 @@ import UniformTypeIdentifiers
 @MainActor
 struct ProjectDocumentTests {
   @Test
-  // swiftlint:disable:next function_body_length
-  func stagingFailureKeepsManifestAndRefusesIncompleteSaveAs() throws {
+  func openingNeverStagesButSavesSelfHealFromTheExistingPackage() throws {
     let name = Fixtures.uuid(86).uuidString.lowercased() + ".wav"
     let audio = Data("canonical".utf8)
     var file = Fixtures.projectFile(source: Fixtures.projectSource(canonicalByteCount: audio.count))
@@ -43,23 +42,25 @@ struct ProjectDocumentTests {
     let dir = FileWrapper(directoryWithFileWrappers: [name: media])
     dir.preferredFilename = "mastering"
     root.addFileWrapper(dir)
-    let document = try ProjectDocument(
-      reading: root,
-      stageMastering: { _, _ in
-        throw CocoaError(.fileWriteOutOfSpace)
-      })
+    // Opening never stages this intact media into Caches (Greptile PR #105: "opening duplicates
+    // all mastering media") — `masteringStaged` starts empty.
+    let document = try ProjectDocument(reading: root)
     var content = try #require(document.content)
     expectNoDifference(content.file.masteringRun, file.masteringRun)
     expectNoDifference(content.masteringStaged.count, 0)
-    #expect(content.masteringStagingError != nil)
     let audioURL = try tempAudioFile(audio)
     defer { try? FileManager.default.removeItem(at: audioURL) }
     content.audio = .packageChild(sessionCopy: audioURL)
+    // A fresh-tree save with no existing package to self-heal from (Save As onto a brand-new
+    // file) still refuses to write an incomplete manifest.
     #expect(throws: ProjectPackage.MasteringReconcileError.missingArtifact(name)) {
       try ProjectDocument.makeFileWrapper(snapshot: content, existingFile: nil)
     }
+    // An ordinary in-place save reuses `root`'s own `mastering/` child directly.
     let ordinary = try ProjectDocument.makeFileWrapper(snapshot: content, existingFile: root)
     expectNoDifference(try ProjectPackage.decode(ordinary).file.masteringRun, file.masteringRun)
+    // A re-transcribe still builds a fresh tree, but self-heals the untouched mastering media
+    // from `existingFile` (`root`) on demand rather than requiring it to have been staged already.
     let replacementAudio = Data("new canonical".utf8)
     let replacementURL = try tempAudioFile(replacementAudio)
     defer { try? FileManager.default.removeItem(at: replacementURL) }
@@ -71,7 +72,7 @@ struct ProjectDocumentTests {
     expectNoDifference(try writtenAudio(of: retranscribed), replacementAudio)
   }
 
-  @Test func replacingRunReleasesStagedMediaAfterTheLastSaveLease() throws {
+  @Test func replacingRunKeepsStagedMediaAliveUntilTheWrapperItselfIsReleased() throws {
     let audio = Data("canonical".utf8)
     let file = Fixtures.projectFile(source: Fixtures.projectSource(canonicalByteCount: audio.count))
     let root = try ProjectPackage.encode(
@@ -109,12 +110,140 @@ struct ProjectDocumentTests {
     }
     let url = try #require(stagedURL)
     expectNoDifference(FileManager.default.fileExists(atPath: url.path), true)
+    // A later save on the SAME wrapper (`root`) that no longer references this artifact must NOT
+    // delete it out from under a still in-flight NSDocument disk write for the earlier save — see
+    // `overlappingSavesOnTheSameWrapperRetainBothLeases` below. The source is only released once the
+    // wrapper itself is (nothing holds `root` past this scope).
     let cleared = ProjectDocument.Content(
       file: file, plan: Fixtures.editPlan(),
       audio: .packageChild(sessionCopy: nil), recoveryArchive: nil)
     _ = try ProjectDocument.makeFileWrapper(snapshot: cleared, existingFile: root)
-    expectNoDifference(FileManager.default.fileExists(atPath: url.path), false)
+    expectNoDifference(FileManager.default.fileExists(atPath: url.path), true)
+    withExtendedLifetime(root) {}
   }
+
+  // swiftlint:disable:next inclusive_language
+  @Test func openingAnIntactMasteredProjectDoesNotStageItsMedia() throws {
+    let audio = Data("canonical".utf8)
+    var file = Fixtures.projectFile(source: Fixtures.projectSource(canonicalByteCount: audio.count))
+    file.schemaVersion = 3
+    let name = Fixtures.uuid(140).uuidString.lowercased() + ".wav"
+    let bytes = Data("wav".utf8)
+    file.masteringRun = MasteringRun(
+      id: Fixtures.uuid(141), artist: "Artist", inputsDigest: "v1:x",
+      parts: [
+        MasteringPart(
+          id: Fixtures.uuid(142), frameCount: 10,
+          prepared: MasteringArtifactRef(fileName: name, byteCount: bytes.count),
+          pieces: [
+            MasteringPiece(
+              id: Fixtures.uuid(143), sliceID: Fixtures.uuid(144), title: "Intro",
+              startFrame: 0, frameCount: 10, lrc: "", finished: nil)
+          ])
+      ])
+    let root = try ProjectPackage.encode(
+      file: Fixtures.projectFile(source: file.source),
+      plan: Fixtures.editPlan(), audio: FileWrapper(regularFileWithContents: audio))
+    let project = FileWrapper(
+      regularFileWithContents: try ProjectPackage.projectEncoder().encode(file))
+    project.preferredFilename = "project.json"
+    if let old = root.fileWrappers?["project.json"] { root.removeFileWrapper(old) }
+    root.addFileWrapper(project)
+    let media = FileWrapper(regularFileWithContents: bytes)
+    media.preferredFilename = name
+    let dir = FileWrapper(directoryWithFileWrappers: [name: media])
+    dir.preferredFilename = "mastering"
+    root.addFileWrapper(dir)
+    // A mastered project whose `mastering/` media is already intact on disk (the ordinary case
+    // for reading or doing a plain in-place save) never needs a staged Caches fallback copy —
+    // `reconcileMastering` reuses the on-disk child directly. Opening it must not pay to stage
+    // media it will never read from the cache (Greptile PR #105: "opening duplicates all
+    // mastering media").
+    let document = try ProjectDocument(reading: root)
+    let content = try #require(document.content)
+    expectNoDifference(content.masteringStaged.count, 0)
+  }
+  @Test
+  // swiftlint:disable:next function_body_length
+  func overlappingSavesOnTheSameWrapperRetainBothLeases() throws {
+    let audio = Data("canonical".utf8)
+    let file = Fixtures.projectFile(source: Fixtures.projectSource(canonicalByteCount: audio.count))
+    let root = try ProjectPackage.encode(
+      file: file, plan: Fixtures.editPlan(),
+      audio: FileWrapper(regularFileWithContents: audio))
+    let base = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: base) }
+
+    func stagedRun(nameSeed: Int, contents: Data) throws -> (String, StagedMasteringArtifact) {
+      let name = Fixtures.uuid(nameSeed).uuidString.lowercased() + ".wav"
+      let source = base.appendingPathComponent("source-\(nameSeed).wav")
+      try contents.write(to: source)
+      let owner = try MasteringStagingStore.adopt(source, as: name, in: base)
+      return (name, owner)
+    }
+
+    // Save A stages media and writes it into `root`, mimicking an autosave whose returned
+    // wrapper has not finished its (asynchronous, NSDocument-driven) disk write yet. Only
+    // `wrapperA`'s lease may keep the staged source alive past this scope — every other strong
+    // reference to it (the local `owner`, the snapshot's `masteringStaged`) must drop here so the
+    // later check can't pass merely because the test itself is still holding the source.
+    let bytesA = Data("file-a".utf8)
+    var stagedURLA: URL?
+    let wrapperA: FileWrapper = try {
+      let (nameA, ownerA) = try stagedRun(nameSeed: 120, contents: bytesA)
+      stagedURLA = ownerA.url
+      var fileA = file
+      fileA.masteringRun = MasteringRun(
+        id: Fixtures.uuid(122), artist: "Artist", inputsDigest: "v1:a",
+        parts: [
+          MasteringPart(
+            id: Fixtures.uuid(123), frameCount: 10,
+            prepared: MasteringArtifactRef(fileName: nameA, byteCount: bytesA.count),
+            pieces: [
+              MasteringPiece(
+                id: Fixtures.uuid(124), sliceID: Fixtures.uuid(125), title: "Intro",
+                startFrame: 0, frameCount: 10, lrc: "", finished: nil)
+            ])
+        ])
+      let snapshotA = ProjectDocument.Content(
+        file: fileA, plan: Fixtures.editPlan(),
+        audio: .packageChild(sessionCopy: nil), recoveryArchive: nil,
+        masteringStaged: [nameA: ownerA])
+      return try ProjectDocument.makeFileWrapper(snapshot: snapshotA, existingFile: root)
+    }()
+
+    // Save B lands on the SAME `root` object before A's write has consumed its sources — the
+    // scenario Greptile flagged (PR #105, ProjectDocument.swift:25): a second save's lease must
+    // not silently replace the first save's, or A's staged source can be deleted while A's disk
+    // write still needs to read it.
+    let bytesB = Data("file-b".utf8)
+    let (nameB, ownerB) = try stagedRun(nameSeed: 126, contents: bytesB)
+    var fileB = file
+    fileB.masteringRun = MasteringRun(
+      id: Fixtures.uuid(128), artist: "Artist", inputsDigest: "v1:b",
+      parts: [
+        MasteringPart(
+          id: Fixtures.uuid(129), frameCount: 10,
+          prepared: MasteringArtifactRef(fileName: nameB, byteCount: bytesB.count),
+          pieces: [
+            MasteringPiece(
+              id: Fixtures.uuid(130), sliceID: Fixtures.uuid(131), title: "Intro",
+              startFrame: 0, frameCount: 10, lrc: "", finished: nil)
+          ])
+      ])
+    let snapshotB = ProjectDocument.Content(
+      file: fileB, plan: Fixtures.editPlan(),
+      audio: .packageChild(sessionCopy: nil), recoveryArchive: nil,
+      masteringStaged: [nameB: ownerB])
+    _ = try ProjectDocument.makeFileWrapper(snapshot: snapshotB, existingFile: root)
+
+    // A's staged source must still be on disk — its lease must have survived B overwriting the
+    // association on the shared wrapper — so A's still-in-flight write can complete.
+    expectNoDifference(FileManager.default.fileExists(atPath: try #require(stagedURLA).path), true)
+    withExtendedLifetime(wrapperA) {}
+  }
+
   // swiftlint:disable:next inclusive_language
   @Test func saveAsRetainsLoadedMasteringAfterSnapshotAndDocumentRelease() throws {
     let rootDir = FileManager.default.temporaryDirectory
@@ -124,6 +253,12 @@ struct ProjectDocumentTests {
     let fixture = try savedMediaFixture(in: rootDir)
     var document: ProjectDocument? = try ProjectDocument(
       reading: FileWrapper(url: fixture.original, options: []))
+    // Opening never stages this project's already-intact `mastering/` media (see
+    // `openingNeverStagesButSavesSelfHealFromTheExistingPackage`). The staged copy this test
+    // exercises instead comes from the real "Prepare for Mastering" flow, `commitMastering`,
+    // which is unaffected by that change and still eagerly caches its freshly rendered output.
+    let owner = try MasteringStagingStore.copy(fixture.source, as: fixture.name, in: rootDir)
+    document?.sink.commitMastering(fixture.file, [fixture.name: owner])
     var content = try #require(document?.content)
     expectNoDifference(content.file.masteringRun, fixture.file.masteringRun)
     let staged = try #require(content.masteringStaged[fixture.name]?.url)
@@ -195,6 +330,7 @@ struct ProjectDocumentTests {
     var name: String
     var bytes: Data
     var audioCopy: URL
+    var source: URL
   }
 
   private func savedMediaFixture(in rootDir: URL) throws -> SavedMediaFixture {
@@ -217,7 +353,9 @@ struct ProjectDocumentTests {
       ])
     let source = rootDir.appendingPathComponent("source.wav")
     try bytes.write(to: source)
-    let owner = try MasteringStagingStore.adopt(source, as: name, in: rootDir)
+    let staging = rootDir.appendingPathComponent("staging-source.wav")
+    try bytes.write(to: staging)
+    let owner = try MasteringStagingStore.adopt(staging, as: name, in: rootDir)
     let root = try ProjectPackage.encode(
       file: file, plan: Fixtures.editPlan(),
       audio: FileWrapper(regularFileWithContents: audio), masteringStaged: [name: owner])
@@ -226,7 +364,8 @@ struct ProjectDocumentTests {
     let audioCopy = rootDir.appendingPathComponent("session.aiff")
     try audio.write(to: audioCopy)
     return SavedMediaFixture(
-      file: file, original: original, name: name, bytes: bytes, audioCopy: audioCopy)
+      file: file, original: original, name: name, bytes: bytes, audioCopy: audioCopy, source: source
+    )
   }
 
   private func fixturePackage() throws -> FileWrapper {
