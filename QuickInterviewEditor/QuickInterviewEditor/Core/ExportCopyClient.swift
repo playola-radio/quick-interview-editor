@@ -36,6 +36,7 @@ struct ExportCopyRequest: Sendable {
   var sourceStem: String
   var renderedByID: [UUID: URL]
   var destination: URL
+  var kind: ExportFileKind = .logicAIFF
   var approvedMappings: [ExportNameMapping]?
   var copied: [ExportCopiedFile] = []
 }
@@ -112,11 +113,12 @@ private struct ExportCopyState {
       uniqueKeysWithValues: request.targets.enumerated().map { ($0.element.id, $0.offset + 1) })
     return preflightExportNames(
       slices: remaining, sourceStem: request.sourceStem, existing: existing,
-      originalIndexes: indexes)
+      originalIndexes: indexes, kind: request.kind)
   }
 
   func requiresNewApproval(_ mappings: [ExportNameMapping]) -> Bool {
-    let generated = Set(remaining.filter { $0.suggestionNaming != nil }.map(\.id))
+    let generated = Set(
+      remaining.filter { request.kind.forcesExactNames || $0.suggestionNaming != nil }.map(\.id))
     return mappings.contains { mapping in
       guard let approved = authorized.first(where: { $0.id == mapping.id }) else { return true }
       return mapping.proposedName != approved.proposedName

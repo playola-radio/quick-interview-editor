@@ -5,6 +5,19 @@ import Testing
 @testable import PlayolaInterviewEditor
 
 struct ExportNamingTests {
+  // swiftlint:disable:next inclusive_language
+  @Test func masteredFilesUseTitlesAndReviewCollisions() {
+    let slices = [clip(1, name: "Song/Intro"), clip(2, name: "Song/Intro")]
+    let mapped = preflightExportNames(
+      slices: slices, sourceStem: "Artist", existing: [], kind: .masteredM4A)
+    expectNoDifference(mapped.map(\.proposedName), ["Song-Intro.m4a", "Song-Intro 2.m4a"])
+    #expect(mapped.allSatisfy { $0.requiresConfirmation })
+    let long = preflightExportNames(
+      slices: [clip(1, name: String(repeating: "😀", count: 100))],
+      sourceStem: "Artist", existing: [], kind: .masteredM4A)
+    #expect(long[0].proposedName.utf8.count <= 255)
+    #expect(long[0].proposedName.hasSuffix(".m4a"))
+  }
   @Test func oversizedSingleGraphemeDoesNotCreateHiddenEmptyFilename() {
     var taken: Set<String> = []
     let name = exportFileName(
