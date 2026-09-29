@@ -7,6 +7,28 @@ import Testing
 
 @MainActor
 struct ExportReviewTests {
+  // swiftlint:disable:next inclusive_language
+  @Test func masteredCopyReviewsCollisionAndKeepsTitleAsFilenameBase() async {
+    let slice = clip(1, name: "Title")
+    let destination = URL(fileURLWithPath: "/tmp/mastered")
+    let model = withDependencies {
+      $0.exportCopy = .init(
+        listNames: { _ in ["Title.m4a"] },
+        copy: { _, _ in
+          Issue.record("Must approve suffix before copying")
+        })
+    } operation: {
+      ExportReviewModel(
+        request: .init(
+          targets: [slice], sourceStem: "Artist",
+          renderedByID: [slice.id: URL(fileURLWithPath: "/tmp/encoded.m4a")],
+          destination: destination, kind: .masteredM4A), scratchDirectory: nil)
+    }
+    let outcome = await model.copy(approved: nil)
+    expectNoDifference(outcome.reviewMappings?.first?.proposedName, "Title 2.m4a")
+    #expect(model.title == "Review Mastered Filenames")
+    #expect(model.progressLabel == "0 of 1 saved")
+  }
   @Test func reviewNamesCanCancelWhileApprovedCopiesAreRunning() async {
     let (enteredStream, entered) = AsyncStream.makeStream(of: Void.self)
     let (releaseStream, release) = AsyncStream.makeStream(of: Void.self)
@@ -207,5 +229,20 @@ struct ExportReviewTests {
       copy: { _, destination in copies.withValue { $0.append(destination.lastPathComponent) } })
     _ = await copyRenderedExports(job, client: client)
     expectNoDifference(copies.value, ["Tape - Slice 002.aiff"])
+  }
+
+  @Test func retryRecopiesAFileDeletedFromTheDestinationAfterAPartialSave() async {
+    var job = request([clip(1, name: "ID 1"), clip(2, name: "ID 2")])
+    job.copied = [
+      .init(id: Fixtures.uuid(1), url: URL(fileURLWithPath: "/destination/ID 1.aiff")),
+      .init(id: Fixtures.uuid(2), url: URL(fileURLWithPath: "/destination/ID 2.aiff")),
+    ]
+    let copies = LockIsolated<[String]>([])
+    let client = ExportCopyClient(
+      listNames: { _ in ["ID 2.aiff"] },
+      copy: { _, destination in copies.withValue { $0.append(destination.lastPathComponent) } })
+    let outcome = await copyRenderedExports(job, client: client)
+    expectNoDifference(copies.value, ["ID 1.aiff"])
+    expectNoDifference(outcome.copied.map(\.id), [Fixtures.uuid(2), Fixtures.uuid(1)])
   }
 }

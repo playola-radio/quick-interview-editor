@@ -1,6 +1,8 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
+// swiftlint:disable inclusive_language
+
 /// One project window: empty state, transcription progress, failure, or the editor. Every
 /// string and every decision comes from `ProjectModel`.
 struct ProjectView: View {
@@ -11,6 +13,9 @@ struct ProjectView: View {
       .frame(minWidth: 1040, minHeight: 680)
       .background(Color.black)
       .toolbar { saveStatusToolbar }
+      .sheet(isPresented: $model.isMasteringSheetPresented) {
+        if let mastering = model.mastering { MasteringPageView(model: mastering) }
+      }
       .dropDestination(for: URL.self) { urls, _ in model.fileDropped(urls) }
       .fileImporter(
         isPresented: $model.isImporterPresented,
@@ -46,7 +51,9 @@ struct ProjectView: View {
     } else if model.showsError {
       failure
     } else if let editor = model.editor {
-      EditorView(model: editor)
+      EditorView(
+        model: editor, prepareLabel: model.prepareForMasteringLabel,
+        onPrepare: { model.prepareForMasteringTapped() })
     }
   }
 
@@ -105,3 +112,5 @@ struct ProjectView: View {
     .frame(maxWidth: .infinity, maxHeight: .infinity)
   }
 }
+
+// swiftlint:enable inclusive_language

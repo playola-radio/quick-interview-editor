@@ -4,6 +4,15 @@ enum ExportNamePolicy: Equatable, Sendable {
   case sourcePrefixed, exactClipName
 }
 
+struct ExportFileKind: Equatable, Sendable {
+  var fileExtension: String
+  var forcesExactNames: Bool
+
+  static let logicAIFF = Self(fileExtension: "aiff", forcesExactNames: false)
+  // swiftlint:disable:next inclusive_language
+  static let masteredM4A = Self(fileExtension: "m4a", forcesExactNames: true)
+}
+
 struct ExportNameMapping: Equatable, Identifiable, Sendable {
   var id: UUID
   var requestedName: String
@@ -13,16 +22,16 @@ struct ExportNameMapping: Equatable, Identifiable, Sendable {
 
 func exportFileName(
   sourceStem: String, sliceName: String, index: Int, taken: inout Set<String>,
-  policy: ExportNamePolicy = .sourcePrefixed
+  policy: ExportNamePolicy = .sourcePrefixed, kind: ExportFileKind = .logicAIFF
 ) -> String {
   let normalizedTaken = Set(taken.map(normalizedExportName))
   var candidate = requestedExportName(
-    sourceStem: sourceStem, sliceName: sliceName, index: index, policy: policy)
+    sourceStem: sourceStem, sliceName: sliceName, index: index, policy: policy, kind: kind)
   var suffix = "2"
   while normalizedTaken.contains(normalizedExportName(candidate)) {
     candidate = requestedExportName(
       sourceStem: sourceStem, sliceName: sliceName, index: index, policy: policy,
-      suffix: " " + suffix)
+      suffix: " " + suffix, kind: kind)
     suffix = nextExportCollisionSuffix(suffix)
   }
   taken.insert(normalizedExportName(candidate))
@@ -34,21 +43,25 @@ func normalizedExportName(_ name: String) -> String {
 }
 
 func preflightExportNames(
-  slices: [Slice], sourceStem: String, existing: Set<String>, originalIndexes: [UUID: Int] = [:]
+  slices: [Slice], sourceStem: String, existing: Set<String>, originalIndexes: [UUID: Int] = [:],
+  kind: ExportFileKind = .logicAIFF
 ) -> [ExportNameMapping] {
   var taken = existing
   var mappings = slices.enumerated().map { offset, slice in
     let index = originalIndexes[slice.id] ?? offset + 1
-    let policy: ExportNamePolicy = slice.suggestionNaming == nil ? .sourcePrefixed : .exactClipName
+    let exact = kind.forcesExactNames || slice.suggestionNaming != nil
+    let policy: ExportNamePolicy = exact ? .exactClipName : .sourcePrefixed
     let requested = requestedExportName(
-      sourceStem: sourceStem, sliceName: slice.name, index: index, policy: policy)
+      sourceStem: sourceStem, sliceName: slice.name, index: index, policy: policy, kind: kind)
     let proposed = exportFileName(
-      sourceStem: sourceStem, sliceName: slice.name, index: index, taken: &taken, policy: policy)
+      sourceStem: sourceStem, sliceName: slice.name, index: index, taken: &taken, policy: policy,
+      kind: kind)
     return ExportNameMapping(
       id: slice.id, requestedName: requested, proposedName: proposed,
-      requiresConfirmation: slice.suggestionNaming != nil && requested != proposed)
+      requiresConfirmation: exact && requested != proposed)
   }
-  let generated = Set(slices.filter { $0.suggestionNaming != nil }.map(\.id))
+  let generated = Set(
+    slices.filter { kind.forcesExactNames || $0.suggestionNaming != nil }.map(\.id))
   let generatedNames = Set(
     mappings.filter { generated.contains($0.id) }.flatMap {
       [normalizedExportName($0.requestedName), normalizedExportName($0.proposedName)]
@@ -79,9 +92,11 @@ func nextExportCollisionSuffix(_ suffix: String) -> String {
 }
 
 private func requestedExportName(
-  sourceStem: String, sliceName: String, index: Int, policy: ExportNamePolicy, suffix: String = ""
+  sourceStem: String, sliceName: String, index: Int, policy: ExportNamePolicy, suffix: String = "",
+  kind: ExportFileKind = .logicAIFF
 ) -> String {
-  let budget = 255 - ".aiff".utf8.count - suffix.utf8.count
+  let ext = "." + kind.fileExtension
+  let budget = 255 - ext.utf8.count - suffix.utf8.count
   let name = sanitizedSliceName(sliceName, fallbackIndex: index)
   let fallback = sanitizedSliceName("", fallbackIndex: index)
   let base: String
@@ -96,7 +111,7 @@ private func requestedExportName(
       + nonemptyExportComponent(
         name, maxBytes: max(1, budget - stem.utf8.count - 3), fallback: fallback)
   }
-  return base + suffix + ".aiff"
+  return base + suffix + ext
 }
 
 private func nonemptyExportComponent(_ text: String, maxBytes: Int, fallback: String) -> String {
