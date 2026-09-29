@@ -28,7 +28,7 @@ struct MasteringPageView: View {
         Button(model.prepareLabel) { Task { await model.prepareTapped() } }
           .disabled(model.isBusy)
         Button(model.cancelLabel) { Task { await model.cancelTapped() } }
-          .disabled(!model.isBusy)
+          .disabled(!model.canCancel)
         Button(model.openSiteLabel) { model.openMasterchannelTapped() }
       }
       ForEach(model.rows) { row in

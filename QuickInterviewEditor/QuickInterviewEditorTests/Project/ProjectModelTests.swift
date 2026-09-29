@@ -188,7 +188,7 @@ struct ProjectModelTests {
     let (sink, record) = ProjectDocumentSink.recorder()
     let model = ProjectModel(file: nil, plan: nil, audio: nil, sink: sink)
     model.interviewArtistText = text
-    await withDependencies {
+    try await withDependencies {
       $0.continuousClock = TestClock()
       $0.date = .constant(importedAt)
       $0.transcription.transcribe = { _, _, _ in
@@ -199,9 +199,11 @@ struct ProjectModelTests {
       let expected: String? = text.contains("Brandi") ? "Brandi Carlile" : nil
       expectNoDifference(model.editor?.documentState.interviewArtist, expected)
       expectNoDifference(record.commits.last?.file.content.interviewArtist, expected)
+      let page = try #require(model.mastering)
       model.editor?.mutateDocument { $0.interviewArtist = "Saved project artist" }
       model.interviewArtistText = "Stale import draft"
       await model.reimportIgnoringCacheTapped()
+      #expect(model.mastering === page)
     }
     expectNoDifference(model.editor?.documentState.interviewArtist, "Saved project artist")
     expectNoDifference(record.commits.last?.file.content.interviewArtist, "Saved project artist")
@@ -934,6 +936,61 @@ struct ProjectModelTests {
       #expect(!FileManager.default.fileExists(atPath: canonical.path))
     }
   }
+
+  // swiftlint:disable inclusive_language
+  @Test func closingWaitsForMasteringCleanupBeforeAudioRelease() async {
+    let gate = CancellationGate()
+    let work = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    let workRemoved = LockIsolated(false)
+    let audioRemoved = LockIsolated(false)
+    let (sink, _) = ProjectDocumentSink.recorder()
+    let (model, page) = withDependencies {
+      $0.masteringStaging = .liveValue
+      $0.masteringStaging.makeWorkDirectory = {
+        try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
+        return work
+      }
+      $0.masteringStaging.removeDirectory = { url in
+        workRemoved.setValue(true)
+        try? FileManager.default.removeItem(at: url)
+      }
+      $0.masteringAudio = .init(prepare: { _, _ in
+        await withTaskCancellationHandler {
+          await gate.waitForCancellation()
+          return .init(parts: [], warnings: [], inputsDigest: "new")
+        } onCancel: {
+          Task { await gate.cancel() }
+        }
+      })
+      $0.canonicalAudioStore.remove = { _ in
+        if !workRemoved.value { Issue.record("Audio released before mastering cleanup") }
+        audioRemoved.setValue(true)
+      }
+    } operation: {
+      let model = ProjectModel(
+        file: Fixtures.projectFile(), plan: Fixtures.editPlan(),
+        audio: .sessionFile(Fixtures.canonicalAudioURL), sink: sink)
+      let page = MasteringPageModel(
+        host: .init(
+          finishTitleEdit: {},
+          inputs: {
+            .success(
+              .init(
+                artist: "Artist", canonicalAudioURL: Fixtures.canonicalAudioURL,
+                canonicalFingerprint: "sha256:test", sourceSampleRate: 44_100,
+                sourceDurationSamples: 44_100, pieces: [], inputsDigest: "new"))
+          }, eligibility: { nil }, run: { nil }, packageURL: { nil },
+          artifact: { _ in nil }, commit: { _, _, _ in false }))
+      model.mastering = page
+      return (model, page)
+    }
+    let preparation = Task { await page.prepareTapped() }
+    await gate.waitUntilStarted()
+    await model.viewDisappeared()
+    await preparation.value
+    #expect(workRemoved.value && audioRemoved.value)
+  }
+  // swiftlint:enable inclusive_language
 
   // MARK: - Re-import keeps the project (content + audio) until the replacement lands
 

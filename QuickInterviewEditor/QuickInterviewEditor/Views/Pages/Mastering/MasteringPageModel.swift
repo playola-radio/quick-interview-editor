@@ -174,6 +174,7 @@ final class MasteringPageModel: ViewModel {
   var isBusy: Bool {
     activity != .idle || batchBusy || exportReview != nil || destinationPrompt != nil
   }
+  var canCancel: Bool { isBusy || replaceTargetPartID != nil }
   var canSave: Bool {
     run?.parts.allSatisfy { part in
       part.isReturned
@@ -306,7 +307,10 @@ final class MasteringPageModel: ViewModel {
         format: "Part %d peaks at %.1f dBTP, above the −1.5 dBTP ceiling. Nothing was changed.",
         part, measured)
     } catch { message = error.localizedDescription }
-    if generation == token { activity = .idle }
+    if generation == token {
+      activity = .idle
+      dragRevision += 1
+    }
   }
   func cancelTapped() async {
     generation += 1
@@ -314,6 +318,7 @@ final class MasteringPageModel: ViewModel {
     await worker?.value
     worker = nil
     activity = .idle
+    dragRevision += 1
     batchBusy = false
     ambiguousReturn = nil
     ambiguousOwner = nil
@@ -376,6 +381,10 @@ final class MasteringPageModel: ViewModel {
           pendingMasters.append(owner)
         }
         await continueDropBatch()
+      } catch is CancellationError {
+        pendingMasters = []
+        batchBusy = false
+        message = "Drop cancelled."
       } catch {
         pendingMasters = []
         batchBusy = false
@@ -583,7 +592,10 @@ final class MasteringPageModel: ViewModel {
   }
   // swiftlint:disable:next cyclomatic_complexity function_body_length
   private func copyFinals(to url: URL) async {
-    guard let run, run.parts.allSatisfy(\.isReturned) else { return }
+    guard let run, run.parts.allSatisfy(\.isReturned) else {
+      activity = .idle
+      return
+    }
     let token = generation
     activity = .copying
     do {
@@ -648,9 +660,16 @@ final class MasteringPageModel: ViewModel {
     token: Int, runID: UUID
   ) async {
     let outcome = await review.copy(approved: approved)
-    guard generation == token, run?.id == runID else { return }
+    guard run?.id == runID else { return }
     copied = outcome.copied
     savedFiles = copied.map(\.url)
+    if generation != token {
+      if outcome.cancelled { message = "Save cancelled. Files already copied remain." }
+      exportReview = nil
+      saveOwners = []
+      activity = .idle
+      return
+    }
     if let error = outcome.errorMessage {
       message = error
       exportReview = nil
