@@ -11,5 +11,9 @@ struct ProjectDocumentSink: Sendable {
   var commit: @MainActor @Sendable (ProjectFile, EditPlan?, CanonicalAudioSource?) -> Void
   /// Marks the document dirty for the current change so NSDocument autosaves it (spec A7).
   var commitRecovery: @MainActor @Sendable (ProjectFile, Data?) -> Void = { _, _ in }
+  // swiftlint:disable:next inclusive_language
+  var commitMastering:
+    @MainActor @Sendable (ProjectFile, [String: StagedMasteringArtifact]) -> Void =
+      { _, _ in }
   var registerChange: @MainActor @Sendable () -> Void
 }

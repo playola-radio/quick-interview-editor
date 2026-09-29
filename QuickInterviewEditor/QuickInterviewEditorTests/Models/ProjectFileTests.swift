@@ -5,6 +5,31 @@ import Testing
 @testable import PlayolaInterviewEditor
 
 struct ProjectFileTests {
+  // swiftlint:disable:next inclusive_language
+  @Test func masteringRunUsesSchemaThreeOnlyWhenPresent() throws {
+    var file = Fixtures.projectFile()
+    expectNoDifference(ProjectFile.writtenSchemaVersion(for: file), 2)
+    expectNoDifference(
+      try ProjectPackage.projectDecoder().decode(
+        ProjectFile.self,
+        from: ProjectPackage.projectEncoder().encode(file)
+      ).masteringRun, nil)
+    file.masteringRun = MasteringRun(
+      id: Fixtures.uuid(1), artist: "Artist",
+      inputsDigest: "v1:abc", parts: [])
+    expectNoDifference(ProjectFile.writtenSchemaVersion(for: file), 3)
+    let data = try ProjectPackage.projectEncoder().encode(file)
+    expectNoDifference(
+      try ProjectPackage.projectDecoder().decode(ProjectFile.self, from: data), file)
+    let malformed = Data(
+      (try #require(String(bytes: data, encoding: .utf8)))
+        .replacingOccurrences(of: "\"parts\":[]", with: "\"parts\":42").utf8)
+    expectNoDifference(
+      try ProjectPackage.projectDecoder().decode(
+        ProjectFile.self,
+        from: malformed
+      ).masteringRun, nil)
+  }
   @Test func interviewArtistPersistsAndOldDocumentsDefaultToAbsent() throws {
     var file = Fixtures.projectFile()
     file.content.interviewArtist = "Björk"

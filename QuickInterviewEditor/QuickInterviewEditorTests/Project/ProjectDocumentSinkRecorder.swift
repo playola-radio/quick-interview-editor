@@ -14,9 +14,17 @@ final class ProjectDocumentSinkRecorder {
   private(set) var commits: [Commit] = []
   private(set) var registerChangeCount = 0
   private(set) var recoveries: [(file: ProjectFile, archive: Data?)] = []
+  // swiftlint:disable:next inclusive_language
+  private(set) var masteringCommits:
+    [(file: ProjectFile, staged: [String: StagedMasteringArtifact])] = []
 
   fileprivate func recordRecovery(_ file: ProjectFile, _ archive: Data?) {
     recoveries.append((file, archive))
+  }
+  // swiftlint:disable:next inclusive_language
+  fileprivate func recordMastering(_ file: ProjectFile, _ staged: [String: StagedMasteringArtifact])
+  {
+    masteringCommits.append((file, staged))
   }
 
   fileprivate func recordCommit(
@@ -38,6 +46,7 @@ extension ProjectDocumentSink {
     let sink = ProjectDocumentSink(
       commit: { file, plan, audio in record.recordCommit(file, plan, audio) },
       commitRecovery: { file, archive in record.recordRecovery(file, archive) },
+      commitMastering: { file, staged in record.recordMastering(file, staged) },
       registerChange: { record.recordRegisterChange() }
     )
     return (sink, record)
