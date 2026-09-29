@@ -136,6 +136,11 @@ final class ProjectModel: ViewModel {
     return true
   }
   var editor: EditorModel?
+  // swiftlint:disable inclusive_language
+  var mastering: MasteringPageModel?
+  var isMasteringSheetPresented = false
+  let prepareForMasteringLabel = "Prepare for Mastering"
+  // swiftlint:enable inclusive_language
   var isImporterPresented = false
   var interviewArtistText = ""
   private var maxFraction: Double?
@@ -341,6 +346,9 @@ final class ProjectModel: ViewModel {
     releaseSessionAudio()
   }
 
+  // swiftlint:disable:next inclusive_language
+  func prepareForMasteringTapped() { isMasteringSheetPresented = true }
+
   // MARK: - Private Helpers
   private static func isAudioFile(_ url: URL) -> Bool {
     guard url.isFileURL else { return false }
@@ -484,6 +492,7 @@ final class ProjectModel: ViewModel {
     loadedPlan = result.editPlan
     loadedAudio = .sessionFile(result.canonicalAudioURL)
     wireEditor(editor)
+    ensureMastering()
     sink.commit(newFile, result.editPlan, .sessionFile(result.canonicalAudioURL))
     if dropsRun {
       masteringStaged = [:]
@@ -555,6 +564,7 @@ final class ProjectModel: ViewModel {
       fingerprint: file.source.originalFingerprint, seed: file.content)
     self.editor = editor
     wireEditor(editor)
+    ensureMastering()
     phase = .loaded
   }
 
@@ -1066,6 +1076,7 @@ final class ProjectModel: ViewModel {
   /// not released here: the document keeps referencing it until the window closes.
   private func tearDownEditor() async {
     recoveryGeneration += 1
+    await mastering?.teardown()
     guard let previous = editor else { return }
     // Drop the reference before the awaits: a buffered completion on `previous` (e.g. a late
     // cut-suggestion) that fires while playback/export teardown is suspended would otherwise
@@ -1077,6 +1088,41 @@ final class ProjectModel: ViewModel {
     await previous.stopPlaybackTapped()
     await previous.awaitExportTeardown()
   }
+
+  // swiftlint:disable inclusive_language
+  private func masteringInputs() -> Result<MasteringSnapshot, MasteringBlocker> {
+    guard let editor, let file, let loadedPlan, let audioURL = loadedAudio?.sessionURL else {
+      return .failure(.notLoaded)
+    }
+    guard packageURL != nil else { return .failure(.unsaved) }
+    guard !editor.hasUncommittedSliceEdit else { return .failure(.pendingEdit) }
+    guard editor.editedTimeline.isValid else { return .failure(.invalidTimeline) }
+    return MasteringSnapshotBuilder.build(
+      document: editor.documentState, plan: loadedPlan, source: file.source,
+      canonicalAudioURL: audioURL)
+  }
+
+  private func ensureMastering() {
+    guard mastering == nil else { return }
+    mastering = withDependencies(from: self) {
+      MasteringPageModel(
+        host: .init(
+          finishTitleEdit: { [weak self] in self?.editor?.finishSliceNameEdit() },
+          inputs: { [weak self] in self?.masteringInputs() ?? .failure(.notLoaded) },
+          eligibility: { [weak self] in
+            self?.editor.map { MasteringEligibilityRule.evaluate($0.documentState) }
+          },
+          run: { [weak self] in self?.masteringRun },
+          packageURL: { [weak self] in self?.packageURL },
+          artifact: { [weak self] ref in self?.masteringArtifact(ref) },
+          commit: { [weak self] run, staged, expectedID in
+            self?.commitMastering(run, staged: staged, expectedRunID: expectedID) ?? false
+          },
+          stagingError: { [weak self] in self?.masteringStagingError },
+          dismiss: { [weak self] in self?.isMasteringSheetPresented = false }))
+    }
+  }
+  // swiftlint:enable inclusive_language
 
   /// Deletes this window's session copies of the canonical AIFF (derived data, rebuildable by
   /// re-transcribing): the one in use plus any a re-transcribe retired. Only safe once no editor
