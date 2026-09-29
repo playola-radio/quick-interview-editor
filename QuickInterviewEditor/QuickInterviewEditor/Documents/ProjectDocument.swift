@@ -125,29 +125,52 @@ final class ProjectDocument: ReferenceFileDocument {
   /// Decodes a package tree and checks the bundled audio's byte count against `project.json`
   /// (spec A4). A mismatch fails the open with the document system's alert (spec A9).
   ///
-  /// Mastering media already on disk is never staged into Caches here: `decode` only keeps a
-  /// referenced artifact whose on-disk copy matches its recorded size (`MasteringRun.healed`), so
-  /// an ordinary in-place save always finds a usable child directly in the package and never
-  /// touches the staged cache. Staging only happens lazily, on demand, for a save that builds a
-  /// fresh tree with nothing to reuse (see `stagingMasteringMedia`) — this keeps opening or
-  /// plainly re-saving a mastered project from duplicating media it will never read from the
-  /// cache (Greptile PR #105: "opening duplicates all mastering media").
+  /// Every referenced mastering artifact gets its own owned session copy here, on the same
+  /// `FileManager.copyItem` path `CanonicalAudioStore` already relies on — APFS clones rather
+  /// than duplicates the bytes, so this costs no real disk space. Without a stable session owner
+  /// from the moment of open, a later Save As / Duplicate that never touches the mastering sheet
+  /// (so `commitMastering` never runs) would have no source to copy from once `existingFile` is
+  /// nil — e.g. the source package was moved/deleted, or the document system's write
+  /// configuration otherwise carries no existing file (Greptile PR #105: "fresh-tree saves lack
+  /// mastering media"). `decode` only keeps refs already `healed` against on-disk children, so
+  /// staging here can never manufacture an owner for media that isn't actually present and
+  /// byte-correct. A per-artifact staging failure is left for `reconcileMastering`'s own
+  /// `strictMissing` check to report; it never fails the open itself (missing/corrupt derived
+  /// media must not make the underlying interview unopenable).
   nonisolated convenience init(reading root: FileWrapper) throws {
     let decoded = try ProjectPackage.decode(root)
     try ProjectPackage.verifyAudio(decoded.audioWrapper, against: decoded.file.source)
+    let staged = Self.stageReferencedMasteringMedia(for: decoded.file.masteringRun, from: root)
     self.init(
       file: decoded.file, plan: decoded.plan, recoveryArchive: decoded.recoveryArchive,
-      masteringManifestCorrupt: decoded.masteringManifestCorrupt)
+      masteringStaged: staged, masteringManifestCorrupt: decoded.masteringManifestCorrupt)
   }
 
   private nonisolated init(
     file: ProjectFile, plan: EditPlan, recoveryArchive: Data?,
     // swiftlint:disable:next inclusive_language
+    masteringStaged: [String: StagedMasteringArtifact],
+    // swiftlint:disable:next inclusive_language
     masteringManifestCorrupt: Bool
   ) {
     content = Content(
       file: file, plan: plan, audio: .packageChild(sessionCopy: nil),
-      recoveryArchive: recoveryArchive, masteringManifestCorrupt: masteringManifestCorrupt)
+      recoveryArchive: recoveryArchive, masteringStaged: masteringStaged,
+      masteringManifestCorrupt: masteringManifestCorrupt)
+  }
+
+  // swiftlint:disable:next inclusive_language
+  private nonisolated static func stageReferencedMasteringMedia(
+    for run: MasteringRun?, from root: FileWrapper
+  ) -> [String: StagedMasteringArtifact] {
+    // swiftlint:disable:next inclusive_language
+    let masteringChildren = root.fileWrappers?["mastering"]?.fileWrappers ?? [:]
+    var staged: [String: StagedMasteringArtifact] = [:]
+    for ref in run?.referencedArtifacts ?? [] {
+      guard let wrapper = masteringChildren[ref.fileName] else { continue }
+      staged[ref.fileName] = try? stageMasteringWrapper(wrapper, ref.fileName)
+    }
+    return staged
   }
 
   // swiftlint:disable inclusive_language
