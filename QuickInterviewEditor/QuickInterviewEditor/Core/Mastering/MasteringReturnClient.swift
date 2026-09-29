@@ -37,6 +37,7 @@ struct EncodedPiece: Equatable, Sendable {
 enum MasteringReturnError: Error, Equatable, LocalizedError {
   case unreadable(fileName: String)
   case unsupportedContainer(fileName: String)
+  case unsupportedCodec(fileName: String)
   case unsupportedChannelCount(fileName: String, count: Int)
   case tooShort(fileName: String, frames: Int, required: Int)
   case encodeFailed(title: String, reason: String)
@@ -47,6 +48,8 @@ enum MasteringReturnError: Error, Equatable, LocalizedError {
     case .unreadable(let fileName): "\(fileName) is not readable audio."
     case .unsupportedContainer(let fileName):
       "\(fileName) must contain WAV, RF64, AIFF, AIFC, or FLAC audio."
+    case .unsupportedCodec(let fileName):
+      "\(fileName) must contain uncompressed PCM or FLAC audio, not a lossy codec."
     case .unsupportedChannelCount(let fileName, let count):
       "\(fileName) has \(count) channels; one or two are supported."
     case .tooShort(let fileName, let frames, let required):
@@ -128,6 +131,15 @@ private enum MasteringReturnInspector {
         kAudioFileFLACType,
       ].contains(type)
     else { throw MasteringReturnError.unsupportedContainer(fileName: name) }
+    var streamDescription = AudioStreamBasicDescription()
+    var streamDescriptionSize = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
+    guard
+      AudioFileGetProperty(
+        fileID, kAudioFilePropertyDataFormat, &streamDescriptionSize, &streamDescription) == noErr
+    else { throw MasteringReturnError.unreadable(fileName: name) }
+    guard [kAudioFormatLinearPCM, kAudioFormatFLAC].contains(streamDescription.mFormatID) else {
+      throw MasteringReturnError.unsupportedCodec(fileName: name)
+    }
     guard let file = try? AVAudioFile(forReading: url), file.fileFormat.sampleRate > 0 else {
       throw MasteringReturnError.unreadable(fileName: name)
     }
@@ -185,11 +197,13 @@ private enum MasteringReturnWorker {
     guard target.partFrameCount > 0, !target.pieces.isEmpty else {
       throw invalidTarget(target)
     }
+    var expectedStartFrame = 0
     for piece in target.pieces {
-      guard piece.startFrame >= 0, piece.startFrame < target.partFrameCount,
+      guard piece.startFrame == expectedStartFrame,
         piece.frameCount > 0,
         piece.frameCount <= target.partFrameCount - piece.startFrame
       else { throw invalidTarget(target) }
+      expectedStartFrame += piece.frameCount
     }
   }
 

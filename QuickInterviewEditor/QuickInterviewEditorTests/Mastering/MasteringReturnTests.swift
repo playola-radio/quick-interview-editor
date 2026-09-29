@@ -67,6 +67,13 @@ struct MasteringReturnTests {
     }
   }
 
+  @Test func rejectsLossyAudioInAGenuineAIFCContainer() async throws {
+    await #expect(throws: MasteringReturnError.unsupportedCodec(fileName: "mono-48k-lossy.aifc")) {
+      try await MasteringReturnClient.liveValue.inspect(
+        fixtures.appendingPathComponent("mono-48k-lossy.aifc"))
+    }
+  }
+
   @Test func rejectsMisnamedAACUnreadableBytesAndMultichannel() async throws {
     let work = try directory()
     defer { try? FileManager.default.removeItem(at: work) }
@@ -122,6 +129,49 @@ struct MasteringReturnTests {
     expectNoDifference(
       try FileManager.default.contentsOfDirectory(at: output, includingPropertiesForKeys: nil)
         .filter { $0.pathExtension == "caf" }, [])
+  }
+
+  @Test func rejectsPieceRangesWithGapsOrOverlaps() async throws {
+    let work = try directory()
+    defer { try? FileManager.default.removeItem(at: work) }
+    let source = work.appendingPathComponent("master.wav")
+    try pcm(source, frames: 4 * 44_100, sampleRate: 44_100)
+    let output = work.appendingPathComponent("output")
+    try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+
+    let gap = [
+      MasteredPieceTarget(
+        pieceID: UUID(), startFrame: 0, frameCount: 44_100,
+        artist: "A", title: "First", lrc: ""),
+      MasteredPieceTarget(
+        pieceID: UUID(), startFrame: 88_200, frameCount: 44_100,
+        artist: "A", title: "Second", lrc: ""),
+    ]
+    await #expect(
+      throws: MasteringReturnError.encodeFailed(
+        title: "First", reason: "Saved piece ranges are invalid")
+    ) {
+      try await MasteringReturnClient.liveValue.encodePart(
+        source, MasteredPartTarget(partFrameCount: 4 * 44_100, pieces: gap), output)
+    }
+
+    let overlap = [
+      MasteredPieceTarget(
+        pieceID: UUID(), startFrame: 0, frameCount: 44_100,
+        artist: "A", title: "First", lrc: ""),
+      MasteredPieceTarget(
+        pieceID: UUID(), startFrame: 22_050, frameCount: 44_100,
+        artist: "A", title: "Second", lrc: ""),
+    ]
+    await #expect(
+      throws: MasteringReturnError.encodeFailed(
+        title: "First", reason: "Saved piece ranges are invalid")
+    ) {
+      try await MasteringReturnClient.liveValue.encodePart(
+        source, MasteredPartTarget(partFrameCount: 4 * 44_100, pieces: overlap), output)
+    }
+    expectNoDifference(
+      try FileManager.default.contentsOfDirectory(at: output, includingPropertiesForKeys: nil), [])
   }
 
   @Test func rejectsOneFrameShortBeforePublishingAnyPiece() async throws {
