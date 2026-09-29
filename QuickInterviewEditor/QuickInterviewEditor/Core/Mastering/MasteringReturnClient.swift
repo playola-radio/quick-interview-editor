@@ -205,6 +205,7 @@ private enum MasteringReturnWorker {
       else { throw invalidTarget(target) }
       expectedStartFrame += piece.frameCount
     }
+    guard expectedStartFrame == target.partFrameCount else { throw invalidTarget(target) }
   }
 
   private static func invalidTarget(_ target: MasteredPartTarget) -> MasteringReturnError {

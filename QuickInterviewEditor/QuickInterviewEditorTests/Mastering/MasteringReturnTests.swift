@@ -174,6 +174,30 @@ struct MasteringReturnTests {
       try FileManager.default.contentsOfDirectory(at: output, includingPropertiesForKeys: nil), [])
   }
 
+  @Test func rejectsPieceRangesThatLeaveATrailingUncoveredRegion() async throws {
+    let work = try directory()
+    defer { try? FileManager.default.removeItem(at: work) }
+    let source = work.appendingPathComponent("master.wav")
+    try pcm(source, frames: 4 * 44_100, sampleRate: 44_100)
+    let output = work.appendingPathComponent("output")
+    try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+
+    let trailingGap = [
+      MasteredPieceTarget(
+        pieceID: UUID(), startFrame: 0, frameCount: 44_100,
+        artist: "A", title: "First", lrc: "")
+    ]
+    await #expect(
+      throws: MasteringReturnError.encodeFailed(
+        title: "First", reason: "Saved piece ranges are invalid")
+    ) {
+      try await MasteringReturnClient.liveValue.encodePart(
+        source, MasteredPartTarget(partFrameCount: 4 * 44_100, pieces: trailingGap), output)
+    }
+    expectNoDifference(
+      try FileManager.default.contentsOfDirectory(at: output, includingPropertiesForKeys: nil), [])
+  }
+
   @Test func rejectsOneFrameShortBeforePublishingAnyPiece() async throws {
     let work = try directory()
     defer { try? FileManager.default.removeItem(at: work) }
