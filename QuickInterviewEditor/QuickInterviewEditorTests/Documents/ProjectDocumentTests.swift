@@ -53,6 +53,91 @@ struct ProjectDocumentTests {
     expectNoDifference(try writtenAudio(of: retranscribed), replacementAudio)
   }
 
+  // swiftlint:disable:next inclusive_language
+  @Test func freshTreeSaveAfterCorruptManifestOpenPreservesIntactMasteringMedia() throws {
+    let name = Fixtures.uuid(90).uuidString.lowercased() + ".wav"
+    let bytes = Data("wav".utf8)
+    let audio = Data("canonical".utf8)
+    let (root, _) = try packageRootWithFinishedRunMedia(
+      name: name, bytes: bytes, audio: audio, seed: 90)
+    // Corrupt the manifest the same way `malformedMasteringManifestIsNotSilentlyDropped` does:
+    // `masteringRun` fails to decode, so `ProjectPackage.decode` reports `masteringManifestCorrupt`
+    // with a `nil` run even though `mastering/` on disk is still intact.
+    guard let projectJSON = root.fileWrappers?["project.json"]?.regularFileContents,
+      let text = String(bytes: projectJSON, encoding: .utf8)
+    else { throw TestFailure() }
+    let corruptedText = text.replacingOccurrences(
+      of: "\"artist\":\"Artist\"", with: "\"artist\":42")
+    #expect(corruptedText != text)
+    let corrupted = FileWrapper(regularFileWithContents: Data(corruptedText.utf8))
+    corrupted.preferredFilename = "project.json"
+    root.removeFileWrapper(root.fileWrappers!["project.json"]!)
+    root.addFileWrapper(corrupted)
+
+    let document = try ProjectDocument(reading: root)
+    var content = try #require(document.content)
+    expectNoDifference(content.masteringManifestCorrupt, true)
+    expectNoDifference(content.file.masteringRun, nil)
+    let audioURL = try tempAudioFile(audio)
+    defer { try? FileManager.default.removeItem(at: audioURL) }
+    content.audio = .packageChild(sessionCopy: audioURL)
+
+    // Save As / Duplicate onto a brand-new file — no existing package to consult at all, matching
+    // `openingStagesReferencedMediaSoAFreshTreeSaveNeverNeedsTheExistingPackage`. `encode` builds a
+    // fresh tree with no `existing` children to reuse, so the still-intact `mastering/` media has
+    // to have been staged at open — there is no decoded `run` to stage referenced artifacts from,
+    // so a corrupt manifest must still get its on-disk `mastering/` children staged wholesale.
+    let freshTree = try ProjectDocument.makeFileWrapper(snapshot: content, existingFile: nil)
+    let decoded = try ProjectPackage.decode(freshTree)
+    expectNoDifference(decoded.masteringManifestCorrupt, true)
+    expectNoDifference(
+      try #require(freshTree.fileWrappers?["mastering"]?.fileWrappers?[name]?.regularFileContents),
+      bytes)
+  }
+
+  @Test func freshTreeSaveRefusesWhenCorruptManifestStagingDroppedAFile() throws {
+    let keptName = Fixtures.uuid(91).uuidString.lowercased() + ".wav"
+    let droppedName = Fixtures.uuid(92).uuidString.lowercased() + ".wav"
+    let bytes = Data("wav".utf8)
+    let audio = Data("canonical".utf8)
+    let (root, _) = try packageRootWithFinishedRunMedia(
+      name: keptName, bytes: bytes, audio: audio, seed: 91)
+    // swiftlint:disable:next inclusive_language
+    let mastering = try #require(root.fileWrappers?["mastering"])
+    let secondFile = FileWrapper(regularFileWithContents: bytes)
+    secondFile.preferredFilename = droppedName
+    mastering.addFileWrapper(secondFile)
+    guard let projectJSON = root.fileWrappers?["project.json"]?.regularFileContents,
+      let text = String(bytes: projectJSON, encoding: .utf8)
+    else { throw TestFailure() }
+    let corruptedText = text.replacingOccurrences(
+      of: "\"artist\":\"Artist\"", with: "\"artist\":42")
+    #expect(corruptedText != text)
+    let corrupted = FileWrapper(regularFileWithContents: Data(corruptedText.utf8))
+    corrupted.preferredFilename = "project.json"
+    root.removeFileWrapper(root.fileWrappers!["project.json"]!)
+    root.addFileWrapper(corrupted)
+
+    let document = try ProjectDocument(reading: root)
+    var content = try #require(document.content)
+    expectNoDifference(content.masteringManifestCorrupt, true)
+    expectNoDifference(content.masteringCorruptExpectedNames, [keptName, droppedName])
+    // Simulate a dropped open-time staging attempt (or a staged file damaged/deleted afterward)
+    // by removing one entry `masteringCorruptExpectedNames` still expects — this is exactly the
+    // gap Codex flagged (PR #105 follow-up): with no `MasteringArtifactRef` to validate against,
+    // a corrupt-manifest save had no way to notice fewer files landed than existed on disk.
+    content.masteringStaged.removeValue(forKey: droppedName)
+    let audioURL = try tempAudioFile(audio)
+    defer { try? FileManager.default.removeItem(at: audioURL) }
+    content.audio = .packageChild(sessionCopy: audioURL)
+
+    #expect(throws: ProjectPackage.MasteringReconcileError.missingArtifact(droppedName)) {
+      try ProjectDocument.makeFileWrapper(snapshot: content, existingFile: nil)
+    }
+  }
+
+  private struct TestFailure: Error {}
+
   @Test func replacingRunKeepsStagedMediaAliveUntilTheWrapperItselfIsReleased() throws {
     let audio = Data("canonical".utf8)
     let file = Fixtures.projectFile(source: Fixtures.projectSource(canonicalByteCount: audio.count))

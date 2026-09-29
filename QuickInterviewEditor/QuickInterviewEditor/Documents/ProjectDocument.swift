@@ -80,6 +80,12 @@ final class ProjectDocument: ReferenceFileDocument {
     /// decode. Ordinary saves must leave any `mastering/` package directory untouched rather
     /// than reconciling it against the resulting `nil` run and deleting it.
     var masteringManifestCorrupt = false
+    /// The on-disk `mastering/` file names found at open when `masteringManifestCorrupt` is set.
+    /// A corrupt manifest has no decoded `run` to check `masteringStaged` against, so this is the
+    /// only record of what must survive a fresh-tree save — `encode`'s `strictMissing` check
+    /// compares `masteringStaged`'s keys against this set rather than silently writing through
+    /// whatever happened to stage successfully.
+    var masteringCorruptExpectedNames: Set<String> = []
     // swiftlint:enable inclusive_language
   }
 
@@ -140,10 +146,12 @@ final class ProjectDocument: ReferenceFileDocument {
   nonisolated convenience init(reading root: FileWrapper) throws {
     let decoded = try ProjectPackage.decode(root)
     try ProjectPackage.verifyAudio(decoded.audioWrapper, against: decoded.file.source)
-    let staged = Self.stageReferencedMasteringMedia(for: decoded.file.masteringRun, from: root)
+    let (staged, corruptExpectedNames) = Self.stageReferencedMasteringMedia(
+      for: decoded.file.masteringRun, manifestCorrupt: decoded.masteringManifestCorrupt, from: root)
     self.init(
       file: decoded.file, plan: decoded.plan, recoveryArchive: decoded.recoveryArchive,
-      masteringStaged: staged, masteringManifestCorrupt: decoded.masteringManifestCorrupt)
+      masteringStaged: staged, masteringManifestCorrupt: decoded.masteringManifestCorrupt,
+      masteringCorruptExpectedNames: corruptExpectedNames)
   }
 
   private nonisolated init(
@@ -151,26 +159,47 @@ final class ProjectDocument: ReferenceFileDocument {
     // swiftlint:disable:next inclusive_language
     masteringStaged: [String: StagedMasteringArtifact],
     // swiftlint:disable:next inclusive_language
-    masteringManifestCorrupt: Bool
+    masteringManifestCorrupt: Bool,
+    // swiftlint:disable:next inclusive_language
+    masteringCorruptExpectedNames: Set<String>
   ) {
     content = Content(
       file: file, plan: plan, audio: .packageChild(sessionCopy: nil),
       recoveryArchive: recoveryArchive, masteringStaged: masteringStaged,
-      masteringManifestCorrupt: masteringManifestCorrupt)
+      masteringManifestCorrupt: masteringManifestCorrupt,
+      masteringCorruptExpectedNames: masteringCorruptExpectedNames)
   }
 
-  // swiftlint:disable:next inclusive_language
+  // swiftlint:disable inclusive_language
+  /// Stages the referenced media at open so a later fresh-tree save always has a source, even
+  /// with no `existingFile` to self-heal from (Greptile PR #105: "fresh-tree saves lack
+  /// mastering media"). A corrupt manifest has no `run` to enumerate referenced artifacts from,
+  /// so every file actually present in `mastering/` is staged instead — otherwise a Save As /
+  /// Duplicate of a corrupt-manifest project would have no source and silently drop its still
+  /// intact media (CodeRabbit PR #105: "fresh-tree save loses corrupt-manifest media"). The
+  /// returned expected-name set records every on-disk file found in the corrupt case, so a save
+  /// can tell a dropped staging attempt (Codex PR #105 follow-up) from "there was only ever one
+  /// file" — `staged`'s keys alone can't distinguish those.
   private nonisolated static func stageReferencedMasteringMedia(
-    for run: MasteringRun?, from root: FileWrapper
-  ) -> [String: StagedMasteringArtifact] {
+    for run: MasteringRun?, manifestCorrupt: Bool, from root: FileWrapper
+  ) -> (staged: [String: StagedMasteringArtifact], corruptExpectedNames: Set<String>) {
+    // swiftlint:enable inclusive_language
     // swiftlint:disable:next inclusive_language
     let masteringChildren = root.fileWrappers?["mastering"]?.fileWrappers ?? [:]
     var staged: [String: StagedMasteringArtifact] = [:]
+    if manifestCorrupt {
+      var expected: Set<String> = []
+      for (name, wrapper) in masteringChildren where wrapper.isRegularFile {
+        expected.insert(name)
+        staged[name] = try? stageMasteringWrapper(wrapper, name)
+      }
+      return (staged, expected)
+    }
     for ref in run?.referencedArtifacts ?? [] {
       guard let wrapper = masteringChildren[ref.fileName] else { continue }
       staged[ref.fileName] = try? stageMasteringWrapper(wrapper, ref.fileName)
     }
-    return staged
+    return (staged, [])
   }
 
   // swiftlint:disable inclusive_language
@@ -279,7 +308,8 @@ final class ProjectDocument: ReferenceFileDocument {
     let wrapper = try ProjectPackage.encode(
       file: snapshot.file, plan: snapshot.plan, audio: audio,
       recoveryArchive: snapshot.recoveryArchive, masteringStaged: masteringStaged,
-      strictMissing: true)
+      strictMissing: true, preserveMasteringWhenAbsent: snapshot.masteringManifestCorrupt,
+      corruptExpectedNames: snapshot.masteringCorruptExpectedNames)
     retainMasteringSources(Array(masteringStaged.values), on: wrapper)
     return wrapper
   }

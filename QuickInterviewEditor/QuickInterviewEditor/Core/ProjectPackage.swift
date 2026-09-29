@@ -139,7 +139,9 @@ enum ProjectPackage {
   static func encode(
     file: ProjectFile, plan: EditPlan, audio: FileWrapper, recoveryArchive: Data? = nil,
     // swiftlint:disable:next inclusive_language
-    masteringStaged: [String: StagedMasteringArtifact] = [:], strictMissing: Bool = false
+    masteringStaged: [String: StagedMasteringArtifact] = [:], strictMissing: Bool = false,
+    // swiftlint:disable:next inclusive_language
+    preserveMasteringWhenAbsent: Bool = false, corruptExpectedNames: Set<String> = []
   ) throws -> FileWrapper {
     audio.preferredFilename = "canonical.aiff"
     let audioDirWrapper = FileWrapper(directoryWithFileWrappers: ["canonical.aiff": audio])
@@ -154,10 +156,18 @@ enum ProjectPackage {
     }
     let root = FileWrapper(directoryWithFileWrappers: children)
     var file = file
+    let hadCorruptManifest = preserveMasteringWhenAbsent && file.masteringRun == nil
     file.masteringRun = try reconcileMastering(
       in: root, run: file.masteringRun,
-      staged: masteringStaged, strictMissing: strictMissing)
-    file.schemaVersion = ProjectFile.writtenSchemaVersion(for: file)
+      staged: masteringStaged, strictMissing: strictMissing,
+      preserveExistingWhenAbsent: preserveMasteringWhenAbsent,
+      corruptExpectedNames: corruptExpectedNames)
+    // A preserved-but-still-undecodable run keeps schema 3, matching `rewriteMetadata`, so a
+    // later open still knows to treat the carried-over `mastering/` directory as belonging to a
+    // corrupt manifest rather than as orphaned schema-2 leftovers to discard.
+    file.schemaVersion =
+      hadCorruptManifest
+      ? ProjectFile.maximumReadableSchemaVersion : ProjectFile.writtenSchemaVersion(for: file)
     let metadata = try metadataWrapper(file)
     metadata.preferredFilename = "project.json"
     root.addFileWrapper(metadata)
@@ -237,12 +247,16 @@ enum ProjectPackage {
   static func reconcileMastering(
     in root: FileWrapper, run: MasteringRun?, staged: [String: StagedMasteringArtifact],
     strictMissing: Bool = false,
-    preserveExistingWhenAbsent: Bool = false
+    preserveExistingWhenAbsent: Bool = false, corruptExpectedNames: Set<String> = []
   ) throws -> MasteringRun? {
     // A corrupt manifest decodes as `run == nil` indistinguishably from "never had a run."
     // When the caller knows this save follows a corrupt-manifest open, leave any on-disk
     // `mastering/` directory untouched rather than reconciling it away as orphaned.
     if run == nil, preserveExistingWhenAbsent {
+      if root.fileWrappers?["mastering"] == nil {
+        try addStagedMasteringDirectory(
+          staged, to: root, expectedNames: strictMissing ? corruptExpectedNames : [])
+      }
       return nil
     }
     let existingDirectory = root.fileWrappers?["mastering"]
@@ -276,6 +290,35 @@ enum ProjectPackage {
       root.addFileWrapper(directory)
     }
     return healed
+  }
+
+  // swiftlint:disable inclusive_language
+  /// Writes every `staged` file into a fresh `mastering/` child of `root`. Used only for a
+  /// corrupt-manifest save whose `root` has no `mastering/` directory of its own to leave alone
+  /// (`encode`'s Save As / Duplicate path) — there is no `run` to enumerate referenced artifacts
+  /// from, so whatever was staged (see `stageReferencedMasteringMedia`) is what opening the
+  /// corrupt manifest already found on disk, and gets written through wholesale. `expectedNames`
+  /// (non-empty only when the caller passed `strictMissing`) is the file set actually seen on
+  /// disk at open — checked against `staged`'s keys and against each file's own readability, so
+  /// neither a dropped open-time staging attempt nor a file damaged/deleted after staging can
+  /// make this save silently write through fewer files than the original had (Codex PR #105
+  /// follow-up: both gaps bypassed `strictMissing` entirely).
+  private static func addStagedMasteringDirectory(
+    _ staged: [String: StagedMasteringArtifact], to root: FileWrapper, expectedNames: Set<String>
+  ) throws {
+    // swiftlint:enable inclusive_language
+    var wrappers: [String: FileWrapper] = [:]
+    for name in expectedNames.union(staged.keys) {
+      guard let artifact = staged[name],
+        let wrapper = try? FileWrapper(url: artifact.url, options: [])
+      else { throw MasteringReconcileError.missingArtifact(name) }
+      wrapper.preferredFilename = name
+      wrappers[name] = wrapper
+    }
+    guard !wrappers.isEmpty else { return }
+    let directory = FileWrapper(directoryWithFileWrappers: wrappers)
+    directory.preferredFilename = "mastering"
+    root.addFileWrapper(directory)
   }
 
   // swiftlint:disable:next inclusive_language
