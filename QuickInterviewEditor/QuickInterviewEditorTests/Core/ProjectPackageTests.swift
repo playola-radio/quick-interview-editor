@@ -5,9 +5,128 @@ import Testing
 @testable import PlayolaInterviewEditor
 
 struct ProjectPackageTests {
+  @Test func decodeKeepsAvailablePiecesWhenOneFinishedFileIsMissing() throws {
+    let names = (100...102).map { Fixtures.uuid($0).uuidString.lowercased() }
+    let prepared = MasteringArtifactRef(fileName: names[0] + ".wav", byteCount: 4)
+    let first = MasteringArtifactRef(fileName: names[1] + ".m4a", byteCount: 4)
+    let second = MasteringArtifactRef(fileName: names[2] + ".m4a", byteCount: 4)
+    var file = Fixtures.projectFile()
+    file.masteringRun = MasteringRun(
+      id: Fixtures.uuid(103), artist: "Artist", inputsDigest: "v1:x",
+      parts: [
+        MasteringPart(
+          id: Fixtures.uuid(104), frameCount: 20, prepared: prepared,
+          pieces: [
+            MasteringPiece(
+              id: Fixtures.uuid(105), sliceID: Fixtures.uuid(106), title: "One",
+              startFrame: 0, frameCount: 10, lrc: "", finished: first),
+            MasteringPiece(
+              id: Fixtures.uuid(107), sliceID: Fixtures.uuid(108), title: "Two",
+              startFrame: 10, frameCount: 10, lrc: "", finished: second),
+          ])
+      ])
+    let base = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: base) }
+    var staged: [String: StagedMasteringArtifact] = [:]
+    for ref in [prepared, first, second] {
+      let source = base.appendingPathComponent(UUID().uuidString)
+      try Data("file".utf8).write(to: source)
+      staged[ref.fileName] = try MasteringStagingStore.adopt(source, as: ref.fileName, in: base)
+    }
+    let root = try ProjectPackage.encode(
+      file: file, plan: Fixtures.editPlan(),
+      audio: FileWrapper(regularFileWithContents: Data("audio".utf8)),
+      masteringStaged: staged, strictMissing: true)
+    let missing = try #require(root.fileWrappers?["mastering"]?.fileWrappers?[second.fileName])
+    root.fileWrappers?["mastering"]?.removeFileWrapper(missing)
+    let reopened = try ProjectPackage.decode(root)
+    expectNoDifference(reopened.file.masteringRun?.parts[0].prepared, prepared)
+    expectNoDifference(reopened.file.masteringRun?.parts[0].pieces[0].finished, first)
+    expectNoDifference(reopened.file.masteringRun?.parts[0].pieces[1].finished, nil)
+    expectNoDifference(reopened.file.masteringRun?.parts[0].isReturned, false)
+  }
+
+  // swiftlint:disable:next inclusive_language
+  @Test func reconciliationRemovesMalformedMasteringDirectoryChild() throws {
+    let root = try ProjectPackage.encode(
+      file: Fixtures.projectFile(), plan: Fixtures.editPlan(),
+      audio: FileWrapper(regularFileWithContents: Data("audio".utf8)))
+    let malformed = FileWrapper(regularFileWithContents: Data("junk".utf8))
+    malformed.preferredFilename = "mastering"
+    root.addFileWrapper(malformed)
+    expectNoDifference(try ProjectPackage.decode(root).file.masteringRun, nil)
+    expectNoDifference(try ProjectPackage.reconcileMastering(in: root, run: nil, staged: [:]), nil)
+    expectNoDifference(root.fileWrappers?["mastering"], nil)
+  }
+  // swiftlint:disable:next inclusive_language
+  @Test func masteringReconciliationReusesUnchangedWrapperAndReplacesOldIdentity() throws {
+    let firstName = Fixtures.uuid(60).uuidString.lowercased() + ".wav"
+    let secondName = Fixtures.uuid(61).uuidString.lowercased() + ".wav"
+    let root = try ProjectPackage.encode(
+      file: Fixtures.projectFile(), plan: Fixtures.editPlan(),
+      audio: FileWrapper(regularFileWithContents: Data("audio".utf8)))
+    let old = FileWrapper(regularFileWithContents: Data("old".utf8))
+    old.preferredFilename = firstName
+    let dir = FileWrapper(directoryWithFileWrappers: [firstName: old])
+    dir.preferredFilename = "mastering"
+    root.addFileWrapper(dir)
+    let run = masteringRun(preparedName: firstName, byteCount: 3)
+    let healed = try ProjectPackage.reconcileMastering(in: root, run: run, staged: [:])
+    expectNoDifference(healed, run)
+    #expect(root.fileWrappers?["mastering"]?.fileWrappers?[firstName] === old)
+
+    let stagingRoot = FileManager.default.temporaryDirectory.appendingPathComponent(
+      UUID().uuidString)
+    try FileManager.default.createDirectory(at: stagingRoot, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: stagingRoot) }
+    let source = stagingRoot.appendingPathComponent("source.wav")
+    try Data("new".utf8).write(to: source)
+    let staged = try MasteringStagingStore.adopt(source, as: secondName, in: stagingRoot)
+    let replaced = masteringRun(preparedName: secondName, byteCount: 3)
+    expectNoDifference(
+      try ProjectPackage.reconcileMastering(
+        in: root, run: replaced,
+        staged: [secondName: staged]), replaced)
+    expectNoDifference(root.fileWrappers?["mastering"]?.fileWrappers?[firstName], nil)
+    expectNoDifference(root.fileWrappers?["mastering"]?.fileWrappers?[secondName] != nil, true)
+    expectNoDifference(try ProjectPackage.reconcileMastering(in: root, run: nil, staged: [:]), nil)
+    expectNoDifference(root.fileWrappers?["mastering"], nil)
+  }
+
+  // swiftlint:disable:next inclusive_language
+  @Test func decodeHealsMissingMasteringMediaWithoutBlockingInterview() throws {
+    var file = Fixtures.projectFile()
+    file.masteringRun = masteringRun(
+      preparedName: Fixtures.uuid(70).uuidString.lowercased() + ".wav",
+      byteCount: 5)
+    file.schemaVersion = 3
+    let root = try ProjectPackage.encode(
+      file: file, plan: Fixtures.editPlan(),
+      audio: FileWrapper(regularFileWithContents: Data("audio".utf8)))
+    let decoded = try ProjectPackage.decode(root)
+    expectNoDifference(decoded.file.masteringRun?.parts[0].prepared, nil)
+    expectNoDifference(decoded.file.masteringRun?.parts.count, 1)
+  }
+
+  // swiftlint:disable:next inclusive_language
+  private func masteringRun(preparedName: String, byteCount: Int) -> MasteringRun {
+    MasteringRun(
+      id: Fixtures.uuid(72), artist: "Artist", inputsDigest: "v1:abc",
+      parts: [
+        MasteringPart(
+          id: Fixtures.uuid(73), frameCount: 10,
+          prepared: MasteringArtifactRef(fileName: preparedName, byteCount: byteCount),
+          pieces: [
+            MasteringPiece(
+              id: Fixtures.uuid(74), sliceID: Fixtures.uuid(75), title: "Intro",
+              startFrame: 0, frameCount: 10, lrc: "", finished: nil)
+          ])
+      ])
+  }
 
   @Test func unsupportedFormatExposesReasonInDocumentOpenAlert() {
-    let version = ProjectFile.currentSchemaVersion + 1
+    let version = ProjectFile.maximumReadableSchemaVersion + 1
     let error = ProjectPackageError.unsupportedSchema(version) as NSError
     expectNoDifference(
       error.localizedFailureReason,
@@ -27,6 +146,55 @@ struct ProjectPackageTests {
     #expect(throws: ProjectPackageError.malformedRecoveryArchive) {
       try ProjectPackage.decode(root)
     }
+  }
+
+  // swiftlint:disable:next inclusive_language
+  @Test func malformedMasteringManifestIsNotSilentlyDropped() throws {
+    let mediaName = Fixtures.uuid(80).uuidString.lowercased() + ".wav"
+    var file = Fixtures.projectFile()
+    file.masteringRun = masteringRun(preparedName: mediaName, byteCount: 4)
+    let root = try ProjectPackage.encode(
+      file: file, plan: Fixtures.editPlan(),
+      audio: FileWrapper(regularFileWithContents: Data("audio".utf8)),
+      masteringStaged: [
+        mediaName: try MasteringStagingStore.adopt(
+          Self.makeStagingSource(named: mediaName, contents: Data("file".utf8)), as: mediaName)
+      ], strictMissing: true)
+    guard let projectJSON = root.fileWrappers?["project.json"]?.regularFileContents,
+      let text = String(bytes: projectJSON, encoding: .utf8)
+    else { throw TestFailure() }
+    let corruptedText = text.replacingOccurrences(
+      of: "\"artist\":\"Artist\"", with: "\"artist\":42")
+    #expect(corruptedText != text)
+    let corrupted = FileWrapper(regularFileWithContents: Data(corruptedText.utf8))
+    corrupted.preferredFilename = "project.json"
+    root.removeFileWrapper(root.fileWrappers!["project.json"]!)
+    root.addFileWrapper(corrupted)
+
+    let decoded = try ProjectPackage.decode(root)
+    expectNoDifference(decoded.file.masteringRun, nil)
+    expectNoDifference(decoded.masteringManifestCorrupt, true)
+
+    // A save after a corrupt-manifest open must not treat the still-present media as
+    // orphaned and delete it — only a run that decoded successfully may retire artifacts.
+    // `ProjectDocument` threads `decoded.masteringManifestCorrupt` into this flag.
+    let resaved = try ProjectPackage.rewriteMetadata(
+      in: root, file: decoded.file, plan: decoded.plan,
+      preserveMasteringWhenAbsent: decoded.masteringManifestCorrupt)
+    expectNoDifference(resaved.fileWrappers?["mastering"]?.fileWrappers?[mediaName] != nil, true)
+    expectNoDifference(resaved.fileWrappers?["project.json"] != nil, true)
+    let reopened = try ProjectPackage.decode(resaved)
+    expectNoDifference(reopened.masteringManifestCorrupt, true)
+  }
+
+  private struct TestFailure: Error {}
+
+  private static func makeStagingSource(named name: String, contents: Data) throws -> URL {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    let url = dir.appendingPathComponent(name)
+    try contents.write(to: url)
+    return url
   }
 
   // MARK: - Helpers
@@ -145,11 +313,13 @@ struct ProjectPackageTests {
 
   @Test func decodeUnsupportedSchemaThrows() {
     var file = Fixtures.projectFile()
-    file.schemaVersion = ProjectFile.currentSchemaVersion + 1
+    file.schemaVersion = ProjectFile.maximumReadableSchemaVersion + 1
     let root = tree(
       projectJSON: encodedProjectFile(file), planJSON: encodedPlan(Fixtures.editPlan()),
       audio: Data("audio".utf8))
-    #expect(throws: ProjectPackageError.unsupportedSchema(ProjectFile.currentSchemaVersion + 1)) {
+    #expect(
+      throws: ProjectPackageError.unsupportedSchema(ProjectFile.maximumReadableSchemaVersion + 1)
+    ) {
       try ProjectPackage.decode(root)
     }
   }

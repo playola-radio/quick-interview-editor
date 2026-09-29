@@ -75,8 +75,12 @@ struct ReTranscribeIdentityTests {
       originalFingerprint: "sha256:original-mp3", canonicalFingerprint: "sha256:canonical-bytes",
       canonicalByteCount: 1)
     let (sink, record) = ProjectDocumentSink.recorder()
+    var file = Fixtures.projectFile(source: source)
+    file.masteringRun = MasteringRun(
+      id: Fixtures.uuid(98), artist: "Artist",
+      inputsDigest: "v1:x", parts: [])
     let model = ProjectModel(
-      file: Fixtures.projectFile(source: source),
+      file: file,
       plan: Fixtures.editPlan(), audio: .sessionFile(Fixtures.canonicalAudioURL), sink: sink)
 
     try await withDependencies {
@@ -110,6 +114,7 @@ struct ReTranscribeIdentityTests {
       commit.file.source.canonicalFingerprint, SourceFingerprint.compute(for: canonical))
     expectNoDifference(commit.file.source.canonicalByteCount, 4096)
     expectNoDifference(commit.file.content.speakerCountOverride, 5)
+    expectNoDifference(commit.file.masteringRun, file.masteringRun)
   }
 
   @Test func aRetiredEditorCannotClobberDocumentContentAfterReTranscribe() async throws {

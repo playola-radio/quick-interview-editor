@@ -1,9 +1,42 @@
 import AppKit
 import Foundation
 import IssueReporting
+import ObjectiveC
 import SwiftUI
 import Synchronization
 import UniformTypeIdentifiers
+
+// swiftlint:disable:next inclusive_language
+private final class MasteringWrapperLeaseKey: Sendable {}
+// swiftlint:disable:next inclusive_language
+private let masteringWrapperLeaseKey = MasteringWrapperLeaseKey()
+
+// swiftlint:disable:next inclusive_language
+private final class MasteringWrapperLease: Sendable {
+  let sources: [StagedMasteringArtifact]
+  init(sources: [StagedMasteringArtifact]) { self.sources = sources }
+}
+
+// swiftlint:disable:next inclusive_language
+private func retainMasteringSources(_ sources: [StagedMasteringArtifact], on wrapper: FileWrapper) {
+  let key = Unmanaged.passUnretained(masteringWrapperLeaseKey).toOpaque()
+  // `rewriteMetadata` mutates and returns the same `existingFile` it was given, so two saves
+  // that land on the same wrapper (an in-flight autosave's disk write racing a later save)
+  // attach to the SAME associated-object slot. Whether an earlier save's now-unreferenced
+  // source is safe to drop can't be decided here — that depends on whether its disk write has
+  // actually finished, which this in-memory tree can't observe — so every source ever leased on
+  // this wrapper is kept alive for as long as the wrapper itself is, via `objc_setAssociatedObject`.
+  // This is deliberately conservative: it can hold a superseded source a little longer than
+  // strictly needed, but it can never drop one an in-flight write still needs (Greptile PR #105:
+  // "overlapping saves can lose media"). Only a wrapper that is itself allowed to deallocate
+  // (its save durably finished) releases its leased sources.
+  let previous =
+    (objc_getAssociatedObject(wrapper, key) as? MasteringWrapperLease)?.sources ?? []
+  let carried = previous + sources.filter { !previous.contains($0) }
+  objc_setAssociatedObject(
+    wrapper, key, MasteringWrapperLease(sources: carried),
+    .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+}
 
 extension UTType {
   /// The `.pie` project package, exported from Info.plist (spec A2).
@@ -38,6 +71,22 @@ final class ProjectDocument: ReferenceFileDocument {
     var plan: EditPlan
     var audio: CanonicalAudioSource
     var recoveryArchive: Data?
+    // swiftlint:disable:next inclusive_language
+    var masteringStaged: [String: StagedMasteringArtifact] = [:]
+    // swiftlint:disable:next inclusive_language
+    var masteringStagingError: String?
+    // swiftlint:disable inclusive_language
+    /// Set when this project was opened with a schema-3 mastering manifest that failed to
+    /// decode. Ordinary saves must leave any `mastering/` package directory untouched rather
+    /// than reconciling it against the resulting `nil` run and deleting it.
+    var masteringManifestCorrupt = false
+    /// The on-disk `mastering/` file names found at open when `masteringManifestCorrupt` is set.
+    /// A corrupt manifest has no decoded `run` to check `masteringStaged` against, so this is the
+    /// only record of what must survive a fresh-tree save — `encode`'s `strictMissing` check
+    /// compares `masteringStaged`'s keys against this set rather than silently writing through
+    /// whatever happened to stage successfully.
+    var masteringCorruptExpectedNames: Set<String> = []
+    // swiftlint:enable inclusive_language
   }
 
   /// The value `snapshot` hands to `fileWrapper`: the content to write plus the edit
@@ -70,6 +119,8 @@ final class ProjectDocument: ReferenceFileDocument {
   /// Bumped on the main actor for every dirtying change and read off the main actor by the save
   /// pipeline, so the generation a save captures is comparable to the latest edit.
   private nonisolated let editGeneration = Mutex(0)
+  // swiftlint:disable:next inclusive_language
+  private nonisolated static let masteringWriteLock = NSLock()
 
   nonisolated init() {}
 
@@ -79,12 +130,109 @@ final class ProjectDocument: ReferenceFileDocument {
 
   /// Decodes a package tree and checks the bundled audio's byte count against `project.json`
   /// (spec A4). A mismatch fails the open with the document system's alert (spec A9).
-  nonisolated init(reading root: FileWrapper) throws {
+  ///
+  /// Every referenced mastering artifact gets its own owned session copy here, on the same
+  /// `FileManager.copyItem` path `CanonicalAudioStore` already relies on — APFS clones rather
+  /// than duplicates the bytes, so this costs no real disk space. Without a stable session owner
+  /// from the moment of open, a later Save As / Duplicate that never touches the mastering sheet
+  /// (so `commitMastering` never runs) would have no source to copy from once `existingFile` is
+  /// nil — e.g. the source package was moved/deleted, or the document system's write
+  /// configuration otherwise carries no existing file (Greptile PR #105: "fresh-tree saves lack
+  /// mastering media"). `decode` only keeps refs already `healed` against on-disk children, so
+  /// staging here can never manufacture an owner for media that isn't actually present and
+  /// byte-correct. A per-artifact staging failure is left for `reconcileMastering`'s own
+  /// `strictMissing` check to report; it never fails the open itself (missing/corrupt derived
+  /// media must not make the underlying interview unopenable).
+  nonisolated convenience init(reading root: FileWrapper) throws {
     let decoded = try ProjectPackage.decode(root)
     try ProjectPackage.verifyAudio(decoded.audioWrapper, against: decoded.file.source)
+    let (staged, corruptExpectedNames) = Self.stageReferencedMasteringMedia(
+      for: decoded.file.masteringRun, manifestCorrupt: decoded.masteringManifestCorrupt, from: root)
+    self.init(
+      file: decoded.file, plan: decoded.plan, recoveryArchive: decoded.recoveryArchive,
+      masteringStaged: staged, masteringManifestCorrupt: decoded.masteringManifestCorrupt,
+      masteringCorruptExpectedNames: corruptExpectedNames)
+  }
+
+  private nonisolated init(
+    file: ProjectFile, plan: EditPlan, recoveryArchive: Data?,
+    // swiftlint:disable:next inclusive_language
+    masteringStaged: [String: StagedMasteringArtifact],
+    // swiftlint:disable:next inclusive_language
+    masteringManifestCorrupt: Bool,
+    // swiftlint:disable:next inclusive_language
+    masteringCorruptExpectedNames: Set<String>
+  ) {
     content = Content(
-      file: decoded.file, plan: decoded.plan, audio: .packageChild(sessionCopy: nil),
-      recoveryArchive: decoded.recoveryArchive)
+      file: file, plan: plan, audio: .packageChild(sessionCopy: nil),
+      recoveryArchive: recoveryArchive, masteringStaged: masteringStaged,
+      masteringManifestCorrupt: masteringManifestCorrupt,
+      masteringCorruptExpectedNames: masteringCorruptExpectedNames)
+  }
+
+  // swiftlint:disable inclusive_language
+  /// Stages the referenced media at open so a later fresh-tree save always has a source, even
+  /// with no `existingFile` to self-heal from (Greptile PR #105: "fresh-tree saves lack
+  /// mastering media"). A corrupt manifest has no `run` to enumerate referenced artifacts from,
+  /// so every file actually present in `mastering/` is staged instead — otherwise a Save As /
+  /// Duplicate of a corrupt-manifest project would have no source and silently drop its still
+  /// intact media (CodeRabbit PR #105: "fresh-tree save loses corrupt-manifest media"). The
+  /// returned expected-name set records every on-disk file found in the corrupt case, so a save
+  /// can tell a dropped staging attempt (Codex PR #105 follow-up) from "there was only ever one
+  /// file" — `staged`'s keys alone can't distinguish those.
+  private nonisolated static func stageReferencedMasteringMedia(
+    for run: MasteringRun?, manifestCorrupt: Bool, from root: FileWrapper
+  ) -> (staged: [String: StagedMasteringArtifact], corruptExpectedNames: Set<String>) {
+    // swiftlint:enable inclusive_language
+    // swiftlint:disable:next inclusive_language
+    let masteringChildren = root.fileWrappers?["mastering"]?.fileWrappers ?? [:]
+    var staged: [String: StagedMasteringArtifact] = [:]
+    if manifestCorrupt {
+      var expected: Set<String> = []
+      for (name, wrapper) in masteringChildren where wrapper.isRegularFile {
+        expected.insert(name)
+        staged[name] = try? stageMasteringWrapper(wrapper, name)
+      }
+      return (staged, expected)
+    }
+    for ref in run?.referencedArtifacts ?? [] {
+      guard let wrapper = masteringChildren[ref.fileName] else { continue }
+      staged[ref.fileName] = try? stageMasteringWrapper(wrapper, ref.fileName)
+    }
+    return (staged, [])
+  }
+
+  // swiftlint:disable inclusive_language
+  /// Fills in any referenced artifact `staged` is missing, using `existingFile`'s own package
+  /// children as the source — the self-heal for a fresh-tree save (Save As / Duplicate, or a
+  /// re-transcribe that can't reuse the existing audio child) whose mastering media was never
+  /// staged because it was intact and untouched since open. Best-effort: a staging failure here
+  /// is left for `reconcileMastering`'s own `strictMissing` check to report.
+  private nonisolated static func stagingMasteringMedia(
+    _ staged: [String: StagedMasteringArtifact], for run: MasteringRun?,
+    from existingFile: FileWrapper?
+  ) throws -> [String: StagedMasteringArtifact] {
+    // swiftlint:enable inclusive_language
+    guard let existingFile else { return staged }
+    var staged = staged
+    // swiftlint:disable:next inclusive_language
+    let masteringChildren = existingFile.fileWrappers?["mastering"]?.fileWrappers ?? [:]
+    for ref in run?.referencedArtifacts ?? [] where staged[ref.fileName] == nil {
+      guard let wrapper = masteringChildren[ref.fileName] else { continue }
+      staged[ref.fileName] = try? stageMasteringWrapper(wrapper, ref.fileName)
+    }
+    return staged
+  }
+
+  // swiftlint:disable:next inclusive_language
+  private nonisolated static func stageMasteringWrapper(_ wrapper: FileWrapper, _ name: String)
+    throws -> StagedMasteringArtifact
+  {
+    let work = try MasteringStagingStore.makeWorkDirectory()
+    defer { MasteringStagingStore.removeDirectory(work) }
+    let target = work.appendingPathComponent(name)
+    try wrapper.write(to: target, options: [], originalContentsURL: nil)
+    return try MasteringStagingStore.adopt(target, as: name)
   }
 
   nonisolated func snapshot(contentType: UTType) throws -> Snapshot {
@@ -118,8 +266,8 @@ final class ProjectDocument: ReferenceFileDocument {
   nonisolated static func makeFileWrapper(snapshot: Content, existingFile: FileWrapper?) throws
     -> FileWrapper
   {
-    var snapshot = snapshot
-    snapshot.file.schemaVersion = ProjectFile.currentSchemaVersion
+    masteringWriteLock.lock()
+    defer { masteringWriteLock.unlock() }
     let audio: FileWrapper
     switch snapshot.audio {
     case .packageChild(let sessionCopy):
@@ -128,18 +276,42 @@ final class ProjectDocument: ReferenceFileDocument {
         existing.isRegularFile
       {
         try ProjectPackage.verifyAudio(existing, against: snapshot.file.source)
-        return try ProjectPackage.rewriteMetadata(
+        let wrapper = try ProjectPackage.rewriteMetadata(
           in: existingFile, file: snapshot.file, plan: snapshot.plan,
-          recoveryArchive: snapshot.recoveryArchive)
+          recoveryArchive: snapshot.recoveryArchive, masteringStaged: snapshot.masteringStaged,
+          strictMissing: true, preserveMasteringWhenAbsent: snapshot.masteringManifestCorrupt)
+        retainMasteringSources(Array(snapshot.masteringStaged.values), on: wrapper)
+        return wrapper
       }
       guard let sessionCopy else { throw ProjectDocumentError.missingPackageAudio }
       audio = try sessionAudioWrapper(at: sessionCopy, source: snapshot.file.source)
     case .sessionFile(let url):
       audio = try sessionAudioWrapper(at: url, source: snapshot.file.source)
+      if let existingFile {
+        let wrapper = try ProjectPackage.rewriteMetadata(
+          in: existingFile, file: snapshot.file, plan: snapshot.plan,
+          recoveryArchive: snapshot.recoveryArchive, masteringStaged: snapshot.masteringStaged,
+          strictMissing: true, preserveMasteringWhenAbsent: snapshot.masteringManifestCorrupt)
+        ProjectPackage.replaceAudio(in: wrapper, with: audio)
+        retainMasteringSources(Array(snapshot.masteringStaged.values), on: wrapper)
+        return wrapper
+      }
     }
-    return try ProjectPackage.encode(
+    // `encode` always builds a fresh tree (no `existing` children to reuse), so every referenced
+    // artifact must come from the staged cache here. `masteringStaged` is only populated lazily
+    // (spec/plan: opening a project must not eagerly duplicate intact on-disk media into Caches),
+    // so a Save As / Duplicate of a project whose mastering media was never touched this session
+    // self-heals by staging on demand from `existingFile`'s own package children.
+    // swiftlint:disable:next inclusive_language
+    let masteringStaged = try Self.stagingMasteringMedia(
+      snapshot.masteringStaged, for: snapshot.file.masteringRun, from: existingFile)
+    let wrapper = try ProjectPackage.encode(
       file: snapshot.file, plan: snapshot.plan, audio: audio,
-      recoveryArchive: snapshot.recoveryArchive)
+      recoveryArchive: snapshot.recoveryArchive, masteringStaged: masteringStaged,
+      strictMissing: true, preserveMasteringWhenAbsent: snapshot.masteringManifestCorrupt,
+      corruptExpectedNames: snapshot.masteringCorruptExpectedNames)
+    retainMasteringSources(Array(masteringStaged.values), on: wrapper)
+    return wrapper
   }
 
   private nonisolated static func sessionAudioWrapper(at url: URL, source: ProjectSource) throws
@@ -163,6 +335,7 @@ final class ProjectDocument: ReferenceFileDocument {
     ProjectDocumentSink(
       commit: { [weak self] file, plan, audio in self?.commit(file, plan: plan, audio: audio) },
       commitRecovery: { [weak self] file, archive in self?.commitRecovery(file, archive: archive) },
+      commitMastering: { [weak self] file, staged in self?.commitMastering(file, staged: staged) },
       registerChange: { [weak self] in self?.registerChange() })
   }
 
@@ -192,6 +365,18 @@ final class ProjectDocument: ReferenceFileDocument {
       guard content != nil else { return }
       content?.file = file
       content?.recoveryArchive = archive
+    }
+  }
+
+  // swiftlint:disable:next inclusive_language
+  private func commitMastering(_ file: ProjectFile, staged: [String: StagedMasteringArtifact]) {
+    latest.withLock { content in
+      guard content != nil else { return }
+      content?.file = file
+      content?.masteringStaged = staged
+      if file.masteringRun?.referencedArtifacts.allSatisfy({ staged[$0.fileName] != nil }) ?? true {
+        content?.masteringStagingError = nil
+      }
     }
   }
 

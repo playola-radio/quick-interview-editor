@@ -29,6 +29,10 @@ final class ProjectModel: ViewModel {
   @ObservationIgnored private var file: ProjectFile?
   @ObservationIgnored private var loadedPlan: EditPlan?
   @ObservationIgnored private var loadedAudio: CanonicalAudioSource?
+  // swiftlint:disable:next inclusive_language
+  @ObservationIgnored private var masteringStaged: [String: StagedMasteringArtifact]
+  // swiftlint:disable:next inclusive_language
+  private(set) var masteringStagingError: String?
   /// Session copies a re-transcribe has replaced. A save snapshot taken before the replacement
   /// commit may still point at one, so they are only deleted once the window closes.
   @ObservationIgnored private var retiredSessionAudio: [URL] = []
@@ -55,12 +59,18 @@ final class ProjectModel: ViewModel {
   init(
     file: ProjectFile?, plan: EditPlan?, audio: CanonicalAudioSource?, packageURL: URL? = nil,
     sink: ProjectDocumentSink, saveStatus: SaveStatus = SaveStatus(), recoveryArchive: Data? = nil,
-    recoveryInstanceID: UUID = UUID()
+    recoveryInstanceID: UUID = UUID(),
+    // swiftlint:disable:next inclusive_language
+    masteringStaged: [String: StagedMasteringArtifact] = [:],
+    // swiftlint:disable:next inclusive_language
+    masteringStagingError: String? = nil
   ) {
     self.sink = sink
     self.file = file
     self.loadedPlan = plan
     self.loadedAudio = audio
+    self.masteringStaged = masteringStaged
+    self.masteringStagingError = masteringStagingError
     self.packageURL = packageURL
     self.saveStatus = saveStatus
     self.recoveryArchive = recoveryArchive
@@ -80,6 +90,51 @@ final class ProjectModel: ViewModel {
 
   // MARK: - Properties
   var phase: Phase
+  // swiftlint:disable:next inclusive_language
+  var masteringRun: MasteringRun? { file?.masteringRun }
+
+  // swiftlint:disable:next inclusive_language
+  func masteringArtifact(_ ref: MasteringArtifactRef) -> StagedMasteringArtifact? {
+    guard ref.isWellFormed, let owner = masteringStaged[ref.fileName],
+      (try? owner.url.resourceValues(forKeys: [.fileSizeKey]).fileSize) == ref.byteCount
+    else { return nil }
+    return owner
+  }
+
+  @discardableResult
+  // swiftlint:disable:next inclusive_language
+  func commitMastering(
+    _ run: MasteringRun, staged: [String: StagedMasteringArtifact],
+    expectedRunID: UUID?
+  ) -> Bool {
+    guard var file, file.masteringRun?.id == expectedRunID else { return false }
+    let names = Set(run.referencedArtifacts.map(\.fileName))
+    let incoming = staged.filter { names.contains($0.key) }
+    guard
+      incoming.allSatisfy({ name, owner in
+        masteringStaged[name].map { $0 === owner } ?? true
+      })
+    else { return false }
+    let retained = masteringStaged.filter { names.contains($0.key) }
+      .merging(incoming) { existing, _ in existing }
+    var available = retained.compactMapValues {
+      try? $0.url.resourceValues(forKeys: [.fileSizeKey]).fileSize
+    }
+    for ref in file.masteringRun?.referencedArtifacts ?? [] where available[ref.fileName] == nil {
+      available[ref.fileName] = ref.byteCount
+    }
+    guard run.isStructurallyValid, run.healed(available: available) == run else { return false }
+    file.masteringRun = run
+    file.schemaVersion = ProjectFile.writtenSchemaVersion(for: file)
+    self.file = file
+    masteringStaged = retained
+    if run.referencedArtifacts.allSatisfy({ retained[$0.fileName] != nil }) {
+      masteringStagingError = nil
+    }
+    sink.commitMastering(file, retained)
+    sink.registerChange()
+    return true
+  }
   var editor: EditorModel?
   var isImporterPresented = false
   var interviewArtistText = ""
@@ -371,6 +426,7 @@ final class ProjectModel: ViewModel {
     }
   }
 
+  // swiftlint:disable:next function_body_length
   private func loadCompletedTranscription(
     _ result: TranscriptionResult, input: TranscriptionInput, sourceFingerprint: String,
     seed: DocumentSeed
@@ -413,10 +469,15 @@ final class ProjectModel: ViewModel {
       sourceURL: URL(fileURLWithPath: newSource.originalFileName),
       canonicalAudioURL: result.canonicalAudioURL, editPlan: result.editPlan,
       fingerprint: newSource.originalFingerprint, seed: seed.content(for: result.editPlan))
-    let newFile = ProjectFile(
+    var newFile = ProjectFile(
       schemaVersion: ProjectFile.currentSchemaVersion, source: newSource,
       engine: ProjectEngineInfo(engineFingerprint: engineFingerprint.current()),
       content: editor.documentState)
+    if file?.source.originalFingerprint == newSource.originalFingerprint {
+      newFile.masteringRun = file?.masteringRun
+    }
+    let dropsRun = file?.masteringRun != nil && newFile.masteringRun == nil
+    newFile.schemaVersion = ProjectFile.writtenSchemaVersion(for: newFile)
     let replacedAudio = loadedAudio
     self.editor = editor
     file = newFile
@@ -424,6 +485,11 @@ final class ProjectModel: ViewModel {
     loadedAudio = .sessionFile(result.canonicalAudioURL)
     wireEditor(editor)
     sink.commit(newFile, result.editPlan, .sessionFile(result.canonicalAudioURL))
+    if dropsRun {
+      masteringStaged = [:]
+      masteringStagingError = nil
+      sink.commitMastering(newFile, [:])
+    }
     // A completed transcription is the first thing worth keeping (spec A7): an untitled window
     // must go dirty here so closing it asks to save and autosave arms.
     sink.registerChange()
@@ -577,7 +643,7 @@ final class ProjectModel: ViewModel {
       else { throw CancellationError() }
     }
     guard recoveryOwner == nil || recoveryOwner?.id == owner.id else { throw CancellationError() }
-    file.schemaVersion = ProjectFile.currentSchemaVersion
+    file.schemaVersion = ProjectFile.writtenSchemaVersion(for: file)
     file.content.suggestionRecoveryOwnerID = owner.id
     file.content.unfinishedSuggestionRun = capture.checkpoint
     self.file = file
@@ -864,7 +930,7 @@ final class ProjectModel: ViewModel {
       guard let self, let editor, self.editor === editor, var file = self.file,
         file.schemaVersion < ProjectFile.currentSchemaVersion
       else { return }
-      file.schemaVersion = ProjectFile.currentSchemaVersion
+      file.schemaVersion = ProjectFile.writtenSchemaVersion(for: file)
       self.file = file
       editor.cutSuggestions.automaticSuggestionsEnabled = true
       self.sink.commit(file, nil, nil)
@@ -878,7 +944,7 @@ final class ProjectModel: ViewModel {
       guard let self, let editor, self.editor === editor, var file = self.file else { return }
       guard file.content != state else { return }
       file.content = state
-      file.schemaVersion = ProjectFile.currentSchemaVersion
+      file.schemaVersion = ProjectFile.writtenSchemaVersion(for: file)
       editor.cutSuggestions.automaticSuggestionsEnabled = true
       self.file = file
       self.sink.commit(file, nil, nil)
