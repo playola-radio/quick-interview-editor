@@ -168,6 +168,22 @@ struct MasteringReturnTests {
       try FileManager.default.contentsOfDirectory(at: output, includingPropertiesForKeys: nil), [])
   }
 
+  @Test func reportsWorkDirectoryFailureAsATypedReturnError() async throws {
+    let work = try directory()
+    defer { try? FileManager.default.removeItem(at: work) }
+    let source = work.appendingPathComponent("valid.wav")
+    try pcm(source, frames: 1_024, sampleRate: 44_100)
+    let blockedDirectory = work.appendingPathComponent("blocked")
+    try Data([1]).write(to: blockedDirectory)
+    let target = MasteredPieceTarget(
+      pieceID: UUID(), startFrame: 0, frameCount: 1_024,
+      artist: "A", title: "Blocked", lrc: "")
+    await #expect(throws: MasteringReturnError.self) {
+      try await MasteringReturnClient.liveValue.encodePart(
+        source, MasteredPartTarget(partFrameCount: 1_024, pieces: [target]), blockedDirectory)
+    }
+  }
+
   @Test func monoReturnDuplicatesChannels() async throws {
     let work = try directory()
     defer { try? FileManager.default.removeItem(at: work) }

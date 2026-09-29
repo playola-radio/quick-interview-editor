@@ -153,11 +153,11 @@ private enum MasteringReturnWorker {
       throw MasteringReturnError.encodeFailed(
         title: target.pieces[0].title, reason: "Returned audio duration changed after matching")
     }
-    try FileManager.default.createDirectory(at: workDirectory, withIntermediateDirectories: true)
     let caf = workDirectory.appendingPathComponent(UUID().uuidString + ".caf")
     var completed: [EncodedPiece] = []
     do {
       defer { try? FileManager.default.removeItem(at: caf) }
+      try FileManager.default.createDirectory(at: workDirectory, withIntermediateDirectories: true)
       let frames = try conform(master, to: caf)
       let required = target.pieces.map { $0.startFrame + $0.frameCount }.max()!
       guard frames >= required else {
