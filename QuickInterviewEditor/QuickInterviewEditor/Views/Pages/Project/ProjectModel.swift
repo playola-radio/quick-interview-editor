@@ -346,6 +346,9 @@ final class ProjectModel: ViewModel {
     releaseSessionAudio()
   }
 
+  // swiftlint:disable:next inclusive_language
+  func prepareForMasteringTapped() { isMasteringSheetPresented = true }
+
   // MARK: - Private Helpers
   private static func isAudioFile(_ url: URL) -> Bool {
     guard url.isFileURL else { return false }
@@ -1087,10 +1090,6 @@ final class ProjectModel: ViewModel {
   }
 
   // swiftlint:disable inclusive_language
-  func prepareForMasteringTapped() {
-    isMasteringSheetPresented = true
-  }
-
   private func masteringInputs() -> Result<MasteringSnapshot, MasteringBlocker> {
     guard let editor, let file, let loadedPlan, let audioURL = loadedAudio?.sessionURL else {
       return .failure(.notLoaded)

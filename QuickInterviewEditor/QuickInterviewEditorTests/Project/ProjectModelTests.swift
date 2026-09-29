@@ -181,6 +181,65 @@ struct ProjectModelTests {
     expectNoDifference(record.commits.last?.file.masteringRun, run)
     expectNoDifference(record.commits.last?.file.schemaVersion, 3)
   }
+  // swiftlint:disable:next inclusive_language
+  @Test func prepareForMasteringReportsUnsavedWhenThereIsNoPackageURL() async throws {
+    let file = Fixtures.projectFile()
+    let (sink, _) = ProjectDocumentSink.recorder()
+    let model = ProjectModel(
+      file: file, plan: Fixtures.editPlan(),
+      audio: .sessionFile(Fixtures.canonicalAudioURL), sink: sink)
+    await model.viewAppeared()
+    let page = try #require(model.mastering)
+    await page.prepareTapped()
+    expectNoDifference(page.message, "Save the project before preparing for mastering.")
+  }
+  // swiftlint:disable:next inclusive_language
+  @Test func prepareForMasteringReportsPendingEditBeforeACommittedFineTune() async throws {
+    let slice = Fixtures.slice(id: Fixtures.uuid(94))
+    var file = Fixtures.projectFile()
+    file.content.slices.append(slice)
+    let (sink, _) = ProjectDocumentSink.recorder()
+    let model = ProjectModel(
+      file: file, plan: Fixtures.editPlan(),
+      audio: .sessionFile(Fixtures.canonicalAudioURL),
+      packageURL: URL(fileURLWithPath: "/tmp/interview.pie"), sink: sink)
+    await model.viewAppeared()
+    let editor = try #require(model.editor)
+    editor.sliceSelected(slice.id)
+    editor.cutOutNudged(byMs: 10)
+    #expect(editor.hasUncommittedSliceEdit)
+    let page = try #require(model.mastering)
+    await page.prepareTapped()
+    expectNoDifference(page.message, "Finish the pending clip edit before preparing.")
+  }
+  // swiftlint:disable:next inclusive_language
+  @Test func prepareForMasteringReportsInvalidTimelineForOverlappingRemovals() async throws {
+    let slice = Fixtures.slice(id: Fixtures.uuid(95), start: 0, end: 100)
+    var file = Fixtures.projectFile()
+    file.content.slices.append(slice)
+    let (sink, _) = ProjectDocumentSink.recorder()
+    let model = ProjectModel(
+      file: file, plan: Fixtures.editPlan(),
+      audio: .sessionFile(Fixtures.canonicalAudioURL),
+      packageURL: URL(fileURLWithPath: "/tmp/interview.pie"), sink: sink)
+    await model.viewAppeared()
+    let editor = try #require(model.editor)
+    // Bypasses `mutateDocument`'s normalization funnel on purpose to force the corrupt,
+    // defensive-recheck state `masteringInputs()` must refuse to build a snapshot from.
+    editor.timelineRemovals = [
+      TimelineRemoval(
+        id: Fixtures.uuid(10), removedRange: 10..<50,
+        crossfade: Crossfade(lengthSamples: 4, curve: .equalPower)),
+      TimelineRemoval(
+        id: Fixtures.uuid(11), removedRange: 30..<70,
+        crossfade: Crossfade(lengthSamples: 4, curve: .equalPower)),
+    ]
+    #expect(!editor.editedTimeline.isValid)
+    let page = try #require(model.mastering)
+    await page.prepareTapped()
+    expectNoDifference(
+      page.message, "The edited timeline is invalid. Undo the last change before preparing.")
+  }
   @Test(arguments: ["  Brandi Carlile \n", "  \n"])
   func optionalInterviewArtistSeedsImportAndSurvivesRetranscription(text: String) async throws {
     let canonical = try temporaryCanonicalAudio(bytes: 1234)

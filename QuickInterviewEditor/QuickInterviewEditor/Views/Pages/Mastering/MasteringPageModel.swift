@@ -187,7 +187,10 @@ final class MasteringPageModel: ViewModel {
     guard let ambiguousReturn, let run else { return [] }
     return ambiguousReturn.candidatePartIDs.compactMap { id in
       guard let index = run.parts.firstIndex(where: { $0.id == id }) else { return nil }
-      return AmbiguityChoice(id: id, title: "Part \(index + 1)")
+      let part = run.parts[index]
+      let seconds = part.frameCount / MasteringFormat.sampleRate
+      let duration = String(format: "%d:%02d", seconds / 60, seconds % 60)
+      return AmbiguityChoice(id: id, title: "Part \(index + 1) (\(duration))")
     }
   }
   let ambiguityMessage = "Which part is this master for?"
@@ -298,6 +301,7 @@ final class MasteringPageModel: ViewModel {
         message = "The project changed while preparing; prepare again."
         return
       }
+      dragOwners = [:]
       warningMessages = result.warnings.map(Self.warningText)
       message = "Prepared \(parts.count) part\(parts.count == 1 ? "" : "s") for mastering."
     } catch is CancellationError {
@@ -447,6 +451,7 @@ final class MasteringPageModel: ViewModel {
         await encode(owner, partID: matches[0], token: token)
       } catch is CancellationError { break } catch { message = error.localizedDescription }
     }
+    pendingMasters = []
     activity = .idle
     batchBusy = false
     replaceTargetPartID = nil
@@ -644,6 +649,10 @@ final class MasteringPageModel: ViewModel {
         Task {
           await self?.cancelTapped()
           self?.exportReview = nil
+          self?.saveOwners = []
+          self?.copied = []
+          self?.savedFiles = []
+          self?.destination = nil
         }
       }
       await finishCopy(review, approved: nil, token: token, runID: run.id)

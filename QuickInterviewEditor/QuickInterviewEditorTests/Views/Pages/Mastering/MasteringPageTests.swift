@@ -352,6 +352,22 @@ struct MasteringPageTests {
     model.ambiguousReturnCancelled()
   }
 
+  @Test func ambiguityChoicesIncludeEachCandidatesDuration() {
+    var current = run()
+    var second = current.parts[0]
+    second.id = Fixtures.uuid(81)
+    second.frameCount = 44_100 * 65
+    current.parts.append(second)
+    let model = MasteringPageModel(
+      host: .init(
+        finishTitleEdit: {}, inputs: { .failure(.notLoaded) },
+        eligibility: { nil }, run: { current }, packageURL: { nil }, artifact: { _ in nil },
+        commit: { _, _, _ in false }))
+    model.ambiguousReturn = .init(candidatePartIDs: [Fixtures.uuid(71), Fixtures.uuid(81)])
+    expectNoDifference(
+      model.ambiguityChoices.map(\.title), ["Part 1 (0:01)", "Part 2 (1:05)"])
+  }
+
   @Test func choosingAmbiguousPartResumesRemainingDropInOrder() async throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -548,6 +564,48 @@ struct MasteringPageTests {
       Set(["Frozen Title.m4a", "Second Title.m4a"]))
   }
   // swiftlint:enable function_body_length
+
+  @Test func abandoningFilenameReviewReleasesStagedCopiesForAFreshSave() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let mastered = directory.appendingPathComponent("mastered")
+    try FileManager.default.createDirectory(at: mastered, withIntermediateDirectories: true)
+    try Data([1, 2, 3, 4]).write(to: mastered.appendingPathComponent("Frozen Title.m4a"))
+    let current = run(returned: true)
+    let source = directory.appendingPathComponent("source.m4a")
+    try Data([1, 2, 3, 4]).write(to: source)
+    let owner = try MasteringStagingStore.copy(
+      source, as: current.parts[0].pieces[0].finished!.fileName)
+    let model = withDependencies {
+      $0.masteringStaging = .liveValue
+      $0.workspace.createDirectory = {
+        try FileManager.default.createDirectory(at: $0, withIntermediateDirectories: true)
+      }
+      $0.exportCopy = .liveValue
+    } operation: {
+      MasteringPageModel(
+        host: .init(
+          finishTitleEdit: {}, inputs: { .failure(.notLoaded) }, eligibility: { nil },
+          run: { current }, packageURL: { directory.appendingPathComponent("interview.pie") },
+          artifact: { _ in owner }, commit: { _, _, _ in false }))
+    }
+    model.saveFinalsTapped()
+    await model.destinationSaveSelected()
+    #expect(model.exportReview != nil)
+    model.exportReview?.reviewNamesTapped()
+    await Task.yield()
+    #expect(model.exportReview == nil)
+    #expect(model.savedFiles.isEmpty)
+    // A fresh save must re-stage from the source artifact rather than silently reuse the
+    // abandoned review's `saveOwners` — proven by seeing the same collision surface again,
+    // not by finding stale state already "saved".
+    model.saveFinalsTapped()
+    await model.destinationSaveSelected()
+    #expect(model.exportReview != nil)
+    expectNoDifference(
+      model.exportReview?.mappings.first?.proposedName, "Frozen Title 2.m4a")
+  }
 
   @Test func replacingReturnedPartUsesFreshArtifactName() async throws {
     let source = FileManager.default.temporaryDirectory.appendingPathComponent(

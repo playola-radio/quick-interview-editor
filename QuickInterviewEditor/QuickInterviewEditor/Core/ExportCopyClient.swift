@@ -106,13 +106,21 @@ private struct ExportCopyState {
     return request.targets.filter { !copiedIDs.contains($0.id) }
   }
 
-  func preflight(client: ExportCopyClient) async throws -> [ExportNameMapping] {
+  /// A file that vanished from the destination after being copied (deleted by the user or
+  /// another process) must be recopied on retry, not silently counted as done — otherwise a
+  /// retry can report a completed save with a missing destination file.
+  mutating func reconcileCopiedWithDisk(existing: Set<String>) {
+    copied = copied.filter { existing.contains($0.url.lastPathComponent) }
+  }
+
+  mutating func preflight(client: ExportCopyClient) async throws -> [ExportNameMapping] {
     let existing = try await client.listNames(request.destination)
-      .union(collidedNames).union(copied.map { $0.url.lastPathComponent })
+    reconcileCopiedWithDisk(existing: existing)
     let indexes = Dictionary(
       uniqueKeysWithValues: request.targets.enumerated().map { ($0.element.id, $0.offset + 1) })
     return preflightExportNames(
-      slices: remaining, sourceStem: request.sourceStem, existing: existing,
+      slices: remaining, sourceStem: request.sourceStem,
+      existing: existing.union(collidedNames).union(copied.map { $0.url.lastPathComponent }),
       originalIndexes: indexes, kind: request.kind)
   }
 
