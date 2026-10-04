@@ -2,46 +2,36 @@ import SwiftUI
 
 struct EditorView: View {
   @Bindable var model: EditorModel
-  var prepareLabel: String
-  var onPrepare: () -> Void
 
   var body: some View {
-    VStack(spacing: 0) {
-      HStack {
-        Button(prepareLabel, action: onPrepare)
-          .buttonStyle(.borderedProminent)
-        Spacer()
-      }
-      .padding(8)
-      HStack(spacing: 0) {
-        VStack(spacing: 0) {
-          TranscriptPageView(model: model.transcript)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-          // The selection controls (Mark as Clip / Clear) sit right under the transcript where the
-          // words are selected. The fine-tune PANE is intentionally not mounted in this flow — it
-          // popped in on selection and reflowed the layout; FineTuneView stays in the codebase,
-          // unmounted, ready to re-enable when a visual boundary-editing UI returns. The fine-tune
-          // SESSION itself is wired below (`fineTuneSessionKey`) so the ←/→ nudge keys (Task 9) have
-          // a draft to move even with no pane on screen.
-          MarkClipBarView(model: model)
-          Divider()
-          WaveformView(model: model)
-        }
+    HStack(spacing: 0) {
+      VStack(spacing: 0) {
+        TranscriptPageView(model: model.transcript)
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // The selection controls (Mark as Clip / Clear) sit right under the transcript where the
+        // words are selected. The fine-tune PANE is intentionally not mounted in this flow — it
+        // popped in on selection and reflowed the layout; FineTuneView stays in the codebase,
+        // unmounted, ready to re-enable when a visual boundary-editing UI returns. The fine-tune
+        // SESSION itself is wired below (`fineTuneSessionKey`) so the ←/→ nudge keys (Task 9) have
+        // a draft to move even with no pane on screen.
+        MarkClipBarView(model: model)
         Divider()
-        VStack(spacing: 0) {
-          Picker(model.rightPanelPickerLabel, selection: $model.rightPanelTab) {
-            Text(model.slicesTabLabel).tag(RightPanelTab.slices)
-            Text(model.suggestionsTabLabel).tag(RightPanelTab.suggestions)
-            Text(model.bothTabLabel).tag(RightPanelTab.both)
-          }
-          .pickerStyle(.segmented)
-          .labelsHidden()
-          .padding(8)
-          Divider()
-          rightPanel
-        }
-        .frame(width: model.rightPanelWidth)
+        WaveformView(model: model)
       }
+      Divider()
+      VStack(spacing: 0) {
+        Picker(model.rightPanelPickerLabel, selection: $model.rightPanelTab) {
+          Text(model.slicesTabLabel).tag(RightPanelTab.slices)
+          Text(model.suggestionsTabLabel).tag(RightPanelTab.suggestions)
+          Text(model.bothTabLabel).tag(RightPanelTab.both)
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .padding(8)
+        Divider()
+        rightPanel
+      }
+      .frame(width: model.rightPanelWidth)
     }
     .background(Color.black)
     .background(
