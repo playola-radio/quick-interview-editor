@@ -13,7 +13,7 @@ Contracts: [spec](spec.md), [screens](screens.md), [models](models.md). Backend/
 - [x] Extend format/job/naming, shared conformer and AAC empty tags; run renderer and mastering regressions.
 - [x] Thread frozen format/artist/titles through editor; AIFF-only markers; replace buttons with menus and neutral picker text.
 - [x] Run full app tests, build, format and lint; AVFoundation AAC format, duration and metadata readback.
-- [ ] Commit; Claude correctness review, then separate challenge/excess concurrently; resolve combined findings and verify.
+- [x] Commit; Claude correctness review, then separate challenge/excess concurrently; resolve combined findings and verify.
 
 Review dispositions: keep one client, no extra settings/modal/state, no database fields. Share the existing conformed renderer and PCM settings rather than copying the algorithm. Preserve ordinary naming instead of using masteredM4A naming. Menu format stays selectable even with cached destination. The user's unrelated untracked canvas/docs will not be committed. Screen PNGs exported through Pen; native menu styling remains system-owned.
 

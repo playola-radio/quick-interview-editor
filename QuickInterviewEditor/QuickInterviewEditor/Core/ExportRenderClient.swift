@@ -129,9 +129,9 @@ enum ExportAudioRenderer {
         from: file, plan: job.plan, editedDurationSamples: job.editedDurationSamples,
         sampleRate: job.sampleRate, emit: { try output.write(from: $0) })
     case .wav:
-      // Leave space for the RIFF header and the converter's one-frame rounding tolerance.
+      // Core Audio pads WAV headers (4 KiB measured); reserve 64 KiB plus conversion rounding.
       let frames = MasteringFrames.conformed(job.editedDurationSamples, fromRate: job.sampleRate)
-      guard frames < (Int(UInt32.max) - 256) / 6 else {
+      guard frames < (Int(UInt32.max) - 65_536) / 6 else {
         throw ExportRenderError.wavTooLarge
       }
       _ = try renderConformed(

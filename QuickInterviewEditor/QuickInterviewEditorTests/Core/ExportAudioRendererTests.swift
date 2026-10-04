@@ -602,7 +602,6 @@ extension ExportAudioRendererTests {
     expectNoDifference(file.fileFormat.sampleRate, 44_100)
     expectNoDifference(file.fileFormat.channelCount, 2)
     expectNoDifference(file.fileFormat.settings[AVLinearPCMBitDepthKey] as? Int, 24)
-
   }
 
   @Test(arguments: ["Test Artist", ""])

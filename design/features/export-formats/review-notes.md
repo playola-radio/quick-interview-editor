@@ -32,4 +32,6 @@ Play actual WAV/M4A exports and verify speech/word timing in the intended player
 
 ## Automated checks
 
-Final full suite: 1,991 tests in 159 suites passed, with 15 existing known issues. Formatting and SwiftLint passed. The macOS build passed before the review fixes; the full suite rebuilt the updated app successfully. One preceding run ended when the test host exited with code 0 during an unrelated editor reveal test; a complete rerun passed without code changes.
+Final full suite: 1,991 tests in 159 suites passed, with 15 existing known issues. Formatting and SwiftLint passed. The final macOS build passed. One preceding run ended when the test host exited with code 0 during an unrelated editor reveal test; a complete rerun passed without code changes.
+
+Claude re-review: PASS. A non-blocking WAV-header note was checked empirically with the same AVAudioFile settings: 600 bytes of PCM produced 4,096 bytes of header/padding. The ordinary WAV guard therefore reserves 64 KiB rather than the mastering path's old 256-byte allowance. This only rejects a few more samples near the container limit; the final renderer suite was rerun. The retained mastering path caps normal parts at 50 minutes, far below that limit.
