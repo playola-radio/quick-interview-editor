@@ -1,0 +1,3294 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>
+      tailwind = { config: { corePlugins: { preflight: false } } };
+    </script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter%3Awght%40100..900&family=Roboto+Mono%3Awght%40100..700&family=Space+Grotesk%3Awght%40300..700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      *, ::before, ::after {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="relative w-[3600px] h-[620px]">
+      <div
+        data-pencil-name="Components · Playola macOS"
+        class="box-border w-[3600px] h-[620px] absolute left-0 top-0 flex flex-col gap-[24px] p-[32px] justify-start items-start bg-[#090909] overflow-hidden"
+      >
+        <div
+          data-pencil-name="Component Library Title"
+          class="text-[28px]/[normal] box-border text-[#F2F2F2] font-['Space_Grotesk',system-ui,sans-serif] font-bold text-left [white-space:nowrap]"
+        >
+          PLAYOLA · macOS COMPONENTS
+        </div>
+        <div
+          data-pencil-name="Component · macOS Window Chrome"
+          class="[box-sizing:content-box] w-[3536px] h-[47.5px] shrink-0 flex flex-row gap-0 p-[0px_16px] justify-between items-center [background-image:linear-gradient(180deg,_#1C1C1C_0%,_#141414_100%)] bg-no-repeat bg-[length:100%_100%] [border-width:0px_0px_1px_0px] [border-style:solid] [border-color:#303030] [margin:0px_0px_-0.5px_0px]"
+        >
+          <div
+            data-pencil-name="Traffic Lights"
+            class="box-border w-fit shrink-0 h-fit flex flex-row gap-[8px] justify-start items-center"
+          >
+            <div
+              data-pencil-name="Close"
+              class="box-border w-[12px] shrink-0 h-[12px] bg-[#FF5F57] rounded-full"
+            ></div>
+            <div
+              data-pencil-name="Minimize"
+              class="box-border w-[12px] shrink-0 h-[12px] bg-[#FEBC2E] rounded-full"
+            ></div>
+            <div
+              data-pencil-name="Zoom"
+              class="box-border w-[12px] shrink-0 h-[12px] bg-[#28C840] rounded-full"
+            ></div>
+          </div>
+          <div
+            data-pencil-name="Window Title"
+            class="text-[13px]/[normal] box-border text-[#A0A0A0] font-[Inter,system-ui,sans-serif] font-medium text-left [white-space:nowrap]"
+          >
+            Interview Editor
+          </div>
+          <div
+            data-pencil-name="Chrome Balance"
+            class="box-border w-[68px] shrink-0 h-[1px] flex flex-row gap-0 justify-start items-start"
+          ></div>
+        </div>
+        <div
+          data-pencil-name="Controls Row"
+          class="box-border w-full h-fit shrink-0 flex flex-row gap-[16px] justify-start items-center"
+        >
+          <div
+            data-pencil-name="Component · Primary Button"
+            class="box-border w-fit shrink-0 h-fit flex flex-row gap-0 p-[9px_16px] justify-center items-center bg-[#CC6666] rounded-[8px]"
+          >
+            <div
+              data-pencil-name="Button Label"
+              class="text-[13px]/[normal] box-border text-[#FFFFFF] font-[Inter,system-ui,sans-serif] font-semibold text-left [white-space:nowrap]"
+            >
+              Primary action
+            </div>
+          </div>
+          <div
+            data-pencil-name="Component · Secondary Button"
+            class="box-border w-fit shrink-0 h-fit flex flex-row gap-0 p-[8px_14px] justify-center items-center bg-[#181818] [outline:1px_solid_#303030] [outline-offset:-0.5px] rounded-[8px]"
+          >
+            <div
+              data-pencil-name="Button Label"
+              class="text-[13px]/[normal] box-border text-[#F2F2F2] font-[Inter,system-ui,sans-serif] font-medium text-left [white-space:nowrap]"
+            >
+              Secondary
+            </div>
+          </div>
+          <div
+            data-pencil-name="Component · Destructive Button"
+            class="box-border w-fit shrink-0 h-fit flex flex-row gap-0 p-[8px_14px] justify-center items-center bg-[#321919] [outline:1px_solid_#663333] [outline-offset:-0.5px] rounded-[8px]"
+          >
+            <div
+              data-pencil-name="Button Label"
+              class="text-[13px]/[normal] box-border text-[#F2A0A0] font-[Inter,system-ui,sans-serif] font-medium text-left [white-space:nowrap]"
+            >
+              Remove
+            </div>
+          </div>
+          <div
+            data-pencil-name="Component · Text Field"
+            class="box-border w-[260px] shrink-0 h-[34px] flex flex-row gap-0 p-[0px_10px] justify-start items-center bg-[#FFFFFF] [outline:1px_solid_#777777] [outline-offset:-0.5px] rounded-[6px]"
+          >
+            <div
+              data-pencil-name="Field Value"
+              class="text-[13px]/[normal] box-border text-[#222222] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+            >
+              Field value
+            </div>
+          </div>
+          <div
+            data-pencil-name="Component · Segmented Control"
+            class="box-border w-[330px] shrink-0 h-[32px] flex flex-row gap-[2px] p-[2px] justify-start items-start bg-[#252525] rounded-[7px]"
+          >
+            <div
+              data-pencil-name="Segment Clips"
+              class="box-border [flex:1_1_0] h-full flex flex-row gap-0 justify-center items-center bg-[#555555] rounded-[5px]"
+            >
+              <div
+                data-pencil-name="Segment Label Clips"
+                class="text-[12px]/[normal] box-border text-[#F2F2F2] font-[Inter,system-ui,sans-serif] font-semibold text-left [white-space:nowrap]"
+              >
+                Clips
+              </div>
+            </div>
+            <div
+              data-pencil-name="Segment Suggestions"
+              class="box-border [flex:1_1_0] h-full flex flex-row gap-0 justify-center items-center bg-[#252525] rounded-[5px]"
+            >
+              <div
+                data-pencil-name="Segment Label Suggestions"
+                class="text-[12px]/[normal] box-border text-[#A0A0A0] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+              >
+                Suggestions
+              </div>
+            </div>
+            <div
+              data-pencil-name="Segment Both"
+              class="box-border [flex:1_1_0] h-full flex flex-row gap-0 justify-center items-center bg-[#252525] rounded-[5px]"
+            >
+              <div
+                data-pencil-name="Segment Label Both"
+                class="text-[12px]/[normal] box-border text-[#A0A0A0] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+              >
+                Both
+              </div>
+            </div>
+          </div>
+          <div
+            data-pencil-name="Component · Progress Bar"
+            class="box-border w-[300px] shrink-0 h-[8px] bg-[#303030] rounded-[4px] relative"
+          >
+            <div
+              data-pencil-name="Progress Fill"
+              class="box-border w-[184px] h-[8px] absolute left-0 top-0 bg-[#CC6666] rounded-[4px] [z-index:0]"
+            ></div>
+          </div>
+        </div>
+        <div
+          data-pencil-name="Content Components Row"
+          class="box-border w-full h-fit shrink-0 flex flex-row gap-[20px] justify-start items-start"
+        >
+          <div
+            data-pencil-name="Component · Section Header"
+            class="box-border w-[360px] shrink-0 h-fit flex flex-row gap-0 justify-between items-center"
+          >
+            <div
+              data-pencil-name="Section Label"
+              class="text-[11px]/[normal] box-border text-[#666666] font-[Inter,system-ui,sans-serif] font-bold tracking-[1.5px] text-left [white-space:nowrap]"
+            >
+              TRANSCRIPT
+            </div>
+            <div
+              data-pencil-name="Section Meta"
+              class="text-[11px]/[normal] box-border text-[#A0A0A0] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+            >
+              1× · 100%
+            </div>
+          </div>
+          <div
+            data-pencil-name="Component · Status Line"
+            class="box-border w-[360px] shrink-0 h-fit flex flex-row gap-[8px] p-[8px_10px] justify-start items-center bg-[#201B0E] [outline:1px_solid_#5C4514] [outline-offset:-0.5px] rounded-[6px]"
+          >
+            <div
+              data-pencil-name="Status Dot"
+              class="box-border w-[8px] shrink-0 h-[8px] bg-[#FEBC2E] rounded-full"
+            ></div>
+            <div
+              data-pencil-name="Status Label"
+              class="text-[12px]/[normal] box-border text-[#F3D98B] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+            >
+              Status message
+            </div>
+          </div>
+          <div
+            data-pencil-name="Component · Waveform Lane"
+            class="box-border w-[520px] shrink-0 h-[174px] flex flex-col gap-[8px] justify-start items-start bg-[#000000] [outline:1px_solid_#00000000] [outline-offset:-0.5px] rounded-[4px]"
+          >
+            <div
+              data-pencil-name="Waveform Ruler Strip"
+              class="box-border w-full h-[18px] shrink-0 bg-[#1A1A1A] [outline:1px_solid_#2E2E2E] [outline-offset:-0.5px] rounded-[3px] overflow-hidden relative"
+            >
+              <div
+                data-pencil-name="Ruler Playhead"
+                class="box-border w-[1.5px] h-[18px] absolute left-[339.25px] top-0 bg-[#F5DB66] [z-index:0]"
+              ></div>
+            </div>
+            <div
+              data-pencil-name="Waveform Band"
+              class="box-border w-full h-[148px] shrink-0 flex flex-row gap-0 justify-start items-center bg-[#060606] rounded-[4px] overflow-hidden relative"
+            >
+              <div
+                data-pencil-name="Waveform Selection Highlight"
+                class="box-border w-[192px] h-[148px] absolute left-[165px] top-0 bg-[#FFFFFF24] [z-index:0]"
+              ></div>
+              <div
+                data-pencil-name="Dense Min Max Columns"
+                class="box-border [flex:1_1_0] h-[148px] flex flex-row gap-0 justify-between items-center relative [z-index:1]"
+              >
+                <div
+                  data-pencil-name="Waveform Column Slot 001"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 001"
+                    class="box-border w-[1px] h-[4px] absolute left-0 top-[72px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 002"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 002"
+                    class="box-border w-[1px] h-[6px] absolute left-0 top-[71px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 003"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 003"
+                    class="box-border w-[1px] h-[7px] absolute left-0 top-[70px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 004"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 004"
+                    class="box-border w-[1px] h-[23px] absolute left-0 top-[60px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 005"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 005"
+                    class="box-border w-[1px] h-[21px] absolute left-0 top-[61px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 006"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 006"
+                    class="box-border w-[1px] h-[15px] absolute left-0 top-[65px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 007"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 007"
+                    class="box-border w-[1px] h-[20px] absolute left-0 top-[62px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 008"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 008"
+                    class="box-border w-[1px] h-[22px] absolute left-0 top-[61px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 009"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 009"
+                    class="box-border w-[1px] h-[17px] absolute left-0 top-[64px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 010"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 010"
+                    class="box-border w-[1px] h-[31px] absolute left-0 top-[57px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 011"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 011"
+                    class="box-border w-[1px] h-[44px] absolute left-0 top-[52px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 012"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 012"
+                    class="box-border w-[1px] h-[50px] absolute left-0 top-[51px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 013"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 013"
+                    class="box-border w-[1px] h-[46px] absolute left-0 top-[54px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 014"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 014"
+                    class="box-border w-[1px] h-[33px] absolute left-0 top-[61px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 015"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 015"
+                    class="box-border w-[1px] h-[25px] absolute left-0 top-[65px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 016"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 016"
+                    class="box-border w-[1px] h-[39px] absolute left-0 top-[60px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 017"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 017"
+                    class="box-border w-[1px] h-[43px] absolute left-0 top-[58px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 018"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 018"
+                    class="box-border w-[1px] h-[35px] absolute left-0 top-[60px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 019"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 019"
+                    class="box-border w-[1px] h-[23px] absolute left-0 top-[64px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 020"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 020"
+                    class="box-border w-[1px] h-[36px] absolute left-0 top-[58px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 021"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 021"
+                    class="box-border w-[1px] h-[39px] absolute left-0 top-[55px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 022"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 022"
+                    class="box-border w-[1px] h-[30px] absolute left-0 top-[58px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 023"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 023"
+                    class="box-border w-[1px] h-[35px] absolute left-0 top-[54px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 024"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 024"
+                    class="box-border w-[1px] h-[54px] absolute left-0 top-[42px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 025"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 025"
+                    class="box-border w-[1px] h-[66px] absolute left-0 top-[33px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 026"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 026"
+                    class="box-border w-[1px] h-[64px] absolute left-0 top-[34px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 027"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 027"
+                    class="box-border w-[1px] h-[50px] absolute left-0 top-[43px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 028"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 028"
+                    class="box-border w-[1px] h-[30px] absolute left-0 top-[56px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 029"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 029"
+                    class="box-border w-[1px] h-[33px] absolute left-0 top-[55px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 030"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 030"
+                    class="box-border w-[1px] h-[38px] absolute left-0 top-[53px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 031"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 031"
+                    class="box-border w-[1px] h-[31px] absolute left-0 top-[58px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 032"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 032"
+                    class="box-border w-[1px] h-[30px] absolute left-0 top-[60px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 033"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 033"
+                    class="box-border w-[1px] h-[43px] absolute left-0 top-[55px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 034"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 034"
+                    class="box-border w-[1px] h-[48px] absolute left-0 top-[54px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 035"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 035"
+                    class="box-border w-[1px] h-[41px] absolute left-0 top-[58px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 036"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 036"
+                    class="box-border w-[1px] h-[23px] absolute left-0 top-[65px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 037"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 037"
+                    class="box-border w-[1px] h-[39px] absolute left-0 top-[60px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 038"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 038"
+                    class="box-border w-[1px] h-[52px] absolute left-0 top-[54px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 039"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 039"
+                    class="box-border w-[1px] h-[54px] absolute left-0 top-[52px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 040"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 040"
+                    class="box-border w-[1px] h-[45px] absolute left-0 top-[54px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 041"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 041"
+                    class="box-border w-[1px] h-[29px] absolute left-0 top-[60px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 042"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 042"
+                    class="box-border w-[1px] h-[21px] absolute left-0 top-[63px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 043"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 043"
+                    class="box-border w-[1px] h-[26px] absolute left-0 top-[60px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 044"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 044"
+                    class="box-border w-[1px] h-[21px] absolute left-0 top-[62px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 045"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 045"
+                    class="box-border w-[1px] h-[23px] absolute left-0 top-[60px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 046"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 046"
+                    class="box-border w-[1px] h-[32px] absolute left-0 top-[54px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 047"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 047"
+                    class="box-border w-[1px] h-[35px] absolute left-0 top-[52px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 048"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 048"
+                    class="box-border w-[1px] h-[30px] absolute left-0 top-[55px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 049"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 049"
+                    class="box-border w-[1px] h-[20px] absolute left-0 top-[62px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 050"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 050"
+                    class="box-border w-[1px] h-[13px] absolute left-0 top-[67px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 051"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 051"
+                    class="box-border w-[1px] h-[6px] absolute left-0 top-[71px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 052"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 052"
+                    class="box-border w-[1px] h-[7px] absolute left-0 top-[71px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 053"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 053"
+                    class="box-border w-[1px] h-[6px] absolute left-0 top-[71px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 054"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 054"
+                    class="box-border w-[1px] h-[5px] absolute left-0 top-[72px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 055"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 055"
+                    class="box-border w-[1px] h-[4px] absolute left-0 top-[72px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 056"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 056"
+                    class="box-border w-[1px] h-[16px] absolute left-0 top-[68px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 057"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 057"
+                    class="box-border w-[1px] h-[16px] absolute left-0 top-[68px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 058"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 058"
+                    class="box-border w-[1px] h-[17px] absolute left-0 top-[68px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 059"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 059"
+                    class="box-border w-[1px] h-[29px] absolute left-0 top-[62px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 060"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 060"
+                    class="box-border w-[1px] h-[40px] absolute left-0 top-[57px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 061"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 061"
+                    class="box-border w-[1px] h-[44px] absolute left-0 top-[53px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 062"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 062"
+                    class="box-border w-[1px] h-[38px] absolute left-0 top-[55px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 063"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 063"
+                    class="box-border w-[1px] h-[26px] absolute left-0 top-[60px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 064"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 064"
+                    class="box-border w-[1px] h-[26px] absolute left-0 top-[59px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 065"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 065"
+                    class="box-border w-[1px] h-[36px] absolute left-0 top-[52px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 066"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 066"
+                    class="box-border w-[1px] h-[35px] absolute left-0 top-[52px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 067"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 067"
+                    class="box-border w-[1px] h-[26px] absolute left-0 top-[58px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 068"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 068"
+                    class="box-border w-[1px] h-[29px] absolute left-0 top-[56px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 069"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 069"
+                    class="box-border w-[1px] h-[38px] absolute left-0 top-[51px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 070"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 070"
+                    class="box-border w-[1px] h-[38px] absolute left-0 top-[52px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 071"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 071"
+                    class="box-border w-[1px] h-[25px] absolute left-0 top-[61px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 072"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 072"
+                    class="box-border w-[1px] h-[39px] absolute left-0 top-[55px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 073"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 073"
+                    class="box-border w-[1px] h-[57px] absolute left-0 top-[48px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 074"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 074"
+                    class="box-border w-[1px] h-[65px] absolute left-0 top-[47px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 075"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 075"
+                    class="box-border w-[1px] h-[60px] absolute left-0 top-[50px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 076"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 076"
+                    class="box-border w-[1px] h-[44px] absolute left-0 top-[57px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 077"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 077"
+                    class="box-border w-[1px] h-[25px] absolute left-0 top-[65px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 078"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 078"
+                    class="box-border w-[1px] h-[35px] absolute left-0 top-[61px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 079"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 079"
+                    class="box-border w-[1px] h-[35px] absolute left-0 top-[60px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 080"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 080"
+                    class="box-border w-[1px] h-[25px] absolute left-0 top-[63px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 081"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 081"
+                    class="box-border w-[1px] h-[38px] absolute left-0 top-[57px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 082"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 082"
+                    class="box-border w-[1px] h-[50px] absolute left-0 top-[49px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 083"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 083"
+                    class="box-border w-[1px] h-[52px] absolute left-0 top-[46px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 084"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 084"
+                    class="box-border w-[1px] h-[40px] absolute left-0 top-[51px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 085"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 085"
+                    class="box-border w-[1px] h-[25px] absolute left-0 top-[59px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 086"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 086"
+                    class="box-border w-[1px] h-[45px] absolute left-0 top-[46px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 087"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 087"
+                    class="box-border w-[1px] h-[56px] absolute left-0 top-[39px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 088"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 088"
+                    class="box-border w-[1px] h-[55px] absolute left-0 top-[40px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 089"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 089"
+                    class="box-border w-[1px] h-[42px] absolute left-0 top-[48px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 090"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 090"
+                    class="box-border w-[1px] h-[26px] absolute left-0 top-[59px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 091"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 091"
+                    class="box-border w-[1px] h-[27px] absolute left-0 top-[59px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 092"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 092"
+                    class="box-border w-[1px] h-[28px] absolute left-0 top-[60px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 093"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 093"
+                    class="box-border w-[1px] h-[19px] absolute left-0 top-[65px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 094"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 094"
+                    class="box-border w-[1px] h-[32px] absolute left-0 top-[60px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 095"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 095"
+                    class="box-border w-[1px] h-[42px] absolute left-0 top-[57px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 096"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 096"
+                    class="box-border w-[1px] h-[44px] absolute left-0 top-[57px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 097"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 097"
+                    class="box-border w-[1px] h-[37px] absolute left-0 top-[60px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 098"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 098"
+                    class="box-border w-[1px] h-[24px] absolute left-0 top-[65px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 099"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 099"
+                    class="box-border w-[1px] h-[19px] absolute left-0 top-[67px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 100"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 100"
+                    class="box-border w-[1px] h-[26px] absolute left-0 top-[63px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 101"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 101"
+                    class="box-border w-[1px] h-[25px] absolute left-0 top-[63px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 102"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 102"
+                    class="box-border w-[1px] h-[19px] absolute left-0 top-[65px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 103"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 103"
+                    class="box-border w-[1px] h-[4px] absolute left-0 top-[72px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 104"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 104"
+                    class="box-border w-[1px] h-[5px] absolute left-0 top-[71px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 105"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 105"
+                    class="box-border w-[1px] h-[5px] absolute left-0 top-[71px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 106"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 106"
+                    class="box-border w-[1px] h-[4px] absolute left-0 top-[72px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 107"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 107"
+                    class="box-border w-[1px] h-[5px] absolute left-0 top-[71px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 108"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 108"
+                    class="box-border w-[1px] h-[23px] absolute left-0 top-[60px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 109"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 109"
+                    class="box-border w-[1px] h-[32px] absolute left-0 top-[54px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 110"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 110"
+                    class="box-border w-[1px] h-[34px] absolute left-0 top-[54px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 111"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 111"
+                    class="box-border w-[1px] h-[29px] absolute left-0 top-[58px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 112"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 112"
+                    class="box-border w-[1px] h-[19px] absolute left-0 top-[64px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 113"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 113"
+                    class="box-border w-[1px] h-[24px] absolute left-0 top-[63px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 114"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 114"
+                    class="box-border w-[1px] h-[30px] absolute left-0 top-[61px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 115"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 115"
+                    class="box-border w-[1px] h-[27px] absolute left-0 top-[63px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 116"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 116"
+                    class="box-border w-[1px] h-[20px] absolute left-0 top-[66px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 117"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 117"
+                    class="box-border w-[1px] h-[32px] absolute left-0 top-[62px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 118"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 118"
+                    class="box-border w-[1px] h-[39px] absolute left-0 top-[60px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 119"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 119"
+                    class="box-border w-[1px] h-[34px] absolute left-0 top-[61px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 120"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 120"
+                    class="box-border w-[1px] h-[22px] absolute left-0 top-[65px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 121"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 121"
+                    class="box-border w-[1px] h-[41px] absolute left-0 top-[56px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 122"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 122"
+                    class="box-border w-[1px] h-[56px] absolute left-0 top-[47px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 123"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 123"
+                    class="box-border w-[1px] h-[61px] absolute left-0 top-[43px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 124"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 124"
+                    class="box-border w-[1px] h-[53px] absolute left-0 top-[45px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 125"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 125"
+                    class="box-border w-[1px] h-[37px] absolute left-0 top-[52px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 126"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 126"
+                    class="box-border w-[1px] h-[26px] absolute left-0 top-[58px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 127"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 127"
+                    class="box-border w-[1px] h-[35px] absolute left-0 top-[52px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 128"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 128"
+                    class="box-border w-[1px] h-[31px] absolute left-0 top-[54px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 129"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 129"
+                    class="box-border w-[1px] h-[29px] absolute left-0 top-[56px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 130"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 130"
+                    class="box-border w-[1px] h-[46px] absolute left-0 top-[47px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 131"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 131"
+                    class="box-border w-[1px] h-[56px] absolute left-0 top-[42px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 132"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 132"
+                    class="box-border w-[1px] h-[53px] absolute left-0 top-[46px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 133"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 133"
+                    class="box-border w-[1px] h-[38px] absolute left-0 top-[55px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 134"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 134"
+                    class="box-border w-[1px] h-[30px] absolute left-0 top-[60px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 135"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 135"
+                    class="box-border w-[1px] h-[49px] absolute left-0 top-[54px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 136"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 136"
+                    class="box-border w-[1px] h-[57px] absolute left-0 top-[52px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 137"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 137"
+                    class="box-border w-[1px] h-[52px] absolute left-0 top-[55px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 138"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 138"
+                    class="box-border w-[1px] h-[38px] absolute left-0 top-[60px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 139"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 139"
+                    class="box-border w-[1px] h-[23px] absolute left-0 top-[65px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 140"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 140"
+                    class="box-border w-[1px] h-[31px] absolute left-0 top-[62px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 141"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 141"
+                    class="box-border w-[1px] h-[29px] absolute left-0 top-[62px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 142"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 142"
+                    class="box-border w-[1px] h-[26px] absolute left-0 top-[62px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 143"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 143"
+                    class="box-border w-[1px] h-[41px] absolute left-0 top-[53px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 144"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 144"
+                    class="box-border w-[1px] h-[51px] absolute left-0 top-[46px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 145"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 145"
+                    class="box-border w-[1px] h-[51px] absolute left-0 top-[44px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 146"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 146"
+                    class="box-border w-[1px] h-[41px] absolute left-0 top-[49px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 147"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 147"
+                    class="box-border w-[1px] h-[24px] absolute left-0 top-[59px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 148"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 148"
+                    class="box-border w-[1px] h-[25px] absolute left-0 top-[58px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 149"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 149"
+                    class="box-border w-[1px] h-[32px] absolute left-0 top-[54px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 150"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 150"
+                    class="box-border w-[1px] h-[30px] absolute left-0 top-[56px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 151"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 151"
+                    class="box-border w-[1px] h-[21px] absolute left-0 top-[62px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 152"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 152"
+                    class="box-border w-[1px] h-[15px] absolute left-0 top-[66px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 153"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 153"
+                    class="box-border w-[1px] h-[19px] absolute left-0 top-[64px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 154"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 154"
+                    class="box-border w-[1px] h-[17px] absolute left-0 top-[66px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 155"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 155"
+                    class="box-border w-[1px] h-[4px] absolute left-0 top-[72px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 156"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 156"
+                    class="box-border w-[1px] h-[6px] absolute left-0 top-[72px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 157"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 157"
+                    class="box-border w-[1px] h-[7px] absolute left-0 top-[71px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 158"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 158"
+                    class="box-border w-[1px] h-[8px] absolute left-0 top-[71px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 159"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 159"
+                    class="box-border w-[1px] h-[7px] absolute left-0 top-[71px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 160"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 160"
+                    class="box-border w-[1px] h-[19px] absolute left-0 top-[67px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 161"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 161"
+                    class="box-border w-[1px] h-[13px] absolute left-0 top-[69px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 162"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 162"
+                    class="box-border w-[1px] h-[20px] absolute left-0 top-[65px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 163"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 163"
+                    class="box-border w-[1px] h-[23px] absolute left-0 top-[63px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 164"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 164"
+                    class="box-border w-[1px] h-[19px] absolute left-0 top-[64px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 165"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 165"
+                    class="box-border w-[1px] h-[23px] absolute left-0 top-[61px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 166"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 166"
+                    class="box-border w-[1px] h-[33px] absolute left-0 top-[54px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 167"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 167"
+                    class="box-border w-[1px] h-[36px] absolute left-0 top-[52px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 168"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 168"
+                    class="box-border w-[1px] h-[30px] absolute left-0 top-[55px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 169"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 169"
+                    class="box-border w-[1px] h-[24px] absolute left-0 top-[59px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 170"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 170"
+                    class="box-border w-[1px] h-[41px] absolute left-0 top-[49px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 171"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 171"
+                    class="box-border w-[1px] h-[54px] absolute left-0 top-[42px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 172"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 172"
+                    class="box-border w-[1px] h-[55px] absolute left-0 top-[44px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 173"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 173"
+                    class="box-border w-[1px] h-[45px] absolute left-0 top-[51px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 174"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 174"
+                    class="box-border w-[1px] h-[29px] absolute left-0 top-[60px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 175"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 175"
+                    class="box-border w-[1px] h-[28px] absolute left-0 top-[62px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 176"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 176"
+                    class="box-border w-[1px] h-[33px] absolute left-0 top-[61px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 177"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 177"
+                    class="box-border w-[1px] h-[25px] absolute left-0 top-[64px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 178"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 178"
+                    class="box-border w-[1px] h-[36px] absolute left-0 top-[61px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 179"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 179"
+                    class="box-border w-[1px] h-[52px] absolute left-0 top-[55px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 180"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 180"
+                    class="box-border w-[1px] h-[58px] absolute left-0 top-[52px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 181"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 181"
+                    class="box-border w-[1px] h-[52px] absolute left-0 top-[53px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 182"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 182"
+                    class="box-border w-[1px] h-[34px] absolute left-0 top-[59px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 183"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 183"
+                    class="box-border w-[1px] h-[35px] absolute left-0 top-[57px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 184"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 184"
+                    class="box-border w-[1px] h-[51px] absolute left-0 top-[47px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 185"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 185"
+                    class="box-border w-[1px] h-[56px] absolute left-0 top-[43px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 186"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 186"
+                    class="box-border w-[1px] h-[47px] absolute left-0 top-[46px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 187"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 187"
+                    class="box-border w-[1px] h-[32px] absolute left-0 top-[54px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 188"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 188"
+                    class="box-border w-[1px] h-[29px] absolute left-0 top-[56px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 189"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 189"
+                    class="box-border w-[1px] h-[34px] absolute left-0 top-[53px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 190"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 190"
+                    class="box-border w-[1px] h-[27px] absolute left-0 top-[57px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 191"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 191"
+                    class="box-border w-[1px] h-[33px] absolute left-0 top-[54px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 192"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 192"
+                    class="box-border w-[1px] h-[49px] absolute left-0 top-[47px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 193"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 193"
+                    class="box-border w-[1px] h-[58px] absolute left-0 top-[44px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 194"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 194"
+                    class="box-border w-[1px] h-[55px] absolute left-0 top-[47px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 195"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 195"
+                    class="box-border w-[1px] h-[42px] absolute left-0 top-[55px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 196"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 196"
+                    class="box-border w-[1px] h-[23px] absolute left-0 top-[65px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 197"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 197"
+                    class="box-border w-[1px] h-[31px] absolute left-0 top-[62px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 198"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 198"
+                    class="box-border w-[1px] h-[36px] absolute left-0 top-[61px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 199"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 199"
+                    class="box-border w-[1px] h-[31px] absolute left-0 top-[63px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 200"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 200"
+                    class="box-border w-[1px] h-[20px] absolute left-0 top-[66px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 201"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 201"
+                    class="box-border w-[1px] h-[24px] absolute left-0 top-[64px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 202"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 202"
+                    class="box-border w-[1px] h-[27px] absolute left-0 top-[62px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 203"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 203"
+                    class="box-border w-[1px] h-[22px] absolute left-0 top-[64px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 204"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 204"
+                    class="box-border w-[1px] h-[15px] absolute left-0 top-[66px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 205"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 205"
+                    class="box-border w-[1px] h-[23px] absolute left-0 top-[61px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 206"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 206"
+                    class="box-border w-[1px] h-[26px] absolute left-0 top-[59px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 207"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 207"
+                    class="box-border w-[1px] h-[8px] absolute left-0 top-[69px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 208"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 208"
+                    class="box-border w-[1px] h-[7px] absolute left-0 top-[70px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 209"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 209"
+                    class="box-border w-[1px] h-[5px] absolute left-0 top-[71px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 210"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 210"
+                    class="box-border w-[1px] h-[4px] absolute left-0 top-[72px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 211"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 211"
+                    class="box-border w-[1px] h-[5px] absolute left-0 top-[71px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 212"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 212"
+                    class="box-border w-[1px] h-[15px] absolute left-0 top-[65px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 213"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 213"
+                    class="box-border w-[1px] h-[13px] absolute left-0 top-[67px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 214"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 214"
+                    class="box-border w-[1px] h-[22px] absolute left-0 top-[63px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 215"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 215"
+                    class="box-border w-[1px] h-[30px] absolute left-0 top-[60px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 216"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 216"
+                    class="box-border w-[1px] h-[31px] absolute left-0 top-[61px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 217"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 217"
+                    class="box-border w-[1px] h-[24px] absolute left-0 top-[65px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 218"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 218"
+                    class="box-border w-[1px] h-[24px] absolute left-0 top-[65px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 219"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 219"
+                    class="box-border w-[1px] h-[39px] absolute left-0 top-[60px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 220"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 220"
+                    class="box-border w-[1px] h-[48px] absolute left-0 top-[56px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 221"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 221"
+                    class="box-border w-[1px] h-[47px] absolute left-0 top-[55px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 222"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 222"
+                    class="box-border w-[1px] h-[36px] absolute left-0 top-[59px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 223"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 223"
+                    class="box-border w-[1px] h-[22px] absolute left-0 top-[64px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 224"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 224"
+                    class="box-border w-[1px] h-[29px] absolute left-0 top-[59px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 225"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 225"
+                    class="box-border w-[1px] h-[29px] absolute left-0 top-[58px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 226"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 226"
+                    class="box-border w-[1px] h-[25px] absolute left-0 top-[60px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 227"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 227"
+                    class="box-border w-[1px] h-[41px] absolute left-0 top-[49px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 228"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 228"
+                    class="box-border w-[1px] h-[55px] absolute left-0 top-[40px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 229"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 229"
+                    class="box-border w-[1px] h-[58px] absolute left-0 top-[37px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 230"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 230"
+                    class="box-border w-[1px] h-[49px] absolute left-0 top-[43px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 231"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 231"
+                    class="box-border w-[1px] h-[29px] absolute left-0 top-[56px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 232"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 232"
+                    class="box-border w-[1px] h-[38px] absolute left-0 top-[52px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 233"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 233"
+                    class="box-border w-[1px] h-[51px] absolute left-0 top-[46px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 234"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 234"
+                    class="box-border w-[1px] h-[52px] absolute left-0 top-[48px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 235"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 235"
+                    class="box-border w-[1px] h-[41px] absolute left-0 top-[55px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 236"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 236"
+                    class="box-border w-[1px] h-[25px] absolute left-0 top-[63px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 237"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 237"
+                    class="box-border w-[1px] h-[34px] absolute left-0 top-[60px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 238"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 238"
+                    class="box-border w-[1px] h-[35px] absolute left-0 top-[61px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 239"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 239"
+                    class="box-border w-[1px] h-[24px] absolute left-0 top-[65px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 240"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 240"
+                    class="box-border w-[1px] h-[40px] absolute left-0 top-[59px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 241"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 241"
+                    class="box-border w-[1px] h-[56px] absolute left-0 top-[52px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 242"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 242"
+                    class="box-border w-[1px] h-[63px] absolute left-0 top-[48px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 243"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 243"
+                    class="box-border w-[1px] h-[57px] absolute left-0 top-[48px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 244"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 244"
+                    class="box-border w-[1px] h-[40px] absolute left-0 top-[54px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 245"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 245"
+                    class="box-border w-[1px] h-[22px] absolute left-0 top-[62px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 246"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 246"
+                    class="box-border w-[1px] h-[35px] absolute left-0 top-[54px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 247"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 247"
+                    class="box-border w-[1px] h-[37px] absolute left-0 top-[52px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 248"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 248"
+                    class="box-border w-[1px] h-[29px] absolute left-0 top-[56px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 249"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 249"
+                    class="box-border w-[1px] h-[23px] absolute left-0 top-[60px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 250"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 250"
+                    class="box-border w-[1px] h-[32px] absolute left-0 top-[54px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 251"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 251"
+                    class="box-border w-[1px] h-[33px] absolute left-0 top-[54px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 252"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 252"
+                    class="box-border w-[1px] h-[25px] absolute left-0 top-[59px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 253"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 253"
+                    class="box-border w-[1px] h-[21px] absolute left-0 top-[62px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 254"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 254"
+                    class="box-border w-[1px] h-[33px] absolute left-0 top-[57px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 255"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 255"
+                    class="box-border w-[1px] h-[38px] absolute left-0 top-[56px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 256"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 256"
+                    class="box-border w-[1px] h-[34px] absolute left-0 top-[59px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 257"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 257"
+                    class="box-border w-[1px] h-[25px] absolute left-0 top-[64px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 258"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 258"
+                    class="box-border w-[1px] h-[15px] absolute left-0 top-[68px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 259"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 259"
+                    class="box-border w-[1px] h-[5px] absolute left-0 top-[72px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+                <div
+                  data-pencil-name="Waveform Column Slot 260"
+                  class="box-border w-[1px] shrink-0 h-full relative"
+                >
+                  <div
+                    data-pencil-name="Min Max Stroke 260"
+                    class="box-border w-[1px] h-[5px] absolute left-0 top-[72px] bg-[#9E9E9E] [z-index:0]"
+                  ></div>
+                </div>
+              </div>
+              <div
+                data-pencil-name="Waveform Playhead"
+                class="box-border w-[1.5px] h-[148px] absolute left-[339.25px] top-0 bg-[#F5DB66] [z-index:2]"
+              ></div>
+            </div>
+          </div>
+          <div
+            data-pencil-name="Component · Clip Card"
+            class="box-border w-[300px] shrink-0 h-fit flex flex-col gap-[6px] p-[12px] justify-start items-start bg-[#FFFFFF14] [outline:1px_solid_#00000000] [outline-offset:-0.5px] rounded-[11px]"
+          >
+            <div
+              data-pencil-name="Clip Header"
+              class="box-border w-full h-fit shrink-0 flex flex-row gap-[8px] justify-start items-center"
+            >
+              <svg
+                data-pencil-name="Clip Completion Toggle"
+                data-icon-name="circle"
+                data-icon-set="lucide"
+                viewBox="0 0 13.99993896484375 14"
+                preserveAspectRatio="xMidYMid meet"
+                xmlns="http://www.w3.org/2000/svg"
+                class="box-border w-[16px] shrink-0 h-[16px]"
+              >
+                <path
+                  d="M6.69238 0.60156q-1.16211 0.04102-2.22851 0.50586-1.06299 0.46143-1.90381 1.26807-0.8374 0.80322-1.34326 1.85254-0.48877 1.0083-0.60157 2.15674-0.02734 0.19482-0.02734 0.61523 0 0.42041 0.02734 0.61523 0.11279 1.14844 0.60157 2.15674 0.65967 1.40137 1.89697 2.33789 1.24072 0.93652 2.75146 1.20313 0.5332 0.09912 1.13477 0.09912 0.75537 0 1.43213-0.15381 0.68018-0.15381 1.35351-0.4751 1.26123-0.61865 2.16358-1.70215 0.90234-1.0835 1.25439-2.44384 0.29395-1.11768 0.18116-2.25244-0.11279-1.13477-0.60157-2.17041-0.58789-1.20313-1.62011-2.08497-1.02881-0.88184-2.31397-1.2749-1.0083-0.30762-2.15674-0.25293z m0.96729 1.18946q1.07666 0.14014 1.99267 0.68017 0.91602 0.54004 1.56201 1.4082 0.82715 1.104 1.00831 2.54639 0.01367 0.16748 0.01367 0.57422 0 0.40674-0.01367 0.57422-0.14014 1.16211-0.7212 2.12939-0.58105 0.96387-1.53466 1.62354-0.4751 0.33496-1.04932 0.56055-0.57422 0.22217-1.18945 0.30761-0.25293 0.04102-0.72803 0.04102-0.4751 0-0.72803-0.04102-1.07666-0.15381-1.95849-0.68701-0.88184-0.5332-1.52784-1.3877-0.82715-1.104-1.0083-2.54638-0.01367-0.16748-0.01367-0.57422 0-0.40674 0.01367-0.57422 0.14014-1.12109 0.66993-2.05078 0.5332-0.92969 1.43212-1.58936 0.54346-0.40674 1.20655-0.66992 0.6665-0.2666 1.32617-0.3247l0.25293-0.02735q0.0957-0.01367 0.4751 0 0.37939 0.01367 0.51953 0.02735z"
+                  fill="#FFFFFF80"
+                ></path>
+              </svg>
+              <div
+                data-pencil-name="Clip Title"
+                class="text-[14px]/[normal] box-border text-[#F2F2F2] font-[Inter,system-ui,sans-serif] font-semibold text-left [white-space:nowrap]"
+              >
+                Clip 01
+              </div>
+              <div
+                data-pencil-name="Clip Header Spacer"
+                class="box-border [flex:1_1_0] h-[1px] flex flex-row gap-0 justify-start items-start"
+              ></div>
+              <div
+                data-pencil-name="Clip Duration"
+                class="text-[11px]/[normal] box-border text-[#A0A0A0] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+              >
+                0:18
+              </div>
+            </div>
+            <div
+              data-pencil-name="Clip Range"
+              class="text-[11px]/[normal] box-border text-[#FFFFFF70] font-['Roboto_Mono',system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+            >
+              0:04.2 – 0:22.5
+            </div>
+            <div
+              data-pencil-name="Clip Snippet"
+              class="text-[12.5px]/[17px] box-border w-full text-[#FFFFFF99] font-[Inter,system-ui,sans-serif] font-normal text-left"
+            >
+              “I honestly had no idea what I was doing…”
+            </div>
+            <div
+              data-pencil-name="Clip Card Actions"
+              class="box-border w-full h-fit shrink-0 flex flex-row gap-[8px] justify-start items-center"
+            >
+              <div
+                data-pencil-name="Play Clip Button"
+                class="box-border w-fit shrink-0 h-fit flex flex-row gap-0 p-[5px_10px] justify-center items-center bg-[#FFFFFF12] [outline:1px_solid_#FFFFFF26] [outline-offset:-0.5px] rounded-[5px]"
+              >
+                <div
+                  data-pencil-name="Play Clip Button Label"
+                  class="text-[11px]/[normal] box-border text-[#D9D9D9] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+                >
+                  Play
+                </div>
+              </div>
+              <div
+                data-pencil-name="Edit Clip Button"
+                class="box-border w-fit shrink-0 h-fit flex flex-row gap-0 p-[5px_10px] justify-center items-center bg-[#FFFFFF12] [outline:1px_solid_#FFFFFF26] [outline-offset:-0.5px] rounded-[5px]"
+              >
+                <div
+                  data-pencil-name="Edit Clip Button Label"
+                  class="text-[11px]/[normal] box-border text-[#D9D9D9] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+                >
+                  Edit
+                </div>
+              </div>
+              <div
+                data-pencil-name="Export Clip Button"
+                class="box-border w-fit shrink-0 h-fit flex flex-row gap-0 p-[5px_10px] justify-center items-center bg-[#FFFFFF12] [outline:1px_solid_#FFFFFF26] [outline-offset:-0.5px] rounded-[5px]"
+              >
+                <div
+                  data-pencil-name="Export Clip Button Label"
+                  class="text-[11px]/[normal] box-border text-[#D9D9D9] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+                >
+                  Export
+                </div>
+              </div>
+              <div
+                data-pencil-name="Clip Actions Spacer"
+                class="box-border [flex:1_1_0] h-[1px] flex flex-row gap-0 justify-start items-start"
+              ></div>
+              <svg
+                data-pencil-name="Delete Clip Button"
+                data-icon-name="x"
+                data-icon-set="lucide"
+                viewBox="0 0 13.99993896484375 14"
+                preserveAspectRatio="xMidYMid meet"
+                xmlns="http://www.w3.org/2000/svg"
+                class="box-border w-[14px] shrink-0 h-[14px]"
+              >
+                <path
+                  d="M3.34619 2.93945q-0.25293 0.08545-0.37939 0.30762-0.04102 0.08545-0.04102 0.25293 0 0.16748 0.04102 0.25293 0.04443 0.08203 1.62353 1.66455l1.58252 1.58252-1.58252 1.58252q-1.5791 1.58252-1.62353 1.66797-0.04102 0.08203-0.04102 0.23584 0 0.15381 0.03418 0.23926 0.0376 0.08203 0.1333 0.18115 0.09912 0.0957 0.18115 0.1333 0.08545 0.03418 0.23926 0.03418 0.15381 0 0.23584-0.04102 0.08545-0.04443 1.66797-1.62353l1.58252-1.58252 1.58252 1.58252q1.58252 1.5791 1.66455 1.62353 0.08545 0.04102 0.23926 0.04102 0.15381 0 0.23584-0.03418 0.08545-0.0376 0.18115-0.1333 0.09912-0.09912 0.1333-0.18115 0.0376-0.08545 0.0376-0.23926 0-0.15381-0.04443-0.23584-0.04101-0.08545-1.62012-1.66797l-1.58252-1.58252 1.58252-1.58252q1.5791-1.58252 1.62012-1.66455 0.04443-0.08545 0.04443-0.25293 0-0.16748-0.04102-0.25293-0.09912-0.16748-0.28027-0.2666-0.05811-0.02734-0.09912-0.04102-0.04102-0.01367-0.15381-0.01367-0.11279 0-0.15381 0.01367-0.04101 0.01367-0.11279 0.04102-0.09912 0.05811-1.66455 1.62695l-1.56885 1.56543-2.82666-2.81299q-0.31104-0.29395-0.42041-0.37939-0.08545-0.05469-0.19824-0.05469l-0.02735 0q-0.14014 0-0.18115 0.01367z"
+                  fill="#FFFFFF8A"
+                ></path>
+              </svg>
+            </div>
+          </div>
+          <div
+            data-pencil-name="Component · Suggestion Card"
+            class="box-border w-[320px] shrink-0 h-fit flex flex-col gap-[4px] p-[8px] justify-start items-start bg-[#1A1A1A] rounded-[6px]"
+          >
+            <div
+              data-pencil-name="Suggestion Type"
+              class="text-[11px]/[normal] box-border text-[#A0A0A0] font-[Inter,system-ui,sans-serif] font-semibold text-left [white-space:nowrap]"
+            >
+              STORY BEAT
+            </div>
+            <div
+              data-pencil-name="Suggestion Header"
+              class="box-border w-full h-fit shrink-0 flex flex-row gap-[6px] justify-start items-center"
+            >
+              <div
+                data-pencil-name="Suggestion Rank"
+                class="text-[11px]/[normal] box-border text-[#A0A0A0] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+              >
+                #1
+              </div>
+              <div
+                data-pencil-name="Suggestion Title"
+                class="text-[12px]/[normal] box-border text-[#F2F2F2] font-[Inter,system-ui,sans-serif] font-medium text-left [white-space:nowrap]"
+              >
+                Starting from instinct
+              </div>
+              <div
+                data-pencil-name="Suggestion Header Spacer"
+                class="box-border [flex:1_1_0] h-[1px] flex flex-row gap-0 justify-start items-start"
+              ></div>
+              <div
+                data-pencil-name="Suggestion Status"
+                class="text-[11px]/[normal] box-border text-[#A0A0A0] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+              >
+                Pending
+              </div>
+            </div>
+            <div
+              data-pencil-name="Suggestion Meta"
+              class="text-[11px]/[normal] box-border text-[#A0A0A0] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+            >
+              0:04 – 0:23 · 18.3s
+            </div>
+            <div
+              data-pencil-name="Suggestion Actions"
+              class="box-border w-fit h-fit shrink-0 flex flex-row gap-[8px] justify-start items-center"
+            >
+              <div
+                data-pencil-name="Review Fields Button"
+                class="box-border w-fit shrink-0 h-fit flex flex-row gap-0 p-[5px_10px] justify-center items-center bg-[#272727] [outline:1px_solid_#4A4A4A] [outline-offset:-0.5px] rounded-[5px]"
+              >
+                <div
+                  data-pencil-name="Review Fields Button Label"
+                  class="text-[11px]/[normal] box-border text-[#D6D6D6] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+                >
+                  Review Fields…
+                </div>
+              </div>
+              <div
+                data-pencil-name="Accept Suggestion Button"
+                class="box-border w-fit shrink-0 h-fit flex flex-row gap-0 p-[5px_10px] justify-center items-center bg-[#272727] [outline:1px_solid_#4A4A4A] [outline-offset:-0.5px] rounded-[5px]"
+              >
+                <div
+                  data-pencil-name="Accept Suggestion Button Label"
+                  class="text-[11px]/[normal] box-border text-[#D6D6D6] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+                >
+                  Accept
+                </div>
+              </div>
+              <div
+                data-pencil-name="Reject Suggestion Button"
+                class="box-border w-fit shrink-0 h-fit flex flex-row gap-0 p-[5px_10px] justify-center items-center bg-[#272727] [outline:1px_solid_#4A4A4A] [outline-offset:-0.5px] rounded-[5px]"
+              >
+                <div
+                  data-pencil-name="Reject Suggestion Button Label"
+                  class="text-[11px]/[normal] box-border text-[#D6D6D6] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+                >
+                  Reject
+                </div>
+              </div>
+            </div>
+          </div>
+          <div
+            data-pencil-name="Component · Modal Shell"
+            class="box-border w-[420px] shrink-0 h-[150px] [box-shadow:0px_12px_30px_#00000088] flex flex-col gap-[10px] p-[20px] justify-start items-start bg-[#111111] [outline:1px_solid_#343434] [outline-offset:-0.5px] rounded-[12px]"
+          >
+            <div
+              data-pencil-name="Modal Title"
+              class="text-[20px]/[normal] box-border text-[#F2F2F2] font-['Space_Grotesk',system-ui,sans-serif] font-bold text-left [white-space:nowrap]"
+            >
+              Dialog title
+            </div>
+            <div
+              data-pencil-name="Modal Body"
+              class="text-[13px]/[18px] box-border w-full text-[#A0A0A0] font-[Inter,system-ui,sans-serif] font-normal text-left"
+            >
+              A native macOS modal state with focused actions.
+            </div>
+          </div>
+        </div>
+      </div>
+      <div
+        data-pencil-name="Export formats · default"
+        class="box-border w-[400px] h-[440px] absolute left-0 top-0 flex flex-col gap-[12px] p-[16px] justify-start items-start bg-[#121212] overflow-hidden"
+      >
+        <div
+          data-pencil-name="Slices heading"
+          class="box-border w-full h-fit shrink-0 flex flex-row gap-0 justify-between items-center"
+        >
+          <div
+            data-pencil-name="Title"
+            class="text-[11px]/[normal] box-border text-[#999999] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+          >
+            SLICES
+          </div>
+          <div
+            data-pencil-name="Count"
+            class="text-[11px]/[normal] box-border text-[#999999] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+          >
+            2
+          </div>
+        </div>
+        <div
+          data-pencil-name="Export all action"
+          class="box-border w-full h-fit shrink-0 flex flex-row gap-0 justify-end items-start"
+        >
+          <div
+            data-pencil-name="Export all ⌄"
+            class="box-border w-fit shrink-0 h-fit flex flex-row gap-0 p-[5px_10px] justify-start items-start bg-[#333333] rounded-[5px]"
+          >
+            <div
+              data-pencil-name="Export all ⌄ label"
+              class="text-[12px]/[normal] box-border text-[#EEEEEE] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+            >
+              Export all ⌄
+            </div>
+          </div>
+        </div>
+        <div
+          data-pencil-name="Slice filter"
+          class="box-border w-full h-fit shrink-0 flex flex-row gap-0 p-[6px] justify-between items-start bg-[#242424] rounded-[5px]"
+        >
+          <div
+            data-pencil-name="All"
+            class="text-[12px]/[normal] box-border text-[#DDDDDD] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+          >
+            All
+          </div>
+          <div
+            data-pencil-name="To edit"
+            class="text-[12px]/[normal] box-border text-[#DDDDDD] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+          >
+            To edit
+          </div>
+          <div
+            data-pencil-name="Done"
+            class="text-[12px]/[normal] box-border text-[#DDDDDD] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+          >
+            Done
+          </div>
+        </div>
+        <div
+          data-pencil-name="Clip card"
+          class="box-border w-full h-fit shrink-0 flex flex-col gap-[10px] p-[12px] justify-start items-start bg-[#202020] rounded-[11px]"
+        >
+          <div
+            data-pencil-name="Clip name"
+            class="text-[14px]/[normal] box-border text-[#DDDDDD] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+          >
+            Intro 1
+          </div>
+          <div
+            data-pencil-name="Range"
+            class="text-[11px]/[normal] box-border text-[#999999] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+          >
+            00:12.000 – 00:22.000
+          </div>
+          <div
+            data-pencil-name="Snippet"
+            class="text-[12px]/[normal] box-border text-[#AAAAAA] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+          >
+            Here is the edited interview clip.
+          </div>
+          <div
+            data-pencil-name="Clip actions"
+            class="box-border w-fit h-fit shrink-0 flex flex-row gap-[8px] justify-start items-start"
+          >
+            <div
+              data-pencil-name="Play"
+              class="box-border w-fit shrink-0 h-fit flex flex-row gap-0 p-[5px_10px] justify-start items-start bg-[#333333] rounded-[5px]"
+            >
+              <div
+                data-pencil-name="Play label"
+                class="text-[12px]/[normal] box-border text-[#EEEEEE] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+              >
+                Play
+              </div>
+            </div>
+            <div
+              data-pencil-name="Edit"
+              class="box-border w-fit shrink-0 h-fit flex flex-row gap-0 p-[5px_10px] justify-start items-start bg-[#333333] rounded-[5px]"
+            >
+              <div
+                data-pencil-name="Edit label"
+                class="text-[12px]/[normal] box-border text-[#EEEEEE] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+              >
+                Edit
+              </div>
+            </div>
+            <div
+              data-pencil-name="Export ⌄"
+              class="box-border w-fit shrink-0 h-fit flex flex-row gap-0 p-[5px_10px] justify-start items-start bg-[#333333] rounded-[5px]"
+            >
+              <div
+                data-pencil-name="Export ⌄ label"
+                class="text-[12px]/[normal] box-border text-[#EEEEEE] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+              >
+                Export ⌄
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div
+        data-pencil-name="Export formats · all-menu"
+        class="box-border w-[400px] h-[440px] absolute left-[440px] top-0 flex flex-col gap-[12px] p-[16px] justify-start items-start bg-[#121212] overflow-hidden"
+      >
+        <div
+          data-pencil-name="Slices heading"
+          class="box-border w-full h-fit shrink-0 flex flex-row gap-0 justify-between items-center relative [z-index:0]"
+        >
+          <div
+            data-pencil-name="Title"
+            class="text-[11px]/[normal] box-border text-[#999999] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+          >
+            SLICES
+          </div>
+          <div
+            data-pencil-name="Count"
+            class="text-[11px]/[normal] box-border text-[#999999] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+          >
+            2
+          </div>
+        </div>
+        <div
+          data-pencil-name="Export all action"
+          class="box-border w-full h-fit shrink-0 flex flex-row gap-0 justify-end items-start relative [z-index:1]"
+        >
+          <div
+            data-pencil-name="Export all ⌄"
+            class="box-border w-fit shrink-0 h-fit flex flex-row gap-0 p-[5px_10px] justify-start items-start bg-[#333333] rounded-[5px]"
+          >
+            <div
+              data-pencil-name="Export all ⌄ label"
+              class="text-[12px]/[normal] box-border text-[#EEEEEE] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+            >
+              Export all ⌄
+            </div>
+          </div>
+        </div>
+        <div
+          data-pencil-name="Format menu"
+          class="box-border w-[210px] h-fit absolute left-[172px] top-[83px] flex flex-col gap-[2px] p-[6px] justify-start items-start bg-[#303030] [outline:1px_solid_#555555] [outline-offset:-0.5px] rounded-[7px] [z-index:2]"
+        >
+          <div
+            data-pencil-name="WAV item"
+            class="box-border w-full h-fit shrink-0 flex flex-row gap-0 p-[6px_10px] justify-start items-start"
+          >
+            <div
+              data-pencil-name="WAV label"
+              class="text-[13px]/[normal] box-border text-[#DDDDDD] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+            >
+              Export as WAV…
+            </div>
+          </div>
+          <div
+            data-pencil-name="M4A item"
+            class="box-border w-full h-fit shrink-0 flex flex-row gap-0 p-[6px_10px] justify-start items-start"
+          >
+            <div
+              data-pencil-name="M4A label"
+              class="text-[13px]/[normal] box-border text-[#DDDDDD] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+            >
+              Export as M4A…
+            </div>
+          </div>
+          <div
+            data-pencil-name="AIFF item"
+            class="box-border w-full h-fit shrink-0 flex flex-row gap-0 p-[6px_10px] justify-start items-start"
+          >
+            <div
+              data-pencil-name="AIFF label"
+              class="text-[13px]/[normal] box-border text-[#DDDDDD] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+            >
+              Export as AIFF…
+            </div>
+          </div>
+        </div>
+        <div
+          data-pencil-name="Slice filter"
+          class="box-border w-full h-fit shrink-0 flex flex-row gap-0 p-[6px] justify-between items-start bg-[#242424] rounded-[5px] relative [z-index:3]"
+        >
+          <div
+            data-pencil-name="All"
+            class="text-[12px]/[normal] box-border text-[#DDDDDD] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+          >
+            All
+          </div>
+          <div
+            data-pencil-name="To edit"
+            class="text-[12px]/[normal] box-border text-[#DDDDDD] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+          >
+            To edit
+          </div>
+          <div
+            data-pencil-name="Done"
+            class="text-[12px]/[normal] box-border text-[#DDDDDD] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+          >
+            Done
+          </div>
+        </div>
+        <div
+          data-pencil-name="Clip card"
+          class="box-border w-full h-fit shrink-0 flex flex-col gap-[10px] p-[12px] justify-start items-start bg-[#202020] rounded-[11px] relative [z-index:4]"
+        >
+          <div
+            data-pencil-name="Clip name"
+            class="text-[14px]/[normal] box-border text-[#DDDDDD] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+          >
+            Intro 1
+          </div>
+          <div
+            data-pencil-name="Range"
+            class="text-[11px]/[normal] box-border text-[#999999] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+          >
+            00:12.000 – 00:22.000
+          </div>
+          <div
+            data-pencil-name="Snippet"
+            class="text-[12px]/[normal] box-border text-[#AAAAAA] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+          >
+            Here is the edited interview clip.
+          </div>
+          <div
+            data-pencil-name="Clip actions"
+            class="box-border w-fit h-fit shrink-0 flex flex-row gap-[8px] justify-start items-start"
+          >
+            <div
+              data-pencil-name="Play"
+              class="box-border w-fit shrink-0 h-fit flex flex-row gap-0 p-[5px_10px] justify-start items-start bg-[#333333] rounded-[5px]"
+            >
+              <div
+                data-pencil-name="Play label"
+                class="text-[12px]/[normal] box-border text-[#EEEEEE] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+              >
+                Play
+              </div>
+            </div>
+            <div
+              data-pencil-name="Edit"
+              class="box-border w-fit shrink-0 h-fit flex flex-row gap-0 p-[5px_10px] justify-start items-start bg-[#333333] rounded-[5px]"
+            >
+              <div
+                data-pencil-name="Edit label"
+                class="text-[12px]/[normal] box-border text-[#EEEEEE] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+              >
+                Edit
+              </div>
+            </div>
+            <div
+              data-pencil-name="Export ⌄"
+              class="box-border w-fit shrink-0 h-fit flex flex-row gap-0 p-[5px_10px] justify-start items-start bg-[#333333] rounded-[5px]"
+            >
+              <div
+                data-pencil-name="Export ⌄ label"
+                class="text-[12px]/[normal] box-border text-[#EEEEEE] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+              >
+                Export ⌄
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div
+        data-pencil-name="Export formats · clip-menu"
+        class="box-border w-[400px] h-[440px] absolute left-[880px] top-0 flex flex-col gap-[12px] p-[16px] justify-start items-start bg-[#121212] overflow-hidden"
+      >
+        <div
+          data-pencil-name="Slices heading"
+          class="box-border w-full h-fit shrink-0 flex flex-row gap-0 justify-between items-center relative [z-index:0]"
+        >
+          <div
+            data-pencil-name="Title"
+            class="text-[11px]/[normal] box-border text-[#999999] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+          >
+            SLICES
+          </div>
+          <div
+            data-pencil-name="Count"
+            class="text-[11px]/[normal] box-border text-[#999999] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+          >
+            2
+          </div>
+        </div>
+        <div
+          data-pencil-name="Export all action"
+          class="box-border w-full h-fit shrink-0 flex flex-row gap-0 justify-end items-start relative [z-index:1]"
+        >
+          <div
+            data-pencil-name="Export all ⌄"
+            class="box-border w-fit shrink-0 h-fit flex flex-row gap-0 p-[5px_10px] justify-start items-start bg-[#333333] rounded-[5px]"
+          >
+            <div
+              data-pencil-name="Export all ⌄ label"
+              class="text-[12px]/[normal] box-border text-[#EEEEEE] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+            >
+              Export all ⌄
+            </div>
+          </div>
+        </div>
+        <div
+          data-pencil-name="Slice filter"
+          class="box-border w-full h-fit shrink-0 flex flex-row gap-0 p-[6px] justify-between items-start bg-[#242424] rounded-[5px] relative [z-index:2]"
+        >
+          <div
+            data-pencil-name="All"
+            class="text-[12px]/[normal] box-border text-[#DDDDDD] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+          >
+            All
+          </div>
+          <div
+            data-pencil-name="To edit"
+            class="text-[12px]/[normal] box-border text-[#DDDDDD] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+          >
+            To edit
+          </div>
+          <div
+            data-pencil-name="Done"
+            class="text-[12px]/[normal] box-border text-[#DDDDDD] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+          >
+            Done
+          </div>
+        </div>
+        <div
+          data-pencil-name="Clip card"
+          class="box-border w-full h-fit shrink-0 flex flex-col gap-[10px] p-[12px] justify-start items-start bg-[#202020] rounded-[11px] relative [z-index:3]"
+        >
+          <div
+            data-pencil-name="Clip name"
+            class="text-[14px]/[normal] box-border text-[#DDDDDD] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+          >
+            Intro 1
+          </div>
+          <div
+            data-pencil-name="Range"
+            class="text-[11px]/[normal] box-border text-[#999999] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+          >
+            00:12.000 – 00:22.000
+          </div>
+          <div
+            data-pencil-name="Snippet"
+            class="text-[12px]/[normal] box-border text-[#AAAAAA] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+          >
+            Here is the edited interview clip.
+          </div>
+          <div
+            data-pencil-name="Clip actions"
+            class="box-border w-fit h-fit shrink-0 flex flex-row gap-[8px] justify-start items-start"
+          >
+            <div
+              data-pencil-name="Play"
+              class="box-border w-fit shrink-0 h-fit flex flex-row gap-0 p-[5px_10px] justify-start items-start bg-[#333333] rounded-[5px]"
+            >
+              <div
+                data-pencil-name="Play label"
+                class="text-[12px]/[normal] box-border text-[#EEEEEE] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+              >
+                Play
+              </div>
+            </div>
+            <div
+              data-pencil-name="Edit"
+              class="box-border w-fit shrink-0 h-fit flex flex-row gap-0 p-[5px_10px] justify-start items-start bg-[#333333] rounded-[5px]"
+            >
+              <div
+                data-pencil-name="Edit label"
+                class="text-[12px]/[normal] box-border text-[#EEEEEE] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+              >
+                Edit
+              </div>
+            </div>
+            <div
+              data-pencil-name="Export ⌄"
+              class="box-border w-fit shrink-0 h-fit flex flex-row gap-0 p-[5px_10px] justify-start items-start bg-[#333333] rounded-[5px]"
+            >
+              <div
+                data-pencil-name="Export ⌄ label"
+                class="text-[12px]/[normal] box-border text-[#EEEEEE] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+              >
+                Export ⌄
+              </div>
+            </div>
+          </div>
+        </div>
+        <div
+          data-pencil-name="Format menu"
+          class="box-border w-[210px] h-fit absolute left-[170px] top-[251px] flex flex-col gap-[2px] p-[6px] justify-start items-start bg-[#303030] [outline:1px_solid_#555555] [outline-offset:-0.5px] rounded-[7px] [z-index:4]"
+        >
+          <div
+            data-pencil-name="WAV item"
+            class="box-border w-full h-fit shrink-0 flex flex-row gap-0 p-[6px_10px] justify-start items-start"
+          >
+            <div
+              data-pencil-name="WAV label"
+              class="text-[13px]/[normal] box-border text-[#DDDDDD] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+            >
+              Export as WAV…
+            </div>
+          </div>
+          <div
+            data-pencil-name="M4A item"
+            class="box-border w-full h-fit shrink-0 flex flex-row gap-0 p-[6px_10px] justify-start items-start"
+          >
+            <div
+              data-pencil-name="M4A label"
+              class="text-[13px]/[normal] box-border text-[#DDDDDD] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+            >
+              Export as M4A…
+            </div>
+          </div>
+          <div
+            data-pencil-name="AIFF item"
+            class="box-border w-full h-fit shrink-0 flex flex-row gap-0 p-[6px_10px] justify-start items-start"
+          >
+            <div
+              data-pencil-name="AIFF label"
+              class="text-[13px]/[normal] box-border text-[#DDDDDD] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+            >
+              Export as AIFF…
+            </div>
+          </div>
+        </div>
+      </div>
+      <div
+        data-pencil-name="Export formats · disabled"
+        class="box-border w-[400px] h-[440px] absolute left-[1320px] top-0 flex flex-col gap-[12px] p-[16px] justify-start items-start bg-[#121212] overflow-hidden"
+      >
+        <div
+          data-pencil-name="Slices heading"
+          class="box-border w-full h-fit shrink-0 flex flex-row gap-0 justify-between items-center"
+        >
+          <div
+            data-pencil-name="Title"
+            class="text-[11px]/[normal] box-border text-[#999999] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+          >
+            SLICES
+          </div>
+          <div
+            data-pencil-name="Count"
+            class="text-[11px]/[normal] box-border text-[#999999] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+          >
+            0
+          </div>
+        </div>
+        <div
+          data-pencil-name="Export all action"
+          class="box-border w-full h-fit shrink-0 flex flex-row gap-0 justify-end items-start"
+        >
+          <div
+            data-pencil-name="Export all ⌄"
+            class="box-border w-fit shrink-0 h-fit flex flex-row gap-0 p-[5px_10px] justify-start items-start bg-[#333333] rounded-[5px]"
+          >
+            <div
+              data-pencil-name="Export all ⌄ label"
+              class="text-[12px]/[normal] box-border text-[#737373] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+            >
+              Export all ⌄
+            </div>
+          </div>
+        </div>
+        <div
+          data-pencil-name="Slice filter"
+          class="box-border w-full h-fit shrink-0 flex flex-row gap-0 p-[6px] justify-between items-start bg-[#242424] rounded-[5px]"
+        >
+          <div
+            data-pencil-name="All"
+            class="text-[12px]/[normal] box-border text-[#DDDDDD] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+          >
+            All
+          </div>
+          <div
+            data-pencil-name="To edit"
+            class="text-[12px]/[normal] box-border text-[#DDDDDD] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+          >
+            To edit
+          </div>
+          <div
+            data-pencil-name="Done"
+            class="text-[12px]/[normal] box-border text-[#DDDDDD] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+          >
+            Done
+          </div>
+        </div>
+        <div
+          data-pencil-name="Empty state"
+          class="text-[13px]/[normal] box-border text-[#888888] font-[Inter,system-ui,sans-serif] font-normal text-left [white-space:nowrap]"
+        >
+          No clips yet.
+        </div>
+      </div>
+    </div>
+  </body>
+</html>
