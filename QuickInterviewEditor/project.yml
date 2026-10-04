@@ -120,6 +120,9 @@ targets:
     sources:
       - path: QuickInterviewEditorTests
         excludes:
+          # MasteringReturnTests reads these beside its source file via #filePath;
+          # do not copy a second, unused set into the test bundle.
+          - Mastering/Fixtures
           # Copied whole as an opaque package by the explicit folder resource
           # below; excluding it here stops the broad source scan from also
           # exploding its children (project.json/plan.json/canonical.aiff) as
