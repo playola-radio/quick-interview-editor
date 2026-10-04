@@ -82,6 +82,8 @@ enum ExportRenderError: Error, Equatable, LocalizedError {
   case invalidSliceRange(name: String, start: Int, end: Int, duration: Int)
   case bufferAllocationFailed
   case invalidWordStart
+  case noConvertedAudio
+  case wavTooLarge
 
   var errorDescription: String? {
     switch self {
@@ -98,6 +100,10 @@ enum ExportRenderError: Error, Equatable, LocalizedError {
         "\"\(name)\" spans samples \(start)..<\(end), which is not a valid range in a \(duration)-sample recording"
     case .bufferAllocationFailed:
       return "Could not allocate an audio buffer for the export."
+    case .noConvertedAudio:
+      return "The clip is too short to export at 44.1 kHz."
+    case .wavTooLarge:
+      return "This clip exceeds the WAV size limit. Split it into smaller clips or export as M4A."
     case .invalidWordStart:
       return "A transcript word has an invalid start time."
     }
@@ -123,6 +129,11 @@ enum ExportAudioRenderer {
         from: file, plan: job.plan, editedDurationSamples: job.editedDurationSamples,
         sampleRate: job.sampleRate, emit: { try output.write(from: $0) })
     case .wav:
+      // Leave space for the RIFF header and the converter's one-frame rounding tolerance.
+      let frames = MasteringFrames.conformed(job.editedDurationSamples, fromRate: job.sampleRate)
+      guard frames < (Int(UInt32.max) - 256) / 6 else {
+        throw ExportRenderError.wavTooLarge
+      }
       _ = try renderConformed(
         from: file, plan: job.plan, editedDurationSamples: job.editedDurationSamples,
         sampleRate: job.sampleRate, to: job.outputURL, settings: MasteringFormat.pcm24WAVSettings)
@@ -155,6 +166,8 @@ enum ExportAudioRenderer {
     from source: AVAudioFile, plan: AudioEditRenderPlan, editedDurationSamples: Int,
     sampleRate: Int, to url: URL, settings: [String: Any]
   ) throws -> Int {
+    let expected = MasteringFrames.conformed(editedDurationSamples, fromRate: sampleRate)
+    guard expected > 0 else { throw ExportRenderError.noConvertedAudio }
     var frames = 0
     do {
       let conformer = try MasteringConformer(inputFormat: source.processingFormat)
@@ -173,7 +186,7 @@ enum ExportAudioRenderer {
         frames += Int(output.frameLength)
       }
     }
-    let expected = MasteringFrames.conformed(editedDurationSamples, fromRate: sampleRate)
+    guard frames > 0 else { throw ExportRenderError.noConvertedAudio }
     guard abs(frames - expected) <= 1 else {
       throw MasteringPreparationError.conversionFailed(
         "Conformed audio length \(frames) differs from expected \(expected)")

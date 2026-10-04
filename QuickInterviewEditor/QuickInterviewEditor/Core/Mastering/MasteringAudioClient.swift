@@ -152,9 +152,6 @@ private enum MasteringPreparer {
         from: source, plan: piece.render, editedDurationSamples: piece.editedDurationSamples,
         sampleRate: snapshot.sourceSampleRate, to: cafURL,
         settings: MasteringFormat.float32CAFSettings)
-      guard frameCount > 0 else {
-        throw MasteringPreparationError.conversionFailed("Intro converted to no audio")
-      }
       let measurement = try await loudness.measure(cafURL)
       let gain = try MasteringGain.decibels(
         integratedLUFS: measurement.integratedLUFS,

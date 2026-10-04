@@ -37,5 +37,4 @@ enum MasteringFormat {
       AVLinearPCMIsNonInterleaved: false,
     ]
   }
-
 }

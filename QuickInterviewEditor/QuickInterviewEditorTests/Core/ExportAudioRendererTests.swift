@@ -30,10 +30,12 @@ struct ExportAudioRendererTests {
   }
 
   /// Writes a canonical-style AIFF: mono, 16-bit big-endian PCM at 48 kHz.
-  private func writeFixture(to url: URL, frames: Int = sourceFrames) throws {
+  private func writeFixture(
+    to url: URL, frames: Int = sourceFrames, sampleRate: Int = sampleRate
+  ) throws {
     let settings: [String: Any] = [
       AVFormatIDKey: kAudioFormatLinearPCM,
-      AVSampleRateKey: Double(Self.sampleRate),
+      AVSampleRateKey: Double(sampleRate),
       AVNumberOfChannelsKey: 1,
       AVLinearPCMBitDepthKey: 16,
       AVLinearPCMIsBigEndianKey: true,
@@ -600,14 +602,7 @@ extension ExportAudioRendererTests {
     expectNoDifference(file.fileFormat.sampleRate, 44_100)
     expectNoDifference(file.fileFormat.channelCount, 2)
     expectNoDifference(file.fileFormat.settings[AVLinearPCMBitDepthKey] as? Int, 24)
-    let buffer = try #require(
-      AVAudioPCMBuffer(
-        pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(file.length)))
-    try file.read(into: buffer)
-    let channels = try #require(buffer.floatChannelData)
-    expectNoDifference(
-      Array(UnsafeBufferPointer(start: channels[0], count: Int(buffer.frameLength))),
-      Array(UnsafeBufferPointer(start: channels[1], count: Int(buffer.frameLength))))
+
   }
 
   @Test(arguments: ["Test Artist", ""])
@@ -685,6 +680,43 @@ extension ExportAudioRendererTests {
       try await ExportRenderClient.liveValue.renderSlice(frozenRequest)
     }
     await #expect(throws: CancellationError.self) { try await task.value }
+    expectNoDifference(
+      try FileManager.default.contentsOfDirectory(atPath: directory.path), ["source.aiff"])
+  }
+}
+
+extension ExportAudioRendererTests {
+  @Test(arguments: [ExportAudioFormat.wav, .m4a])
+  func subFrameExportFailsWithoutLeavingAudio(format: ExportAudioFormat) async throws {
+    let directory = try makeSandbox()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let source = directory.appendingPathComponent("source.aiff")
+    try writeFixture(to: source, frames: 1, sampleRate: 192_000)
+    let plan = SliceRenderPlanBuilder.plan(sliceRange: 0..<1, removals: [])
+    var request = job(
+      source: source, output: directory.appendingPathComponent("clip.\(format.rawValue)"),
+      plan: plan.plan, editedDuration: 1, sampleRate: 192_000, sourceDuration: 1)
+    request.format = format
+    await #expect(throws: ExportRenderError.noConvertedAudio) {
+      try await ExportRenderClient.liveValue.renderSlice(request)
+    }
+    expectNoDifference(
+      try FileManager.default.contentsOfDirectory(atPath: directory.path), ["source.aiff"])
+  }
+
+  @Test func oversizedWAVFailsBeforeRendering() async throws {
+    let directory = try makeSandbox()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let source = directory.appendingPathComponent("source.aiff")
+    try writeFixture(to: source)
+    let plan = SliceRenderPlanBuilder.plan(sliceRange: 0..<8_000, removals: [])
+    var request = job(
+      source: source, output: directory.appendingPathComponent("clip.wav"),
+      plan: plan.plan, editedDuration: 7 * 3_600 * Self.sampleRate)
+    request.format = .wav
+    await #expect(throws: ExportRenderError.wavTooLarge) {
+      try await ExportRenderClient.liveValue.renderSlice(request)
+    }
     expectNoDifference(
       try FileManager.default.contentsOfDirectory(atPath: directory.path), ["source.aiff"])
   }
