@@ -25,7 +25,7 @@ extension WorkspaceClient: DependencyKey {
         panel.allowsMultipleSelection = false
         panel.canCreateDirectories = true
         panel.prompt = "Export Here"
-        panel.message = "Choose a folder for the exported AIFFs"
+        panel.message = "Choose a folder for the exported audio files"
         return panel.runModal() == .OK ? panel.url : nil
       }
     },

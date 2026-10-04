@@ -1,5 +1,18 @@
 import Foundation
 
+enum ExportAudioFormat: String, CaseIterable, Identifiable, Sendable {
+  case wav, m4a, aiff
+
+  var id: String { rawValue }
+  var fileKind: ExportFileKind {
+    switch self {
+    case .wav: .wav
+    case .m4a: .m4a
+    case .aiff: .logicAIFF
+    }
+  }
+}
+
 enum ExportNamePolicy: Equatable, Sendable {
   case sourcePrefixed, exactClipName
 }
@@ -8,6 +21,8 @@ struct ExportFileKind: Equatable, Sendable {
   var fileExtension: String
   var forcesExactNames: Bool
 
+  static let wav = Self(fileExtension: "wav", forcesExactNames: false)
+  static let m4a = Self(fileExtension: "m4a", forcesExactNames: false)
   static let logicAIFF = Self(fileExtension: "aiff", forcesExactNames: false)
   // swiftlint:disable:next inclusive_language
   static let masteredM4A = Self(fileExtension: "m4a", forcesExactNames: true)

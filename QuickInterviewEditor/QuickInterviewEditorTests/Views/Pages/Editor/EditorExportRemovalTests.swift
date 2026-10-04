@@ -12,7 +12,10 @@ import Testing
 /// this file drives the removal-aware pieces through the real `performExport` pipeline.
 @MainActor
 struct EditorExportRemovalTests {
-  @Test func generatedCollisionRetainsRenderUntilApprovedAndFreezesClipEdits() async throws {
+  @Test(arguments: ExportAudioFormat.allCases)
+  func generatedCollisionRetainsRenderUntilApprovedAndFreezesClipEdits(format: ExportAudioFormat)
+    async throws
+  {
     let model = editor(Fixtures.editPlan())
     var slice = Slice(
       id: Fixtures.uuid(1), name: "ID 1", startSample: 1000, endSample: 2000, wordIDs: [],
@@ -24,7 +27,7 @@ struct EditorExportRemovalTests {
     model.slices = [slice]
     let destination = try makeTempDir()
     defer { try? FileManager.default.removeItem(at: destination) }
-    let existing = destination.appendingPathComponent("ID 1.aiff")
+    let existing = destination.appendingPathComponent("ID 1.\(format.rawValue)")
     let original = Data("existing file".utf8)
     try original.write(to: existing)
     let jobs = LockIsolated<[ExportRenderJob]>([])
@@ -37,7 +40,7 @@ struct EditorExportRemovalTests {
       $0.workspace.reveal = { _ in }
     } operation: {
       model.destinationURL = destination
-      model.exportAllTapped()
+      model.exportAllTapped(format: format)
       await model.exportTask?.value
       let review = try #require(model.exportReview)
       #expect(model.isExporting)
@@ -59,7 +62,7 @@ struct EditorExportRemovalTests {
       expectNoDifference(try Data(contentsOf: existing), original)
       #expect(
         FileManager.default.fileExists(
-          atPath: destination.appendingPathComponent("ID 1 2.aiff").path))
+          atPath: destination.appendingPathComponent("ID 1 2.\(format.rawValue)").path))
       #expect(!FileManager.default.fileExists(atPath: rendered.path))
     }
   }
@@ -478,5 +481,105 @@ struct EditorExportRemovalTests {
     // Only the first (gating-time) removal is rendered out: 20000 - 3000 = 17000. Had the
     // late removal leaked in, the edited duration would be 12000.
     expectNoDifference(renderedJobs.value.map(\.editedDurationSamples), [17000])
+  }
+}
+
+extension EditorExportRemovalTests {
+  @Test(arguments: ExportAudioFormat.allCases, [false, true])
+  func selectedFormatRoutesRenderingMarkersAndCopy(format: ExportAudioFormat, all: Bool)
+    async throws
+  {
+    let model = editor(Fixtures.editPlan())
+    let slice = Slice(
+      id: Fixtures.uuid(1), name: "Intro", startSample: 1_000, endSample: 2_000,
+      wordIDs: [], snippet: "")
+    model.slices = [slice]
+    model.interviewArtist = " Artist "
+    let directory = try makeTempDir()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let jobs = LockIsolated<[ExportRenderJob]>([])
+    let injections = LockIsolated(0)
+    await withDependencies {
+      $0.exportRender.renderSlice = { job in
+        jobs.withValue { $0.append(job) }
+        try Data("rendered".utf8).write(to: job.outputURL)
+      }
+      $0.engine.injectMarkers = { _ in injections.withValue { $0 += 1 } }
+      $0.workspace.reveal = { _ in }
+    } operation: {
+      model.destinationURL = directory
+      if all {
+        model.exportAllTapped(format: format)
+      } else {
+        model.exportSliceTapped(slice.id, format: format)
+      }
+      await model.exportTask?.value
+    }
+    let job = try #require(jobs.value.first)
+    expectNoDifference(job.format, format)
+    expectNoDifference(job.outputURL.pathExtension, format.rawValue)
+    expectNoDifference(job.tags.title, "Intro")
+    expectNoDifference(job.tags.artist, "Artist")
+    expectNoDifference(injections.value, format == .aiff ? 1 : 0)
+    expectNoDifference(model.exportPhase, .done(count: 1))
+    expectNoDifference(
+      try FileManager.default.contentsOfDirectory(atPath: directory.path),
+      ["clip - Intro.\(format.rawValue)"])
+  }
+
+  @Test func formatAndTagsAreFrozenBeforePickerAndFolderIsReused() async throws {
+    let model = editor(Fixtures.editPlan())
+    model.slices = [
+      Slice(
+        id: Fixtures.uuid(1), name: "Original", startSample: 1_000, endSample: 2_000,
+        wordIDs: [], snippet: "")
+    ]
+    model.interviewArtist = "Original artist"
+    let directory = try makeTempDir()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let jobs = LockIsolated<[ExportRenderJob]>([])
+    let panels = LockIsolated(0)
+    await withDependencies {
+      $0.workspace.chooseDirectory = {
+        panels.withValue { $0 += 1 }
+        await MainActor.run {
+          model.interviewArtist = nil
+          model.slices[id: Fixtures.uuid(1)]?.name = "Changed"
+        }
+        return directory
+      }
+      $0.exportRender.renderSlice = { job in
+        jobs.withValue { $0.append(job) }
+        try Data("rendered".utf8).write(to: job.outputURL)
+      }
+      $0.workspace.reveal = { _ in }
+    } operation: {
+      model.exportAllTapped(format: .m4a)
+      await model.exportTask?.value
+      model.exportAllTapped(format: .wav)
+      await model.exportTask?.value
+    }
+    expectNoDifference(panels.value, 1)
+    expectNoDifference(jobs.value.map(\.format), [.m4a, .wav])
+    expectNoDifference(jobs.value.map(\.tags.title), ["Original", "Changed"])
+    expectNoDifference(jobs.value.map(\.tags.artist), ["Original artist", ""])
+    expectNoDifference(model.exportPhase, .done(count: 1))
+  }
+
+  @Test(arguments: [ExportAudioFormat.wav, .m4a])
+  func unsupportedChannelsFailBeforeDestinationPicker(format: ExportAudioFormat) async {
+    var plan = Fixtures.editPlan()
+    plan.source.channels = 6
+    let model = editor(plan)
+    model.slices = [
+      Slice(
+        id: Fixtures.uuid(1), name: "Surround", startSample: 1_000, endSample: 2_000,
+        wordIDs: [], snippet: "")
+    ]
+    model.exportAllTapped(format: format)
+    await model.exportTask?.value
+    expectNoDifference(
+      model.exportPhase,
+      .failed("WAV and M4A export support mono or stereo recordings. Export as AIFF instead."))
   }
 }

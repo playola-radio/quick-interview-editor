@@ -578,6 +578,11 @@ final class EditorModel: ViewModel {
   let editSliceLabel = "Edit"
   let exportLabel = "Export"
   let exportAllLabel = "Export all"
+  let exportFormats = ExportAudioFormat.allCases
+
+  func exportFormatLabel(_ format: ExportAudioFormat) -> String {
+    "Export as \(format.rawValue.uppercased())…"
+  }
   let cancelExportLabel = "Cancel export"
   /// Shown when the canonical AIFF backing this session has vanished before a render —
   /// e.g. cleared by an app update or a second window's launch cleanup. Re-importing
@@ -3887,24 +3892,24 @@ final class EditorModel: ViewModel {
   }
 
   // MARK: - Export Actions
-  func exportSliceTapped(_ id: Slice.ID) {
+  func exportSliceTapped(_ id: Slice.ID, format: ExportAudioFormat = .aiff) {
     // Commit a pending rename before reading the target, or the export would render the old name
-    // into the AIFF (the draft lives only in `sliceNameEdit` until blur).
+    // into the export (the draft lives only in `sliceNameEdit` until blur).
     finishSliceNameEdit()
     guard !isExporting, !hasUncommittedSliceEdit, editedTimeline.isValid,
       let slice = slices[id: id], sliceIsExportable(slice)
     else { return }
     lastExportSkippedRemovedNames = []
-    startExport([slice])
+    startExport([slice], format: format)
   }
 
-  func exportAllTapped() {
+  func exportAllTapped(format: ExportAudioFormat = .aiff) {
     finishSliceNameEdit()
     guard !isExporting, !hasUncommittedSliceEdit, editedTimeline.isValid else { return }
     let targets = slices.filter(sliceIsExportable)
     guard !targets.isEmpty else { return }
     lastExportSkippedRemovedNames = slices.filter { !sliceIsExportable($0) }.map(\.name)
-    startExport(Array(targets))
+    startExport(Array(targets), format: format)
   }
 
   func cancelExportTapped() {
@@ -4015,7 +4020,12 @@ final class EditorModel: ViewModel {
     FileManager.default.fileExists(atPath: canonicalAudioURL.path)
   }
 
-  private func startExport(_ targets: [Slice]) {
+  private func startExport(_ targets: [Slice], format: ExportAudioFormat) {
+    guard format == .aiff || (1...2).contains(editPlan.source.channels) else {
+      exportPhase = .failed(
+        "WAV and M4A export support mono or stereo recordings. Export as AIFF instead.")
+      return
+    }
     // Fail loud at the tap with actionable copy instead of opening a destination picker and
     // then handing the engine a dead path that surfaces as a raw "no such file".
     guard canonicalAudioIsOnDisk else {
@@ -4030,7 +4040,10 @@ final class EditorModel: ViewModel {
     // timeline the export was never gated on (worst case, a slice that became fully removed
     // mid-picker exporting as a 0-frame file "successfully").
     let removals = Array(timelineRemovals)
-    exportTask = Task { await performExport(targets, removals: removals) }
+    let artist = interviewArtist?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    exportTask = Task {
+      await performExport(targets, removals: removals, format: format, artist: artist)
+    }
   }
 
   /// Resolves the export destination, then re-checks the canonical audio is still on disk —
@@ -4054,7 +4067,9 @@ final class EditorModel: ViewModel {
   /// Each slice gets its own local `EditedTimeline`/`AudioEditRenderPlan` (built from
   /// `removals` — the snapshot taken at the tap that passed the export gate), so a removal is
   /// rendered out rather than silently shipped.
-  private func performExport(_ targets: [Slice], removals: [TimelineRemoval]) async {
+  private func performExport(
+    _ targets: [Slice], removals: [TimelineRemoval], format: ExportAudioFormat, artist: String
+  ) async {
     guard let destination = await exportDestination() else { return }
     guard !Task.isCancelled else {
       exportPhase = .failed(cancelMessage(copied: 0, total: targets.count))
@@ -4081,16 +4096,16 @@ final class EditorModel: ViewModel {
 
     do {
       let rendered = try await renderTargets(
-        targets, removals: removals, scratchDir: scratchDir)
+        targets, removals: removals, scratchDir: scratchDir, format: format, artist: artist)
       if Task.isCancelled {
         await removeWorkDir(scratchDir)
         exportPhase = .failed(cancelMessage(copied: 0, total: targets.count))
         return
       }
-      try await engine.injectMarkers(rendered.injectionFiles)
+      if format == .aiff { try await engine.injectMarkers(rendered.injectionFiles) }
       await finishExport(
         targets: targets, outputsByID: rendered.outputsByID,
-        scratchDir: scratchDir, destination: destination)
+        scratchDir: scratchDir, destination: destination, format: format)
     } catch is CancellationError {
       await removeWorkDir(scratchDir)
       exportPhase = .failed(cancelMessage(copied: 0, total: targets.count))
@@ -4112,17 +4127,25 @@ final class EditorModel: ViewModel {
   /// `startExport` took at the gating moment, NOT a fresh read of `timelineRemovals`, so the
   /// exported audio is exactly the timeline that enabled the export.
   private func renderTargets(
-    _ targets: [Slice], removals: [TimelineRemoval], scratchDir: URL
+    _ targets: [Slice], removals: [TimelineRemoval], scratchDir: URL,
+    format: ExportAudioFormat, artist: String
   ) async throws -> RenderedTargets {
     let sampleRate = editPlan.source.sampleRate
     let sourceDurationSamples = editPlan.source.durationSamples
     // RAW absolute source-sample marker positions straight from the loaded plan words —
     // no global tie-nudge here. `SliceRenderPlanBuilder.markers` maps each marker into
     // slice-relative EDITED space and applies the strictly-increasing nudge itself.
-    guard
-      let sourceMarkers = SliceRenderPlanBuilder.sourceMarkers(
-        editPlan.words, sampleRate: sampleRate)
-    else { throw ExportRenderError.invalidWordStart }
+    // WAV tags carry no markers (no Logic markers, no LRC), so an out-of-range word
+    // start in the loaded plan must never block an otherwise-valid WAV export.
+    let sourceMarkers: [RenderMarker]
+    if format == .wav {
+      sourceMarkers = []
+    } else {
+      guard
+        let markers = SliceRenderPlanBuilder.sourceMarkers(editPlan.words, sampleRate: sampleRate)
+      else { throw ExportRenderError.invalidWordStart }
+      sourceMarkers = markers
+    }
 
     var outputsByID: [Slice.ID: URL] = [:]
     var injectionFiles: [MarkerInjectionFile] = []
@@ -4141,16 +4164,19 @@ final class EditorModel: ViewModel {
       exportPhase = .exporting(current: offset + 1, total: targets.count)
       let sliceRange = slice.startSample..<slice.endSample
       let plan = SliceRenderPlanBuilder.plan(sliceRange: sliceRange, removals: removals)
-      let outputURL = scratchDir.appendingPathComponent("\(slice.id.uuidString).aiff")
+      let outputURL = scratchDir.appendingPathComponent("\(slice.id.uuidString).\(format.rawValue)")
+      let markers = SliceRenderPlanBuilder.markers(
+        sourceMarkers, sliceRange: sliceRange, localTimeline: plan.localTimeline)
       let job = ExportRenderJob(
         canonicalAudioURL: canonicalAudioURL, plan: plan.plan,
         editedDurationSamples: plan.editedDurationSamples, sampleRate: sampleRate,
-        sourceDurationSamples: sourceDurationSamples, outputURL: outputURL)
+        sourceDurationSamples: sourceDurationSamples, outputURL: outputURL,
+        format: format, tags: .init(title: slice.name, artist: artist, wordStarts: markers))
       try await exportRender.renderSlice(job)
       outputsByID[slice.id] = outputURL
-      let markers = SliceRenderPlanBuilder.markers(
-        sourceMarkers, sliceRange: sliceRange, localTimeline: plan.localTimeline)
-      injectionFiles.append(MarkerInjectionFile(url: outputURL, markers: markers))
+      if format == .aiff {
+        injectionFiles.append(MarkerInjectionFile(url: outputURL, markers: markers))
+      }
     }
     return RenderedTargets(outputsByID: outputsByID, injectionFiles: injectionFiles)
   }
@@ -4159,12 +4185,13 @@ final class EditorModel: ViewModel {
   /// success, a copy failure, a mid-copy cancel, or (defensively) a count mismatch.
   private func finishExport(
     targets: [Slice], outputsByID: [Slice.ID: URL],
-    scratchDir: URL, destination: URL
+    scratchDir: URL, destination: URL, format: ExportAudioFormat
   ) async {
     let session = ExportReviewModel(
       request: .init(
         targets: targets, sourceStem: sourceURL.deletingPathExtension().lastPathComponent,
-        renderedByID: outputsByID, destination: destination), scratchDirectory: scratchDir)
+        renderedByID: outputsByID, destination: destination, kind: format.fileKind),
+      scratchDirectory: scratchDir)
     exportSession = session
     session.onReviewNames = { [weak self, weak session] in
       guard let self, let session, exportSession === session else { return }

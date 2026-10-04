@@ -3,15 +3,20 @@ import Dependencies
 import Foundation
 import IssueReporting
 
+struct ExportAudioTags: Equatable, Sendable {
+  var title = ""
+  var artist = ""
+  var wordStarts: [RenderMarker] = []
+}
+
 /// One slice to render: the plan's source ranges are ABSOLUTE canonical-file
 /// coordinates, its edited axis is slice-local, and `outputURL` receives an audio
-/// file in the canonical file's exact format.
+/// file in the selected export format (AIFF defaults to the canonical format).
 ///
 /// `sampleRate` and `sourceDurationSamples` are the plan's own values, and the
 /// renderer requires the file to match both EXACTLY. That makes the file-to-plan
 /// sample ratio exactly 1, so every plan coordinate is a native frame coordinate and
-/// no rounding enters the export path (unlike playback, which tolerates a resampled
-/// file).
+/// edits are rendered before any conversion to the selected output sample rate.
 struct ExportRenderJob: Equatable, Sendable {
   var canonicalAudioURL: URL
   var plan: AudioEditRenderPlan
@@ -19,6 +24,8 @@ struct ExportRenderJob: Equatable, Sendable {
   var sampleRate: Int
   var sourceDurationSamples: Int
   var outputURL: URL
+  var format: ExportAudioFormat = .aiff
+  var tags = ExportAudioTags()
 }
 
 struct ExportRenderClient: Sendable {
@@ -32,9 +39,15 @@ extension ExportRenderClient: DependencyKey {
       // detached task also severs cancellation: the renderer's `Task.checkCancellation()`
       // would consult the detached task, never the cancelled export. Forward it
       // explicitly so Cancel/tab-close interrupts a long render at the next chunk.
-      let render = Task.detached { try ExportAudioRenderer.render(job) }
+      let render = Task.detached { try await ExportAudioRenderer.render(job) }
       return try await withTaskCancellationHandler {
-        try await render.value
+        do {
+          try await render.value
+          try Task.checkCancellation()
+        } catch {
+          try? FileManager.default.removeItem(at: job.outputURL)
+          throw error
+        }
       } onCancel: {
         render.cancel()
       }
@@ -69,6 +82,8 @@ enum ExportRenderError: Error, Equatable, LocalizedError {
   case invalidSliceRange(name: String, start: Int, end: Int, duration: Int)
   case bufferAllocationFailed
   case invalidWordStart
+  case noConvertedAudio
+  case wavTooLarge
 
   var errorDescription: String? {
     switch self {
@@ -85,6 +100,10 @@ enum ExportRenderError: Error, Equatable, LocalizedError {
         "\"\(name)\" spans samples \(start)..<\(end), which is not a valid range in a \(duration)-sample recording"
     case .bufferAllocationFailed:
       return "Could not allocate an audio buffer for the export."
+    case .noConvertedAudio:
+      return "The clip is too short to export at 44.1 kHz."
+    case .wavTooLarge:
+      return "This clip exceeds the WAV size limit. Split it into smaller clips or export as M4A."
     case .invalidWordStart:
       return "A transcript word has an invalid start time."
     }
@@ -98,15 +117,85 @@ enum ExportAudioRenderer {
   /// Frames per read/write for kept segments; keeps peak memory flat on long slices.
   private static let chunkFrames = 1 << 16
 
-  static func render(_ job: ExportRenderJob) throws {
+  static func render(_ job: ExportRenderJob) async throws {
+    try Task.checkCancellation()
     let file = try openCanonical(
       job.canonicalAudioURL, sampleRate: job.sampleRate,
       sourceDurationSamples: job.sourceDurationSamples)
-    // Preserve the canonical file's exact format for legacy AIFF export.
-    let output = try AVAudioFile(forWriting: job.outputURL, settings: file.fileFormat.settings)
-    _ = try renderEdited(
+    switch job.format {
+    case .aiff:
+      let output = try AVAudioFile(forWriting: job.outputURL, settings: file.fileFormat.settings)
+      _ = try renderEdited(
+        from: file, plan: job.plan, editedDurationSamples: job.editedDurationSamples,
+        sampleRate: job.sampleRate, emit: { try output.write(from: $0) })
+    case .wav:
+      // Core Audio pads WAV headers (4 KiB measured); reserve 64 KiB plus conversion rounding.
+      let frames = MasteringFrames.conformed(job.editedDurationSamples, fromRate: job.sampleRate)
+      guard frames < (Int(UInt32.max) - 65_536) / 6 else {
+        throw ExportRenderError.wavTooLarge
+      }
+      _ = try renderConformed(
+        from: file, plan: job.plan, editedDurationSamples: job.editedDurationSamples,
+        sampleRate: job.sampleRate, to: job.outputURL, settings: MasteringFormat.pcm24WAVSettings)
+    case .m4a:
+      try await renderM4A(job, from: file)
+    }
+  }
+
+  private static func renderM4A(_ job: ExportRenderJob, from file: AVAudioFile) async throws {
+    let caf = job.outputURL.deletingPathExtension().appendingPathExtension("caf")
+    defer { try? FileManager.default.removeItem(at: caf) }
+    let frames = try renderConformed(
       from: file, plan: job.plan, editedDurationSamples: job.editedDurationSamples,
-      sampleRate: job.sampleRate, emit: { try output.write(from: $0) })
+      sampleRate: job.sampleRate, to: caf, settings: MasteringFormat.float32CAFSettings)
+    let words = job.tags.wordStarts.compactMap { marker -> (frame: Int, text: String)? in
+      guard marker.position >= 0 else { return nil }
+      let frame = MasteringFrames.conformed(marker.position, fromRate: job.sampleRate)
+      return frame < frames ? (frame, marker.name) : nil
+    }
+    _ = try await MasteringAACEncoder.encode(
+      caf,
+      target: .init(
+        pieceID: UUID(), startFrame: 0, frameCount: frames,
+        artist: job.tags.artist, title: job.tags.title, lrc: MasteringLRC.text(wordStarts: words)),
+      outputURL: job.outputURL)
+  }
+
+  // swiftlint:disable:next function_parameter_count
+  static func renderConformed(
+    from source: AVAudioFile, plan: AudioEditRenderPlan, editedDurationSamples: Int,
+    sampleRate: Int, to url: URL, settings: [String: Any]
+  ) throws -> Int {
+    let expected = MasteringFrames.conformed(editedDurationSamples, fromRate: sampleRate)
+    guard expected > 0 else { throw ExportRenderError.noConvertedAudio }
+    var frames = 0
+    do {
+      let conformer = try MasteringConformer(inputFormat: source.processingFormat)
+      let writer = try AVAudioFile(forWriting: url, settings: settings)
+      _ = try renderEdited(
+        from: source, plan: plan, editedDurationSamples: editedDurationSamples,
+        sampleRate: sampleRate
+      ) { input in
+        try conformer.push(input) { output in
+          try writer.write(from: output)
+          frames += Int(output.frameLength)
+        }
+      }
+      try conformer.finish { output in
+        try writer.write(from: output)
+        frames += Int(output.frameLength)
+      }
+    }
+    guard frames > 0 else { throw ExportRenderError.noConvertedAudio }
+    guard abs(frames - expected) <= 1 else {
+      throw MasteringPreparationError.conversionFailed(
+        "Conformed audio length \(frames) differs from expected \(expected)")
+    }
+    let readback = try AVAudioFile(forReading: url)
+    guard Int(readback.length) == frames else {
+      throw ExportRenderError.shortRender(written: Int(readback.length), expected: frames)
+    }
+    return frames
   }
 
   static func openCanonical(
