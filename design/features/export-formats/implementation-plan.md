@@ -9,10 +9,10 @@
 Contracts: [spec](spec.md), [screens](screens.md), [models](models.md). Backend/API: none.
 
 ## Execution checklist
-- [ ] Add renderer WAV/M4A and editor routing/metadata tests; run red.
-- [ ] Extend format/job/naming, shared conformer and AAC empty tags; run renderer and mastering regressions.
-- [ ] Thread frozen format/artist/titles through editor; AIFF-only markers; replace buttons with menus and neutral picker text.
-- [ ] Run full app tests, build, format and lint; independent AAC metadata smoke read where tools available.
+- [x] Add renderer WAV/M4A and editor routing/metadata tests; run red.
+- [x] Extend format/job/naming, shared conformer and AAC empty tags; run renderer and mastering regressions.
+- [x] Thread frozen format/artist/titles through editor; AIFF-only markers; replace buttons with menus and neutral picker text.
+- [ ] Run full app tests, build, format and lint; AVFoundation AAC format, duration and metadata readback.
 - [ ] Commit; Claude correctness review, then separate challenge/excess concurrently; resolve combined findings and verify.
 
 Review dispositions: keep one client, no extra settings/modal/state, no database fields. Share the existing conformed renderer and PCM settings rather than copying the algorithm. Preserve ordinary naming instead of using masteredM4A naming. Menu format stays selectable even with cached destination. The user's unrelated untracked canvas/docs will not be committed. Screen PNGs exported through Pen; native menu styling remains system-owned.
@@ -129,3 +129,7 @@ Keep the user's untracked files and the current branch.
 ## Verification
 - Run `make test-fast ONLY=…` for each suite above, then the full `make test-fast`, then `make format-check` and `make lint`.
 - Manual check: export one clip in each format. WAV and M4A should open in QuickTime at 44.1 kHz stereo, the M4A should show its title, artist, and lyrics in Music/afinfo, and the AIFF should still show markers in Logic.
+
+## Validation record
+
+The full app suite passed with 1,989 tests and 15 existing known issues. Formatting and lint passed. New renderer tests cover WAV conformance and unchanged interior level, tagged AAC readback (including blank artist and Unicode), and cancellation cleanup. Editor tests cover all three formats for single/bulk exports, frozen metadata, folder reuse, unsupported channels, and collision approval. Existing mastering suites passed after sharing the renderer. The proposed independent decoder and manual QuickTime/Logic listening checks have not been rerun for this change.

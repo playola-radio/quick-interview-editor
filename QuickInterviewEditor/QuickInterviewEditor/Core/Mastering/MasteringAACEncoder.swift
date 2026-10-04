@@ -25,10 +25,9 @@ enum MasteringAACEncoder {
         mediaType: .audio, outputSettings: settings, sourceFormatHint: format)
       guard writer.canAdd(input) else { throw failed(target, "AAC writer rejected its input") }
       writer.add(input)
-      var items = [
-        metadata(.iTunesMetadataArtist, target.artist),
-        metadata(.iTunesMetadataSongName, target.title),
-      ]
+      var items: [AVMetadataItem] = []
+      if !target.artist.isEmpty { items.append(metadata(.iTunesMetadataArtist, target.artist)) }
+      if !target.title.isEmpty { items.append(metadata(.iTunesMetadataSongName, target.title)) }
       if !target.lrc.isEmpty { items.append(metadata(.iTunesMetadataLyrics, target.lrc)) }
       writer.metadata = items
       guard writer.startWriting() else {

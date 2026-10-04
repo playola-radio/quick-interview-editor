@@ -28,8 +28,13 @@ struct SlicesPanelView: View {
       }
       HStack(spacing: 8) {
         Spacer()
-        Button(model.exportAllLabel) { model.exportAllTapped() }
-          .disabled(!model.canExportAll)
+        Menu(model.exportAllLabel) {
+          ForEach(model.exportFormats) { format in
+            Button(model.exportFormatLabel(format)) { model.exportAllTapped(format: format) }
+          }
+        }
+        .fixedSize()
+        .disabled(!model.canExportAll)
       }
       Picker(model.sliceFilterPickerLabel, selection: $model.sliceFilter) {
         ForEach(model.sliceFilterOptions) { filter in
@@ -194,9 +199,14 @@ private struct SliceCard: View {
         Button(model.editSliceLabel) {
           model.editSliceTapped(row.id)
         }
-        Button(model.exportLabel) {
-          model.exportSliceTapped(row.id)
+        Menu(model.exportLabel) {
+          ForEach(model.exportFormats) { format in
+            Button(model.exportFormatLabel(format)) {
+              model.exportSliceTapped(row.id, format: format)
+            }
+          }
         }
+        .fixedSize()
         .disabled(!model.canExportSlice || !row.canExport)
         Spacer()
         Button {

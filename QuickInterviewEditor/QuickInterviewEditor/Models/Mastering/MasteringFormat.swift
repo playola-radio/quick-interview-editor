@@ -15,4 +15,27 @@ enum MasteringFormat {
     AVAudioFormat(
       standardFormatWithSampleRate: Double(sampleRate), channels: AVAudioChannelCount(channels))!
   }
+  static var pcm24WAVSettings: [String: Any] {
+    [
+      AVFormatIDKey: kAudioFormatLinearPCM,
+      AVSampleRateKey: 44_100.0,
+      AVNumberOfChannelsKey: 2,
+      AVLinearPCMBitDepthKey: 24,
+      AVLinearPCMIsFloatKey: false,
+      AVLinearPCMIsBigEndianKey: false,
+      AVLinearPCMIsNonInterleaved: false,
+    ]
+  }
+
+  static var float32CAFSettings: [String: Any] {
+    [
+      AVFormatIDKey: kAudioFormatLinearPCM,
+      AVSampleRateKey: 44_100.0,
+      AVNumberOfChannelsKey: 2,
+      AVLinearPCMBitDepthKey: 32,
+      AVLinearPCMIsFloatKey: true,
+      AVLinearPCMIsNonInterleaved: false,
+    ]
+  }
+
 }

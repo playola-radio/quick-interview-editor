@@ -175,7 +175,7 @@ struct ExportAudioRendererTests {
   /// fade out at its last) so a hard cut never clicks — see `DeclickFade`. That means an
   /// "identity" render is no longer byte-exact end to end; it's byte-exact in the
   /// interior, and its edges must match `DeclickFade.gain` applied to the source.
-  @Test func identityRenderAppliesTheBoundaryDeclickAndReproducesTheInteriorExactly() throws {
+  @Test func identityRenderAppliesTheBoundaryDeclickAndReproducesTheInteriorExactly() async throws {
     let dir = try makeSandbox()
     defer { try? FileManager.default.removeItem(at: dir) }
     let source = dir.appendingPathComponent("canonical.aiff")
@@ -183,7 +183,7 @@ struct ExportAudioRendererTests {
     try writeFixture(to: source)
 
     let timeline = EditedTimeline(sourceDurationSamples: Self.sourceFrames, removals: [])
-    try ExportAudioRenderer.render(
+    try await ExportAudioRenderer.render(
       job(
         source: source, output: output, plan: AudioEditRenderPlan(timeline: timeline),
         editedDuration: Self.sourceFrames))
@@ -210,7 +210,7 @@ struct ExportAudioRendererTests {
       fadeOutCount: declickCount)
   }
 
-  @Test func subRangeSliceAppliesTheBoundaryDeclickAndReproducesTheInteriorExactly() throws {
+  @Test func subRangeSliceAppliesTheBoundaryDeclickAndReproducesTheInteriorExactly() async throws {
     let dir = try makeSandbox()
     defer { try? FileManager.default.removeItem(at: dir) }
     let source = dir.appendingPathComponent("canonical.aiff")
@@ -218,7 +218,7 @@ struct ExportAudioRendererTests {
     try writeFixture(to: source)
 
     let built = SliceRenderPlanBuilder.plan(sliceRange: 2000..<5000, removals: [])
-    try ExportAudioRenderer.render(
+    try await ExportAudioRenderer.render(
       job(
         source: source, output: output, plan: built.plan,
         editedDuration: built.editedDurationSamples))
@@ -240,7 +240,7 @@ struct ExportAudioRendererTests {
       fadeInSourceStart: 2000)
   }
 
-  @Test func removalWithACrossfadeMatchesTheSharedRenderer() throws {
+  @Test func removalWithACrossfadeMatchesTheSharedRenderer() async throws {
     let dir = try makeSandbox()
     defer { try? FileManager.default.removeItem(at: dir) }
     let source = dir.appendingPathComponent("canonical.aiff")
@@ -257,7 +257,7 @@ struct ExportAudioRendererTests {
       sliceRange: 0..<Self.sourceFrames, removals: [removal])
     expectNoDifference(built.editedDurationSamples, 5800)
 
-    try ExportAudioRenderer.render(
+    try await ExportAudioRenderer.render(
       job(
         source: source, output: output, plan: built.plan,
         editedDuration: built.editedDurationSamples))
@@ -306,7 +306,7 @@ struct ExportAudioRendererTests {
     #expect(worst <= tolerance)
   }
 
-  @Test func renderEditedEmitsSameSamplesAsRenderSlice() throws {
+  @Test func renderEditedEmitsSameSamplesAsRenderSlice() async throws {
     let dir = try makeSandbox()
     defer { try? FileManager.default.removeItem(at: dir) }
     let source = dir.appendingPathComponent("canonical.aiff")
@@ -317,7 +317,7 @@ struct ExportAudioRendererTests {
       crossfade: Crossfade(lengthSamples: 200))
     let built = SliceRenderPlanBuilder.plan(
       sliceRange: 0..<Self.sourceFrames, removals: [removal])
-    try ExportAudioRenderer.render(
+    try await ExportAudioRenderer.render(
       job(
         source: source, output: output, plan: built.plan,
         editedDuration: built.editedDurationSamples))
@@ -341,7 +341,7 @@ struct ExportAudioRendererTests {
   /// edge leaves no leading kept segment. The leading boundary declick must still reach into the
   /// blended seam samples exactly as it would an ordinary segment's, since `writeSeam` applies
   /// `DeclickFade` at the seam's own position in the whole clip rather than special-casing it away.
-  @Test func aSeamAsTheFirstItemAlsoReceivesTheLeadingBoundaryDeclick() throws {
+  @Test func aSeamAsTheFirstItemAlsoReceivesTheLeadingBoundaryDeclick() async throws {
     let dir = try makeSandbox()
     defer { try? FileManager.default.removeItem(at: dir) }
     let source = dir.appendingPathComponent("canonical.aiff")
@@ -359,7 +359,7 @@ struct ExportAudioRendererTests {
       .segment(source: 5000..<6200, editedStart: 800),
     ]
 
-    try ExportAudioRenderer.render(
+    try await ExportAudioRenderer.render(
       job(source: source, output: output, plan: plan, editedDuration: totalFrames))
 
     let declickCount = DeclickFade.frameCount(totalFrames: totalFrames, sampleRate: Self.sampleRate)
@@ -387,7 +387,7 @@ struct ExportAudioRendererTests {
   /// The mirror case: a seam as the render's LAST item (a removal ending right at the clip's own
   /// edge, so there is no trailing kept segment). The trailing boundary declick must reach into
   /// the blended seam samples the same way.
-  @Test func aSeamAsTheLastItemAlsoReceivesTheTrailingBoundaryDeclick() throws {
+  @Test func aSeamAsTheLastItemAlsoReceivesTheTrailingBoundaryDeclick() async throws {
     let dir = try makeSandbox()
     defer { try? FileManager.default.removeItem(at: dir) }
     let source = dir.appendingPathComponent("canonical.aiff")
@@ -405,7 +405,7 @@ struct ExportAudioRendererTests {
         fadeOffset: 0),
     ]
 
-    try ExportAudioRenderer.render(
+    try await ExportAudioRenderer.render(
       job(source: source, output: output, plan: plan, editedDuration: totalFrames))
 
     let declickCount = DeclickFade.frameCount(totalFrames: totalFrames, sampleRate: Self.sampleRate)
@@ -429,7 +429,7 @@ struct ExportAudioRendererTests {
     #expect(abs(rendered[799]) <= tolerance)
   }
 
-  @Test func renderingTheSameJobTwiceProducesIdenticalFiles() throws {
+  @Test func renderingTheSameJobTwiceProducesIdenticalFiles() async throws {
     let dir = try makeSandbox()
     defer { try? FileManager.default.removeItem(at: dir) }
     let source = dir.appendingPathComponent("canonical.aiff")
@@ -445,7 +445,7 @@ struct ExportAudioRendererTests {
     let first = dir.appendingPathComponent("first.aiff")
     let second = dir.appendingPathComponent("second.aiff")
     for output in [first, second] {
-      try ExportAudioRenderer.render(
+      try await ExportAudioRenderer.render(
         job(
           source: source, output: output, plan: built.plan,
           editedDuration: built.editedDurationSamples))
@@ -456,7 +456,7 @@ struct ExportAudioRendererTests {
     expectNoDifference(firstDifferingByte(firstBytes, secondBytes), nil)
   }
 
-  @Test func aFrameCountMismatchFailsLoud() throws {
+  @Test func aFrameCountMismatchFailsLoud() async throws {
     let dir = try makeSandbox()
     defer { try? FileManager.default.removeItem(at: dir) }
     let source = dir.appendingPathComponent("canonical.aiff")
@@ -464,17 +464,17 @@ struct ExportAudioRendererTests {
     try writeFixture(to: source)
 
     let timeline = EditedTimeline(sourceDurationSamples: Self.sourceFrames, removals: [])
-    #expect(
+    await #expect(
       throws: ExportRenderError.frameCountMismatch(actual: 8000, expected: 7999)
     ) {
-      try ExportAudioRenderer.render(
+      try await ExportAudioRenderer.render(
         job(
           source: source, output: output, plan: AudioEditRenderPlan(timeline: timeline),
           editedDuration: Self.sourceFrames, sourceDuration: 7999))
     }
   }
 
-  @Test func aSampleRateMismatchFailsLoud() throws {
+  @Test func aSampleRateMismatchFailsLoud() async throws {
     let dir = try makeSandbox()
     defer { try? FileManager.default.removeItem(at: dir) }
     let source = dir.appendingPathComponent("canonical.aiff")
@@ -482,10 +482,10 @@ struct ExportAudioRendererTests {
     try writeFixture(to: source)
 
     let timeline = EditedTimeline(sourceDurationSamples: Self.sourceFrames, removals: [])
-    #expect(
+    await #expect(
       throws: ExportRenderError.sampleRateMismatch(actual: 48000, expected: 44100)
     ) {
-      try ExportAudioRenderer.render(
+      try await ExportAudioRenderer.render(
         job(
           source: source, output: output, plan: AudioEditRenderPlan(timeline: timeline),
           editedDuration: Self.sourceFrames, sampleRate: 44100))
@@ -496,7 +496,7 @@ struct ExportAudioRendererTests {
   /// silently: `readFloats` filled the tail with zeros and `writeSeam` still reported a full
   /// seam, so `framesWritten` matched `editedDurationSamples` and the export "succeeded" with
   /// silence spliced into kept audio. The read is strict now, so it fails loud instead.
-  @Test func aSeamReadingPastTheEndOfTheFileFailsLoudInsteadOfPaddingSilence() throws {
+  @Test func aSeamReadingPastTheEndOfTheFileFailsLoudInsteadOfPaddingSilence() async throws {
     let dir = try makeSandbox()
     defer { try? FileManager.default.removeItem(at: dir) }
     let source = dir.appendingPathComponent("canonical.aiff")
@@ -515,8 +515,8 @@ struct ExportAudioRendererTests {
         fadeOffset: 0),
       .segment(source: 5200..<8000, editedStart: 3000),
     ]
-    #expect(throws: ExportRenderError.shortRead(requested: 200, got: 100, atFrame: 7900)) {
-      try ExportAudioRenderer.render(
+    await #expect(throws: ExportRenderError.shortRead(requested: 200, got: 100, atFrame: 7900)) {
+      try await ExportAudioRenderer.render(
         job(source: source, output: output, plan: plan, editedDuration: 5800))
     }
   }
@@ -525,7 +525,7 @@ struct ExportAudioRendererTests {
   /// CONTINUE the fade rather than restart it. Chunked output has to be identical to a
   /// single unchunked blend of the whole overlap — that equivalence is what lets the
   /// renderer bound its memory without changing a single sample.
-  @Test func aCrossfadeLongerThanOneReadChunkMatchesAnUnchunkedBlend() throws {
+  @Test func aCrossfadeLongerThanOneReadChunkMatchesAnUnchunkedBlend() async throws {
     let dir = try makeSandbox()
     defer { try? FileManager.default.removeItem(at: dir) }
     let source = dir.appendingPathComponent("canonical.aiff")
@@ -543,7 +543,7 @@ struct ExportAudioRendererTests {
     let editedDuration = frames - 50_000 - fadeLength
     expectNoDifference(built.editedDurationSamples, editedDuration)
 
-    try ExportAudioRenderer.render(
+    try await ExportAudioRenderer.render(
       job(
         source: source, output: output, plan: built.plan, editedDuration: editedDuration,
         sourceDuration: frames))
@@ -564,7 +564,7 @@ struct ExportAudioRendererTests {
     #expect(worst <= tolerance)
   }
 
-  @Test func aPlanShorterThanItsEditedDurationFailsLoud() throws {
+  @Test func aPlanShorterThanItsEditedDurationFailsLoud() async throws {
     let dir = try makeSandbox()
     defer { try? FileManager.default.removeItem(at: dir) }
     let source = dir.appendingPathComponent("canonical.aiff")
@@ -572,9 +572,120 @@ struct ExportAudioRendererTests {
     try writeFixture(to: source)
 
     let built = SliceRenderPlanBuilder.plan(sliceRange: 0..<1000, removals: [])
-    #expect(throws: ExportRenderError.shortRender(written: 1000, expected: 2000)) {
-      try ExportAudioRenderer.render(
+    await #expect(throws: ExportRenderError.shortRender(written: 1000, expected: 2000)) {
+      try await ExportAudioRenderer.render(
         job(source: source, output: output, plan: built.plan, editedDuration: 2000))
     }
+  }
+}
+
+extension ExportAudioRendererTests {
+  @Test func wavExportConformsEditedMonoToStereoPCM24() async throws {
+    let directory = try makeSandbox()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let source = directory.appendingPathComponent("source.aiff")
+    try writeFixture(to: source)
+    let output = directory.appendingPathComponent("clip.wav")
+    let removal = TimelineRemoval(
+      id: UUID(), removedRange: 2_000..<2_800,
+      crossfade: Crossfade(lengthSamples: 0, curve: .equalPower))
+    let plan = SliceRenderPlanBuilder.plan(sliceRange: 0..<8_000, removals: [removal])
+    var request = job(
+      source: source, output: output, plan: plan.plan,
+      editedDuration: plan.editedDurationSamples)
+    request.format = .wav
+    try await ExportRenderClient.liveValue.renderSlice(request)
+    let file = try AVAudioFile(forReading: output)
+    expectNoDifference(Int(file.length), 6_615)
+    expectNoDifference(file.fileFormat.sampleRate, 44_100)
+    expectNoDifference(file.fileFormat.channelCount, 2)
+    expectNoDifference(file.fileFormat.settings[AVLinearPCMBitDepthKey] as? Int, 24)
+    let buffer = try #require(
+      AVAudioPCMBuffer(
+        pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(file.length)))
+    try file.read(into: buffer)
+    let channels = try #require(buffer.floatChannelData)
+    expectNoDifference(
+      Array(UnsafeBufferPointer(start: channels[0], count: Int(buffer.frameLength))),
+      Array(UnsafeBufferPointer(start: channels[1], count: Int(buffer.frameLength))))
+  }
+
+  @Test(arguments: ["Test Artist", ""])
+  func m4aExportWritesExactLengthAndEditedWordTags(artist: String) async throws {
+    let directory = try makeSandbox()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let source = directory.appendingPathComponent("source.aiff")
+    try writeFixture(to: source)
+    let output = directory.appendingPathComponent("clip.m4a")
+    let plan = SliceRenderPlanBuilder.plan(sliceRange: 0..<8_000, removals: [])
+    var request = job(source: source, output: output, plan: plan.plan, editedDuration: 8_000)
+    request.format = .m4a
+    request.tags = .init(
+      title: "Intro 🎙️", artist: artist,
+      wordStarts: [.init(position: 4_800, name: "Café"), .init(position: 8_000, name: "outside")])
+    try await ExportRenderClient.liveValue.renderSlice(request)
+    let file = try AVAudioFile(forReading: output)
+    expectNoDifference(Int(file.length), 7_350)
+    expectNoDifference(file.fileFormat.sampleRate, 44_100)
+    expectNoDifference(file.fileFormat.channelCount, 2)
+    expectNoDifference(file.fileFormat.streamDescription.pointee.mFormatID, kAudioFormatMPEG4AAC)
+    let metadata = try await AVURLAsset(url: output).load(.metadata)
+    expectNoDifference(
+      metadata.first { $0.identifier == .iTunesMetadataSongName }?.stringValue, "Intro 🎙️")
+    expectNoDifference(
+      metadata.first { $0.identifier == .iTunesMetadataArtist }?.stringValue,
+      artist.isEmpty ? nil : artist)
+    expectNoDifference(
+      metadata.first { $0.identifier == .iTunesMetadataLyrics }?.stringValue, "[00:00.10]Café\n")
+    expectNoDifference(
+      try FileManager.default.contentsOfDirectory(atPath: directory.path).sorted(),
+      ["clip.m4a", "source.aiff"])
+  }
+
+  @Test func wavExportDoesNotNormalizeTheAudio() async throws {
+    let directory = try makeSandbox()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let source = directory.appendingPathComponent("source.caf")
+    do {
+      let format = try #require(AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 1))
+      let file = try AVAudioFile(forWriting: source, settings: format.settings)
+      let buffer = try #require(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 2_000))
+      buffer.frameLength = 2_000
+      let samples = try #require(buffer.floatChannelData)[0]
+      for index in 0..<2_000 { samples[index] = 0.125 }
+      try file.write(from: buffer)
+    }
+    let output = directory.appendingPathComponent("clip.wav")
+    let plan = SliceRenderPlanBuilder.plan(sliceRange: 0..<2_000, removals: [])
+    var request = job(
+      source: source, output: output, plan: plan.plan, editedDuration: 2_000,
+      sampleRate: 44_100, sourceDuration: 2_000)
+    request.format = .wav
+    try await ExportRenderClient.liveValue.renderSlice(request)
+    let samples = try readFrames(output, from: 700, count: 500)
+    #expect(samples.allSatisfy { abs($0 - 0.125) < 0.000001 })
+  }
+}
+
+extension ExportAudioRendererTests {
+  @Test(arguments: [ExportAudioFormat.wav, .m4a])
+  func cancelledFormatExportLeavesNoTemporaryAudio(format: ExportAudioFormat) async throws {
+    let directory = try makeSandbox()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let source = directory.appendingPathComponent("source.aiff")
+    try writeFixture(to: source)
+    let plan = SliceRenderPlanBuilder.plan(sliceRange: 0..<8_000, removals: [])
+    var request = job(
+      source: source, output: directory.appendingPathComponent("clip.\(format.rawValue)"),
+      plan: plan.plan, editedDuration: 8_000)
+    request.format = format
+    let frozenRequest = request
+    let task = Task {
+      withUnsafeCurrentTask { $0?.cancel() }
+      try await ExportRenderClient.liveValue.renderSlice(frozenRequest)
+    }
+    await #expect(throws: CancellationError.self) { try await task.value }
+    expectNoDifference(
+      try FileManager.default.contentsOfDirectory(atPath: directory.path), ["source.aiff"])
   }
 }

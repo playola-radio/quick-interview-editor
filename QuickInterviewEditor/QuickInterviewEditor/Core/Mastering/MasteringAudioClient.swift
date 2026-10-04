@@ -148,8 +148,10 @@ private enum MasteringPreparer {
         throw MasteringPreparationError.conversionFailed("Intro has no rendered audio")
       }
       let cafURL = request.workDirectory.appendingPathComponent("piece-\(index).caf")
-      let frameCount = try render(
-        piece, from: source, sampleRate: snapshot.sourceSampleRate, to: cafURL)
+      let frameCount = try ExportAudioRenderer.renderConformed(
+        from: source, plan: piece.render, editedDurationSamples: piece.editedDurationSamples,
+        sampleRate: snapshot.sourceSampleRate, to: cafURL,
+        settings: MasteringFormat.float32CAFSettings)
       guard frameCount > 0 else {
         throw MasteringPreparationError.conversionFailed("Intro converted to no audio")
       }
@@ -192,7 +194,7 @@ private enum MasteringPreparer {
       var prepared: [PreparedPiece] = []
       var frameCount = 0
       do {
-        let writer = try AVAudioFile(forWriting: wavURL, settings: wavSettings)
+        let writer = try AVAudioFile(forWriting: wavURL, settings: MasteringFormat.pcm24WAVSettings)
         for index in group {
           try Task.checkCancellation()
           let piece = staged[index]
@@ -262,60 +264,4 @@ private enum MasteringPreparer {
       parts: parts, warnings: warnings, inputsDigest: snapshot.inputsDigest)
   }
 
-  private static var wavSettings: [String: Any] {
-    [
-      AVFormatIDKey: kAudioFormatLinearPCM,
-      AVSampleRateKey: 44_100.0,
-      AVNumberOfChannelsKey: 2,
-      AVLinearPCMBitDepthKey: 24,
-      AVLinearPCMIsFloatKey: false,
-      AVLinearPCMIsBigEndianKey: false,
-      AVLinearPCMIsNonInterleaved: false,
-    ]
-  }
-
-  private static var cafSettings: [String: Any] {
-    [
-      AVFormatIDKey: kAudioFormatLinearPCM,
-      AVSampleRateKey: 44_100.0,
-      AVNumberOfChannelsKey: 2,
-      AVLinearPCMBitDepthKey: 32,
-      AVLinearPCMIsFloatKey: true,
-      AVLinearPCMIsNonInterleaved: false,
-    ]
-  }
-
-  private static func render(
-    _ piece: MasteringPieceInput, from source: AVAudioFile,
-    sampleRate: Int, to url: URL
-  ) throws -> Int {
-    var frames = 0
-    do {
-      let writer = try AVAudioFile(forWriting: url, settings: cafSettings)
-      let conformer = try MasteringConformer(inputFormat: source.processingFormat)
-      _ = try ExportAudioRenderer.renderEdited(
-        from: source, plan: piece.render,
-        editedDurationSamples: piece.editedDurationSamples, sampleRate: sampleRate
-      ) { input in
-        try conformer.push(input) { output in
-          try writer.write(from: output)
-          frames += Int(output.frameLength)
-        }
-      }
-      try conformer.finish { output in
-        try writer.write(from: output)
-        frames += Int(output.frameLength)
-      }
-    }
-    let expected = MasteringFrames.conformed(piece.editedDurationSamples, fromRate: sampleRate)
-    guard abs(frames - expected) <= 1 else {
-      throw MasteringPreparationError.conversionFailed(
-        "Conformed intro length \(frames) differs from expected \(expected)")
-    }
-    let readback = try AVAudioFile(forReading: url)
-    guard Int(readback.length) == frames else {
-      throw ExportRenderError.shortRender(written: Int(readback.length), expected: frames)
-    }
-    return frames
-  }
 }
