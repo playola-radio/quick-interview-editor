@@ -1269,6 +1269,29 @@ struct EditorTests {
       model.exportPhase, .failed(ExportRenderError.invalidWordStart.localizedDescription))
   }
 
+  @Test func wavExportSucceedsDespiteAWordWithAnInvalidStartTime() async throws {
+    // WAV tags carry no markers — no Logic markers, no LRC — so an out-of-range word
+    // start elsewhere in the plan must never block an otherwise-valid WAV export.
+    var plan = Fixtures.editPlan()
+    let lastIndex = plan.words.count - 1
+    plan.words[lastIndex].startSample = nil
+    plan.words[lastIndex].start = .nan
+    let model = editor(plan)
+    addSlices(model, [(0, 1)])
+    model.destinationURL = try makeTempDir()
+    defer { try? FileManager.default.removeItem(at: model.destinationURL!) }
+
+    await withDependencies {
+      $0.exportRender.renderSlice = { job in try writeStubAIFF(job) }
+      $0.workspace.reveal = { _ in }
+    } operation: {
+      model.exportAllTapped(format: .wav)
+      await model.exportTask?.value
+    }
+
+    expectNoDifference(model.exportPhase, .done(count: 1))
+  }
+
   @Test func awaitExportTeardownWaitsForTheInFlightRender() async throws {
     // A tab close / re-import must not delete the canonical AIFF mid-render. This proves the
     // teardown await only returns AFTER the render finishes, so the discard that follows it

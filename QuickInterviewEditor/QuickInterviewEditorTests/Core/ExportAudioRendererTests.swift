@@ -604,6 +604,40 @@ extension ExportAudioRendererTests {
     expectNoDifference(file.fileFormat.settings[AVLinearPCMBitDepthKey] as? Int, 24)
   }
 
+  /// At a ratio-1 sample rate (44.1 kHz in, 44.1 kHz WAV out) the mono→stereo conform is
+  /// a straight duplicate with no resampling, so the decoded audio on each side of a cut
+  /// can be asserted exactly — proving a regression can't silently blend or drop the
+  /// wrong samples across the seam while the earlier length/format checks still pass.
+  @Test func wavExportDecodesTheEditedAudioAcrossACut() async throws {
+    let directory = try makeSandbox()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let source = directory.appendingPathComponent("source.aiff")
+    try writeFixture(to: source, frames: 8_000, sampleRate: 44_100)
+    let output = directory.appendingPathComponent("clip.wav")
+    let removal = TimelineRemoval(
+      id: UUID(), removedRange: 2_000..<2_800,
+      crossfade: Crossfade(lengthSamples: 0, curve: .equalPower))
+    let plan = SliceRenderPlanBuilder.plan(sliceRange: 0..<8_000, removals: [removal])
+    var request = job(
+      source: source, output: output, plan: plan.plan,
+      editedDuration: plan.editedDurationSamples, sampleRate: 44_100, sourceDuration: 8_000)
+    request.format = .wav
+    try await ExportRenderClient.liveValue.renderSlice(request)
+
+    // Kept [0, 2_000) then kept [2_800, 8_000) — no crossfade, so the seam is a hard cut
+    // at the boundary declick's edge. Sample the interior of each side, well clear of the
+    // declick ramps, and confirm the decoded WAV carries the SOURCE frame on each side of
+    // the cut rather than the removed region's.
+    let tolerance: Float = 0.0005
+    let beforeCut = try readFrames(output, from: 1_000, count: 1)
+    #expect(abs(beforeCut[0] - Float(sourceSample(at: 1_000)) / 32768) <= tolerance)
+    let afterCut = try readFrames(output, from: 5_000, count: 1)
+    #expect(abs(afterCut[0] - Float(sourceSample(at: 5_800)) / 32768) <= tolerance)
+    // The removed region's samples must not appear right at the seam.
+    let atSeam = try readFrames(output, from: 1_999, count: 2)
+    #expect(abs(atSeam[1] - Float(sourceSample(at: 2_000)) / 32768) > 0.01)
+  }
+
   @Test(arguments: ["Test Artist", ""])
   func m4aExportWritesExactLengthAndEditedWordTags(artist: String) async throws {
     let directory = try makeSandbox()
@@ -678,6 +712,43 @@ extension ExportAudioRendererTests {
       withUnsafeCurrentTask { $0?.cancel() }
       try await ExportRenderClient.liveValue.renderSlice(frozenRequest)
     }
+    await #expect(throws: CancellationError.self) { try await task.value }
+    expectNoDifference(
+      try FileManager.default.contentsOfDirectory(atPath: directory.path), ["source.aiff"])
+  }
+
+  /// Cancels AFTER the renderer has already written at least one chunk, unlike the test
+  /// above (which cancels before the task body ever runs). A fixture long enough to span
+  /// several of the renderer's 65_536-frame chunks gives a window to observe partial
+  /// output on disk before cancelling, so this catches a failure to stop or clean up a
+  /// partially written temporary CAF or WAV mid-render.
+  @Test(arguments: [ExportAudioFormat.wav, .m4a])
+  func cancellingMidRenderLeavesNoTemporaryAudio(format: ExportAudioFormat) async throws {
+    let directory = try makeSandbox()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let source = directory.appendingPathComponent("source.aiff")
+    let frames = 300_000
+    try writeFixture(to: source, frames: frames)
+    let plan = SliceRenderPlanBuilder.plan(sliceRange: 0..<frames, removals: [])
+    var request = job(
+      source: source, output: directory.appendingPathComponent("clip.\(format.rawValue)"),
+      plan: plan.plan, editedDuration: frames, sourceDuration: frames)
+    request.format = format
+    let frozenRequest = request
+    let temporaryFile =
+      format == .m4a
+      ? frozenRequest.outputURL.deletingPathExtension().appendingPathExtension("caf")
+      : frozenRequest.outputURL
+    let task = Task { try await ExportRenderClient.liveValue.renderSlice(frozenRequest) }
+    // Poll for the renderer's own partial output rather than a fixed delay — the
+    // renderer writes each chunk as it completes, so a non-empty temp file proves
+    // rendering has actually begun.
+    for _ in 0..<1000 {
+      let attributes = try? FileManager.default.attributesOfItem(atPath: temporaryFile.path)
+      if let size = attributes?[.size] as? Int, size > 0 { break }
+      await Task.yield()
+    }
+    task.cancel()
     await #expect(throws: CancellationError.self) { try await task.value }
     expectNoDifference(
       try FileManager.default.contentsOfDirectory(atPath: directory.path), ["source.aiff"])

@@ -4135,10 +4135,17 @@ final class EditorModel: ViewModel {
     // RAW absolute source-sample marker positions straight from the loaded plan words —
     // no global tie-nudge here. `SliceRenderPlanBuilder.markers` maps each marker into
     // slice-relative EDITED space and applies the strictly-increasing nudge itself.
-    guard
-      let sourceMarkers = SliceRenderPlanBuilder.sourceMarkers(
-        editPlan.words, sampleRate: sampleRate)
-    else { throw ExportRenderError.invalidWordStart }
+    // WAV tags carry no markers (no Logic markers, no LRC), so an out-of-range word
+    // start in the loaded plan must never block an otherwise-valid WAV export.
+    let sourceMarkers: [RenderMarker]
+    if format == .wav {
+      sourceMarkers = []
+    } else {
+      guard
+        let markers = SliceRenderPlanBuilder.sourceMarkers(editPlan.words, sampleRate: sampleRate)
+      else { throw ExportRenderError.invalidWordStart }
+      sourceMarkers = markers
+    }
 
     var outputsByID: [Slice.ID: URL] = [:]
     var injectionFiles: [MarkerInjectionFile] = []
