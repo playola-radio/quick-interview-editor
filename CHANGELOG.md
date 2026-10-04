@@ -5,6 +5,14 @@ focus on changes that affect editing work rather than internal implementation.
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-10-04
+
+- Choose an audio format when exporting: the Export and Export All buttons now
+  offer AIFF (with Logic word markers, as before), WAV (24-bit, 44.1 kHz
+  stereo), or M4A (AAC, tagged with artist, title, and word-timed lyrics).
+- The export review now lists the exact filenames that would collide with files
+  already in the destination folder, so you can see which clip names to fix.
+
 ## [2.3.0] - 2026-09-14
 
 - New Playback Latency settings: correct the audio delay you hear on Bluetooth
