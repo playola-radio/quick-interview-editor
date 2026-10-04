@@ -95,8 +95,8 @@ targets:
         # Single source of truth for the app version. sparkle:version ==
         # CFBundleVersion (CURRENT_PROJECT_VERSION) — a monotonically increasing
         # integer; CFBundleShortVersionString (MARKETING_VERSION) is the display.
-        MARKETING_VERSION: "2.2.0"
-        CURRENT_PROJECT_VERSION: "6"
+        MARKETING_VERSION: "2.4.0"
+        CURRENT_PROJECT_VERSION: "8"
         GENERATE_INFOPLIST_FILE: YES
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ENABLE_TESTABILITY: YES
@@ -120,6 +120,9 @@ targets:
     sources:
       - path: QuickInterviewEditorTests
         excludes:
+          # MasteringReturnTests reads these beside its source file via #filePath;
+          # do not copy a second, unused set into the test bundle.
+          - Mastering/Fixtures
           # Copied whole as an opaque package by the explicit folder resource
           # below; excluding it here stops the broad source scan from also
           # exploding its children (project.json/plan.json/canonical.aiff) as
