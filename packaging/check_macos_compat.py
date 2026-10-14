@@ -17,7 +17,7 @@ from pathlib import Path
 _PROJECT_YML = Path(__file__).resolve().parent.parent / "QuickInterviewEditor" / "project.yml"
 
 _THIN_MAGICS = {0xFEEDFACE: 28, 0xFEEDFACF: 32}  # header size, little-endian
-_FAT_MAGICS = {0xCAFEBABE: (">5I", 20), 0xCAFEBABF: (">2Q2I", 32)}  # 32/64-bit fat_arch
+_FAT_MAGICS = {0xCAFEBABE: (">5I", 20), 0xCAFEBABF: (">2I2Q2I", 32)}  # 32/64-bit fat_arch
 _LC_BUILD_VERSION = 0x32
 _LC_VERSION_MIN_MACOSX = 0x24
 _PLATFORM_MACOS = 1
@@ -37,15 +37,17 @@ def _unpack(fmt, data, offset):
     return struct.unpack_from(fmt, data, offset)
 
 
-def _thin_minimums(data, start):
+def _thin_minimum(data, start):
     (magic,) = _unpack("<I", data, start)
     ncmds = _unpack("<I", data, start + 16)[0]
     offset = start + _THIN_MAGICS[magic]
     found = []
     for _ in range(ncmds):
         cmd, size = _unpack("<2I", data, offset)
-        if size < 8:
+        needed = {_LC_BUILD_VERSION: 24, _LC_VERSION_MIN_MACOSX: 16}.get(cmd, 8)
+        if size < needed:
             raise ValueError("malformed load command")
+        _unpack(f"{size}s", data, offset)  # the whole command must be present
         if cmd == _LC_BUILD_VERSION:
             platform, minos = _unpack("<2I", data, offset + 8)
             if platform == _PLATFORM_MACOS:
@@ -53,17 +55,17 @@ def _thin_minimums(data, start):
         elif cmd == _LC_VERSION_MIN_MACOSX:
             found.append(_decode(_unpack("<I", data, offset + 8)[0]))
         offset += size
-    return found
+    return max(found, default=None)
 
 
 def minimum_versions(path):
-    """Minimum macOS of every slice, [] if none recorded, None if not a Mach-O."""
+    """Minimum macOS of each slice (None where unrecorded), or None if not a Mach-O."""
     with open(path, "rb") as f:
         head = f.read(8)
         if len(head) < 8:
             return None
         if struct.unpack("<I", head[:4])[0] in _THIN_MAGICS:
-            return _thin_minimums(head + f.read(), 0)
+            return [_thin_minimum(head + f.read(), 0)]
         magic, nfat = struct.unpack(">2I", head)
         # Java class files share 0xCAFEBABE; a real fat header has a handful of arches.
         if magic not in _FAT_MAGICS or not 0 < nfat < 32:
@@ -73,13 +75,16 @@ def minimum_versions(path):
     found = []
     for i in range(nfat):
         offset = _unpack(fmt, data, 8 + i * size)[2]
-        found += _thin_minimums(data, offset)
+        found.append(_thin_minimum(data, offset))
     return found
 
 
 def find_problems(bundle, target):
     problems, checked = [], 0
-    for root, _, files in os.walk(bundle):
+    def fail(error):
+        raise error
+
+    for root, _, files in os.walk(bundle, onerror=fail):
         for name in sorted(files):
             path = Path(root) / name
             if path.is_symlink():
@@ -89,7 +94,7 @@ def find_problems(bundle, target):
                 continue
             checked += 1
             rel = path.relative_to(bundle)
-            if not minimums:
+            if None in minimums:
                 problems.append(f"no minimum macOS recorded: {rel}")
             elif max(minimums) > target:
                 problems.append(f"needs macOS {_format(max(minimums))}: {rel}")
