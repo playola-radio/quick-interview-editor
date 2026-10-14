@@ -7,7 +7,8 @@
 # The app bundles that folder at Contents/Resources/engine/. This is a slow,
 # multi-GB build, so it is a deliberate, separate step — NOT an xcodebuild phase.
 #
-# Requirements: a venv with the engine deps + PyInstaller. Override with
+# Requirements: a python-build-standalone venv with the engine deps + PyInstaller
+# (create it with packaging/make-build-venv.sh). Override with
 #   VENV=/path/to/.venv packaging/package-engine.sh
 #
 # Apple Silicon only for the spike.
@@ -22,8 +23,8 @@ VENV="${VENV:-$REPO_ROOT/.venv}"
 PY="$VENV/bin/python"
 
 if [[ ! -x "$PY" ]]; then
-  echo "error: no python at $PY. Set VENV=/path/to/.venv (a venv with the engine" >&2
-  echo "       deps + PyInstaller), e.g. VENV=~/playola/logic-utils/.venv" >&2
+  echo "error: no python at $PY. Create it with packaging/make-build-venv.sh, or set" >&2
+  echo "       VENV=/path/to/.venv (a python-build-standalone venv from that script)." >&2
   exit 1
 fi
 if ! "$PY" -c "import PyInstaller" 2>/dev/null; then
@@ -53,6 +54,7 @@ fi
 
 echo "==> Built: $ENGINE"
 du -sh "$REPO_ROOT/packaging/dist/logic-markers-engine" | awk '{print "    bundle size: " $1}'
+"$REPO_ROOT/packaging/check-macos-compat.sh" "$REPO_ROOT/packaging/dist/logic-markers-engine"
 echo "==> Smoke test: engine responds to --help"
 "$ENGINE" --help >/dev/null && echo "    OK (--help)"
 echo
