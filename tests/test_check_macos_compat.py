@@ -1,3 +1,4 @@
+import builtins
 import importlib.util
 import struct
 from pathlib import Path
@@ -80,6 +81,32 @@ def test_minimum_versions_reads_64_bit_fat_header(tmp_path):
     assert compat.minimum_versions(path) == [(11, 0, 0)]
 
 
+def test_minimum_versions_never_reads_an_entire_library(tmp_path, monkeypatch):
+    path = write(tmp_path, "a.so", thin(build_version((15, 0))) + b"x" * 1024)
+    real_open = builtins.open
+
+    class HeaderOnlyFile:
+        def __init__(self, file):
+            self.file = file
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return self.file.__exit__(*args)
+
+        def read(self, size=-1):
+            if size < 0:
+                raise AssertionError("minimum_versions must read a bounded header")
+            return self.file.read(size)
+
+        def seek(self, *args):
+            return self.file.seek(*args)
+
+    monkeypatch.setattr(builtins, "open", lambda *args, **kwargs: HeaderOnlyFile(real_open(*args, **kwargs)))
+    assert compat.minimum_versions(path) == [(15, 0, 0)]
+
+
 def test_minimum_versions_ignores_other_platforms(tmp_path):
     path = write(tmp_path, "a.so", thin(build_version((26, 0), platform=2)))
     assert compat.minimum_versions(path) == [None]
@@ -130,16 +157,17 @@ def test_find_problems_fails_on_undersized_build_version(tmp_path):
 
 
 def test_find_problems_fails_on_unreadable_directory(tmp_path):
-    locked = tmp_path / "locked"
-    locked.mkdir()
-    write(locked, "a.so", thin(build_version((26, 0))))
-    write(tmp_path, "b.so", thin(build_version((11, 0))))
-    locked.chmod(0)
+    def unreadable_walk(*args, **kwargs):
+        kwargs["onerror"](PermissionError("locked"))
+        return iter(())
+
+    original_walk = compat.os.walk
+    compat.os.walk = unreadable_walk
     try:
-        with pytest.raises(PermissionError):
+        with pytest.raises(PermissionError, match="locked"):
             compat.find_problems(tmp_path, (15, 0, 0))
     finally:
-        locked.chmod(0o755)
+        compat.os.walk = original_walk
 
 
 def test_find_problems_accepts_binary_at_target(tmp_path):

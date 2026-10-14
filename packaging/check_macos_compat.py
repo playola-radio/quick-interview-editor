@@ -31,29 +31,33 @@ def _format(version):
     return ".".join(str(part) for part in version)
 
 
-def _unpack(fmt, data, offset):
-    if offset < 0 or offset + struct.calcsize(fmt) > len(data):
+def _unpack(file, fmt, offset):
+    if offset < 0:
         raise ValueError("truncated Mach-O")
-    return struct.unpack_from(fmt, data, offset)
+    file.seek(offset)
+    data = file.read(struct.calcsize(fmt))
+    if len(data) != struct.calcsize(fmt):
+        raise ValueError("truncated Mach-O")
+    return struct.unpack(fmt, data)
 
 
-def _thin_minimum(data, start):
-    (magic,) = _unpack("<I", data, start)
-    ncmds = _unpack("<I", data, start + 16)[0]
+def _thin_minimum(file, start):
+    (magic,) = _unpack(file, "<I", start)
+    ncmds = _unpack(file, "<I", start + 16)[0]
     offset = start + _THIN_MAGICS[magic]
     found = []
     for _ in range(ncmds):
-        cmd, size = _unpack("<2I", data, offset)
+        cmd, size = _unpack(file, "<2I", offset)
         needed = {_LC_BUILD_VERSION: 24, _LC_VERSION_MIN_MACOSX: 16}.get(cmd, 8)
         if size < needed:
             raise ValueError("malformed load command")
-        _unpack(f"{size}s", data, offset)  # the whole command must be present
+        _unpack(file, f"{size}s", offset)  # the whole command must be present
         if cmd == _LC_BUILD_VERSION:
-            platform, minos = _unpack("<2I", data, offset + 8)
+            platform, minos = _unpack(file, "<2I", offset + 8)
             if platform == _PLATFORM_MACOS:
                 found.append(_decode(minos))
         elif cmd == _LC_VERSION_MIN_MACOSX:
-            found.append(_decode(_unpack("<I", data, offset + 8)[0]))
+            found.append(_decode(_unpack(file, "<I", offset + 8)[0]))
         offset += size
     return max(found, default=None)
 
@@ -65,18 +69,17 @@ def minimum_versions(path):
         if len(head) < 8:
             return None
         if struct.unpack("<I", head[:4])[0] in _THIN_MAGICS:
-            return [_thin_minimum(head + f.read(), 0)]
+            return [_thin_minimum(f, 0)]
         magic, nfat = struct.unpack(">2I", head)
         # Java class files share 0xCAFEBABE; a real fat header has a handful of arches.
         if magic not in _FAT_MAGICS or not 0 < nfat < 32:
             return None
-        data = head + f.read()
-    fmt, size = _FAT_MAGICS[magic]
-    found = []
-    for i in range(nfat):
-        offset = _unpack(fmt, data, 8 + i * size)[2]
-        found.append(_thin_minimum(data, offset))
-    return found
+        fmt, size = _FAT_MAGICS[magic]
+        found = []
+        for i in range(nfat):
+            offset = _unpack(f, fmt, 8 + i * size)[2]
+            found.append(_thin_minimum(f, offset))
+        return found
 
 
 def find_problems(bundle, target):

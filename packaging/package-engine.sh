@@ -21,12 +21,14 @@ cd "$REPO_ROOT"
 # (e.g. the shared logic-utils checkout) with VENV=/path/to/.venv.
 VENV="${VENV:-$REPO_ROOT/.venv}"
 PY="$VENV/bin/python"
+source "$REPO_ROOT/packaging/build-python.sh"
 
 if [[ ! -x "$PY" ]]; then
   echo "error: no python at $PY. Create it with packaging/make-build-venv.sh, or set" >&2
   echo "       VENV=/path/to/.venv (a python-build-standalone venv from that script)." >&2
   exit 1
 fi
+validate_build_python "$PY" "$VENV"
 if ! "$PY" -c "import PyInstaller" 2>/dev/null; then
   echo "error: PyInstaller not installed in $VENV. Run: $PY -m pip install pyinstaller" >&2
   exit 1
