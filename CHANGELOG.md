@@ -5,6 +5,26 @@ focus on changes that affect editing work rather than internal implementation.
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-10-04
+
+- Choose an audio format when exporting: the Export and Export All buttons now
+  offer AIFF (with Logic word markers, as before), WAV (24-bit, 44.1 kHz
+  stereo), or M4A (AAC, tagged with artist, title, and word-timed lyrics).
+- The export review now lists the exact filenames that would collide with files
+  already in the destination folder, so you can see which clip names to fix.
+
+## [2.3.0] - 2026-09-14
+
+- New Playback Latency settings: correct the audio delay you hear on Bluetooth
+  headphones and speakers so the playhead lines up with the sound. The app
+  estimates the offset automatically and remembers a per-device adjustment you
+  can fine tune, and it now stops playback cleanly when the audio output changes.
+- Rejected cut suggestions now stay gone — dismissing a suggestion removes it
+  from the list instead of leaving it behind.
+- Accepted clips now move to the top of the slices panel and are revealed as
+  soon as you accept them.
+- The suggestions panel now remembers its scroll position.
+
 ## [2.2.0] - 2026-09-10
 
 - Edit words directly inside a clip: select and delete words from the transcript
