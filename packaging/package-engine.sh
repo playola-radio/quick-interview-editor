@@ -54,7 +54,7 @@ fi
 
 echo "==> Built: $ENGINE"
 du -sh "$REPO_ROOT/packaging/dist/logic-markers-engine" | awk '{print "    bundle size: " $1}'
-"$REPO_ROOT/packaging/check-macos-compat.sh" "$REPO_ROOT/packaging/dist/logic-markers-engine"
+"$PY" "$REPO_ROOT/packaging/check_macos_compat.py" "$REPO_ROOT/packaging/dist/logic-markers-engine"
 echo "==> Smoke test: engine responds to --help"
 "$ENGINE" --help >/dev/null && echo "    OK (--help)"
 echo

@@ -138,6 +138,7 @@ platform :mac do
     notes = "packaging/dist/release-notes-#{release_short}.md"
     sh("cd ../.. && ruby packaging/release_notes.rb extract CHANGELOG.md '#{release_short}' '#{notes}'")
 
+    sh("cd ../.. && packaging/make-build-venv.sh")
     sh("cd ../.. && packaging/package-engine.sh")
     sh("cd ../.. && packaging/package-cut-suggester.sh")
     sh("cd ../.. && packaging/build-app.sh")

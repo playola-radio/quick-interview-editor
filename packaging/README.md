@@ -32,12 +32,18 @@ CPython, created by `packaging/make-build-venv.sh` (default `.venv`, override wi
 `VENV=`). It installs `requirements.txt` + PyInstaller under
 `build-constraints.txt`, the exact versions the release ships.
 
-**Never freeze with Homebrew Python.** Homebrew builds its stdlib extensions for
-the build machine's macOS, so a bundle frozen on macOS 26 crashed on macOS 15 at
-`import pyexpat` (`Symbol not found: _XML_SetAllocTrackerActivationThreshold`
-from `/usr/lib/libexpat.1.dylib`). Both package scripts run
-`check-macos-compat.sh`, which fails the build if any bundled Mach-O needs a
-newer macOS than the app's `deploymentTarget` in `project.yml`.
+**Never freeze with Homebrew Python.** Homebrew's bottle was built against the
+macOS 26.4 SDK but declares macOS 26.0 as its minimum, and its `pyexpat` links the
+system `/usr/lib/libexpat.1.dylib`. Expat 2.7.2 functions only ship in macOS
+26.4's copy, so a bundle frozen with it crashed on macOS 26.2 (and anything
+older) at `import pyexpat` (`Symbol not found:
+_XML_SetAllocTrackerActivationThreshold`). python-build-standalone links expat,
+OpenSSL etc. statically and targets macOS 11. The release lane runs
+`make-build-venv.sh` (which refuses a venv on any other Python), and both package
+scripts run `check_macos_compat.py`, which fails the build if any bundled Mach-O
+declares a newer minimum macOS than the app's `deploymentTarget` in `project.yml`.
+A declared minimum can understate what a binary really needs (as Homebrew's did),
+so the venv requirement is the real guard and the check is a backstop.
 
 ### 1. Freeze the engine — `package-engine.sh`
 

@@ -79,7 +79,7 @@ if [[ "$TOP" != "$EXPECTED" ]]; then
   exit 1
 fi
 
-"$REPO_ROOT/packaging/check-macos-compat.sh" "$DIST_DIR"
+"$PY" "$REPO_ROOT/packaging/check_macos_compat.py" "$DIST_DIR"
 
 echo "==> Smoke test: helper responds to --help"
 "$HELPER" --help >/dev/null && echo "    OK (--help)"

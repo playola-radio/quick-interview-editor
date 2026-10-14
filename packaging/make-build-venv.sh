@@ -4,10 +4,9 @@
 #   packaging/make-build-venv.sh                 # → $REPO_ROOT/.venv
 #   VENV=/path/to/.venv packaging/make-build-venv.sh
 #
-# Never freeze with Homebrew Python: its stdlib extensions are built for the build
-# machine's macOS and crash on older Macs (see check-macos-compat.sh). The
-# python-build-standalone CPython targets macOS 11 and links expat/OpenSSL/etc.
-# statically, so the frozen helpers run on every macOS the app supports.
+# The release lane runs this before freezing; it refuses a venv on any other Python
+# and re-pins packages to build-constraints.txt. See packaging/README.md for why
+# Homebrew Python can't be used.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
