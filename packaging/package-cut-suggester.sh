@@ -11,7 +11,8 @@
 # This is a SMALL, fast build compared to package-engine.sh: the cutter's whole
 # runtime is CPython stdlib + the anthropic SDK (lazy-imported). No torch/whisperx.
 #
-# Requirements: a venv with `anthropic` + PyInstaller. Override with
+# Requirements: a python-build-standalone venv with `anthropic` + PyInstaller
+# (create it with packaging/make-build-venv.sh). Override with
 #   VENV=/path/to/.venv packaging/package-cut-suggester.sh
 #
 # Apple Silicon only.
@@ -24,12 +25,14 @@ cd "$REPO_ROOT"
 # VENV=/path/to/.venv (a venv with `anthropic` + PyInstaller).
 VENV="${VENV:-$REPO_ROOT/.venv}"
 PY="$VENV/bin/python"
+source "$REPO_ROOT/packaging/build-python.sh"
 
 if [[ ! -x "$PY" ]]; then
-  echo "error: no python at $PY. Set VENV=/path/to/.venv (a venv with anthropic +" >&2
-  echo "       PyInstaller), e.g. VENV=~/playola/logic-utils/.venv" >&2
+  echo "error: no python at $PY. Create it with packaging/make-build-venv.sh, or set" >&2
+  echo "       VENV=/path/to/.venv (a python-build-standalone venv from that script)." >&2
   exit 1
 fi
+validate_build_python "$PY" "$VENV"
 if ! "$PY" -c "import PyInstaller" 2>/dev/null; then
   echo "error: PyInstaller not installed in $VENV. Run: $PY -m pip install pyinstaller" >&2
   exit 1
@@ -77,6 +80,8 @@ if [[ "$TOP" != "$EXPECTED" ]]; then
   echo "        would collide with logic-markers-engine when merged into engine/)" >&2
   exit 1
 fi
+
+"$PY" "$REPO_ROOT/packaging/check_macos_compat.py" "$DIST_DIR"
 
 echo "==> Smoke test: helper responds to --help"
 "$HELPER" --help >/dev/null && echo "    OK (--help)"

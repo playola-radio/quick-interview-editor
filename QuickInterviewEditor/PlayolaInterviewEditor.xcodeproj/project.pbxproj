@@ -1511,7 +1511,7 @@
 			path = EditSlice;
 			sourceTree = "<group>";
 		};
-		"TEMP_7FAA7991-F1B3-45C5-A42D-9FE0E1A8D93C" /* Fixtures */ = {
+		"TEMP_BD031BCE-E125-4EC8-8988-D1E9115CDAC1" /* Fixtures */ = {
 			isa = PBXGroup;
 			children = (
 			);
@@ -2101,7 +2101,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 8;
+				CURRENT_PROJECT_VERSION = 9;
 				DEVELOPMENT_TEAM = FSRSPV9N9Q;
 				ENABLE_TESTABILITY = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -2110,7 +2110,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 2.4.0;
+				MARKETING_VERSION = 2.4.1;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-ObjC",
@@ -2144,7 +2144,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 8;
+				CURRENT_PROJECT_VERSION = 9;
 				DEVELOPMENT_TEAM = FSRSPV9N9Q;
 				ENABLE_TESTABILITY = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -2153,7 +2153,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 2.4.0;
+				MARKETING_VERSION = 2.4.1;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-ObjC",

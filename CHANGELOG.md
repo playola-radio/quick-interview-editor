@@ -5,6 +5,11 @@ focus on changes that affect editing work rather than internal implementation.
 
 ## [Unreleased]
 
+## [2.4.1] - 2026-10-14
+
+- Fixed transcription failing as soon as it started, with a "Symbol not found"
+  error, on Macs running anything older than macOS 26.4.
+
 ## [2.4.0] - 2026-10-04
 
 - Choose an audio format when exporting: the Export and Export All buttons now

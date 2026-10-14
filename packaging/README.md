@@ -25,11 +25,30 @@ the heavy `logic-markers-engine` (whisperx transcription) and the light
 `cut-suggester-engine` (the LLM cut-suggester). Build each with its own
 `package-*.sh`; `build-app.sh` embeds both.
 
+### 0. Create the build venv — `make-build-venv.sh`
+
+Both freezes must run from a venv on the pinned **python-build-standalone**
+CPython, created by `packaging/make-build-venv.sh` (default `.venv`, override with
+`VENV=`). It installs `requirements.txt` + PyInstaller under
+`build-constraints.txt`, the exact versions the release ships.
+
+**Never freeze with Homebrew Python.** Homebrew's bottle was built against the
+macOS 26.4 SDK but declares macOS 26.0 as its minimum, and its `pyexpat` links the
+system `/usr/lib/libexpat.1.dylib`. Expat 2.7.2 functions only ship in macOS
+26.4's copy, so a bundle frozen with it crashed on macOS 26.2 (and anything
+older) at `import pyexpat` (`Symbol not found:
+_XML_SetAllocTrackerActivationThreshold`). python-build-standalone links expat,
+OpenSSL etc. statically and targets macOS 11. The release lane runs
+`make-build-venv.sh` (which refuses a venv on any other Python), and both package
+scripts run `check_macos_compat.py`, which fails the build if any bundled Mach-O
+declares a newer minimum macOS than the app's `deploymentTarget` in `project.yml`.
+A declared minimum can understate what a binary really needs (as Homebrew's did),
+so the venv requirement is the real guard and the check is a backstop.
+
 ### 1. Freeze the engine — `package-engine.sh`
 
-Runs PyInstaller against `engine.spec` using a venv that has the engine deps +
-PyInstaller (`VENV=/path/to/.venv packaging/package-engine.sh`, default
-`~/playola/logic-utils/.venv`). Produces
+Runs PyInstaller against `engine.spec` using the build venv
+(`VENV=/path/to/.venv packaging/package-engine.sh`, default `.venv`). Produces
 `packaging/dist/logic-markers-engine/` (~850 MB): a `logic-markers-engine`
 executable + an `_internal/` tree of torch/ctranslate2/torchaudio native libs
 and package data.
@@ -387,6 +406,6 @@ notarization (roadmap decision 6):
   (`spctl --assess`) needs a real notarized build.
 - Intel (x86_64) builds, an Xcode Archive build phase for the engine, CI
   notarization secrets, and the licensing audit are Phase 6 concerns.
-- PyInstaller was chosen to retire risk fast; a `python-build-standalone`
-  relocatable venv may be a more robust final strategy (the resolution seam
-  makes swapping it a one-file change).
+- PyInstaller was chosen to retire risk fast; shipping the
+  `python-build-standalone` venv directly (no freeze) may be a more robust final
+  strategy (the resolution seam makes swapping it a one-file change).
