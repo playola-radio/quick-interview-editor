@@ -769,6 +769,22 @@ struct EditorGroupSelectionTests {
     expectNoDifference(model.timelineRemovals[id: existing.id], existing)
   }
 
+  @Test func cmdDragBackToFullyRemovedWordRestoresBaseSelection() {
+    let model = editor()
+    model.mutateDocument {
+      $0.timelineRemovals.append(
+        TimelineRemoval(
+          id: Fixtures.uuid(7), removedRange: 164_000..<167_000,
+          crossfade: Crossfade(lengthSamples: 48, curve: .equalPower)))
+    }
+    click(model, word: 2)
+    let base = model.selection
+
+    cmdDrag(model, from: 8, to: 8, through: [7])
+
+    expectNoDifference(model.selection, base)
+  }
+
   @Test func deletingAfterCmdDragRemovesEveryPieceInOneUndoStep() async {
     let model = editor()
     click(model, word: 2)

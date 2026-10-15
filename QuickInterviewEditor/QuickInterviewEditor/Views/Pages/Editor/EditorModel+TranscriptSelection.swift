@@ -222,6 +222,7 @@ extension EditorModel {
     }
     guard let run = sourceRange(coveringWords: anchorID, focusID) else { return }
     guard SliceRenderPlanBuilder.hasAudio(sliceRange: run, removals: Array(timelineRemovals)) else {
+      selection = base
       return
     }
     selection = base.adding(run.clamped(to: 0..<editPlan.source.durationSamples))
