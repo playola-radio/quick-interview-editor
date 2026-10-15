@@ -932,7 +932,7 @@ final class EditorModel: ViewModel {
       }
     }
     var items: [TranscriptResizeItem] = []
-    if !selectedWordIDs.isEmpty {
+    if selection.freeformRange != nil, !selectedWordIDs.isEmpty {
       items.append(.init(identity: .selection, wordOccurrences: ordered(selectedWordIDs)))
     }
     for object in visibleTranscriptObjects {
@@ -1070,7 +1070,7 @@ final class EditorModel: ViewModel {
 
   private func canBeginTranscriptResize(_ identity: TranscriptResizeItemIdentity) -> Bool {
     switch identity {
-    case .selection: true
+    case .selection: selection.freeformRange != nil
     case .clip: !isExporting && !hasUncommittedSliceEdit
     case .suggestion: !isExporting && !cutSuggestions.candidateActionsDisabled
     }

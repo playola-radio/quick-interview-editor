@@ -477,4 +477,24 @@ struct EditorSelectionTests {
     model.selection = .range(70648..<74176, anchor: 70648)
     expectNoDifference(model.waveformMultiSelectionRanges, [])
   }
+
+  @Test func multiSelectionHasNoTranscriptResizeSelectionItem() {
+    let model = editor()
+    model.selection = wordsTwoAndEight
+    #expect(!model.transcriptResizeItems.contains { $0.identity == .selection })
+  }
+
+  @Test func multiSelectionRefusesTranscriptResize() {
+    let model = editor()
+    model.selection = wordsTwoAndEight
+    #expect(!model.transcriptResizeBegan(.selection, .start))
+    expectNoDifference(model.selection, wordsTwoAndEight)
+  }
+
+  @Test func singleRangeKeepsTranscriptResizeSelectionItem() {
+    let model = editor()
+    model.selection = .range(70648..<74176, anchor: 70648)
+    #expect(model.transcriptResizeItems.contains { $0.identity == .selection })
+    #expect(model.transcriptResizeBegan(.selection, .start))
+  }
 }
