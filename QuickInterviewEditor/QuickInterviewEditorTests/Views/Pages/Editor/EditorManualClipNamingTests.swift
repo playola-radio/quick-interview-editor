@@ -309,6 +309,23 @@ struct EditorManualClipNamingTests {
     }
   }
 
+  @Test func deletedQueuedClipIsNotSentToTheHelper() async {
+    let gate = ClipNamingGate()
+    await run(gate: gate) {
+      let model = editor()
+      let first = markClip(model, 0, 3)
+      let second = markClip(model, 10, 13)
+      await gate.waitForRequests(1)
+      await model.deleteSlice(second.id)
+      gate.resolveNext(.spotlight)
+      await model.awaitClipNaming()
+
+      expectNoDifference(gate.requests.map(\.clipStartSample), [first.startSample])
+      expectNoDifference(model.slices[id: first.id]?.name, "Spotlight 1")
+      #expect(model.slices[id: second.id] == nil)
+    }
+  }
+
   @Test func renamedClipKeepsItsName() async {
     let gate = ClipNamingGate()
     await run(gate: gate) {

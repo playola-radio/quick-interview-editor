@@ -111,7 +111,7 @@ def test_prompt_carries_interview_artist_when_supplied():
     assert "User-provided interview artist" not in build_prompt(_request())
 
 
-def test_context_excludes_overlap_and_orders_nearest_first():
+def test_context_includes_boundary_crossing_units_and_orders_nearest_first():
     units = [
         _unit(1, 0, 1_000, "far before"),
         _unit(2, 8_000, 12_000, "overlaps the start"),
@@ -122,8 +122,11 @@ def test_context_excludes_overlap_and_orders_nearest_first():
     ]
     prompt = build_prompt(_request(transcript_units=units))
 
-    assert "overlaps the start" not in prompt and "overlaps the end" not in prompt
-    positions = [prompt.index(text) for text in ("near before", "near after", "far before", "far after")]
+    assert "overlaps the start [overlaps clip boundary]" in prompt
+    assert "overlaps the end [overlaps clip boundary]" in prompt
+    positions = [prompt.index(text) for text in (
+        "overlaps the start", "overlaps the end", "near before", "near after", "far before", "far after",
+    )]
     assert positions == sorted(positions)
 
 

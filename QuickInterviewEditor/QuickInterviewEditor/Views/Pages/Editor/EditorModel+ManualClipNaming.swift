@@ -144,6 +144,7 @@ extension EditorModel {
     guard let configuration = try? await suggestionConfiguration.load(),
       configuration.validationMessages().isEmpty
     else { return }
+    guard !Task.isCancelled, job.matches(documentState) else { return }
     let request = ClipNamingRequest(
       configuration: configuration, model: CutSuggestOptions.freshConfigured.model,
       clipText: job.clipText, clipStartSample: job.startSample, clipEndSample: job.endSample,

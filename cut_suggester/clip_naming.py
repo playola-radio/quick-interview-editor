@@ -50,17 +50,27 @@ def validate_clip_request(request: object) -> None:
 
 
 def _distance(unit: Mapping, start: int, end: int) -> int:
+    if unit["start_sample"] < end and unit["end_sample"] > start:
+        return 0
     return start - unit["end_sample"] if unit["end_sample"] <= start else unit["start_sample"] - end
 
 
 def _context_lines(units: Sequence[Mapping], start: int, end: int) -> list[str]:
-    outside = [u for u in units if u["end_sample"] <= start or u["start_sample"] >= end]
-    outside.sort(key=lambda u: (_distance(u, start, end), u["start_sample"], u["id"]))
+    context = [
+        u for u in units
+        if u["end_sample"] <= start or u["start_sample"] >= end
+        or u["start_sample"] < start < u["end_sample"]
+        or u["start_sample"] < end < u["end_sample"]
+    ]
+    context.sort(key=lambda u: (_distance(u, start, end), u["start_sample"], u["id"]))
     lines = []
-    for unit in outside:
+    for unit in context:
         speaker = unit.get("speaker_id")
         suffix = f" [speaker_id: {speaker}]" if isinstance(speaker, str) and _trim_foundation_whitespace(speaker) else ""
-        lines.append(f"[{unit['id']}] {unit['text'].strip()}{suffix}")
+        crosses_boundary = unit["start_sample"] < start < unit["end_sample"] \
+            or unit["start_sample"] < end < unit["end_sample"]
+        boundary_label = " [overlaps clip boundary]" if crosses_boundary else ""
+        lines.append(f"[{unit['id']}] {unit['text'].strip()}{boundary_label}{suffix}")
     return lines
 
 
