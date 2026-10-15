@@ -920,6 +920,7 @@ final class EditorModel: ViewModel {
   /// Resize handles follow the same full geometry and foreground ordering as the text bands.
   /// Freeform selection edges take priority, followed by the selected object.
   var transcriptResizeItems: [TranscriptResizeItem] {
+    if case .ranges = selection { return [] }
     // Index every transcript position of each word ID ONCE, then order each item by gathering its
     // IDs' positions + sort — O(n) once plus O(m log m) per item — instead of a full O(n)
     // `order.filter` per item. On a long transcript with many clips/suggestions this per-item full
@@ -1072,7 +1073,8 @@ final class EditorModel: ViewModel {
   }
 
   private func canBeginTranscriptResize(_ identity: TranscriptResizeItemIdentity) -> Bool {
-    switch identity {
+    if case .ranges = selection { return false }
+    return switch identity {
     case .selection: selection.freeformRange != nil
     case .clip: !isExporting && !hasUncommittedSliceEdit
     case .suggestion: !isExporting && !cutSuggestions.candidateActionsDisabled

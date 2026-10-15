@@ -379,6 +379,11 @@ struct EditorSelectionTests {
     expectNoDifference(start.adding(107736..<119202), start)
   }
 
+  @Test func addingPartiallyOverlappingPieceMergesIntoIt() {
+    let selection = EditorSelection.range(100..<200, anchor: 100).adding(150..<250)
+    expectNoDifference(selection, .range(100..<250, anchor: 100))
+  }
+
   @Test func addingAbuttingPieceMergesAndDemotesToRange() {
     let selection = EditorSelection.range(74176..<77704, anchor: 74176).adding(70648..<74176)
     expectNoDifference(selection, .range(70648..<77704, anchor: 70648))
@@ -496,5 +501,39 @@ struct EditorSelectionTests {
     model.selection = .range(70648..<74176, anchor: 70648)
     #expect(model.transcriptResizeItems.contains { $0.identity == .selection })
     #expect(model.transcriptResizeBegan(.selection, .start))
+  }
+
+  // MARK: - Resize handles during a multi-piece selection
+
+  private func clipAndMultiSelection() -> (EditorModel, UUID) {
+    let clipID = Fixtures.uuid(1)
+    let model = EditorModel(
+      sourceURL: URL(fileURLWithPath: "/clip.m4a"),
+      canonicalAudioURL: Fixtures.canonicalAudioURL,
+      editPlan: Fixtures.editPlan(),
+      initialDocument: EditorDocumentState(
+        slices: [
+          Slice(
+            id: clipID, name: "A story", startSample: 54772, endSample: 74176,
+            wordIDs: [1, 2], snippet: "So a")
+        ]))
+    return (model, clipID)
+  }
+
+  @Test func multiRangeSelectionHidesEveryResizeItem() {
+    let (model, clipID) = clipAndMultiSelection()
+    model.selection = .ranges(
+      MultiRangeSelection(primary: 70648..<74176, anchor: 70648, additional: [164228..<166874]))
+    expectNoDifference(model.transcriptResizeItems, [])
+    let slicesBefore = model.slices
+    expectNoDifference(model.transcriptResizeBegan(.clip(clipID), .end), false)
+    expectNoDifference(model.transcriptResizeDraft, nil)
+    expectNoDifference(model.slices, slicesBefore)
+  }
+
+  @Test func singleRangeSelectionStillShowsClipResizeItems() {
+    let (model, clipID) = clipAndMultiSelection()
+    model.selection = .range(164228..<166874, anchor: 164228)
+    #expect(model.transcriptResizeItems.contains { $0.identity == .clip(clipID) })
   }
 }

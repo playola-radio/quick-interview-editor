@@ -519,12 +519,11 @@ struct EditorGroupSelectionTests {
     expectNoDifference(model.selection, wordsTwoAndEight)
   }
 
-  @Test func cmdClickWordPartlyInsideRangeIsNoOp() {
+  @Test func cmdClickWordPartlyInsideRangeExtendsPiece() {
     let model = editor()
     model.selectSourceRange(70648..<110_000, snapPlayhead: false, origin: .transcript)
-    let before = model.selection
     cmdClick(model, word: 4, time: 3)
-    expectNoDifference(model.selection, before)
+    expectNoDifference(model.selection, .range(70648..<119202, anchor: 70648))
   }
 
   @Test func cmdClickFullyRemovedWordIsNoOp() {

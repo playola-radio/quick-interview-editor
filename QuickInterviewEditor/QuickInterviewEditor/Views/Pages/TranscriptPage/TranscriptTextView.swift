@@ -653,13 +653,7 @@ final class HitTestingTextView: NSTextView {
         additive: additiveClick, clickCount: count, timestamp: event.timestamp,
         doubleClickInterval: NSEvent.doubleClickInterval)
     case .dragEnded:
-      if additiveClick {
-        coordinator.model.transcriptClicked(
-          atUTF16Offset: anchorOffset, extending: false, additive: true, clickCount: 1,
-          timestamp: event.timestamp, doubleClickInterval: NSEvent.doubleClickInterval)
-      } else {
-        coordinator.model.transcriptDragEnded()
-      }
+      if !additiveClick { coordinator.model.transcriptDragEnded() }
     case .none: break
     }
   }

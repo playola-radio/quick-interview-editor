@@ -33,8 +33,9 @@ enum EditorSelection: Equatable, Sendable {
     }
   }
 
-  /// Cmd-click: adds `piece` to a `.range`/`.ranges` selection. Add-only — a piece overlapping a
-  /// selected piece is a no-op. Other selections are returned unchanged.
+  /// Cmd-click: adds `piece` to a `.range`/`.ranges` selection. Add-only — a piece fully inside a
+  /// selected piece is a no-op; a partial overlap extends that piece. Other selections are
+  /// returned unchanged.
   func adding(_ piece: Range<Int>) -> EditorSelection {
     let primary: Range<Int>
     let anchor: Int
@@ -47,9 +48,10 @@ enum EditorSelection: Equatable, Sendable {
     case .none, .object, .seam:
       return self
     }
-    guard !piece.isEmpty, !([primary] + others).contains(where: { $0.overlaps(piece) }) else {
-      return self
+    let isContained = ([primary] + others).contains {
+      $0.lowerBound <= piece.lowerBound && piece.upperBound <= $0.upperBound
     }
+    guard !piece.isEmpty, !isContained else { return self }
     return Self.normalized(primary: primary, anchor: anchor, pieces: others + [piece])
   }
 

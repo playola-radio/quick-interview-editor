@@ -15,6 +15,7 @@ final class TranscriptResizeHandleOverlayView: NSView {
   private var downPoint: NSPoint?
   private var didBeginResize = false
   private var additiveClick = false
+  private var pointer = TranscriptPointerGesture()
   private var trackingArea: NSTrackingArea?
 
   override var isFlipped: Bool { true }
@@ -57,9 +58,11 @@ final class TranscriptResizeHandleOverlayView: NSView {
     downPoint = point
     didBeginResize = false
     additiveClick = event.modifierFlags.contains(.command)
+    pointer.began(at: event.locationInWindow)
   }
 
   override func mouseDragged(with event: NSEvent) {
+    _ = pointer.moved(to: event.locationInWindow)
     guard !additiveClick, let handle = activeHandle, let down = downPoint, let coordinator else {
       return
     }
@@ -80,9 +83,10 @@ final class TranscriptResizeHandleOverlayView: NSView {
   }
 
   override func mouseUp(with event: NSEvent) {
+    let additiveDrag = additiveClick && pointer.ended(clickCount: event.clickCount) == .dragEnded
     if didBeginResize {
       coordinator?.model.transcriptResizeEnded()
-    } else if let coordinator, let down = downPoint,
+    } else if !additiveDrag, let coordinator, let down = downPoint,
       let offset = coordinator.utf16Offset(at: down)
     {
       coordinator.model.transcriptClicked(
@@ -95,6 +99,7 @@ final class TranscriptResizeHandleOverlayView: NSView {
     downPoint = nil
     didBeginResize = false
     additiveClick = false
+    pointer.cancelled()
   }
 
   override func viewWillMove(toWindow newWindow: NSWindow?) {
@@ -104,6 +109,9 @@ final class TranscriptResizeHandleOverlayView: NSView {
       didBeginResize = false
       activeHandle = nil
     }
-    if newWindow == nil { additiveClick = false }
+    if newWindow == nil {
+      additiveClick = false
+      pointer.cancelled()
+    }
   }
 }
