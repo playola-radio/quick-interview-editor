@@ -5,6 +5,7 @@ import sys
 import wave
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from logic_markers import aiff_markers
@@ -25,6 +26,20 @@ def _write_wav(path: Path, seconds=0.5, sr=16000):
         w.setsampwidth(2)
         w.setframerate(sr)
         w.writeframes(b"\x00\x00" * n)  # silence is fine; alignment is pre-seeded
+
+
+def _write_tone_wav(path: Path, sr=16000):
+    def tone(seconds):
+        n = round(seconds * sr)
+        return 0.4 * np.sin(2 * np.pi * 200.0 * np.arange(n) / sr)
+
+    quiet = lambda seconds: np.zeros(round(seconds * sr))
+    sig = np.concatenate([quiet(0.2), tone(0.4), quiet(0.4), tone(0.4), quiet(0.2)])
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(sr)
+        w.writeframes((sig * 32767).astype("<i2").tobytes())
 
 
 def _seed_transcript(cache: Path):
@@ -117,11 +132,11 @@ def test_plan_cache_hit_skips_to_finalizing_phase(tmp_path):
     assert events[0]["phase_index"] == 3
 
 
-def _run_plan_seeded(tmp_path: Path, words):
+def _run_plan_seeded(tmp_path: Path, words, write_wav=_write_wav):
     src_dir = tmp_path / "src"
     src_dir.mkdir()
     src = src_dir / "clip.wav"
-    _write_wav(src)
+    write_wav(src)
     work = tmp_path / "work"
     work.mkdir()
     transcript = Transcript(
@@ -151,3 +166,15 @@ def test_plan_clamps_trailing_word_end_to_duration(tmp_path):
     assert last["end_sample"] is not None
     assert last["end_sample"] <= duration
     assert last["start_sample"] <= last["end_sample"]
+
+
+def test_plan_word_samples_are_refined_to_the_audio(tmp_path):
+    # tone 0.2-0.6s, silence 0.6-1.0s, tone 1.0-1.4s; the seeded edges are loose
+    plan = _run_plan_seeded(tmp_path, [
+        Word(id=1, text="hello", start=0.2, end=0.5),
+        Word(id=2, text="world", start=1.1, end=1.4),
+    ], write_wav=_write_tone_wav)
+    sr = plan["source"]["sample_rate"]
+    first, second = plan["words"]
+    assert first["end_sample"] == pytest.approx(0.61 * sr, abs=0.02 * sr)
+    assert second["start_sample"] == pytest.approx(0.99 * sr, abs=0.02 * sr)

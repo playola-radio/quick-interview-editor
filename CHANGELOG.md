@@ -5,6 +5,10 @@ focus on changes that affect editing work rather than internal implementation.
 
 ## [Unreleased]
 
+- Word edges now line up with the audio in newly transcribed interviews:
+  deleting a single word no longer leaves part of it behind or clips the start
+  of the next word. Projects you already edited keep their existing word edges.
+
 ## [2.5.0] - 2026-10-16
 
 - Delete several words at once: Cmd-click words, or Cmd-drag across a run of
