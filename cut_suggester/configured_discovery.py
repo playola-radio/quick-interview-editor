@@ -82,6 +82,21 @@ def _validated_run_id(run_id: object) -> uuid.UUID:
     raise DiscoveryError("run_id must be a UUID")
 
 
+FOCUSED_INTRO_RULE = (
+    "For Intro, require one specific artist or one specific song as the clear central subject of the "
+    "entire clip. A listener should naturally expect that song or music by that artist next. "
+    "No immediate musical handoff or exact song title is required; artist-only commentary and "
+    "self-referential discussion of one song can qualify. Reject general discussion of the industry, "
+    "a genre, a personal story, or influences when artist names are only incidental examples. "
+    "Roundups and comparisons with two or more coequal artists or songs belong in Spotlights. "
+    "Do not pick one recognizable name from a list to manufacture an Intro. A secondary comparison "
+    "is allowed when one subject clearly dominates. Do not count names mechanically; count central subjects. "
+    "The interview subject's identity alone is not subject evidence. Preserve complete useful thoughts "
+    "and reject isolated names or acknowledgments. Within this single-subject requirement, the "
+    "configured guidelines control which commentary is useful for Intro.\n"
+)
+
+
 def _prompt(sentences: list[Sentence], types: dict[str, str], start: int, end: int,
             *, discovery_prompt_version: str = "configured-v1") -> str:
     type_lines = "\n".join(f"- {type_id}: {guidance}" for type_id, guidance in types.items())
@@ -126,19 +141,7 @@ def _prompt(sentences: list[Sentence], types: dict[str, str], start: int, end: i
             "The configured guidelines control which commentary is useful for the requested Intro type.\n"
         )
         if discovery_prompt_version == FOCUSED_INTRO_DISCOVERY_VERSION:
-            intro_rule = (
-                "For Intro, require one specific artist or one specific song as the clear central subject of the "
-                "entire clip. A listener should naturally expect that song or music by that artist next. "
-                "No immediate musical handoff or exact song title is required; artist-only commentary and "
-                "self-referential discussion of one song can qualify. Reject general discussion of the industry, "
-                "a genre, a personal story, or influences when artist names are only incidental examples. "
-                "Roundups and comparisons with two or more coequal artists or songs belong in Spotlights. "
-                "Do not pick one recognizable name from a list to manufacture an Intro. A secondary comparison "
-                "is allowed when one subject clearly dominates. Do not count names mechanically; count central subjects. "
-                "The interview subject's identity alone is not subject evidence. Preserve complete useful thoughts "
-                "and reject isolated names or acknowledgments. Within this single-subject requirement, the "
-                "configured guidelines control which commentary is useful for Intro.\n"
-            )
+            intro_rule = FOCUSED_INTRO_RULE
     return f"""{heading}
 
 Configured types and guidelines:

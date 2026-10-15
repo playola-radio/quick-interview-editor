@@ -25,6 +25,33 @@ _IMMUTABLE_KEYS = ('schema_version', 'run_id', 'transcript_hash', 'source_finger
                    'transcript_units', 'configuration')
 
 
+def validate_transcript_units(units: object) -> None:
+    if not isinstance(units, list):
+        raise ValueError('transcript_units must be an array')
+    seen = set()
+    for unit in units:
+        if not isinstance(unit, dict):
+            raise ValueError('transcript unit must be an object')
+        for name in ('id', 'start_sample', 'end_sample'):
+            if type(unit.get(name)) is not int or unit[name] < 0:
+                raise ValueError(f'transcript unit {name} must be a nonnegative integer')
+        if unit['id'] in seen:
+            raise ValueError('duplicate transcript unit id')
+        seen.add(unit['id'])
+        if not isinstance(unit.get('text'), str) or not unit['text'].strip():
+            raise ValueError('transcript unit has empty text')
+        if not isinstance(unit.get('word_ids'), list) or not unit['word_ids'] or any(type(w) is not int or w < 0 for w in unit['word_ids']):
+            raise ValueError('transcript unit must have integer word_ids')
+        for name in ('start_sec', 'end_sec'):
+            value = unit.get(name)
+            if type(value) not in (int, float) or not math.isfinite(value) or value < 0:
+                raise ValueError(f'transcript unit {name} must be a finite nonnegative number')
+        if unit['end_sample'] < unit['start_sample'] or unit['end_sec'] < unit['start_sec']:
+            raise ValueError('transcript unit has reversed bounds')
+        if unit.get('speaker_id') is not None and not isinstance(unit['speaker_id'], str):
+            raise ValueError('speaker_id must be a string or null')
+
+
 def validate_request(request: object) -> None:
     if not isinstance(request, dict):
         raise ValueError('request must be an object')
@@ -59,28 +86,7 @@ def validate_request(request: object) -> None:
     units = request.get('transcript_units')
     if not isinstance(units, list) or not units:
         raise ValueError('request has no transcript_units to analyze')
-    seen = set()
-    for unit in units:
-        if not isinstance(unit, dict):
-            raise ValueError('transcript unit must be an object')
-        for name in ('id', 'start_sample', 'end_sample'):
-            if type(unit.get(name)) is not int or unit[name] < 0:
-                raise ValueError(f'transcript unit {name} must be a nonnegative integer')
-        if unit['id'] in seen:
-            raise ValueError('duplicate transcript unit id')
-        seen.add(unit['id'])
-        if not isinstance(unit.get('text'), str) or not unit['text'].strip():
-            raise ValueError('transcript unit has empty text')
-        if not isinstance(unit.get('word_ids'), list) or not unit['word_ids'] or any(type(w) is not int or w < 0 for w in unit['word_ids']):
-            raise ValueError('transcript unit must have integer word_ids')
-        for name in ('start_sec', 'end_sec'):
-            value = unit.get(name)
-            if type(value) not in (int, float) or not math.isfinite(value) or value < 0:
-                raise ValueError(f'transcript unit {name} must be a finite nonnegative number')
-        if unit['end_sample'] < unit['start_sample'] or unit['end_sec'] < unit['start_sec']:
-            raise ValueError('transcript unit has reversed bounds')
-        if unit.get('speaker_id') is not None and not isinstance(unit['speaker_id'], str):
-            raise ValueError('speaker_id must be a string or null')
+    validate_transcript_units(units)
     canonical_json(immutable_request(request))
 
 
