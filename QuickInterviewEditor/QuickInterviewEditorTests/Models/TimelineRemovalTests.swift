@@ -32,6 +32,15 @@ struct TimelineRemovalTests {
   @Test func normalizeEmptyIsEmpty() {
     expectNoDifference(TimelineRemovals.normalize([]), [])
   }
+
+  @Test func mergingTouchingSortsAndMergesOverlapAndAbutment() {
+    let merged = [50..<60, 10..<20, 20..<30, 25..<40].mergingTouching()
+    expectNoDifference(merged, [10..<40, 50..<60])
+  }
+
+  @Test func mergingTouchingKeepsGappedRangesApart() {
+    expectNoDifference([30..<40, 10..<20].mergingTouching(), [10..<20, 30..<40])
+  }
 }
 
 struct CrossfadeDecodingTests {

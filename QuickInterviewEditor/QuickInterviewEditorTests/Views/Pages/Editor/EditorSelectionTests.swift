@@ -363,4 +363,59 @@ struct EditorSelectionTests {
     model.addSliceTapped()
     expectNoDifference(model.slices.last?.wordIDs, wordIDs(anyOverlap: range, words: words))
   }
+
+  // MARK: - Multi-range selection
+
+  @Test func addingDisjointPieceToRangeMakesRanges() {
+    let selection = EditorSelection.range(70648..<74176, anchor: 70648).adding(164228..<166874)
+    expectNoDifference(
+      selection,
+      .ranges(
+        MultiRangeSelection(primary: 70648..<74176, anchor: 70648, additional: [164228..<166874])))
+  }
+
+  @Test func addingOverlappingPieceIsNoOp() {
+    let start = EditorSelection.range(70648..<119202, anchor: 70648)
+    expectNoDifference(start.adding(107736..<119202), start)
+  }
+
+  @Test func addingAbuttingPieceMergesAndDemotesToRange() {
+    let selection = EditorSelection.range(74176..<77704, anchor: 74176).adding(70648..<74176)
+    expectNoDifference(selection, .range(70648..<77704, anchor: 70648))
+  }
+
+  @Test func addingPieceThatBridgesTwoPiecesKeepsPrimaryIdentity() {
+    let multi = EditorSelection.ranges(
+      MultiRangeSelection(primary: 100..<200, anchor: 200, additional: [300..<400, 900..<950]))
+    expectNoDifference(
+      multi.adding(200..<300),
+      .ranges(MultiRangeSelection(primary: 100..<400, anchor: 100, additional: [900..<950])))
+  }
+
+  @Test func addingFromNonRangeSelectionIsNoOp() {
+    expectNoDifference(EditorSelection.none.adding(10..<20), .none)
+    expectNoDifference(
+      EditorSelection.seam(Fixtures.uuid(1)).adding(10..<20), .seam(Fixtures.uuid(1)))
+  }
+
+  @Test func selectedRangesListsEveryPieceInOrder() {
+    let multi = EditorSelection.ranges(
+      MultiRangeSelection(primary: 500..<600, anchor: 500, additional: [100..<200]))
+    expectNoDifference(multi.selectedRanges, [100..<200, 500..<600])
+    expectNoDifference(EditorSelection.range(1..<2, anchor: 1).selectedRanges, [1..<2])
+    expectNoDifference(EditorSelection.none.selectedRanges, [])
+  }
+
+  @Test func freeformRangeIsNilForMultiSelection() {
+    let multi = EditorSelection.ranges(
+      MultiRangeSelection(primary: 500..<600, anchor: 500, additional: [100..<200]))
+    #expect(multi.freeformRange == nil)
+  }
+
+  @Test func selectionAnchorSampleReadsMultiAnchor() {
+    let model = editor()
+    model.selection = .ranges(
+      MultiRangeSelection(primary: 70648..<74176, anchor: 74176, additional: [164228..<166874]))
+    expectNoDifference(model.selectionAnchorSample, 74176)
+  }
 }

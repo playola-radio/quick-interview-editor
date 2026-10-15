@@ -401,4 +401,15 @@ struct EditorSelectionHistoryTests {
     started.continuation.finish()
     released.continuation.finish()
   }
+
+  @Test func undoOfClearRestoresMultiSelection() async {
+    let model = editor()
+    let multi = EditorSelection.ranges(
+      MultiRangeSelection(primary: 70648..<74176, anchor: 70648, additional: [164228..<166874]))
+    model.selection = multi
+    model.clearSelectionTapped()
+    expectNoDifference(model.selection, .none)
+    await model.undoTapped()
+    expectNoDifference(model.selection, multi)
+  }
 }

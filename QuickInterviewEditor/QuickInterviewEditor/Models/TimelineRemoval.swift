@@ -63,3 +63,18 @@ enum TimelineRemovals {
     return sorted
   }
 }
+
+extension Array where Element == Range<Int> {
+  /// Sorted by lower bound, with overlapping or abutting ranges merged.
+  func mergingTouching() -> [Range<Int>] {
+    var merged: [Range<Int>] = []
+    for range in sorted(by: { $0.lowerBound < $1.lowerBound }) {
+      if let last = merged.last, range.lowerBound <= last.upperBound {
+        merged[merged.count - 1] = last.lowerBound..<Swift.max(last.upperBound, range.upperBound)
+      } else {
+        merged.append(range)
+      }
+    }
+    return merged
+  }
+}

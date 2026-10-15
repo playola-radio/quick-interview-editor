@@ -662,8 +662,11 @@ final class EditorModel: ViewModel {
 
   var selectionAnchorSample: Int? {
     get {
-      if case .range(_, let anchor) = selection { return anchor }
-      return selectedTranscriptObject?.range.lowerBound
+      switch selection {
+      case .range(_, let anchor): return anchor
+      case .ranges(let multi): return multi.anchor
+      case .none, .object, .seam: return selectedTranscriptObject?.range.lowerBound
+      }
     }
     set {
       guard case .range(let range, _) = selection else { return }

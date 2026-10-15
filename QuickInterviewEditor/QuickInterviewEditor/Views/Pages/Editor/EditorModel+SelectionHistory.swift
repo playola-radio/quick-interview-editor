@@ -30,7 +30,7 @@ extension EditorModel {
         $0.cutSuggestions[id: id] = nil
       }
       await reconcilePlayback()
-    case .range:
+    case .range, .ranges:
       await removeSelectedSectionTapped()
     case .seam(let id):
       mutateDocument(selectionAfter: EditorSelection.none, label: "Restore Removed Audio") {
@@ -95,9 +95,23 @@ extension EditorModel {
       if timelineRemovals[id: id] == nil { clearSelection() }
     case .range(let range, let anchor):
       reconcileFreeformRange(range, anchor: anchor)
+    case .ranges(let multi):
+      reconcileMultiRange(multi)
     case .none: break
     }
   }
+  private func reconcileMultiRange(_ multi: MultiRangeSelection) {
+    let source = 0..<editPlan.source.durationSamples
+    let primary = multi.primary.clamped(to: source)
+    guard !primary.isEmpty else {
+      clearSelection()
+      return
+    }
+    selection = EditorSelection.normalized(
+      primary: primary, anchor: multi.anchor,
+      pieces: multi.additional.map { $0.clamped(to: source) }.filter { !$0.isEmpty })
+  }
+
   private func reconcileFreeformRange(_ range: Range<Int>, anchor: Int) {
     let lower = max(0, range.lowerBound)
     let upper = min(editPlan.source.durationSamples, range.upperBound)
