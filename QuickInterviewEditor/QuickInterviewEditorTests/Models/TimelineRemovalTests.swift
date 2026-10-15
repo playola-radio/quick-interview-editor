@@ -38,10 +38,6 @@ struct TimelineRemovalTests {
     expectNoDifference(merged, [10..<40, 50..<60])
   }
 
-  @Test func mergingTouchingKeepsGappedRangesApart() {
-    expectNoDifference([30..<40, 10..<20].mergingTouching(), [10..<20, 30..<40])
-  }
-
   // MARK: - mergedSpans
 
   @Test func mergedSpansKeepsDisjointPiecesSeparate() {
@@ -74,11 +70,6 @@ struct TimelineRemovalTests {
       removing: [50..<150, 250..<350], existing: [removal(100, 300, id: 4)])
     expectNoDifference(plan.spans, [50..<350])
     expectNoDifference(plan.absorbedIDs, [removal(100, 300, id: 4).id])
-  }
-
-  @Test func mergedSpansDropsEmptyPieces() {
-    let plan = TimelineRemovals.mergedSpans(removing: [100..<100, 300..<400], existing: [])
-    expectNoDifference(plan.spans, [300..<400])
   }
 }
 

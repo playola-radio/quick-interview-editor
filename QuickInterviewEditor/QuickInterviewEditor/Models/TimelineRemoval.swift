@@ -71,7 +71,7 @@ enum TimelineRemovals {
   ) -> (spans: [Range<Int>], absorbedIDs: Set<TimelineRemoval.ID>) {
     // Single-pass absorption relies on existing removals being pairwise non-overlapping (the normalize invariant).
     var absorbedIDs: Set<TimelineRemoval.ID> = []
-    let extended = ranges.filter { !$0.isEmpty }.mergingTouching().map { piece in
+    let extended = ranges.mergingTouching().map { piece in
       let absorbed = existing.filter { $0.removedRange.overlaps(piece) }
       absorbedIDs.formUnion(absorbed.map(\.id))
       return absorbed.reduce(piece) { hull, removal in
