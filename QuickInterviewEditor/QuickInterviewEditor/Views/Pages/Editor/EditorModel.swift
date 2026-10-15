@@ -412,6 +412,9 @@ final class EditorModel: ViewModel {
   var exportReview: ExportReviewModel?
   @ObservationIgnored private var exportSession: ExportReviewModel?
   var destinationURL: URL?
+  /// The folder the last export actually wrote to — `destinationURL`, or the interview-artist
+  /// subfolder inside it for an "Export all".
+  private(set) var exportFolderURL: URL?
   /// Which pane the right column shows. The clips list and the cut-suggester share the
   /// column so accepting a suggestion visibly lands a clip in the Slices tab.
   var rightPanelTab: RightPanelTab = .slices
@@ -1291,7 +1294,7 @@ final class EditorModel: ViewModel {
       return "Review filenames — \(current) of \(total) exported."
     case .done(let count):
       let clips = count == 1 ? "clip" : "clips"
-      let location = destinationURL.map { " to \($0.lastPathComponent)" } ?? ""
+      let location = exportFolderURL.map { " to \($0.lastPathComponent)" } ?? ""
       return "Exported \(count) \(clips)\(location)."
     case .failed(let message):
       return message
@@ -3909,7 +3912,7 @@ final class EditorModel: ViewModel {
     let targets = slices.filter(sliceIsExportable)
     guard !targets.isEmpty else { return }
     lastExportSkippedRemovedNames = slices.filter { !sliceIsExportable($0) }.map(\.name)
-    startExport(Array(targets), format: format)
+    startExport(Array(targets), format: format, intoArtistFolder: true)
   }
 
   func cancelExportTapped() {
@@ -4020,7 +4023,9 @@ final class EditorModel: ViewModel {
     FileManager.default.fileExists(atPath: canonicalAudioURL.path)
   }
 
-  private func startExport(_ targets: [Slice], format: ExportAudioFormat) {
+  private func startExport(
+    _ targets: [Slice], format: ExportAudioFormat, intoArtistFolder: Bool = false
+  ) {
     guard format == .aiff || (1...2).contains(editPlan.source.channels) else {
       exportPhase = .failed(
         "WAV and M4A export support mono or stereo recordings. Export as AIFF instead.")
@@ -4041,8 +4046,10 @@ final class EditorModel: ViewModel {
     // mid-picker exporting as a 0-frame file "successfully").
     let removals = Array(timelineRemovals)
     let artist = interviewArtist?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    let folderName = intoArtistFolder ? exportFolderName(artist: artist) : nil
     exportTask = Task {
-      await performExport(targets, removals: removals, format: format, artist: artist)
+      await performExport(
+        targets, removals: removals, format: format, artist: artist, folderName: folderName)
     }
   }
 
@@ -4068,9 +4075,12 @@ final class EditorModel: ViewModel {
   /// `removals` — the snapshot taken at the tap that passed the export gate), so a removal is
   /// rendered out rather than silently shipped.
   private func performExport(
-    _ targets: [Slice], removals: [TimelineRemoval], format: ExportAudioFormat, artist: String
+    _ targets: [Slice], removals: [TimelineRemoval], format: ExportAudioFormat, artist: String,
+    folderName: String?
   ) async {
-    guard let destination = await exportDestination() else { return }
+    guard let chosen = await exportDestination() else { return }
+    let destination =
+      folderName.map { chosen.appendingPathComponent($0, isDirectory: true) } ?? chosen
     guard !Task.isCancelled else {
       exportPhase = .failed(cancelMessage(copied: 0, total: targets.count))
       return
@@ -4103,6 +4113,8 @@ final class EditorModel: ViewModel {
         return
       }
       if format == .aiff { try await engine.injectMarkers(rendered.injectionFiles) }
+      try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+      exportFolderURL = destination
       await finishExport(
         targets: targets, outputsByID: rendered.outputsByID,
         scratchDir: scratchDir, destination: destination, format: format)
