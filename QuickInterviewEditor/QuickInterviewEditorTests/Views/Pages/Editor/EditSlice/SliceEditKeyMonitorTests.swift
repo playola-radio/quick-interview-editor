@@ -65,6 +65,8 @@ struct SliceEditKeyMonitorTests {
     expectNoDifference(key(123, .command), .zoom(.zoomOut))  // ⌘←
     expectNoDifference(key(124, .command), .zoom(.zoomIn))  // ⌘→
     expectNoDifference(key(6, [], characters: "z"), .zoom(.zoomFit))  // Z
+    expectNoDifference(key(125, .command), .zoom(.verticalZoomIn))  // ⌘↓
+    expectNoDifference(key(126, .command), .zoom(.verticalZoomOut))  // ⌘↑
   }
 
   @Test func plainDeleteKeepsScopedRemovalDespiteMainSelectionDelete() {

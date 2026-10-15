@@ -86,6 +86,21 @@ struct WaveformViewportTests {
     expectNoDifference(result.visibleStartSample, 2500)
   }
 
+  @Test func zoomCenteredOnSamplePutsThatSampleAtViewportCenter() {
+    let result = WaveformViewport.zoom(
+      by: 0.5, centeredOn: 300_000, viewportWidth: 1000, axis: 0..<1_000_000,
+      samplesPerPixel: 100)
+    expectNoDifference(result.samplesPerPixel, 50)
+    expectNoDifference(result.visibleStartSample, 275_000)
+  }
+
+  @Test func zoomCenteredOnSampleClampsAtAxisStart() {
+    let result = WaveformViewport.zoom(
+      by: 0.5, centeredOn: 1_000, viewportWidth: 1000, axis: 0..<1_000_000,
+      samplesPerPixel: 100)
+    expectNoDifference(result.visibleStartSample, 0)
+  }
+
   // MARK: - Pan
 
   @Test func panByPixelsMovesByPixelsTimesSamplesPerPixel() {

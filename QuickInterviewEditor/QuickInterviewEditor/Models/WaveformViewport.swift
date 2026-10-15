@@ -83,7 +83,17 @@ enum WaveformViewport {
   ) -> (samplesPerPixel: Double, visibleStartSample: Int) {
     let visibleCount = visibleSampleCount(
       viewportWidth: viewportWidth, samplesPerPixel: samplesPerPixel)
-    let center = visibleStartSample + visibleCount / 2
+    return zoom(
+      by: factor, centeredOn: visibleStartSample + visibleCount / 2, viewportWidth: viewportWidth,
+      axis: axis, samplesPerPixel: samplesPerPixel)
+  }
+
+  /// Multiplies `samplesPerPixel` by `factor`, then centers the viewport on `center` (clamped
+  /// into the axis, so a sample near either end can't be centered exactly).
+  static func zoom(
+    by factor: Double, centeredOn center: Int, viewportWidth: CGFloat, axis: Range<Int>,
+    samplesPerPixel: Double
+  ) -> (samplesPerPixel: Double, visibleStartSample: Int) {
     let newSamplesPerPixel = clampedSamplesPerPixel(
       samplesPerPixel * factor, viewportWidth: viewportWidth, axis: axis)
     let newVisibleCount = visibleSampleCount(

@@ -10,6 +10,9 @@ enum EditorKey {
   case zoomIn
   case zoomOut
   case zoomFit
+  /// ⌘↓ / ⌘↑ — Logic's Zoom Vertical In / Out, mapped to the waveform's amplitude zoom.
+  case verticalZoomIn
+  case verticalZoomOut
   case speedUp
   case speedDown
   case removeSection
@@ -1906,9 +1909,8 @@ final class EditorModel: ViewModel {
 
   func editorKeyDown(_ key: EditorKey) -> Bool {
     switch key {
-    case .zoomIn: editedWaveform.zoomInTapped()
-    case .zoomOut: editedWaveform.zoomOutTapped()
-    case .zoomFit: editedWaveform.zoomFitToggled(sourceSelection: selectedSourceRange)
+    case .zoomIn, .zoomOut, .verticalZoomIn, .verticalZoomOut, .zoomFit:
+      handleZoomKey(key)
     case .speedUp: transcript.speedUpTapped()
     case .speedDown: transcript.speedDownTapped()
     case .deleteSelection, .removeSection:
@@ -1924,6 +1926,20 @@ final class EditorModel: ViewModel {
       Task { await returnToLastPlayStartTapped() }
     }
     return true
+  }
+
+  /// Routes a zoom key, split out of `editorKeyDown`'s switch to keep its cyclomatic complexity in
+  /// check. ⌘←/⌘→ keep the playhead centered (Logic parity); a ⌘-scroll anchors on the pointer
+  /// instead, via `waveformScrolled`.
+  private func handleZoomKey(_ key: EditorKey) {
+    switch key {
+    case .zoomIn: editedWaveform.zoomIn(centeredOnEdited: playheadEditedSample)
+    case .zoomOut: editedWaveform.zoomOut(centeredOnEdited: playheadEditedSample)
+    case .verticalZoomIn: waveform.amplitudeZoomIncremented()
+    case .verticalZoomOut: waveform.amplitudeZoomDecremented()
+    case .zoomFit: editedWaveform.zoomFitToggled(sourceSelection: selectedSourceRange)
+    default: break
+    }
   }
 
   /// Routes an arrow-nudge key, split out of `editorKeyDown`'s switch to keep its cyclomatic

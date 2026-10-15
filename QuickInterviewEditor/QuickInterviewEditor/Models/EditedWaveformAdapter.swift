@@ -279,6 +279,14 @@ final class EditedWaveformAdapter {
   // MARK: - User Actions (zoom / pan / fit)
   func zoomInTapped() { zoom(by: 1 / WaveformViewport.zoomStep) }
   func zoomOutTapped() { zoom(by: WaveformViewport.zoomStep) }
+  /// Keyboard zoom (⌘→/⌘←): steps like the buttons but centers the viewport on `editedSample`
+  /// (the playhead) rather than on whatever was mid-screen.
+  func zoomIn(centeredOnEdited editedSample: Int) {
+    zoom(by: 1 / WaveformViewport.zoomStep, centeredOn: editedSample)
+  }
+  func zoomOut(centeredOnEdited editedSample: Int) {
+    zoom(by: WaveformViewport.zoomStep, centeredOn: editedSample)
+  }
 
   func scrolled(toStartEditedSample start: Int) {
     fitRestore = nil
@@ -399,11 +407,15 @@ final class EditedWaveformAdapter {
   }
 
   private func zoom(by factor: Double) {
+    zoom(by: factor, centeredOn: visibleStartSample + visibleSampleCount / 2)
+  }
+
+  private func zoom(by factor: Double, centeredOn center: Int) {
     guard viewportWidth > 0, !navigableRange.isEmpty else { return }
     fitRestore = nil
     let result = WaveformViewport.zoom(
-      by: factor, viewportWidth: viewportWidth, axis: navigableRange,
-      samplesPerPixel: samplesPerPixel, visibleStartSample: visibleStartSample)
+      by: factor, centeredOn: center, viewportWidth: viewportWidth, axis: navigableRange,
+      samplesPerPixel: samplesPerPixel)
     samplesPerPixel = result.samplesPerPixel
     visibleStartSample = result.visibleStartSample
   }

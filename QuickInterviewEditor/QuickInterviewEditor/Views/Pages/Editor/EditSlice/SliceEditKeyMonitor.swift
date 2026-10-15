@@ -163,10 +163,16 @@ struct SliceEditKeyMonitor: NSViewRepresentable {
     private func handleZoom(_ key: EditorKey, isARepeat: Bool, model: EditSliceModel) -> Bool {
       switch key {
       case .zoomOut:
-        model.zoomOutTapped()
+        model.zoomOutKeyPressed()
         return true
       case .zoomIn:
-        model.zoomInTapped()
+        model.zoomInKeyPressed()
+        return true
+      case .verticalZoomIn:
+        model.verticalZoomInKeyPressed()
+        return true
+      case .verticalZoomOut:
+        model.verticalZoomOutKeyPressed()
         return true
       case .zoomFit:
         // Z is a toggle; swallow auto-repeat so holding it doesn't flicker fit↔restore (or beep).

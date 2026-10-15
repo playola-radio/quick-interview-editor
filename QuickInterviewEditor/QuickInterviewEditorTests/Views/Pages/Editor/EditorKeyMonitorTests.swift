@@ -28,6 +28,18 @@ struct EditorKeyMonitorTests {
     expectNoDifference(key(124, .command), .zoomIn)  // ⌘→
   }
 
+  @Test func commandUpAndDownZoomVerticallyLikeLogic() {
+    expectNoDifference(key(125, .command), .verticalZoomIn)  // ⌘↓ = taller waveform
+    expectNoDifference(key(126, .command), .verticalZoomOut)  // ⌘↑ = shorter waveform
+  }
+
+  @Test func plainAndOtherModifiedUpDownArrowsFallThrough() {
+    expectNoDifference(key(125), nil)  // ↓
+    expectNoDifference(key(126), nil)  // ↑
+    expectNoDifference(key(125, [.command, .shift]), nil)  // ⌘⇧↓
+    expectNoDifference(key(126, .option), nil)  // ⌥↑
+  }
+
   @Test func plainZZoomsToFit() {
     expectNoDifference(key(6, [], characters: "z"), .zoomFit)
   }
