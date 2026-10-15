@@ -630,7 +630,10 @@ final class EditorModel: ViewModel {
   /// leaves `draftRange` populated (via `syncEditSession`) even with nothing tuned, so the moving
   /// marquee must take precedence or the overlay would freeze on the stale draft.
   var activeEditingRange: Range<Int>? {
-    marqueePreview ?? fineTune.draftRange ?? activeOrSelectedRange
+    // A multi-selection has no single editable range: never fall back to a stale fine-tune draft
+    // or the active slice. Its pieces are drawn from `waveformMultiSelectionRanges`.
+    if case .ranges = selection { return marqueePreview }
+    return marqueePreview ?? fineTune.draftRange ?? activeOrSelectedRange
   }
 
   // MARK: - Selection (source samples — the single source of truth)
@@ -801,6 +804,7 @@ final class EditorModel: ViewModel {
   /// selection is a new-slice intent that retargets the pane), else the active slice.
   /// `sliceSelected` clears the selection so an edited slice cleanly becomes the driver.
   var fineTuneTarget: FineTuneModel.Target? {
+    if case .ranges = selection { return nil }
     if selection.freeformRange != nil { return .pendingSelection }
     if let activeSliceID { return .slice(activeSliceID) }
     return nil
@@ -886,7 +890,7 @@ final class EditorModel: ViewModel {
   /// (non-word-aligned) selection highlights the partially-covered words at its edges too. Empty
   /// when there's no selection.
   var selectedWordIDs: Set<Word.ID> {
-    selection.freeformRange.map { Set(wordIDs(anyOverlap: $0, words: editPlan.words)) } ?? []
+    Set(selection.selectedRanges.flatMap { wordIDs(anyOverlap: $0, words: editPlan.words) })
   }
 
   /// Waveform render data, geometry delegated to the edited adapter (the view reads these; it
@@ -894,6 +898,14 @@ final class EditorModel: ViewModel {
   /// a fine-tune drag live and collapses correctly around any removed spans it straddles.
   var waveformHighlightSpan: WaveformSpan? {
     activeEditingRange.flatMap { editedWaveform.span(forSource: $0) }
+  }
+
+  /// Every piece of a Cmd-click multi-selection, drawn as plain (non-interactive) waveform fills.
+  /// Empty for a single range (it keeps the interactive `activeEditingRange` highlight) and while a
+  /// marquee is live (the marquee is replacing the selection).
+  var waveformMultiSelectionRanges: [Range<Int>] {
+    guard marqueePreview == nil, case .ranges(let multi) = selection else { return [] }
+    return multi.allRanges
   }
 
   /// View-x of the persistent cursor on the edited axis, or nil when it's scrolled out of the
@@ -1225,7 +1237,7 @@ final class EditorModel: ViewModel {
   /// Clear is available for every main-editor selection, including objects and seams.
   var canClearSelection: Bool { selection != .none }
   var canEditSelectionEdges: Bool { selection.freeformRange != nil }
-  var shouldShowRemoveSectionControl: Bool { selection.freeformRange != nil }
+  var shouldShowRemoveSectionControl: Bool { !selection.selectedRanges.isEmpty }
   var shouldShowSelectedClipControls: Bool {
     if case .object(.clip) = selection { return true }
     return false
@@ -1243,8 +1255,9 @@ final class EditorModel: ViewModel {
   /// a silence-only selection reads "0 words selected".
   var selectionSummary: String {
     if selectedSeamID != nil { return crossfadeSelectedSummary }
-    guard let range = audioSelection else { return "No selection" }
-    let count = wordIDs(anyOverlap: range, words: editPlan.words).count
+    let ranges = audioSelection.map { [$0] } ?? selection.selectedRanges
+    guard !ranges.isEmpty else { return "No selection" }
+    let count = Set(ranges.flatMap { wordIDs(anyOverlap: $0, words: editPlan.words) }).count
     return "\(count) word\(count == 1 ? "" : "s") selected"
   }
   // Undo/redo restore `slices` wholesale; doing that under an open cut edit would leave the

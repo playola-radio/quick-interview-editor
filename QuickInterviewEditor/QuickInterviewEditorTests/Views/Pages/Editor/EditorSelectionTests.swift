@@ -418,4 +418,63 @@ struct EditorSelectionTests {
       MultiRangeSelection(primary: 70648..<74176, anchor: 74176, additional: [164228..<166874]))
     expectNoDifference(model.selectionAnchorSample, 74176)
   }
+
+  // MARK: - Multi-selection gating
+
+  private let wordsTwoAndEight = EditorSelection.ranges(
+    MultiRangeSelection(primary: 70648..<74176, anchor: 70648, additional: [164228..<166874]))
+
+  @Test func multiSelectionDisablesSingleRangeFeatures() {
+    let model = editor()
+    model.selection = wordsTwoAndEight
+    #expect(!model.canAddSlice)
+    #expect(!model.canOpenSelection)
+    #expect(!model.canEditSelectionEdges)
+    #expect(!model.canAudition)
+    #expect(model.fineTuneTarget == nil)
+  }
+
+  @Test func multiSelectionOffersRemoval() {
+    let model = editor()
+    model.selection = wordsTwoAndEight
+    #expect(model.canRemoveSelectedSection)
+    #expect(model.shouldShowRemoveSectionControl)
+  }
+
+  @Test func multiSelectionIgnoresStaleFineTuneDraft() {
+    let model = editor()
+    model.selectSourceRange(70648..<74176, snapPlayhead: false, origin: .transcript)
+    model.syncEditSession()
+    model.selection = wordsTwoAndEight
+    #expect(model.activeEditingRange == nil)
+    model.syncEditSession()
+    #expect(model.fineTune.target == nil)
+  }
+
+  @Test func multiSelectionNudgeIsNoOp() {
+    let model = editor()
+    model.selection = wordsTwoAndEight
+    model.selectionNudged(.start, byMs: 10)
+    expectNoDifference(model.selection, wordsTwoAndEight)
+  }
+
+  @Test func multiSelectionHighlightsEveryPieceInTranscript() {
+    let model = editor()
+    model.selection = wordsTwoAndEight
+    expectNoDifference(model.selectedWordIDs, [2, 8])
+  }
+
+  @Test func multiSelectionSummaryCountsWordsAcrossPieces() {
+    let model = editor()
+    model.selection = wordsTwoAndEight
+    expectNoDifference(model.selectionSummary, "2 words selected")
+  }
+
+  @Test func waveformMultiSelectionRangesListEveryPiece() {
+    let model = editor()
+    model.selection = wordsTwoAndEight
+    expectNoDifference(model.waveformMultiSelectionRanges, [70648..<74176, 164228..<166874])
+    model.selection = .range(70648..<74176, anchor: 70648)
+    expectNoDifference(model.waveformMultiSelectionRanges, [])
+  }
 }
