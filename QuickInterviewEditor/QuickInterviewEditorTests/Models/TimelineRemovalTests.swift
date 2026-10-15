@@ -41,6 +41,45 @@ struct TimelineRemovalTests {
   @Test func mergingTouchingKeepsGappedRangesApart() {
     expectNoDifference([30..<40, 10..<20].mergingTouching(), [10..<20, 30..<40])
   }
+
+  // MARK: - mergedSpans
+
+  @Test func mergedSpansKeepsDisjointPiecesSeparate() {
+    let plan = TimelineRemovals.mergedSpans(removing: [500..<600, 100..<200], existing: [])
+    expectNoDifference(plan.spans, [100..<200, 500..<600])
+    expectNoDifference(plan.absorbedIDs, [])
+  }
+
+  @Test func mergedSpansMergesAbuttingPieces() {
+    let plan = TimelineRemovals.mergedSpans(removing: [100..<200, 200..<300], existing: [])
+    expectNoDifference(plan.spans, [100..<300])
+  }
+
+  @Test func mergedSpansAbsorbsStrictlyOverlappingRemoval() {
+    let plan = TimelineRemovals.mergedSpans(
+      removing: [450..<550], existing: [removal(500, 600, id: 9)])
+    expectNoDifference(plan.spans, [450..<600])
+    expectNoDifference(plan.absorbedIDs, [removal(500, 600, id: 9).id])
+  }
+
+  @Test func mergedSpansLeavesAbuttingRemovalAlone() {
+    let plan = TimelineRemovals.mergedSpans(
+      removing: [400..<500], existing: [removal(500, 600, id: 9)])
+    expectNoDifference(plan.spans, [400..<500])
+    expectNoDifference(plan.absorbedIDs, [])
+  }
+
+  @Test func mergedSpansRemovalBridgingTwoPiecesYieldsOneSpan() {
+    let plan = TimelineRemovals.mergedSpans(
+      removing: [50..<150, 250..<350], existing: [removal(100, 300, id: 4)])
+    expectNoDifference(plan.spans, [50..<350])
+    expectNoDifference(plan.absorbedIDs, [removal(100, 300, id: 4).id])
+  }
+
+  @Test func mergedSpansDropsEmptyPieces() {
+    let plan = TimelineRemovals.mergedSpans(removing: [100..<100, 300..<400], existing: [])
+    expectNoDifference(plan.spans, [300..<400])
+  }
 }
 
 struct CrossfadeDecodingTests {

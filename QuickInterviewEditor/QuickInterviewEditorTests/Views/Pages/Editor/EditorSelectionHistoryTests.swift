@@ -412,4 +412,80 @@ struct EditorSelectionHistoryTests {
     await model.undoTapped()
     expectNoDifference(model.selection, multi)
   }
+
+  // MARK: - Multi-piece delete
+
+  private func selectWordsTwoAndEight(_ model: EditorModel) {
+    model.selection = .ranges(
+      MultiRangeSelection(primary: 70648..<74176, anchor: 70648, additional: [164228..<166874]))
+  }
+
+  @Test func deletingMultiSelectionRemovesEachPieceWithDefaultCrossfade() async {
+    let model = editor()
+    selectWordsTwoAndEight(model)
+    #expect(model.canRemoveSelectedSection)
+    await model.deleteSelectionTapped()
+    expectNoDifference(
+      model.timelineRemovals.map(\.removedRange), [70648..<74176, 164228..<166874])
+    expectNoDifference(
+      model.timelineRemovals.map(\.crossfade),
+      Array(
+        repeating: Crossfade(lengthSamples: model.defaultCrossfadeSamples, curve: .equalPower),
+        count: 2))
+    expectNoDifference(model.selection, .none)
+    expectNoDifference(model.removedWordIDs, [2, 8])
+  }
+
+  @Test func deletingMultiSelectionIsOneUndoStep() async {
+    let model = editor()
+    selectWordsTwoAndEight(model)
+    let before = model.documentState
+    var writes = 0
+    model.onDocumentStateChanged = { _ in writes += 1 }
+    await model.deleteSelectionTapped()
+    expectNoDifference(model.history.undo.last?.label, "Remove Sections")
+    expectNoDifference(writes, 1)
+    await model.undoTapped()
+    expectNoDifference(model.documentState, before)
+    expectNoDifference(model.selection, .none)
+    await model.redoTapped()
+    expectNoDifference(
+      model.timelineRemovals.map(\.removedRange), [70648..<74176, 164228..<166874])
+  }
+
+  @Test func deletingMultiSelectionKeepsUntouchedRemovalIdentity() async {
+    let model = editor()
+    let untouched = TimelineRemoval(
+      id: Fixtures.uuid(7), removedRange: 300_000..<310_000,
+      crossfade: Crossfade(lengthSamples: 999, curve: .linear))
+    model.mutateDocument { $0.timelineRemovals.append(untouched) }
+    selectWordsTwoAndEight(model)
+    await model.deleteSelectionTapped()
+    expectNoDifference(model.timelineRemovals[id: untouched.id], untouched)
+    expectNoDifference(model.timelineRemovals.count, 3)
+  }
+
+  @Test func deletingMultiSelectionAbsorbsOverlappedRemoval() async {
+    let model = editor()
+    model.mutateDocument {
+      $0.timelineRemovals.append(
+        TimelineRemoval(
+          id: Fixtures.uuid(7), removedRange: 165_000..<170_000,
+          crossfade: Crossfade(lengthSamples: 999, curve: .linear)))
+    }
+    selectWordsTwoAndEight(model)
+    await model.deleteSelectionTapped()
+    expectNoDifference(
+      model.timelineRemovals.map(\.removedRange), [70648..<74176, 164228..<170_000])
+    #expect(model.timelineRemovals[id: Fixtures.uuid(7)] == nil)
+  }
+
+  @Test func deletingMultiSelectionIsBlockedWhileExporting() async {
+    let model = editor()
+    selectWordsTwoAndEight(model)
+    model.exportPhase = .exporting(current: 0, total: 1)
+    #expect(!model.canRemoveSelectedSection)
+    await model.deleteSelectionTapped()
+    #expect(model.timelineRemovals.isEmpty)
+  }
 }

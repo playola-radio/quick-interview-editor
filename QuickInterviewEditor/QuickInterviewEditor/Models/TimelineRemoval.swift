@@ -62,6 +62,25 @@ enum TimelineRemovals {
     }
     return sorted
   }
+
+  /// The removal spans for selected SOURCE pieces: touching pieces merge, then each absorbs every
+  /// existing removal it strictly overlaps (abutting removals stay separate). One existing removal
+  /// can bridge two pieces into one span.
+  static func mergedSpans(
+    removing ranges: [Range<Int>], existing: [TimelineRemoval]
+  ) -> (spans: [Range<Int>], absorbedIDs: Set<TimelineRemoval.ID>) {
+    var absorbedIDs: Set<TimelineRemoval.ID> = []
+    let extended = ranges.filter { !$0.isEmpty }.mergingTouching().map { piece in
+      let absorbed = existing.filter { $0.removedRange.overlaps(piece) }
+      absorbedIDs.formUnion(absorbed.map(\.id))
+      return absorbed.reduce(piece) { hull, removal in
+        min(
+          hull.lowerBound, removal.removedRange.lowerBound)..<max(
+            hull.upperBound, removal.removedRange.upperBound)
+      }
+    }
+    return (extended.mergingTouching(), absorbedIDs)
+  }
 }
 
 extension Array where Element == Range<Int> {

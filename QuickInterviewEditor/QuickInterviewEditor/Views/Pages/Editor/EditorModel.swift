@@ -2620,11 +2620,6 @@ final class EditorModel: ViewModel {
   /// rate. PR 2 makes it user-editable per removal.
   var defaultCrossfadeSamples: Int { Int(0.020 * Double(editPlan.source.sampleRate)) }
 
-  /// The SOURCE range a removal would apply to: the primary selection. Edge drag + nudge now mutate
-  /// `audioSelection` directly (see `selectionNudged` / `selectionEdgeDragged`), so there is no
-  /// separate fine-tune draft to prefer — the selection is already the (possibly nudged) truth.
-  private var pendingRemovalSourceRange: Range<Int>? { selection.freeformRange }
-
   /// Whether `range` can become a removal: non-empty. Cross-seam is now allowed — a range that
   /// overlaps existing removals merges them into one larger removal via `removeSourceRange`
   /// (Item ①: the Edit-Slice modal and the main timeline share one collapsed axis, so Delete
@@ -2633,45 +2628,43 @@ final class EditorModel: ViewModel {
     range.lowerBound < range.upperBound
   }
 
-  /// Drives ⌫ enablement and the Remove Section menu item. Also blocked while an export is
-  /// in flight — an in-progress export is rendering the un-cut canonical audio, so adding a
-  /// removal mid-export would leave the finished AIFF stale relative to what the editor shows.
+  /// Drives ⌫ enablement and the Remove Section menu item for one range or several Cmd-clicked
+  /// pieces. Blocked while an export is in flight — an in-progress export is rendering the un-cut
+  /// canonical audio, so adding a removal mid-export would leave the finished AIFF stale.
   var canRemoveSelectedSection: Bool {
-    guard let range = pendingRemovalSourceRange else { return false }
-    return canRemove(sourceRange: range) && !isExporting
+    !isExporting && selection.selectedRanges.contains { canRemove(sourceRange: $0) }
   }
 
-  /// Turns the current selection (or its nudged draft, if a boundary-nudge session is open) into
-  /// a `TimelineRemoval` with the default 20 ms equal-power crossfade, then clears the selection
-  /// and the fine-tune session. Belt-and-suspenders guard on `isExporting` (mirrors
-  /// `canRemoveSelectedSection`) so a stale invocation can't mutate the document while an export
-  /// is rendering.
+  /// Turns every selected piece into a `TimelineRemoval` with the default 20 ms equal-power
+  /// crossfade, then clears the selection and the fine-tune session.
   func removeSelectedSectionTapped() async {
-    guard let range = pendingRemovalSourceRange else { return }
-    await removeSourceRange(range)
+    await removeSourceRanges(selection.selectedRanges)
   }
 
-  /// Removes a SOURCE range, merging any existing removals it overlaps into ONE larger removal
-  /// (Item ①). The single funnel both the main timeline (`removeSelectedSectionTapped`) and the
-  /// Edit-Slice modal route Remove through, so cross-seam behavior is identical on both surfaces —
-  /// the modal is a truncated view of the same collapsed axis. The merged removal spans
-  /// `min(lower)..<max(upper)` of the range and every absorbed removal, and carries the default
-  /// crossfade: an absorbed removal's crossfade was internal to audio that stays removed, so it is
-  /// no longer an audible seam. `normalize` runs only as a validation backstop. A no-op while
-  /// exporting (a removal mid-export would leave the finished AIFF stale) or for an empty range.
+  /// One-range form of `removeSourceRanges`, used by the Edit-Slice modal's Remove.
   func removeSourceRange(_ range: Range<Int>) async {
-    guard !isExporting, canRemove(sourceRange: range) else { return }
-    let absorbed = timelineRemovals.filter { $0.removedRange.overlaps(range) }
-    let mergedLower = min(
-      range.lowerBound, absorbed.map(\.removedRange.lowerBound).min() ?? range.lowerBound)
-    let mergedUpper = max(
-      range.upperBound, absorbed.map(\.removedRange.upperBound).max() ?? range.upperBound)
-    let removal = TimelineRemoval(
-      id: UUID(), removedRange: mergedLower..<mergedUpper,
-      crossfade: Crossfade(lengthSamples: defaultCrossfadeSamples, curve: .equalPower))
-    mutateDocument(label: "Remove Section") { doc in
-      for absorbedRemoval in absorbed { doc.timelineRemovals.remove(id: absorbedRemoval.id) }
-      doc.timelineRemovals.append(removal)
+    await removeSourceRanges([range])
+  }
+
+  /// Removes SOURCE pieces in ONE undo step. Touching pieces merge; each piece absorbs the existing
+  /// removals it strictly overlaps (Item ①: an absorbed removal's crossfade was internal to audio
+  /// that stays removed). Each resulting span becomes one removal with the default crossfade;
+  /// untouched removals keep their IDs and crossfades. `normalize` runs only as a validation
+  /// backstop. A no-op while exporting (a removal mid-export would leave the finished AIFF stale)
+  /// or when no piece is removable.
+  func removeSourceRanges(_ ranges: [Range<Int>]) async {
+    let source = 0..<editPlan.source.durationSamples
+    let pieces = ranges.map { $0.clamped(to: source) }.filter { canRemove(sourceRange: $0) }
+    guard !isExporting, !pieces.isEmpty else { return }
+    let plan = TimelineRemovals.mergedSpans(removing: pieces, existing: Array(timelineRemovals))
+    let removals = plan.spans.map {
+      TimelineRemoval(
+        id: UUID(), removedRange: $0,
+        crossfade: Crossfade(lengthSamples: defaultCrossfadeSamples, curve: .equalPower))
+    }
+    mutateDocument(label: removals.count == 1 ? "Remove Section" : "Remove Sections") { doc in
+      for id in plan.absorbedIDs { doc.timelineRemovals.remove(id: id) }
+      doc.timelineRemovals.append(contentsOf: removals)
       doc.timelineRemovals = IdentifiedArray(
         uniqueElements: TimelineRemovals.normalize(Array(doc.timelineRemovals))
           ?? Array(doc.timelineRemovals))
