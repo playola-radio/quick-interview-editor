@@ -569,7 +569,9 @@ final class EditorModel: ViewModel {
   // MARK: - Display Text
   let markAsClipLabel = "Mark as Clip"
   let clearButtonLabel = "Clear"
-  let removeSectionLabel = "Remove Section"
+  var removeSectionLabel: String {
+    selection.selectedRanges.count > 1 ? "Remove Sections" : "Remove Section"
+  }
   let scrollToCurrentWordLabel = "Scroll to current word"
   let emptyStateMessage = "Select words in the transcript, then Mark as Clip."
   let playLabel = "Play"
@@ -778,6 +780,7 @@ final class EditorModel: ViewModel {
     case .range, .ranges:
       selection = selection.adding(
         wordRange.clamped(to: 0..<editPlan.source.durationSamples))
+      selectionPreservesTransport = true
     case .none, .object, .seam:
       selectWord(id, extending: false)
     }

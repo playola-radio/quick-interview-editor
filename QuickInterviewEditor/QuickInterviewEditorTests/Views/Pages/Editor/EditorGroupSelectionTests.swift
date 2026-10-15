@@ -613,6 +613,86 @@ struct EditorGroupSelectionTests {
     expectNoDifference(model.playheadSourceSample, playhead)
   }
 
+  @Test func cmdClickMergingIntoSingleRangeDuringPlaybackDoesNotStopOrSeek() async {
+    let stops = LockIsolated(0)
+    let model = withDependencies {
+      $0.audioPlayer.stop = { _ in stops.withValue { $0 += 1 } }
+    } operation: {
+      editor()
+    }
+    model.selectSourceRange(70648..<77704, snapPlayhead: false)
+    let session = PlaybackSessionID()
+    model.transportPhase = .playing(session)
+    model.playheadEditedSample = 150_000
+    cmdClick(model, word: 3, time: 3)
+    expectNoDifference(model.selection, .range(70648..<98916, anchor: 70648))
+    await model.transportSelectionChanged(model.audioSelection, cursorToken: model.cursorMoveToken)
+    expectNoDifference(model.transportPhase, .playing(session))
+    expectNoDifference(model.playheadEditedSample, 150_000)
+    expectNoDifference(stops.value, 0)
+  }
+
+  @Test func cmdClickBridgingTwoPiecesDuringPlaybackDoesNotStopOrSeek() async {
+    let stops = LockIsolated(0)
+    let model = withDependencies {
+      $0.audioPlayer.stop = { _ in stops.withValue { $0 += 1 } }
+    } operation: {
+      editor()
+    }
+    model.selection = .ranges(
+      MultiRangeSelection(primary: 70648..<77704, anchor: 70648, additional: [98916..<107736]))
+    let session = PlaybackSessionID()
+    model.transportPhase = .playing(session)
+    model.playheadEditedSample = 150_000
+    cmdClick(model, word: 3, time: 3)
+    expectNoDifference(model.selection, .range(70648..<107736, anchor: 70648))
+    await model.transportSelectionChanged(model.audioSelection, cursorToken: model.cursorMoveToken)
+    expectNoDifference(model.transportPhase, .playing(session))
+    expectNoDifference(model.playheadEditedSample, 150_000)
+    expectNoDifference(stops.value, 0)
+  }
+
+  @Test func removeSectionLabelIsSingularForOneRange() {
+    let model = editor()
+    model.selection = .range(70648..<74176, anchor: 70648)
+    expectNoDifference(model.removeSectionLabel, "Remove Section")
+  }
+
+  @Test func removeSectionLabelIsPluralForMultiSelection() {
+    let model = editor()
+    model.selection = wordsTwoAndEight
+    expectNoDifference(model.removeSectionLabel, "Remove Sections")
+  }
+
+  private func shortSourceEditor() -> EditorModel {
+    let plan = EditPlan(
+      schemaVersion: 1,
+      source: .init(path: "/clip.m4a", sampleRate: 44100, channels: 1, durationSamples: 100_000),
+      words: [], silences: [], segments: [])
+    return EditorModel(
+      sourceURL: URL(fileURLWithPath: "/clip.m4a"),
+      canonicalAudioURL: Fixtures.canonicalAudioURL, editPlan: plan, sourceFingerprint: "fp")
+  }
+
+  @Test func reconcileDropsPieceBeyondSourceAndDemotesToSingleRange() {
+    let model = shortSourceEditor()
+    model.selection = .ranges(
+      MultiRangeSelection(primary: 10_000..<20_000, anchor: 10_000, additional: [150_000..<160_000])
+    )
+    model.mutateDocument { $0.speakerCountOverride = 3 }
+    expectNoDifference(model.selection, .range(10_000..<20_000, anchor: 10_000))
+  }
+
+  @Test func reconcileClearsMultiSelectionWhenPrimaryIsBeyondSource() {
+    let model = shortSourceEditor()
+    model.selection = .ranges(
+      MultiRangeSelection(
+        primary: 150_000..<160_000, anchor: 150_000, additional: [10_000..<20_000])
+    )
+    model.mutateDocument { $0.speakerCountOverride = 3 }
+    expectNoDifference(model.selection, .none)
+  }
+
   @Test func plainClickCollapsesMultiSelection() {
     let model = editor()
     model.selection = wordsTwoAndEight
