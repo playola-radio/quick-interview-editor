@@ -1084,6 +1084,7 @@ final class ProjectModel: ViewModel {
     editor = nil
     invalidateSuggestionAttempt()
     await cancelSuggestionAttempt()
+    previous.cancelClipNaming()
     previous.cancelExportTapped()
     await previous.stopPlaybackTapped()
     await previous.awaitExportTeardown()

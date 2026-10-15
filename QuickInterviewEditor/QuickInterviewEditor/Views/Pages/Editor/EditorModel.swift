@@ -50,6 +50,10 @@ final class EditorModel: ViewModel {
   @ObservationIgnored @Dependency(\.exportRender) var exportRender
   @ObservationIgnored @Dependency(\.workspace) var workspace
   @ObservationIgnored @Dependency(\.continuousClock) var clock
+  @ObservationIgnored @Dependency(\.cutSuggest) var cutSuggest
+  @ObservationIgnored @Dependency(\.suggestionConfiguration) var suggestionConfiguration
+  @ObservationIgnored @Dependency(\.keychain) var keychain
+  @ObservationIgnored @Dependency(\.environment) var environment
 
   // MARK: - Shared State
   /// The user's global clip-boundary offset preference (Settings → Editing) — nudges every
@@ -83,6 +87,8 @@ final class EditorModel: ViewModel {
   var editSlice: EditSliceModel?
   var clipEditorMessage: String?
   @ObservationIgnored var committingDraftID: UUID?
+  @ObservationIgnored var clipNamingQueue: [ManualClipNamingJob] = []
+  @ObservationIgnored var clipNamingTask: Task<Void, Never>?
   @ObservationIgnored @Dependency(\.uuid) var draftUUID
 
   init(
@@ -281,6 +287,9 @@ final class EditorModel: ViewModel {
   private var cutSuggestionTitleEdit: (id: CutSuggestion.ID, before: EditorDocumentState)?
   private var sliceNameEdit: (id: Slice.ID, draft: String)?
   private var focusedSliceNameID: Slice.ID?
+  func isEditingName(of id: Slice.ID) -> Bool {
+    sliceNameEdit?.id == id || focusedSliceNameID == id
+  }
   /// Fired after every committed document change (mutation, undo, redo) with the new
   /// document — the single dirtiness signal. The tab model wires this to persistence, so
   /// the editor itself never touches the sidecar.
@@ -2332,10 +2341,12 @@ final class EditorModel: ViewModel {
   /// The single funnel for every NEW clip (Mark as Clip, fine-tune commit): nudges its cut
   /// points by the user's clip-boundary offset setting, then appends. Manual boundary
   /// re-edits (`updatedSlice`) deliberately do NOT pass through here (new cuts only).
-  private func appendNewClip(_ slice: Slice) {
+  @discardableResult
+  private func appendNewClip(_ slice: Slice) -> Slice {
     let nudged = offsetNudgedClip(slice)
     mutateSlices { $0.append(nudged) }
     sliceScrollTarget = nudged.id
+    return nudged
   }
 
   /// Nudges a new clip's cut points by the user's clip-boundary offset setting, leaving word
@@ -2607,7 +2618,8 @@ final class EditorModel: ViewModel {
     let slice = buildSlice(
       id: UUID(), name: "Slice \(nextSliceNumber)", range: range, wordIDs: wordIDs,
       plan: editPlan)
-    appendNewClip(slice)
+    let added = appendNewClip(slice)
+    queueManualClipNaming(for: added)
     advanceSliceNumber()
     transcript.clearSelectionTapped()
   }
@@ -3769,7 +3781,8 @@ final class EditorModel: ViewModel {
       fineTune.markCommitted(draft)
     case .pendingSelection:
       let slice = makeSlice(range: draft)
-      appendNewClip(slice)
+      let added = appendNewClip(slice)
+      queueManualClipNaming(for: added)
       advanceSliceNumber()
       // Closing the pane removes the region, so stop any preview or audition of the draft first.
       cancelPreviewOrAuditionIfNeeded()
