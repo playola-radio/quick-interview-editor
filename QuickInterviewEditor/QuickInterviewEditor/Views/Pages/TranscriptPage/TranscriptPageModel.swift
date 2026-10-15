@@ -351,15 +351,16 @@ class TranscriptPageModel: ViewModel {
   }
 
   func transcriptClicked(
-    atUTF16Offset offset: Int?, extending: Bool = false, clickCount: Int = 1,
-    timestamp: TimeInterval = 0, doubleClickInterval: TimeInterval = 0.5
+    atUTF16Offset offset: Int?, extending: Bool = false, additive: Bool = false,
+    clickCount: Int = 1, timestamp: TimeInterval = 0, doubleClickInterval: TimeInterval = 0.5
   ) {
     let id = offset.flatMap { document.wordID(atUTF16Offset: $0) }
     if let onGroupClick {
       onGroupClick(
         TranscriptClick(
           wordID: id, extending: extending, count: clickCount,
-          timestamp: timestamp, doubleClickInterval: doubleClickInterval, utf16Offset: offset))
+          timestamp: timestamp, doubleClickInterval: doubleClickInterval, utf16Offset: offset,
+          additive: additive))
       return
     }
     guard let id else {

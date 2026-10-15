@@ -47,6 +47,8 @@ struct TranscriptClick {
   let timestamp: TimeInterval
   let doubleClickInterval: TimeInterval
   var utf16Offset: Int?
+  /// Command held at mouse-down: add the word as another selected piece.
+  var additive = false
 }
 
 struct TranscriptClickCapture {

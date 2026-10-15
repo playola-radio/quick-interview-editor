@@ -766,6 +766,20 @@ final class EditorModel: ViewModel {
     }
   }
 
+  /// Cmd-click: adds the word as another selected piece without moving the playhead. From a clip,
+  /// suggestion, seam, or empty selection it starts a fresh single-word range instead. A fully
+  /// removed word is ignored.
+  func addWordToSelection(_ id: Word.ID) {
+    guard !removedWordIDs.contains(id), let wordRange = sourceRange(ofWord: id) else { return }
+    switch selection {
+    case .range, .ranges:
+      selection = selection.adding(
+        wordRange.clamped(to: 0..<editPlan.source.durationSamples))
+    case .none, .object, .seam:
+      selectWord(id, extending: false)
+    }
+  }
+
   /// The exact source range of one word, or nil if it has no monotonic sample bounds.
   func sourceRange(ofWord id: Word.ID) -> Range<Int>? {
     guard let word = editPlan.words.first(where: { $0.id == id }),

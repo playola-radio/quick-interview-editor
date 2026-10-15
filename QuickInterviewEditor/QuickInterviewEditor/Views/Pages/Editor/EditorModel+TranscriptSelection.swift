@@ -156,6 +156,10 @@ extension EditorModel {
   }
 
   func transcriptClicked(_ click: TranscriptClick) {
+    if click.additive {
+      additiveTranscriptClicked(click)
+      return
+    }
     if click.count == 2 {
       openCapturedTranscriptClick(click)
       return
@@ -187,6 +191,17 @@ extension EditorModel {
     guard let range = audioSelection else { return }
     transcript.clickCapture = TranscriptClickCapture(
       selection: selection, range: range, timestamp: click.timestamp)
+  }
+
+  private func additiveTranscriptClicked(_ click: TranscriptClick) {
+    // Cmd-click only ever adds a word: it never opens (any click count) and a miss never clears.
+    transcript.clickCapture = nil
+    transcript.overlapClick = nil
+    defer { reconcileTranscriptOverlap() }
+    guard let wordID = click.wordID,
+      click.utf16Offset.map({ transcript.document.containsWord(atUTF16Offset: $0) }) ?? true
+    else { return }
+    addWordToSelection(wordID)
   }
 
   private func openCapturedTranscriptClick(_ click: TranscriptClick) {

@@ -22,13 +22,21 @@ struct EditorGroupSelectionTests {
   }
 
   private func click(
-    _ model: EditorModel, word: Int = 3, count: Int = 1, extending: Bool = false, time: Double = 1
+    _ model: EditorModel, word: Int = 3, count: Int = 1, extending: Bool = false,
+    additive: Bool = false, time: Double = 1
   ) {
     let offset = model.transcript.document.wordRanges.first { $0.wordID == word }!.range.location
     model.transcript.transcriptClicked(
-      atUTF16Offset: offset, extending: extending, clickCount: count,
+      atUTF16Offset: offset, extending: extending, additive: additive, clickCount: count,
       timestamp: time, doubleClickInterval: 0.5)
   }
+
+  private func cmdClick(_ model: EditorModel, word: Int, count: Int = 1, time: Double = 1) {
+    click(model, word: word, count: count, additive: true, time: time)
+  }
+
+  private let wordsTwoAndEight = EditorSelection.ranges(
+    MultiRangeSelection(primary: 70648..<74176, anchor: 70648, additional: [164228..<166874]))
 
   @Test func deletingSuggestionRespectsSearchLock() async {
     let model = editor()
@@ -476,5 +484,161 @@ struct EditorGroupSelectionTests {
     expectNoDifference(model.selection, .seam(Fixtures.uuid(2)))
     expectNoDifference(model.audioSelection, nil)
     expectNoDifference(model.selectionAnchorSample, nil)
+  }
+
+  // MARK: - Cmd-click
+
+  @Test func cmdClickFromNoSelectionStartsSingleWordRange() {
+    let model = editor()
+    cmdClick(model, word: 2)
+    expectNoDifference(model.selection, .range(70648..<74176, anchor: 70648))
+  }
+
+  @Test func cmdClickAddsDisjointWord() {
+    let model = editor()
+    click(model, word: 2)
+    cmdClick(model, word: 8, time: 3)
+    expectNoDifference(model.selection, wordsTwoAndEight)
+  }
+
+  @Test func cmdClickKeepsDraggedRangeAsPrimary() {
+    let model = editor()
+    _ = model.transcript.selectWords(anchorID: 2, focusID: 4)
+    cmdClick(model, word: 13, time: 3)
+    expectNoDifference(
+      model.selection,
+      .ranges(
+        MultiRangeSelection(primary: 70648..<119202, anchor: 70648, additional: [232186..<235714])))
+  }
+
+  @Test func cmdClickSelectedWordIsNoOp() {
+    let model = editor()
+    click(model, word: 2)
+    cmdClick(model, word: 8, time: 3)
+    cmdClick(model, word: 8, time: 5)
+    expectNoDifference(model.selection, wordsTwoAndEight)
+  }
+
+  @Test func cmdClickWordPartlyInsideRangeIsNoOp() {
+    let model = editor()
+    model.selectSourceRange(70648..<110_000, snapPlayhead: false, origin: .transcript)
+    let before = model.selection
+    cmdClick(model, word: 4, time: 3)
+    expectNoDifference(model.selection, before)
+  }
+
+  @Test func cmdClickFullyRemovedWordIsNoOp() {
+    let model = editor()
+    model.mutateDocument {
+      $0.timelineRemovals.append(
+        TimelineRemoval(
+          id: Fixtures.uuid(7), removedRange: 164_000..<167_000,
+          crossfade: Crossfade(lengthSamples: 48, curve: .equalPower)))
+    }
+    click(model, word: 2)
+    cmdClick(model, word: 8, time: 3)
+    expectNoDifference(model.selection, .range(70648..<74176, anchor: 70648))
+  }
+
+  @Test func cmdClickPartlyRemovedWordIsAdded() {
+    let model = editor()
+    model.mutateDocument {
+      $0.timelineRemovals.append(
+        TimelineRemoval(
+          id: Fixtures.uuid(7), removedRange: 160_000..<165_000,
+          crossfade: Crossfade(lengthSamples: 48, curve: .equalPower)))
+    }
+    click(model, word: 2)
+    cmdClick(model, word: 8, time: 3)
+    expectNoDifference(model.selection, wordsTwoAndEight)
+  }
+
+  @Test func cmdClickFromObjectStartsFreshWordRange() {
+    let model = editor()
+    let candidate = suggestion(model)
+    model.documentCutSuggestions = [candidate]
+    model.selectTranscriptObject(.suggestion(candidate.id))
+    cmdClick(model, word: 8)
+    expectNoDifference(model.selection, .range(164228..<166874, anchor: 164228))
+  }
+
+  @Test func cmdClickFromSeamStartsFreshWordRange() {
+    let model = editor()
+    model.mutateDocument {
+      $0.timelineRemovals.append(
+        TimelineRemoval(
+          id: Fixtures.uuid(7), removedRange: 300_000..<310_000,
+          crossfade: Crossfade(lengthSamples: 48, curve: .equalPower)))
+    }
+    model.selectSeam(Fixtures.uuid(7))
+    cmdClick(model, word: 2)
+    expectNoDifference(model.selection, .range(70648..<74176, anchor: 70648))
+  }
+
+  @Test func cmdShiftClickActsAdditive() {
+    let model = editor()
+    click(model, word: 2)
+    click(model, word: 8, extending: true, additive: true, time: 3)
+    expectNoDifference(model.selection, wordsTwoAndEight)
+  }
+
+  @Test func cmdDoubleClickNeverOpens() {
+    let model = editor()
+    cmdClick(model, word: 2, time: 1)
+    cmdClick(model, word: 2, count: 2, time: 1.2)
+    #expect(model.editSlice == nil)
+    expectNoDifference(model.selection, .range(70648..<74176, anchor: 70648))
+  }
+
+  @Test func cmdClickWithClickCountTwoOnAnotherWordStillAdds() {
+    let model = editor()
+    click(model, word: 2, time: 1)
+    cmdClick(model, word: 8, count: 2, time: 1.2)
+    expectNoDifference(model.selection, wordsTwoAndEight)
+  }
+
+  @Test func cmdClickOffAWordKeepsSelection() {
+    let model = editor()
+    model.selection = wordsTwoAndEight
+    model.transcript.transcriptClicked(
+      atUTF16Offset: nil, additive: true, clickCount: 1, timestamp: 3, doubleClickInterval: 0.5)
+    expectNoDifference(model.selection, wordsTwoAndEight)
+  }
+
+  @Test func cmdClickAddDoesNotMovePlayhead() {
+    let model = editor()
+    click(model, word: 2)
+    let playhead = model.playheadSourceSample
+    cmdClick(model, word: 8, time: 3)
+    expectNoDifference(model.playheadSourceSample, playhead)
+  }
+
+  @Test func plainClickCollapsesMultiSelection() {
+    let model = editor()
+    model.selection = wordsTwoAndEight
+    click(model, word: 13, time: 3)
+    expectNoDifference(model.selection, .range(232186..<235714, anchor: 232186))
+  }
+
+  @Test func shiftClickCollapsesAndExtendsFromPrimaryAnchor() {
+    let model = editor()
+    model.selection = wordsTwoAndEight
+    click(model, word: 13, extending: true, time: 3)
+    expectNoDifference(model.selection, .range(70648..<235714, anchor: 70648))
+  }
+
+  @Test func dragCollapsesMultiSelection() {
+    let model = editor()
+    model.selection = wordsTwoAndEight
+    let offset = model.transcript.document.wordRanges.first { $0.wordID == 13 }!.range.location
+    #expect(model.transcript.transcriptDragBegan(atUTF16Offset: offset))
+    expectNoDifference(model.selection, .range(232186..<235714, anchor: 232186))
+  }
+
+  @Test func waveformSelectionReplacesMultiSelection() {
+    let model = editor()
+    model.selection = wordsTwoAndEight
+    model.selectSourceRange(300_000..<310_000, snapPlayhead: false)
+    expectNoDifference(model.selection.freeformRange, 300_000..<310_000)
   }
 }
