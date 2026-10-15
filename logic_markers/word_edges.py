@@ -3,8 +3,9 @@
 CTC alignment edges are loose: next to pauses, ends run early and starts late;
 in connected speech the true boundary is the nearby energy valley. The edit plan
 cuts exactly `start..end`, so we move each edge to where the signal actually
-goes quiet. At a pause an edge only ever grows outward into the silence: cutting
-extra silence is harmless, cutting a quiet consonant is the bug. Every refined
+goes quiet. At a pause an edge only ever grows outward, across continuous sound
+until it first goes quiet: cutting extra silence is harmless, cutting a quiet
+consonant or the neighbour's onset is the bug. Every refined
 boundary is clamped to lie between the two words' midpoints, so words keep
 `start < end` and never cross, whatever the alignment.
 """
@@ -69,6 +70,20 @@ class _Envelope:
             f = g
         return runs
 
+    def sound_end(self, x: int, limit: int) -> int:
+        """Where the sound running forward from `x` first goes quiet, no later than `limit`."""
+        f = -(-x // self.hop)
+        while f * self.hop < limit and f < len(self.quiet) and not self.quiet[f]:
+            f += 1
+        return min(f * self.hop, limit)
+
+    def sound_start(self, x: int, limit: int) -> int:
+        """Where the sound running back from `x` began after quiet, no earlier than `limit`."""
+        g = min(len(self.quiet) - 1, (x - self.win) // self.hop)
+        while g >= 0 and g * self.hop + self.win > limit and not self.quiet[g]:
+            g -= 1
+        return max(g * self.hop + self.win, limit)
+
     def valley_boundary(self, lo: int, hi: int, fallback: int) -> int:
         first = max(0, -(-(lo - self.win // 2) // self.hop))
         last = min(len(self.db) - 1, (hi - self.win // 2) // self.hop)
@@ -92,8 +107,8 @@ def _clamp(value: int, lo: int, hi: int) -> int:
 def _pair_edges(env: _Envelope, e_a: int, s_b: int, m_a: int, m_b: int) -> tuple[int, int]:
     runs = env.quiet_runs(m_a, m_b, min(e_a, s_b), max(e_a, s_b))
     if runs:
-        end_a = max(e_a, runs[0][0] + env.pad)
-        start_b = min(s_b, runs[-1][1] - env.pad)
+        end_a = max(e_a, env.sound_end(e_a, runs[0][0]) + env.pad)
+        start_b = min(s_b, env.sound_start(s_b, runs[-1][1]) - env.pad)
     else:
         c = (e_a + s_b) // 2
         lo, hi = max(m_a, c - env.valley_radius), min(m_b, c + env.valley_radius)
@@ -110,14 +125,14 @@ def _first_start(env: _Envelope, s: int, m: int) -> int:
     runs = env.quiet_runs(max(0, s - env.outer), m, 0, s)
     if not runs:
         return s
-    return _clamp(min(s, runs[-1][1] - env.pad), 0, m)
+    return _clamp(min(s, env.sound_start(s, runs[-1][1]) - env.pad), 0, m)
 
 
 def _last_end(env: _Envelope, e: int, m: int) -> int:
     runs = env.quiet_runs(m, min(env.total, e + env.outer), e, env.total)
     if not runs:
         return e
-    return _clamp(max(e, runs[0][0] + env.pad), m + 1, env.total)
+    return _clamp(max(e, env.sound_end(e, runs[0][0]) + env.pad), m + 1, env.total)
 
 
 def refine_word_edges(words: tuple[Word, ...], samples, sr: int) -> tuple[Word, ...]:

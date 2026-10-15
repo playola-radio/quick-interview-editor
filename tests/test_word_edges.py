@@ -57,6 +57,15 @@ def test_stop_closure_inside_a_word_is_not_taken_for_the_pause():
     assert a.end == b.start
 
 
+def test_end_never_jumps_over_the_next_words_onset_to_a_later_closure():
+    # a 0.2-0.6, 40 ms pause, b's onset 0.64-0.75, closure inside b 0.75-0.85, b resumes;
+    # b is reported very late, so the closure sits inside the raw gap
+    sig = _sig(_silence(0.2), _tone(0.4), _silence(0.04), _tone(0.11), _silence(0.1),
+               _tone(0.35), _silence(0.3))
+    a, _ = refine_word_edges((_w(1, 0.2, 0.58), _w(2, 0.9, 1.2)), sig, SR)
+    assert 0.6 <= a.end <= 0.64
+
+
 def test_speech_entirely_below_the_quiet_threshold_keeps_its_span():
     sig = _sig(_silence(0.2), _tone(0.4, amp=0.0005), _silence(0.2),
                _tone(0.4, amp=0.0005), _silence(0.3))
