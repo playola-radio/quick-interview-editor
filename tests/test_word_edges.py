@@ -9,9 +9,9 @@ SR = 16000
 TOL = (PAD_MS + HOP_MS) / 1000 + 1 / SR
 
 
-def _tone(seconds, amp=0.4, freq=200.0):
+def _tone(seconds, amp=0.4):
     t = np.arange(round(seconds * SR)) / SR
-    return (amp * np.sin(2 * np.pi * freq * t)).astype(np.float32)
+    return (amp * np.sin(2 * np.pi * 200.0 * t)).astype(np.float32)
 
 
 def _silence(seconds):
@@ -26,10 +26,6 @@ def _w(i, start, end):
     return Word(id=i, text=f"w{i}", start=start, end=end, confidence=0.5)
 
 
-def _samples(word):
-    return round(word.start * SR), round(word.end * SR)
-
-
 def test_pause_edges_move_to_true_tone_edges():
     # tone a 0.3-0.7, silence 0.7-1.0, tone b 1.0-1.4
     sig = _sig(_silence(0.3), _tone(0.4), _silence(0.3), _tone(0.4), _silence(0.3))
@@ -38,22 +34,35 @@ def test_pause_edges_move_to_true_tone_edges():
     assert b.start == pytest.approx(1.0, abs=TOL)
 
 
-def test_end_reported_late_into_silence_is_pulled_back():
+def test_pause_edges_already_in_silence_are_never_pulled_into_the_word():
     sig = _sig(_silence(0.3), _tone(0.4), _silence(0.3), _tone(0.4), _silence(0.3))
-    a, _ = refine_word_edges((_w(1, 0.3, 0.725), _w(2, 1.0, 1.4)), sig, SR)
-    assert a.end == pytest.approx(0.7, abs=TOL)
+    a, b = refine_word_edges((_w(1, 0.3, 0.8), _w(2, 0.9, 1.4)), sig, SR)
+    assert (a.end, b.start) == (0.8, 0.9)
 
 
-def test_end_reported_far_late_into_silence_is_pulled_back_fully():
-    sig = _sig(_silence(0.3), _tone(0.4), _silence(0.3), _tone(0.4), _silence(0.3))
-    a, _ = refine_word_edges((_w(1, 0.3, 0.8), _w(2, 1.0, 1.4)), sig, SR)
-    assert a.end == pytest.approx(0.7, abs=TOL)
+def test_quiet_consonant_under_a_raised_noise_floor_stays_in_the_word():
+    noise = np.random.default_rng(0).uniform(-0.02, 0.02, round(1.6 * SR)).astype(np.float32)
+    sig = _sig(_silence(0.2), _tone(0.4), _tone(0.1, amp=0.02), _silence(0.2),
+               _tone(0.4), _silence(0.3)) + noise
+    a, _ = refine_word_edges((_w(1, 0.2, 0.7), _w(2, 0.9, 1.3)), sig, SR)
+    assert a.end == 0.7
 
 
-def test_start_reported_early_into_silence_is_pushed_forward_fully():
-    sig = _sig(_silence(0.3), _tone(0.4), _silence(0.3), _tone(0.4), _silence(0.3))
-    _, b = refine_word_edges((_w(1, 0.3, 0.7), _w(2, 0.9, 1.4)), sig, SR)
-    assert b.start == pytest.approx(1.0, abs=TOL)
+def test_stop_closure_inside_a_word_is_not_taken_for_the_pause():
+    # word a 0.2-0.7 has a silent closure 0.59-0.68 before its release; b follows at once
+    sig = _sig(_silence(0.2), _tone(0.39), _silence(0.09), _tone(0.02), _tone(0.4),
+               _silence(0.3))
+    a, b = refine_word_edges((_w(1, 0.2, 0.7), _w(2, 0.7, 1.1)), sig, SR)
+    assert a.end >= 0.69
+    assert a.end == b.start
+
+
+def test_speech_entirely_below_the_quiet_threshold_keeps_its_span():
+    sig = _sig(_silence(0.2), _tone(0.4, amp=0.0005), _silence(0.2),
+               _tone(0.4, amp=0.0005), _silence(0.3))
+    a, b = refine_word_edges((_w(1, 0.2, 0.6), _w(2, 0.8, 1.2)), sig, SR)
+    assert a.start <= 0.2 and a.end >= 0.6
+    assert b.start <= 0.8 and b.end >= 1.2
 
 
 def test_connected_boundary_lands_in_dip_and_is_shared():
