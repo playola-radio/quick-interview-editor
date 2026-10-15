@@ -1,7 +1,7 @@
 # Cmd-click multi-word selection + multi-delete — design
 
 **Date:** 2026-10-15
-**Status:** Approved in chat; awaiting written-spec review
+**Status:** Approved; implemented
 **Supersedes:** the "No non-contiguous multi-word selection is introduced" line in
 `2026-08-04-transcript-textkit-zoom-scroll-design.md`; extends the gesture table in
 `2026-09-08-transcript-group-selection-design.md`.

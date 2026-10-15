@@ -100,6 +100,7 @@ extension EditorModel {
     case .none: break
     }
   }
+
   private func reconcileMultiRange(_ multi: MultiRangeSelection) {
     let source = 0..<editPlan.source.durationSamples
     let primary = multi.primary.clamped(to: source)

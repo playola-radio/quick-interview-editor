@@ -14,6 +14,7 @@ final class TranscriptResizeHandleOverlayView: NSView {
   private var activeHandle: TranscriptResizeHandleTarget?
   private var downPoint: NSPoint?
   private var didBeginResize = false
+  private var additiveClick = false
   private var trackingArea: NSTrackingArea?
 
   override var isFlipped: Bool { true }
@@ -55,10 +56,13 @@ final class TranscriptResizeHandleOverlayView: NSView {
     activeHandle = coordinator?.resizeHandle(at: point)
     downPoint = point
     didBeginResize = false
+    additiveClick = event.modifierFlags.contains(.command)
   }
 
   override func mouseDragged(with event: NSEvent) {
-    guard let handle = activeHandle, let down = downPoint, let coordinator else { return }
+    guard !additiveClick, let handle = activeHandle, let down = downPoint, let coordinator else {
+      return
+    }
     let point = convert(event.locationInWindow, from: nil)
     if !didBeginResize {
       guard abs(point.x - down.x) >= TranscriptResizeMetrics.dragThreshold else { return }
@@ -83,13 +87,14 @@ final class TranscriptResizeHandleOverlayView: NSView {
     {
       coordinator.model.transcriptClicked(
         atUTF16Offset: offset, extending: event.modifierFlags.contains(.shift),
-        additive: event.modifierFlags.contains(.command),
+        additive: additiveClick,
         clickCount: event.clickCount, timestamp: event.timestamp,
         doubleClickInterval: NSEvent.doubleClickInterval)
     }
     activeHandle = nil
     downPoint = nil
     didBeginResize = false
+    additiveClick = false
   }
 
   override func viewWillMove(toWindow newWindow: NSWindow?) {
@@ -99,5 +104,6 @@ final class TranscriptResizeHandleOverlayView: NSView {
       didBeginResize = false
       activeHandle = nil
     }
+    if newWindow == nil { additiveClick = false }
   }
 }
