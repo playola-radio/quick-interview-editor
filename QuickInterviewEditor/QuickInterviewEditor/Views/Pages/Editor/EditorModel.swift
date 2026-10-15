@@ -89,6 +89,7 @@ final class EditorModel: ViewModel {
   @ObservationIgnored var committingDraftID: UUID?
   @ObservationIgnored var clipNamingQueue: [ManualClipNamingJob] = []
   @ObservationIgnored var clipNamingTask: Task<Void, Never>?
+  @ObservationIgnored var deferredClipNamings: [DeferredClipNaming] = []
   @ObservationIgnored @Dependency(\.uuid) var draftUUID
 
   init(
@@ -417,7 +418,9 @@ final class EditorModel: ViewModel {
   /// selection→playhead snap don't recompute per pointer tick. The real selection is committed once
   /// on release (`waveformAreaSelectEnded`), matching the "drag = view-only preview" rule.
   private(set) var marqueePreview: Range<Int>?
-  var exportPhase: ExportPhase = .idle
+  var exportPhase: ExportPhase = .idle {
+    didSet { applyDeferredClipNamings() }
+  }
   var exportReview: ExportReviewModel?
   @ObservationIgnored private var exportSession: ExportReviewModel?
   var destinationURL: URL?

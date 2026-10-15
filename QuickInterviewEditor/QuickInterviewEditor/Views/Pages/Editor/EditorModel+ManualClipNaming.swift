@@ -1,5 +1,6 @@
 import Dependencies
 import Foundation
+import IdentifiedCollections
 
 struct ManualClipNamingJob: Sendable {
   var clipID: Slice.ID
@@ -7,14 +8,33 @@ struct ManualClipNamingJob: Sendable {
   var startSample: Int
   var endSample: Int
   var wordIDs: [Word.ID]
+  var removedRanges: [Range<Int>]
+  var interviewArtist: String?
   var clipText: String
   var apiKey: String
 
-  func matches(_ slice: Slice) -> Bool {
-    slice.name == originalName && slice.startSample == startSample
+  func matches(_ state: EditorDocumentState) -> Bool {
+    guard let slice = state.slices[id: clipID] else { return false }
+    return slice.name == originalName && slice.startSample == startSample
       && slice.endSample == endSample && slice.wordIDs == wordIDs
       && slice.suggestionNaming == nil && slice.suggestionTypeID == nil
+      && state.interviewArtist == interviewArtist
+      && Self.intersectingRemovals(in: state.timelineRemovals, start: startSample, end: endSample)
+        == removedRanges
   }
+
+  static func intersectingRemovals(
+    in removals: IdentifiedArrayOf<TimelineRemoval>, start: Int, end: Int
+  ) -> [Range<Int>] {
+    removals.map(\.removedRange).filter { $0.overlaps(start..<end) }
+      .sorted { $0.lowerBound < $1.lowerBound }
+  }
+}
+
+struct DeferredClipNaming {
+  var job: ManualClipNamingJob
+  var result: ClipNamingResult
+  var configuration: SuggestionConfiguration
 }
 
 struct ManualClipName: Equatable, Sendable {
@@ -63,17 +83,34 @@ func manualClipName(
 extension EditorModel {
   func queueManualClipNaming(for slice: Slice) {
     guard slices[id: slice.id] != nil, let apiKey = resolvedClipNamingAPIKey() else { return }
+    let removed = removedWordIDs
     clipNamingQueue.append(
       ManualClipNamingJob(
         clipID: slice.id, originalName: slice.name, startSample: slice.startSample,
         endSample: slice.endSample, wordIDs: slice.wordIDs,
-        clipText: sliceSnippet(for: slice.wordIDs, words: editPlan.words), apiKey: apiKey))
+        removedRanges: ManualClipNamingJob.intersectingRemovals(
+          in: timelineRemovals, start: slice.startSample, end: slice.endSample),
+        interviewArtist: interviewArtist,
+        clipText: sliceSnippet(
+          for: slice.wordIDs.filter { !removed.contains($0) }, words: editPlan.words),
+        apiKey: apiKey))
     startClipNamingWorker()
   }
 
   func cancelClipNaming() {
     clipNamingTask?.cancel()
     clipNamingQueue.removeAll()
+    deferredClipNamings.removeAll()
+  }
+
+  /// Applies results that arrived while export was open, once it closes.
+  func applyDeferredClipNamings() {
+    guard !isExporting else { return }
+    let deferred = deferredClipNamings
+    deferredClipNamings.removeAll()
+    for item in deferred {
+      applyClipNaming(item.result, configuration: item.configuration, to: item.job)
+    }
   }
 
   func awaitClipNaming() async {
@@ -110,29 +147,27 @@ extension EditorModel {
     let request = ClipNamingRequest(
       configuration: configuration, model: CutSuggestOptions.freshConfigured.model,
       clipText: job.clipText, clipStartSample: job.startSample, clipEndSample: job.endSample,
-      transcriptUnits: editPlan.transcriptUnits, interviewArtist: interviewArtist)
+      transcriptUnits: editPlan.transcriptUnits, interviewArtist: job.interviewArtist)
     guard let result = try? await cutSuggest.nameClip(request, job.apiKey), !Task.isCancelled
     else { return }
     applyClipNaming(result, configuration: configuration, to: job)
   }
 
-  private func canApplyClipNaming(_ job: ManualClipNamingJob) -> Bool {
-    guard !isExporting, !isEditingName(of: job.clipID), let slice = slices[id: job.clipID]
-    else { return false }
-    return job.matches(slice)
-  }
-
   private func applyClipNaming(
     _ result: ClipNamingResult, configuration: SuggestionConfiguration, to job: ManualClipNamingJob
   ) {
-    guard canApplyClipNaming(job),
+    guard !isExporting else {
+      deferredClipNamings.append(.init(job: job, result: result, configuration: configuration))
+      return
+    }
+    guard !isEditingName(of: job.clipID), job.matches(documentState),
       let named = try? manualClipName(
         for: job, result: result, snapshot: clipNamingSnapshot(configuration),
         starts: suggestionStarts, issued: issuedSuggestionNumbers)
     else { return }
     let reservations = named.naming.reservation.map { [$0] } ?? []
     mutateDocument(recordUndo: false, recordingPermanentReservations: reservations) { state in
-      guard let slice = state.slices[id: job.clipID], job.matches(slice) else { return }
+      guard job.matches(state) else { return }
       state.slices[id: job.clipID]?.name = named.name
       state.slices[id: job.clipID]?.suggestionNaming = named.naming
       state.slices[id: job.clipID]?.suggestionTypeID = named.naming.typeID

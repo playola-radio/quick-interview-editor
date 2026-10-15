@@ -340,6 +340,81 @@ struct EditorManualClipNamingTests {
     }
   }
 
+  private func removal(coveringWord index: Int, of model: EditorModel) -> TimelineRemoval {
+    let word = model.editPlan.words[index]
+    return TimelineRemoval(
+      id: UUID(77), removedRange: word.startSample!..<word.endSample!,
+      crossfade: Crossfade(lengthSamples: 200, curve: .equalPower))
+  }
+
+  @Test func removedWordsAreLeftOutOfTheClipText() async {
+    let gate = ClipNamingGate()
+    await run(gate: gate) {
+      let model = editor()
+      let removed = removal(coveringWord: 1, of: model)
+      model.mutateDocument(recordUndo: false) { $0.timelineRemovals.append(removed) }
+      let clip = markClip(model, 0, 3)
+      await gate.waitForRequests(1)
+
+      expectNoDifference(
+        gate.requests[0].clipText,
+        sliceSnippet(
+          for: clip.wordIDs.filter { $0 != model.editPlan.words[1].id },
+          words: model.editPlan.words))
+      gate.resolveNext(nil)
+      await model.awaitClipNaming()
+    }
+  }
+
+  @Test func clipWhoseRemovalsChangedKeepsItsName() async {
+    let gate = ClipNamingGate()
+    await run(gate: gate) {
+      let model = editor()
+      let clip = markClip(model, 0, 3)
+      await gate.waitForRequests(1)
+      let removed = removal(coveringWord: 1, of: model)
+      model.mutateDocument(recordUndo: false) { $0.timelineRemovals.append(removed) }
+      gate.resolveNext(.spotlight)
+      await model.awaitClipNaming()
+
+      expectNoDifference(model.slices[id: clip.id]?.name, "Slice 1")
+      expectNoDifference(model.issuedSuggestionNumbers, [])
+    }
+  }
+
+  @Test func changedInterviewArtistKeepsTheClipName() async {
+    let gate = ClipNamingGate()
+    await run(gate: gate) {
+      let model = editor()
+      model.mutateDocument(recordUndo: false) { $0.interviewArtist = "Alice" }
+      let clip = markClip(model, 0, 3)
+      await gate.waitForRequests(1)
+      model.mutateDocument(recordUndo: false) { $0.interviewArtist = "Bob" }
+      gate.resolveNext(.spotlight)
+      await model.awaitClipNaming()
+
+      expectNoDifference(model.slices[id: clip.id]?.name, "Slice 1")
+      expectNoDifference(model.issuedSuggestionNumbers, [])
+    }
+  }
+
+  @Test func resultArrivingDuringExportIsAppliedWhenExportCloses() async {
+    let gate = ClipNamingGate()
+    await run(gate: gate) {
+      let model = editor()
+      let clip = markClip(model, 0, 3)
+      await gate.waitForRequests(1)
+      model.exportPhase = .reviewing(current: 0, total: 1)
+      gate.resolveNext(.spotlight)
+      await model.awaitClipNaming()
+      expectNoDifference(model.slices[id: clip.id]?.name, "Slice 1")
+
+      model.exportPhase = .idle
+
+      expectNoDifference(model.slices[id: clip.id]?.name, "Spotlight 1")
+    }
+  }
+
   @Test func rangeEditedClipKeepsItsName() async {
     let gate = ClipNamingGate()
     await run(gate: gate) {

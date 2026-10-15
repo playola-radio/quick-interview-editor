@@ -1517,7 +1517,7 @@
 			path = EditSlice;
 			sourceTree = "<group>";
 		};
-		"TEMP_7AF33CCA-A60A-41CE-AEF7-3A8EF0C2F898" /* Fixtures */ = {
+		"TEMP_BD031BCE-E125-4EC8-8988-D1E9115CDAC1" /* Fixtures */ = {
 			isa = PBXGroup;
 			children = (
 			);
