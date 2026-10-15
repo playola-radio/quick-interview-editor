@@ -204,6 +204,27 @@ extension EditorModel {
     addWordToSelection(wordID)
   }
 
+  func additiveTranscriptDragBegan(_ id: Word.ID) {
+    switch selection {
+    case .range, .ranges:
+      additiveDragBase = selection
+      additiveTranscriptDragged(anchorID: id, focusID: id)
+    case .none, .object, .seam:
+      additiveDragBase = nil
+      selectWord(id, extending: false)
+    }
+  }
+
+  func additiveTranscriptDragged(anchorID: Word.ID, focusID: Word.ID) {
+    guard let base = additiveDragBase else {
+      selectWords(anchorID: anchorID, focusID: focusID)
+      return
+    }
+    guard let run = sourceRange(coveringWords: anchorID, focusID) else { return }
+    selection = base.adding(run.clamped(to: 0..<editPlan.source.durationSamples))
+    selectionPreservesTransport = true
+  }
+
   private func openCapturedTranscriptClick(_ click: TranscriptClick) {
     defer { transcript.clickCapture = nil }
     guard !click.extending, let captured = transcript.clickCapture,

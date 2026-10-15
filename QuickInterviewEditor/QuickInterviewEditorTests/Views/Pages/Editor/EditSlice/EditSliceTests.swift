@@ -1932,6 +1932,19 @@ struct EditSliceTests {
     #expect(model.canRemoveSelection)
   }
 
+  /// Scoped transcripts have no multi-selection, so a Cmd-drag across words behaves as a plain drag.
+  @Test func cmdDragInScopedTranscriptActsAsPlainDrag() {
+    let model = wordSelectionModel()
+    let offsets = model.transcript.document.wordRanges
+    model.transcript.selectWords(anchorID: 1, focusID: 1)
+    model.transcript.transcriptDragBegan(
+      atUTF16Offset: offsets.first { $0.wordID == 3 }!.range.location, additive: true)
+    model.transcript.transcriptDragged(
+      toUTF16Offset: offsets.first { $0.wordID == 4 }!.range.location)
+    expectNoDifference(model.waveformSelection, 77_704..<119_202)
+    expectNoDifference(model.selectedWordIDs, [3, 4])
+  }
+
   /// A single-word transcript click selects just that word for removal.
   @Test func transcriptSingleWordSelectsThatWord() {
     let model = wordSelectionModel()

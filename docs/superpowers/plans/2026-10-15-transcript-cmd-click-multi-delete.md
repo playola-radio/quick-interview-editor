@@ -8,6 +8,8 @@
 
 **Tech Stack:** Swift 6 / SwiftUI + AppKit (macOS), `@Observable` MV models, swift-dependencies, swift-sharing, swift-identified-collections, Swift Testing + swift-custom-dump.
 
+> Note: Cmd-drag (adds the dragged run of words as one piece) was added after this plan was implemented; the "No Cmd-drag" statements below reflect the original scope.
+
 **Spec:** `docs/superpowers/specs/2026-10-15-transcript-cmd-click-multi-delete-design.md`
 
 ## Global Constraints

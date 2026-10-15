@@ -75,6 +75,12 @@ class TranscriptPageModel: ViewModel {
     case word(Word.ID, extending: Bool)
     /// Clear the selection entirely.
     case clear
+    /// A Cmd-drag began on a word: the editor snapshots its current selection as the base the drag
+    /// adds to (or acts as a plain word selection when there is no multi-selectable base).
+    case additiveDragBegan(Word.ID)
+    /// A Cmd-drag's run from its anchor word to its current focus word. Always applied on top of the
+    /// base captured at `additiveDragBegan`, so dragging back shrinks the run.
+    case additiveWords(anchor: Word.ID, focus: Word.ID)
   }
 
   // MARK: - Initialization
@@ -116,6 +122,7 @@ class TranscriptPageModel: ViewModel {
   /// handlers reads them; the renderer draws the pushed-in `highlightedWordIDs` instead.
   private var selectionAnchorID: Word.ID?
   private var selectionFocusID: Word.ID?
+  private var dragIsAdditive = false
   var document = TranscriptDocument(words: [])
   var plainTranscriptText: String { document.text }
   let minFontSize = 11.0
@@ -396,15 +403,17 @@ class TranscriptPageModel: ViewModel {
   }
 
   @discardableResult
-  func transcriptDragBegan(atUTF16Offset offset: Int?) -> Bool {
+  func transcriptDragBegan(atUTF16Offset offset: Int?, additive: Bool = false) -> Bool {
     overlap.dismiss()
     overlapClick = nil
     overlap.update([], anchor: nil, selected: nil)
     clickCapture = nil
+    dragIsAdditive = false
     guard let offset, let id = document.wordID(atUTF16Offset: offset) else { return false }
     selectionAnchorID = id
     selectionFocusID = id
-    onSelectionIntent?(.word(id, extending: false))
+    dragIsAdditive = additive
+    onSelectionIntent?(additive ? .additiveDragBegan(id) : .word(id, extending: false))
     return true
   }
 
@@ -413,10 +422,14 @@ class TranscriptPageModel: ViewModel {
       return
     }
     selectionFocusID = id
-    onSelectionIntent?(.words(anchor: anchor, focus: id))
+    onSelectionIntent?(
+      dragIsAdditive ? .additiveWords(anchor: anchor, focus: id) : .words(anchor: anchor, focus: id)
+    )
   }
 
-  func transcriptDragEnded() {}
+  func transcriptDragEnded() {
+    dragIsAdditive = false
+  }
 
   /// Fired by the resize-handle overlay once a drag crosses `TranscriptResizeMetrics.dragThreshold`.
   /// No-op until `EditorModel` wires the closure (a later task's resize state machine).

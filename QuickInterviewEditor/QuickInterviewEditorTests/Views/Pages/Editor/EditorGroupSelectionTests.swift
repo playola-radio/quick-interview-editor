@@ -651,6 +651,132 @@ struct EditorGroupSelectionTests {
     expectNoDifference(stops.value, 0)
   }
 
+  // MARK: - Cmd-drag
+
+  private func cmdDrag(
+    _ model: EditorModel, from anchor: Int, to focus: Int, through waypoints: [Int] = []
+  ) {
+    model.transcript.transcriptDragBegan(
+      atUTF16Offset: wordOffset(model, word: anchor), additive: true)
+    for word in waypoints + [focus] {
+      model.transcript.transcriptDragged(toUTF16Offset: wordOffset(model, word: word))
+    }
+  }
+
+  private func wordSpan(_ model: EditorModel, _ first: Int, _ last: Int) -> Range<Int> {
+    model.sourceRange(ofWord: first)!.lowerBound..<model.sourceRange(ofWord: last)!.upperBound
+  }
+
+  @Test func cmdDragAddsRunAsOnePieceBesideExistingWord() {
+    let model = editor()
+    click(model, word: 2)
+    cmdDrag(model, from: 8, to: 10)
+    expectNoDifference(
+      model.selection,
+      .ranges(
+        MultiRangeSelection(
+          primary: 70648..<74176, anchor: 70648, additional: [wordSpan(model, 8, 10)])))
+  }
+
+  @Test func cmdDragMergesIntoPieceItReaches() {
+    let model = editor()
+    _ = model.transcript.selectWords(anchorID: 2, focusID: 3)
+    cmdDrag(model, from: 7, to: 3)
+    expectNoDifference(model.selection, .range(wordSpan(model, 2, 7), anchor: 70648))
+  }
+
+  @Test func cmdDragBackShrinksTheNewPieceWithoutMutatingTheBase() {
+    let model = editor()
+    click(model, word: 2)
+    cmdDrag(model, from: 8, to: 8, through: [9, 10, 11])
+    expectNoDifference(
+      model.selection,
+      .ranges(
+        MultiRangeSelection(
+          primary: 70648..<74176, anchor: 70648, additional: [wordSpan(model, 8, 8)])))
+  }
+
+  @Test func cmdDragFromNoSelectionActsAsPlainDrag() {
+    let cmd = editor()
+    cmdDrag(cmd, from: 8, to: 10)
+    let plain = editor()
+    plain.transcript.transcriptDragBegan(atUTF16Offset: wordOffset(plain, word: 8))
+    plain.transcript.transcriptDragged(toUTF16Offset: wordOffset(plain, word: 10))
+    expectNoDifference(cmd.selection, plain.selection)
+    expectNoDifference(cmd.selection.freeformRange, wordSpan(cmd, 8, 10))
+  }
+
+  @Test func cmdDragFromClipActsAsPlainDrag() {
+    let model = editor()
+    let candidate = suggestion(model)
+    model.documentCutSuggestions = [candidate]
+    model.selectTranscriptObject(.suggestion(candidate.id))
+    cmdDrag(model, from: 8, to: 10)
+    expectNoDifference(model.selection, .range(wordSpan(model, 8, 10), anchor: 164228))
+  }
+
+  @Test func cmdDragFromSeamActsAsPlainDrag() {
+    let model = editor()
+    model.mutateDocument {
+      $0.timelineRemovals.append(
+        TimelineRemoval(
+          id: Fixtures.uuid(7), removedRange: 20_000..<30_000,
+          crossfade: Crossfade(lengthSamples: 48, curve: .equalPower)))
+    }
+    model.selection = .seam(Fixtures.uuid(7))
+    cmdDrag(model, from: 8, to: 10)
+    expectNoDifference(model.selection, .range(wordSpan(model, 8, 10), anchor: 164228))
+  }
+
+  @Test func cmdDragAddingToSelectionDuringPlaybackDoesNotStopOrSeek() async {
+    let stops = LockIsolated(0)
+    let model = withDependencies {
+      $0.audioPlayer.stop = { _ in stops.withValue { $0 += 1 } }
+    } operation: {
+      editor()
+    }
+    model.selection = .range(70648..<74176, anchor: 70648)
+    let session = PlaybackSessionID()
+    model.transportPhase = .playing(session)
+    model.playheadEditedSample = 150_000
+    cmdDrag(model, from: 8, to: 10)
+    #expect(model.selectionPreservesTransport)
+    await model.transportSelectionChanged(model.audioSelection, cursorToken: model.cursorMoveToken)
+    expectNoDifference(model.transportPhase, .playing(session))
+    expectNoDifference(model.playheadEditedSample, 150_000)
+    expectNoDifference(stops.value, 0)
+  }
+
+  @Test func cmdDragDoesNotMovePlayhead() {
+    let model = editor()
+    click(model, word: 2)
+    let playhead = model.playheadSourceSample
+    cmdDrag(model, from: 8, to: 10)
+    expectNoDifference(model.playheadSourceSample, playhead)
+  }
+
+  @Test func deletingAfterCmdDragRemovesEveryPieceInOneUndoStep() async {
+    let model = editor()
+    click(model, word: 2)
+    cmdDrag(model, from: 8, to: 10)
+    let before = model.documentState
+    await model.deleteSelectionTapped()
+    expectNoDifference(
+      model.timelineRemovals.map(\.removedRange), [70648..<74176, wordSpan(model, 8, 10)])
+    expectNoDifference(model.history.undo.last?.label, "Remove Sections")
+    await model.undoTapped()
+    expectNoDifference(model.documentState, before)
+  }
+
+  @Test func plainDragAfterCmdDragStartsFresh() {
+    let model = editor()
+    click(model, word: 2)
+    cmdDrag(model, from: 8, to: 10)
+    model.transcript.transcriptDragBegan(atUTF16Offset: wordOffset(model, word: 13))
+    model.transcript.transcriptDragged(toUTF16Offset: wordOffset(model, word: 13))
+    expectNoDifference(model.selection, .range(232186..<235714, anchor: 232186))
+  }
+
   @Test func removeSectionLabelIsSingularForOneRange() {
     let model = editor()
     model.selection = .range(70648..<74176, anchor: 70648)

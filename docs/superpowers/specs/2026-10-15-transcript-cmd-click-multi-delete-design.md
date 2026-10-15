@@ -16,13 +16,13 @@ one undo step.
 
 | # | Decision |
 |---|----------|
-| 1 | Gesture is **Cmd-click in the transcript only**. No Cmd-drag, no waveform additive gesture. Ctrl-click is macOS right-click, so it is not used. |
+| 1 | Gesture is **Cmd-click and Cmd-drag in the transcript only** (Cmd-drag was added after the first implementation; see decision 7). No waveform additive gesture. Ctrl-click is macOS right-click, so it is not used. |
 | 2 | Cmd-click is **add-only**. Cmd-clicking an already-selected word is a no-op. |
 | 3 | An existing contiguous `.range` (drag / Shift-click) is kept as one piece; Cmd-clicked words are added as further pieces. |
 | 4 | From `.none`, `.object` (clip/suggestion) or `.seam`, Cmd-click discards the old selection and starts a single-word `.range`. It never implicitly includes an object's whole range. |
 | 5 | Cmd-click on a **fully removed** (struck-through) word is a no-op. A partially removed word is selectable. |
 | 6 | Plain click, drag, and any waveform selection replace the selection exactly as today. **Shift-click** collapses to single-range and extends from the primary piece's anchor. Command wins over Shift when both are held. |
-| 7 | Cmd-double-click never opens a clip/draft; Cmd-drag does nothing (no drag selection starts). |
+| 7 | Cmd-double-click never opens a clip/draft. **Cmd-drag adds the dragged run of words (anchor word to focus word) as ONE piece.** The piece grows live while dragging and is always computed from the selection as it was when the drag began, so dragging back shrinks it. It merges with any piece it touches or overlaps. From a non-range selection (none, clip, suggestion, seam) it behaves exactly like a plain drag. Playback keeps running and the playhead does not move. Scoped (Edit Slice) transcripts have no multi-selection, so a Cmd-drag there acts as a plain drag. Cmd-drag that starts on a resize handle is still a no-op. |
 | 8 | ⌫ removes every piece in **one** `mutateDocument` / history entry. Abutting or overlapping pieces merge first; each resulting disjoint piece becomes one `TimelineRemoval` with the default crossfade (20 ms equal-power). |
 | 9 | Existing removals are absorbed with today's strict-overlap rule (as in `removeSourceRange`); untouched removals keep their IDs and crossfade settings. |
 | 10 | Undo restores the audio and leaves the selection cleared — same as today's single-range delete. |
@@ -67,8 +67,11 @@ struct MultiRangeSelection: Equatable, Sendable {
 ### 3.2 Gesture plumbing
 
 - `TranscriptClick` gains `additive: Bool` (Command held at mouse-down).
-- `HitTestingTextView` reads `.command` on mouse-down; while held, no drag gesture
-  begins. `mouseUp` forwards `additive`. `TranscriptResizeHandleOverlayView` forwards
+- `HitTestingTextView` reads `.command` on mouse-down; while held, a drag begins as an
+  additive drag (`transcriptDragBegan(atUTF16Offset:additive:)`), which makes the
+  transcript emit `additiveDragBegan` / `additiveWords` intents instead of `word` / `words`.
+  `EditorModel` snapshots the selection at drag begin (`additiveDragBase`) and applies
+  `base.adding(run)` on every move. `mouseUp` forwards `additive` for clicks. `TranscriptResizeHandleOverlayView` forwards
   Command as well as Shift.
 - `EditorModel.transcriptClicked(_:)` branches on `additive` **before** the
   double-click / `clickCapture` logic: clears `clickCapture`, never calls
@@ -110,7 +113,7 @@ the post-mutation teardown (`transcript.clearSelectionTapped()`, `fineTune.clear
 
 ## 4. Out of scope
 
-Cmd-drag, Cmd-click toggle-off, waveform additive selection, multi-selection in the
+Cmd-click toggle-off, waveform additive selection, multi-selection in the
 Edit Slice modal, restoring the multi-selection on undo, per-piece crossfade editing
 before delete.
 
@@ -122,7 +125,9 @@ Model tests (Swift Testing + `expectNoDifference`), colocated with existing suit
   existing range kept as primary; re-click no-op; removed-word no-op; abutting words
   merge (and demote to `.range` when only one piece results); plain click, Shift-click,
   drag, waveform click collapse; Cmd+Shift acts additive; Cmd-double-click does not
-  open; Cmd prevents drag start; resize overlay forwards Command.
+  open; Cmd-drag adds a run, merges, shrinks when dragged back, and falls back to a plain drag
+  from a non-range selection; resize overlay forwards Command (a Cmd-drag on a resize handle
+  stays a no-op).
 - **Gating:** for `.ranges`, `canAddSlice`, `canOpenSelection`, fine-tune, audition,
   edge-edit, nudge are unavailable; `canRemoveSelectedSection` true;
   `activeEditingRange` does not show the active slice.

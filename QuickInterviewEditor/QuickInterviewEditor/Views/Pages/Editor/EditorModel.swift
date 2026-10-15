@@ -145,16 +145,20 @@ final class EditorModel: ViewModel {
     // on the model (not a view `.onChange`) so headless model tests apply intents without a view.
     // One-directional — the model never writes the transcript's selection back through this.
     wireTranscriptInteractions()
-    transcript.onSelectionIntent = { [weak self] intent in
-      guard let self else { return }
-      switch intent {
-      case .words(let anchor, let focus): self.selectWords(anchorID: anchor, focusID: focus)
-      case .word(let id, extending: true): self.selectWord(id, extending: true)
-      case .word(let id, extending: false): self.selectWord(id, extending: false)
-      case .clear: self.clearSelection()
-      }
-    }
+    transcript.onSelectionIntent = { [weak self] in self?.applyTranscriptSelectionIntent($0) }
     wireTranscriptResize()
+  }
+
+  private func applyTranscriptSelectionIntent(_ intent: TranscriptPageModel.SelectionIntent) {
+    switch intent {
+    case .words(let anchor, let focus): selectWords(anchorID: anchor, focusID: focus)
+    case .word(let id, extending: true): selectWord(id, extending: true)
+    case .word(let id, extending: false): selectWord(id, extending: false)
+    case .clear: clearSelection()
+    case .additiveDragBegan(let id): additiveTranscriptDragBegan(id)
+    case .additiveWords(let anchor, let focus):
+      additiveTranscriptDragged(anchorID: anchor, focusID: focus)
+    }
   }
 
   private func wireTranscriptResize() {
@@ -653,6 +657,7 @@ final class EditorModel: ViewModel {
   }
   /// Explicit clears and history restore selection without changing transport.
   var selectionPreservesTransport = false
+  @ObservationIgnored var additiveDragBase: EditorSelection?
 
   var audioSelection: Range<Int>? {
     get { selection.freeformRange ?? selectedTranscriptObject?.range }
@@ -796,7 +801,7 @@ final class EditorModel: ViewModel {
 
   /// The source range spanning two words — the earlier word's start to the later word's end — so a
   /// selection from `a` to `b` covers everything between them regardless of drag direction.
-  private func sourceRange(coveringWords lhs: Word.ID, _ rhs: Word.ID) -> Range<Int>? {
+  func sourceRange(coveringWords lhs: Word.ID, _ rhs: Word.ID) -> Range<Int>? {
     guard let left = sourceRange(ofWord: lhs), let right = sourceRange(ofWord: rhs) else {
       return nil
     }

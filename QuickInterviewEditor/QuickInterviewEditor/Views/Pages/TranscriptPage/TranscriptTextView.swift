@@ -626,12 +626,12 @@ final class HitTestingTextView: NSTextView {
 
   override func mouseDragged(with event: NSEvent) {
     _ = pointer.moved(to: event.locationInWindow)
-    guard !additiveClick else { return }
     guard pointer.isDragging, let coordinator else { return }
     let point = convert(event.locationInWindow, from: nil)
     let offset = coordinator.utf16Offset(at: point)
     if !beganWordDrag {
-      beganWordDrag = coordinator.model.transcriptDragBegan(atUTF16Offset: anchorOffset ?? offset)
+      beganWordDrag = coordinator.model.transcriptDragBegan(
+        atUTF16Offset: anchorOffset ?? offset, additive: additiveClick)
     }
     if beganWordDrag, let offset { coordinator.model.transcriptDragged(toUTF16Offset: offset) }
   }
@@ -653,7 +653,7 @@ final class HitTestingTextView: NSTextView {
         additive: additiveClick, clickCount: count, timestamp: event.timestamp,
         doubleClickInterval: NSEvent.doubleClickInterval)
     case .dragEnded:
-      if !additiveClick { coordinator.model.transcriptDragEnded() }
+      coordinator.model.transcriptDragEnded()
     case .none: break
     }
   }
