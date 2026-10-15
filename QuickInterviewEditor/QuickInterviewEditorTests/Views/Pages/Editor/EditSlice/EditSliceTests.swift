@@ -511,6 +511,21 @@ struct EditSliceTests {
     expectNoDifference(model.editedWaveform.samplesPerPixel, 10)
   }
 
+  @Test func zoomKeysCenterOnThePlayhead() {
+    let model = laneModel()  // slice 10_000..<20_000, fit spp 10
+    model.updatePlayback(sample: 15_500, isPlaying: false)
+    model.zoomInKeyPressed()  // spp 8 (floor) -> 8_000 visible, centered on 15_500
+    expectNoDifference(model.editedWaveform.visibleStartSample, 11_500)
+  }
+
+  @Test func verticalZoomKeysScaleTheWaveformAmplitude() {
+    let model = laneModel()
+    model.verticalZoomInKeyPressed()
+    expectNoDifference(model.waveform.amplitudeScale, 2)
+    model.verticalZoomOutKeyPressed()
+    expectNoDifference(model.waveform.amplitudeScale, 1)
+  }
+
   @Test func zoomFitTogglesAgainstTheSlice() {
     let model = laneModel()  // slice 10_000..<20_000, fit spp 10
     model.zoomInTapped()  // spp 8 (floor), so a fit is a visible change

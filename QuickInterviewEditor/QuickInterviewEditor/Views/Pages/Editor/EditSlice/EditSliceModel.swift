@@ -1080,6 +1080,17 @@ final class EditSliceModel: ViewModel, Identifiable {
 
   func zoomInTapped() { editedWaveform.zoomInTapped() }
   func zoomOutTapped() { editedWaveform.zoomOutTapped() }
+  /// ⌘→ / ⌘← keep the playhead centered (the buttons above keep the viewport's center instead).
+  func zoomInKeyPressed() {
+    guard let center = laneCursorSample else { return zoomInTapped() }
+    editedWaveform.zoomIn(centeredOnEdited: center)
+  }
+  func zoomOutKeyPressed() {
+    guard let center = laneCursorSample else { return zoomOutTapped() }
+    editedWaveform.zoomOut(centeredOnEdited: center)
+  }
+  func verticalZoomInKeyPressed() { waveform.amplitudeZoomIncremented() }
+  func verticalZoomOutKeyPressed() { waveform.amplitudeZoomDecremented() }
   /// Logic's `Z`: fit the whole slice (the lane's pinned extent) on the first press, restore the
   /// prior zoom on the next. Uses the committed slice window, not the live draft, so it always
   /// frames exactly what the pinned lane can show.

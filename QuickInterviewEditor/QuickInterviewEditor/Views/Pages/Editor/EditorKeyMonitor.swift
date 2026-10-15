@@ -2,7 +2,8 @@ import AppKit
 import SwiftUI
 
 /// A logic-free bridge: installs an app-local key-down monitor while it's mounted and forwards
-/// the editor's global zoom keys (⌘← / ⌘→ step-zoom, Z zoom-to-fit) to `EditorModel`. It stands
+/// the editor's global zoom keys (⌘← / ⌘→ step-zoom, ⌘↓ / ⌘↑ vertical zoom, Z zoom-to-fit) to
+/// `EditorModel`. It stands
 /// down while a text field is being edited (the field editor is first responder), so slice
 /// renaming keeps those keys. The transcript is a non-editable NSTextView, so it never blocks
 /// the shortcuts. Mirrors ``AuditionKeyMonitor`` so both survive Swift 6 strict concurrency.
@@ -63,9 +64,10 @@ struct EditorKeyMonitor: NSViewRepresentable {
       monitor = nil
     }
 
-    /// Exactly ⌘← / ⌘→ ⇒ zoom out/in; Z with no modifiers ⇒ zoom-to-fit. Any extra modifier
-    /// (Shift, Option, Control) falls through, as do ⌘Z (undo) and ⌥Z. Pure and `Sendable`, so
-    /// it runs in the monitor's nonisolated handler (only `Sendable` values in and out).
+    /// Exactly ⌘← / ⌘→ ⇒ zoom out/in, ⌘↓ / ⌘↑ ⇒ vertical zoom in/out; Z with no modifiers ⇒
+    /// zoom-to-fit. Any extra modifier (Shift, Option, Control) falls through, as do ⌘Z (undo) and
+    /// ⌥Z. Pure and `Sendable`, so it runs in the monitor's nonisolated handler (only `Sendable`
+    /// values in and out).
     static func editorKey(
       forKeyCode keyCode: UInt16, modifiers rawModifiers: NSEvent.ModifierFlags,
       characters: String?
@@ -107,15 +109,18 @@ struct EditorKeyMonitor: NSViewRepresentable {
       }
     }
 
-    /// Left/Right arrow keys only, split out of `editorKey` to keep its cyclomatic complexity in
-    /// check: ⌘←/⌘→ zoom, plain ←/→ nudge the pending removal's start (cut-in), Shift-←/→ nudge
-    /// its end (cut-out), ⌥←/→ nudge a selected seam's left cut, ⌥⇧←/→ nudge its right cut.
+    /// Arrow keys only, split out of `editorKey` to keep its cyclomatic complexity in check:
+    /// ⌘←/⌘→ zoom, plain ←/→ nudge the pending removal's start (cut-in), Shift-←/→ nudge its end
+    /// (cut-out), ⌥←/→ nudge a selected seam's left cut, ⌥⇧←/→ nudge its right cut. ⌘↓/⌘↑ are
+    /// Logic's Zoom Vertical In/Out (↓ makes the waveform taller); other ↑/↓ combos fall through.
     private static func arrowKey(
       forKeyCode keyCode: UInt16, modifiers: NSEvent.ModifierFlags
     ) -> EditorKey? {
       switch keyCode {
       case 123: return arrowKey(forModifiers: modifiers, whenLeft: true)
       case 124: return arrowKey(forModifiers: modifiers, whenLeft: false)
+      case 125 where modifiers == .command: return .verticalZoomIn  // ⌘↓
+      case 126 where modifiers == .command: return .verticalZoomOut  // ⌘↑
       default: return nil
       }
     }
@@ -147,7 +152,7 @@ struct EditorKeyMonitor: NSViewRepresentable {
       // Z is a toggle, the speed keys step discrete presets, ⌫ removes a section, and R restarts
       // playback from the last start; swallow auto-repeat on all of them so holding one doesn't
       // flicker fit↔restore, blow through every speed, fire multiple removals, or machine-gun
-      // restart (and doesn't beep). The arrow zoom keys intentionally keep repeating.
+      // restart (and doesn't beep). The arrow zoom keys (both axes) intentionally keep repeating.
       if isARepeat,
         key == .zoomFit || key == .speedUp || key == .speedDown || key == .deleteSelection
           || key == .returnToLastPlayStart

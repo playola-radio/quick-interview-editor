@@ -1795,6 +1795,33 @@ struct EditorTests {
     #expect(model.editedWaveform.samplesPerPixel > zoomedIn)
   }
 
+  @Test func editorKeyDownZoomCentersOnThePlayhead() {
+    let model = editor()
+    model.editedWaveform.timeline = EditedTimeline(
+      sourceDurationSamples: 100_000_000, removals: [])
+    model.editedWaveform.viewportWidth = 1000
+    model.editedWaveform.samplesPerPixel = 100
+    model.editedWaveform.visibleStartSample = 0
+    model.playheadEditedSample = 400_000
+
+    _ = model.editorKeyDown(.zoomIn)
+    expectNoDifference(model.editedWaveform.visibleStartSample, 400_000 - 25_000)
+
+    _ = model.editorKeyDown(.zoomOut)
+    expectNoDifference(model.editedWaveform.visibleStartSample, 400_000 - 50_000)
+  }
+
+  @Test func editorKeyDownVerticalZoomScalesTheWaveformAmplitude() {
+    let model = editor()
+    model.waveform.amplitudeScale = 2
+
+    #expect(model.editorKeyDown(.verticalZoomIn))
+    expectNoDifference(model.waveform.amplitudeScale, 4)
+
+    #expect(model.editorKeyDown(.verticalZoomOut))
+    expectNoDifference(model.waveform.amplitudeScale, 2)
+  }
+
   @Test func editorKeyDownSwitchesRightPanel() {
     let model = editor()
 
