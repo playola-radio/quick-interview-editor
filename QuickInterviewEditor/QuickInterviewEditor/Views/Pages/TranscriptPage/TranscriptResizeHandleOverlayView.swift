@@ -83,6 +83,7 @@ final class TranscriptResizeHandleOverlayView: NSView {
     {
       coordinator.model.transcriptClicked(
         atUTF16Offset: offset, extending: event.modifierFlags.contains(.shift),
+        additive: event.modifierFlags.contains(.command),
         clickCount: event.clickCount, timestamp: event.timestamp,
         doubleClickInterval: NSEvent.doubleClickInterval)
     }

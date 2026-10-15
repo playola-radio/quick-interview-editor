@@ -64,11 +64,13 @@ Escape, and background deselection do not add history entries.
 | Drag a transcript group body | Replace object selection with a freeform word range |
 | Drag a transcript edge handle | Resize that selection, clip, or suggestion; commit object edits in one undo step |
 | Shift-click a word | Extend the range from its existing anchor; transition an object to freeform selection |
+| Cmd-click a word | Add it as another selected piece (add-only; ignored if already selected or fully removed). From a clip, suggestion, or seam, start a fresh single-word selection. Never opens; Cmd-drag does nothing |
 | Click true empty transcript background | Clear the selection |
 | Escape | Close an open overlap chooser first; otherwise clear the selection |
 | Delete with a clip selected | Delete that clip object and clear selection; one undo step |
 | Delete with a suggestion selected | Delete that suggestion and clear selection; one undo step |
 | Delete with a freeform highlight | Clear the highlight; one undo step; preserve audio |
+| Delete with several Cmd-clicked pieces | Remove every piece in one undo step, one default crossfade per resulting piece |
 | Arrow keys with a clip or suggestion selected | Leave the object and its range unchanged |
 | Arrow keys with a freeform range | Retain existing start/end boundary nudges |
 

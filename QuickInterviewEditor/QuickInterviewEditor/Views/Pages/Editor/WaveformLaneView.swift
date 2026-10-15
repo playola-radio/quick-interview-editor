@@ -61,6 +61,9 @@ struct WaveformLaneView<Overlay: View>: View {
   /// to `[]` so every existing call site (e.g. the slice-edit sheet) compiles unchanged. This lane
   /// only draws whatever overlays it's handed.
   var seams: [SeamOverlay] = []
+  /// Extra non-interactive highlight fills (a Cmd-click multi-selection's pieces). No edge handles
+  /// or audition buttons attach to these. Defaults to `[]` so the slice-edit sheet compiles unchanged.
+  var additionalHighlightRanges: [Range<Int>] = []
   /// The right-click menu for a band position, keyed by view-x. The model decides whether the x
   /// hits a seam and what the menu contains; returning `[]` shows no menu. Default no-op so call
   /// sites without a seam menu (the slice-edit sheet) compile unchanged.
@@ -105,12 +108,14 @@ struct WaveformLaneView<Overlay: View>: View {
 
   var body: some View {
     let highlight = highlightRange.flatMap { waveform.laneSpan(forSource: $0) }
+    let highlightSpans = ([highlightRange].compactMap { $0 } + additionalHighlightRanges)
+      .compactMap { waveform.laneSpan(forSource: $0) }
     let cursorEdgeXs = resizeCursorEdgeXs()
     VStack(alignment: .leading, spacing: 8) {
       rulerStrip
       ZStack(alignment: .leading) {
         Color(white: 0.024)
-        content(highlight: highlight)
+        content(highlightSpans: highlightSpans)
       }
       .frame(height: bandHeight)
       .clipShape(RoundedRectangle(cornerRadius: 4))
@@ -212,14 +217,14 @@ struct WaveformLaneView<Overlay: View>: View {
     .overlay(WaveformRulerInteractionLayer(waveform: waveform, onRulerMove: onRulerMove))
   }
 
-  @ViewBuilder private func content(highlight: WaveformSpan?) -> some View {
+  @ViewBuilder private func content(highlightSpans: [WaveformSpan]) -> some View {
     if waveform.showsLoading {
       centeredMessage(waveform.loadingMessage)
     } else if waveform.showsEmpty {
       centeredMessage(waveform.emptyMessage)
     } else {
       ZStack(alignment: .leading) {
-        WaveformHighlight(highlight: highlight)
+        WaveformHighlight(spans: highlightSpans)
         WaveformCanvas(waveform: waveform)
         SeamBowtieOverlay(seams: seams)
         WaveformPlayhead(waveform: waveform, playhead: playhead)
@@ -269,16 +274,18 @@ private struct WaveformCanvas: View {
 /// expensive ``WaveformCanvas`` strokes beneath. Sits below the canvas in the ``ZStack`` so the
 /// waveform draws on top of the highlight, matching the original single-canvas draw order.
 private struct WaveformHighlight: View {
-  let highlight: WaveformSpan?
+  let spans: [WaveformSpan]
 
   private let highlightColor = Color.white.opacity(0.14)
 
   var body: some View {
-    if let highlight {
+    if !spans.isEmpty {
       Canvas { context, size in
-        context.fill(
-          Path(CGRect(x: highlight.positionX, y: 0, width: highlight.width, height: size.height)),
-          with: .color(highlightColor))
+        for span in spans {
+          context.fill(
+            Path(CGRect(x: span.positionX, y: 0, width: span.width, height: size.height)),
+            with: .color(highlightColor))
+        }
       }
     }
   }

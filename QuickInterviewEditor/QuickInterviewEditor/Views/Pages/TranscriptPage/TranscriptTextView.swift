@@ -606,6 +606,7 @@ final class HitTestingTextView: NSTextView {
   private var anchorOffset: Int?
   private var pointer = TranscriptPointerGesture()
   private var beganWordDrag = false
+  private var additiveClick = false
 
   override func accessibilityChildren() -> [Any]? {
     var children = super.accessibilityChildren() ?? []
@@ -620,10 +621,12 @@ final class HitTestingTextView: NSTextView {
     anchorOffset = coordinator?.utf16Offset(at: convert(event.locationInWindow, from: nil))
     pointer.began(at: event.locationInWindow)
     beganWordDrag = false
+    additiveClick = event.modifierFlags.contains(.command)
   }
 
   override func mouseDragged(with event: NSEvent) {
     _ = pointer.moved(to: event.locationInWindow)
+    guard !additiveClick else { return }
     guard pointer.isDragging, let coordinator else { return }
     let point = convert(event.locationInWindow, from: nil)
     let offset = coordinator.utf16Offset(at: point)
@@ -637,6 +640,7 @@ final class HitTestingTextView: NSTextView {
     defer {
       anchorOffset = nil
       beganWordDrag = false
+      additiveClick = false
     }
     guard let coordinator else {
       pointer.cancelled()
@@ -646,7 +650,7 @@ final class HitTestingTextView: NSTextView {
     case .click(let count):
       coordinator.model.transcriptClicked(
         atUTF16Offset: anchorOffset, extending: event.modifierFlags.contains(.shift),
-        clickCount: count, timestamp: event.timestamp,
+        additive: additiveClick, clickCount: count, timestamp: event.timestamp,
         doubleClickInterval: NSEvent.doubleClickInterval)
     case .dragEnded:
       coordinator.model.transcriptDragEnded()
@@ -679,6 +683,7 @@ final class HitTestingTextView: NSTextView {
     pointer.cancelled()
     anchorOffset = nil
     beganWordDrag = false
+    additiveClick = false
     coordinator?.model.clickCapture = nil
   }
 
