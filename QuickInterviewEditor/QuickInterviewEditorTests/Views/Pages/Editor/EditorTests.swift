@@ -1246,6 +1246,55 @@ struct EditorTests {
     expectNoDifference(model.exportStatusMessage, "Exported 2 clips to AC-DC.")
   }
 
+  @Test func exportAllReusesTheArtistFolderWithoutReplacingExistingClips() async throws {
+    let model = editor()
+    addSlices(model, [(0, 1), (2, 3)])
+    model.interviewArtist = "Tom Petty"
+    let destination = try makeTempDir()
+    defer { try? FileManager.default.removeItem(at: destination) }
+    let artistFolder = destination.appendingPathComponent("Tom Petty")
+
+    try await withDependencies {
+      $0.exportRender.renderSlice = { job in try writeStubAIFF(job) }
+      $0.engine.injectMarkers = { _ in }
+      $0.workspace.reveal = { _ in }
+    } operation: {
+      model.destinationURL = destination
+      model.exportAllTapped()
+      await model.exportTask?.value
+      let firstExport = try FileManager.default.contentsOfDirectory(atPath: artistFolder.path)
+        .sorted()
+
+      model.exportAllTapped()
+      await model.exportTask?.value
+
+      let secondExport = try FileManager.default.contentsOfDirectory(atPath: artistFolder.path)
+        .sorted()
+      expectNoDifference(secondExport.count, 4)
+      #expect(firstExport.allSatisfy { secondExport.contains($0) })
+    }
+  }
+
+  @Test func failedExportDoesNotCreateTheArtistFolder() async throws {
+    let model = editor()
+    addSlices(model, [(0, 1)])
+    model.interviewArtist = "Tom Petty"
+    let destination = try makeTempDir()
+    defer { try? FileManager.default.removeItem(at: destination) }
+
+    await withDependencies {
+      $0.exportRender.renderSlice = { _ in throw EngineClientError.engineFailed("boom") }
+    } operation: {
+      model.destinationURL = destination
+      model.exportAllTapped()
+      await model.exportTask?.value
+    }
+
+    #expect(
+      !FileManager.default.fileExists(
+        atPath: destination.appendingPathComponent("Tom Petty").path))
+  }
+
   @Test func exportSliceIgnoresTheInterviewArtistFolder() async throws {
     let model = editor()
     addSlices(model, [(0, 1)])
