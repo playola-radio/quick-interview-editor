@@ -20,3 +20,17 @@ func wordIDs(anyOverlap range: Range<Int>, words: [Word]) -> [Word.ID] {
     return (start < range.upperBound && end > range.lowerBound) ? word.id : nil
   }
 }
+
+func wordIDs(anyOverlap ranges: [Range<Int>], words: [Word]) -> [Word.ID] {
+  let ranges = ranges.sorted { $0.lowerBound < $1.lowerBound }
+  var rangeIndex = 0
+
+  return words.compactMap { word in
+    guard let start = word.startSample, let end = word.endSample, start < end else { return nil }
+    while rangeIndex < ranges.count, ranges[rangeIndex].upperBound <= start {
+      rangeIndex += 1
+    }
+    guard rangeIndex < ranges.count, ranges[rangeIndex].lowerBound < end else { return nil }
+    return word.id
+  }
+}

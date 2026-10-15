@@ -755,6 +755,20 @@ struct EditorGroupSelectionTests {
     expectNoDifference(model.playheadSourceSample, playhead)
   }
 
+  @Test func cmdDragInsideFullyRemovedWordPreservesExistingCrossfade() async {
+    let model = editor()
+    let existing = TimelineRemoval(
+      id: Fixtures.uuid(7), removedRange: 164_000..<167_000,
+      crossfade: Crossfade(lengthSamples: 48, curve: .equalPower))
+    model.mutateDocument { $0.timelineRemovals.append(existing) }
+    click(model, word: 2)
+
+    cmdDrag(model, from: 8, to: 8)
+    await model.deleteSelectionTapped()
+
+    expectNoDifference(model.timelineRemovals[id: existing.id], existing)
+  }
+
   @Test func deletingAfterCmdDragRemovesEveryPieceInOneUndoStep() async {
     let model = editor()
     click(model, word: 2)

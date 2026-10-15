@@ -646,6 +646,7 @@ final class EditorModel: ViewModel {
   var selection: EditorSelection = .none {
     didSet {
       if selection != oldValue {
+        selectedWordIDsCache = nil
         selectionPreservesTransport = false
         transcript.clickCapture = nil
         transcript.overlap.dismiss()
@@ -658,6 +659,7 @@ final class EditorModel: ViewModel {
   /// Explicit clears and history restore selection without changing transport.
   var selectionPreservesTransport = false
   @ObservationIgnored var additiveDragBase: EditorSelection?
+  @ObservationIgnored private var selectedWordIDsCache: (ranges: [Range<Int>], ids: Set<Word.ID>)?
 
   var audioSelection: Range<Int>? {
     get { selection.freeformRange ?? selectedTranscriptObject?.range }
@@ -898,7 +900,16 @@ final class EditorModel: ViewModel {
   /// (non-word-aligned) selection highlights the partially-covered words at its edges too. Empty
   /// when there's no selection.
   var selectedWordIDs: Set<Word.ID> {
-    Set(selection.selectedRanges.flatMap { wordIDs(anyOverlap: $0, words: editPlan.words) })
+    wordIDsOverlapping(selection.selectedRanges)
+  }
+
+  private func wordIDsOverlapping(_ ranges: [Range<Int>]) -> Set<Word.ID> {
+    if let selectedWordIDsCache, selectedWordIDsCache.ranges == ranges {
+      return selectedWordIDsCache.ids
+    }
+    let ids = Set(wordIDs(anyOverlap: ranges, words: editPlan.words))
+    selectedWordIDsCache = (ranges, ids)
+    return ids
   }
 
   /// Waveform render data, geometry delegated to the edited adapter (the view reads these; it
@@ -1267,7 +1278,7 @@ final class EditorModel: ViewModel {
     if selectedSeamID != nil { return crossfadeSelectedSummary }
     let ranges = audioSelection.map { [$0] } ?? selection.selectedRanges
     guard !ranges.isEmpty else { return "No selection" }
-    let count = Set(ranges.flatMap { wordIDs(anyOverlap: $0, words: editPlan.words) }).count
+    let count = wordIDsOverlapping(ranges).count
     return "\(count) word\(count == 1 ? "" : "s") selected"
   }
   // Undo/redo restore `slices` wholesale; doing that under an open cut edit would leave the
