@@ -15,6 +15,34 @@ struct CutSuggestClient: Sendable {
     @Sendable (_ request: CutSuggestRequest, _ apiKey: String?) -> AsyncThrowingStream<
       CutSuggestEvent, Error
     >
+  /// Names one hand-marked clip: the helper classifies it against the configured types and
+  /// extracts that type's naming fields in a single LLM call. `nil` means no configured type
+  /// fits. Defaults to the unimplemented failure so clients built with only `suggestCuts`
+  /// (test doubles) fail loudly if they reach it.
+  var nameClip:
+    @Sendable (_ request: ClipNamingRequest, _ apiKey: String) async throws -> ClipNamingResult? =
+      { _, _ in
+        reportIssue("CutSuggestClient.nameClip called without a test override")
+        throw CutSuggestClientError.unimplemented("nameClip")
+      }
+}
+
+/// One hand-marked clip to classify and extract naming fields for. The model layer validates
+/// the result against `configuration`; the client only transports it.
+struct ClipNamingRequest: Equatable, Sendable {
+  var configuration: SuggestionConfiguration
+  var model: String
+  var clipText: String
+  var clipStartSample: Int
+  var clipEndSample: Int
+  var transcriptUnits: [TranscriptUnit]
+  var interviewArtist: String?
+}
+
+/// The chosen type and its extracted field values (`nil` = the model found no value).
+struct ClipNamingResult: Equatable, Sendable {
+  var typeID: String
+  var fields: [String: String?]
 }
 
 /// Everything the cutter needs, addressed by stable IDs rather than raw offsets. The
@@ -97,14 +125,16 @@ extension CutSuggestClient: DependencyKey {
   /// `EngineClient.liveValue` → `LiveEngine`), so the validated windowing / classify /
   /// trim / dedupe / rank logic and the regression eval stay a single source of truth.
   static let liveValue = CutSuggestClient(
-    suggestCuts: { request, apiKey in LiveCutSuggester.suggestCuts(request, apiKey: apiKey) }
+    suggestCuts: { request, apiKey in LiveCutSuggester.suggestCuts(request, apiKey: apiKey) },
+    nameClip: { request, apiKey in try await LiveCutSuggester.nameClip(request, apiKey: apiKey) }
   )
 }
 
 extension CutSuggestClient: TestDependencyKey {
   /// Fails loudly if a test reaches the client without overriding it (via
   /// `withDependencies { $0.cutSuggest = … }`), so a forgotten override never passes
-  /// against a hidden fixture. Matches `EngineClient.testValue`.
+  /// against a hidden fixture. Matches `EngineClient.testValue`. `nameClip` takes its
+  /// failing default.
   static let testValue = CutSuggestClient(
     suggestCuts: { _, _ in
       AsyncThrowingStream { continuation in
@@ -123,7 +153,8 @@ extension CutSuggestClient: TestDependencyKey {
         continuation.yield(.completed([]))
         continuation.finish()
       }
-    }
+    },
+    nameClip: { _, _ in nil }
   )
 }
 
