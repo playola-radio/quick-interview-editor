@@ -427,9 +427,7 @@ class TranscriptPageModel: ViewModel {
     )
   }
 
-  func transcriptDragEnded() {
-    dragIsAdditive = false
-  }
+  func transcriptDragEnded() {}
 
   /// Fired by the resize-handle overlay once a drag crosses `TranscriptResizeMetrics.dragThreshold`.
   /// No-op until `EditorModel` wires the closure (a later task's resize state machine).
