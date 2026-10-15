@@ -783,6 +783,7 @@ struct EditorGroupSelectionTests {
     cmdDrag(model, from: 8, to: 8, through: [7])
 
     expectNoDifference(model.selection, base)
+    #expect(model.selectionPreservesTransport)
   }
 
   @Test func deletingAfterCmdDragRemovesEveryPieceInOneUndoStep() async {
