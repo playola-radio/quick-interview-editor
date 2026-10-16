@@ -1,7 +1,8 @@
 """Refine WhisperX word edges against the audio's own energy envelope.
 
 CTC alignment edges are loose: next to pauses, ends run early and starts late;
-in connected speech the true boundary is the nearby energy valley. The edit plan
+in connected speech we choose the nearest local energy minimum with enough
+prominence, rather than a deeper valley inside the neighbouring word. The edit plan
 cuts exactly `start..end`, so we move each edge to where the signal actually
 goes quiet. At a pause an edge only ever grows outward, across its word's sound
 until it goes quiet or dips into a different sound: cutting extra silence is
@@ -101,9 +102,10 @@ class _Envelope:
         dip's floor."""
         near = behind.max() if len(behind) else -np.inf
         walked = list(frames)
+        ahead_max = np.maximum.accumulate(self.db[walked][::-1])[::-1]
         for k, v in enumerate(walked):
-            ahead = self.db[walked[k + 1 :]] if k + 1 < len(walked) else None
-            if ahead is not None and near - self.db[v] >= DIP_DB and ahead.max() - self.db[v] >= DIP_DB:
+            if (k + 1 < len(walked) and near - self.db[v] >= DIP_DB
+                    and ahead_max[k + 1] - self.db[v] >= DIP_DB):
                 while k + 1 < len(walked) and self.db[walked[k + 1]] <= self.db[walked[k]]:
                     k += 1
                 return walked[k]
@@ -116,14 +118,17 @@ class _Envelope:
         if first > last:
             return fallback
         window = self.db[first : last + 1]
-        lowest = window.min()
-        candidates = np.flatnonzero(window <= lowest + 1e-9) + first
+        left = np.maximum.accumulate(window)
+        right = np.maximum.accumulate(window[::-1])[::-1]
+        local_min = np.zeros(len(window), dtype=bool)
+        local_min[1:-1] = (window[1:-1] <= window[:-2]) & (window[1:-1] <= window[2:])
+        candidates = np.flatnonzero(
+            local_min & (np.minimum(left, right) - window >= PROMINENCE_DB)
+        ) + first
+        if not len(candidates):
+            return fallback
         v = int(min(candidates, key=lambda f: abs(self.center(f) - fallback)))
-        left = self.db[first : v + 1].max()
-        right = self.db[v : last + 1].max()
-        if min(left, right) - self.db[v] >= PROMINENCE_DB:
-            return self.center(v)
-        return fallback
+        return self.center(v)
 
 
 def _clamp(value: int, lo: int, hi: int) -> int:

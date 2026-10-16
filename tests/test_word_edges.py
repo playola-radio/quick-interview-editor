@@ -100,6 +100,15 @@ def test_connected_boundary_lands_in_dip_and_is_shared():
     assert a.end == pytest.approx(0.72, abs=0.015)
 
 
+def test_connected_boundary_prefers_nearby_clear_dip_over_deeper_neighbour_dip():
+    # True boundary at 0.7 has a shallow dip; a deeper dip at 0.76 is inside b.
+    sig = _sig(_silence(0.3), _tone(0.39), _tone(0.02, amp=0.16),
+               _tone(0.04), _tone(0.02, amp=0.04), _tone(0.37), _silence(0.3))
+    a, b = refine_word_edges((_w(1, 0.3, 0.7), _w(2, 0.7, 1.14)), sig, SR)
+    assert a.end == b.start
+    assert a.end == pytest.approx(0.7, abs=HOP_MS / 1000)
+
+
 def test_connected_flat_energy_keeps_raw_gap_midpoint():
     sig = _sig(_silence(0.3), _tone(1.0), _silence(0.3))
     a, b = refine_word_edges((_w(1, 0.3, 0.78), _w(2, 0.82, 1.3)), sig, SR)
