@@ -522,8 +522,9 @@ extension EditorExportRemovalTests {
     expectNoDifference(job.tags.artist, "Artist")
     expectNoDifference(injections.value, format == .aiff ? 1 : 0)
     expectNoDifference(model.exportPhase, .done(count: 1))
+    let folder = all ? directory.appendingPathComponent("Artist") : directory
     expectNoDifference(
-      try FileManager.default.contentsOfDirectory(atPath: directory.path),
+      try FileManager.default.contentsOfDirectory(atPath: folder.path),
       ["clip - Intro.\(format.rawValue)"])
   }
 

@@ -149,11 +149,7 @@ private let illegalFilenameCharacters = CharacterSet(charactersIn: "/\\:\u{0}")
 /// whitespace is collapsed, and leading dots are stripped (no dotfiles / `..`). An
 /// empty result falls back to `Slice NNN`.
 private func sanitizedSliceName(_ name: String, fallbackIndex: Int) -> String {
-  var cleaned = name.components(separatedBy: illegalFilenameCharacters).joined(separator: "-")
-  cleaned = cleaned.components(separatedBy: .whitespacesAndNewlines)
-    .filter { !$0.isEmpty }.joined(separator: " ")
-  while cleaned.hasPrefix(".") { cleaned.removeFirst() }
-  cleaned = cleaned.trimmingCharacters(in: .whitespaces)
+  let cleaned = sanitizedPathComponent(name)
   guard !cleaned.isEmpty else { return "Slice \(String(format: "%03d", fallbackIndex))" }
   return cleaned
 }
@@ -161,10 +157,21 @@ private func sanitizedSliceName(_ name: String, fallbackIndex: Int) -> String {
 /// Sanitize the source stem the same way, so a pathological source name can't break
 /// out either. Falls back to `Export` if it sanitizes to nothing.
 private func sanitizedStem(_ stem: String) -> String {
-  var cleaned = stem.components(separatedBy: illegalFilenameCharacters).joined(separator: "-")
+  let cleaned = sanitizedPathComponent(stem)
+  return cleaned.isEmpty ? "Export" : cleaned
+}
+
+/// The subfolder an "Export all" lands in, named for the interview artist. Nil when the
+/// artist sanitizes to nothing, so the export goes straight into the chosen folder.
+func exportFolderName(artist: String) -> String? {
+  let cleaned = truncatedToUTF8Bytes(sanitizedPathComponent(artist), maxBytes: 255)
+  return cleaned.isEmpty ? nil : cleaned
+}
+
+private func sanitizedPathComponent(_ text: String) -> String {
+  var cleaned = text.components(separatedBy: illegalFilenameCharacters).joined(separator: "-")
   cleaned = cleaned.components(separatedBy: .whitespacesAndNewlines)
     .filter { !$0.isEmpty }.joined(separator: " ")
   while cleaned.hasPrefix(".") { cleaned.removeFirst() }
-  cleaned = cleaned.trimmingCharacters(in: .whitespaces)
-  return cleaned.isEmpty ? "Export" : cleaned
+  return cleaned.trimmingCharacters(in: .whitespaces)
 }

@@ -1216,6 +1216,107 @@ struct EditorTests {
     }
   }
 
+  @Test func exportAllWritesIntoAFolderNamedForTheInterviewArtist() async throws {
+    let model = editor()
+    addSlices(model, [(0, 1), (2, 3)])
+    model.interviewArtist = "  AC/DC "
+    let destination = try makeTempDir()
+    defer { try? FileManager.default.removeItem(at: destination) }
+    let revealed = LockIsolated<[URL]>([])
+
+    await withDependencies {
+      $0.exportRender.renderSlice = { job in try writeStubAIFF(job) }
+      $0.engine.injectMarkers = { _ in }
+      $0.workspace.reveal = { revealed.setValue($0) }
+    } operation: {
+      model.destinationURL = destination
+      model.exportAllTapped()
+      await model.exportTask?.value
+    }
+
+    let artistFolder = destination.appendingPathComponent("AC-DC")
+    expectNoDifference(model.exportPhase, .done(count: 2))
+    expectNoDifference(
+      try FileManager.default.contentsOfDirectory(atPath: destination.path), ["AC-DC"])
+    expectNoDifference(
+      try FileManager.default.contentsOfDirectory(atPath: artistFolder.path).count, 2)
+    expectNoDifference(
+      Set(revealed.value.map { $0.deletingLastPathComponent().lastPathComponent }), ["AC-DC"])
+    expectNoDifference(model.destinationURL, destination)
+    expectNoDifference(model.exportStatusMessage, "Exported 2 clips to AC-DC.")
+  }
+
+  @Test func exportAllReusesTheArtistFolderWithoutReplacingExistingClips() async throws {
+    let model = editor()
+    addSlices(model, [(0, 1), (2, 3)])
+    model.interviewArtist = "Tom Petty"
+    let destination = try makeTempDir()
+    defer { try? FileManager.default.removeItem(at: destination) }
+    let artistFolder = destination.appendingPathComponent("Tom Petty")
+
+    try await withDependencies {
+      $0.exportRender.renderSlice = { job in try writeStubAIFF(job) }
+      $0.engine.injectMarkers = { _ in }
+      $0.workspace.reveal = { _ in }
+    } operation: {
+      model.destinationURL = destination
+      model.exportAllTapped()
+      await model.exportTask?.value
+      let firstExport = try FileManager.default.contentsOfDirectory(atPath: artistFolder.path)
+        .sorted()
+
+      model.exportAllTapped()
+      await model.exportTask?.value
+
+      let secondExport = try FileManager.default.contentsOfDirectory(atPath: artistFolder.path)
+        .sorted()
+      expectNoDifference(secondExport.count, 4)
+      #expect(firstExport.allSatisfy { secondExport.contains($0) })
+    }
+  }
+
+  @Test func failedExportDoesNotCreateTheArtistFolder() async throws {
+    let model = editor()
+    addSlices(model, [(0, 1)])
+    model.interviewArtist = "Tom Petty"
+    let destination = try makeTempDir()
+    defer { try? FileManager.default.removeItem(at: destination) }
+
+    await withDependencies {
+      $0.exportRender.renderSlice = { _ in throw EngineClientError.engineFailed("boom") }
+    } operation: {
+      model.destinationURL = destination
+      model.exportAllTapped()
+      await model.exportTask?.value
+    }
+
+    #expect(
+      !FileManager.default.fileExists(
+        atPath: destination.appendingPathComponent("Tom Petty").path))
+  }
+
+  @Test func exportSliceIgnoresTheInterviewArtistFolder() async throws {
+    let model = editor()
+    addSlices(model, [(0, 1)])
+    model.interviewArtist = "Tom Petty"
+    let destination = try makeTempDir()
+    defer { try? FileManager.default.removeItem(at: destination) }
+
+    await withDependencies {
+      $0.exportRender.renderSlice = { job in try writeStubAIFF(job) }
+      $0.engine.injectMarkers = { _ in }
+      $0.workspace.reveal = { _ in }
+    } operation: {
+      model.destinationURL = destination
+      model.exportSliceTapped(model.slices[0].id)
+      await model.exportTask?.value
+    }
+
+    expectNoDifference(model.exportPhase, .done(count: 1))
+    #expect(
+      !FileManager.default.fileExists(atPath: destination.appendingPathComponent("Tom Petty").path))
+  }
+
   @Test func exportWithMissingCanonicalAudioFailsClearlyWithoutRendering() async throws {
     // A canonical dir reaped out from under a live session (overlapping instance's
     // launch cleanup): export must refuse with actionable copy, never hand the renderer a

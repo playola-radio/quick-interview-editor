@@ -25,6 +25,15 @@ struct ExportNamingTests {
       taken: &taken, policy: .exactClipName)
     expectNoDifference(name, "Slice 001.aiff")
   }
+  @Test func artistFolderNameIsSanitizedAndNilWhenBlank() {
+    expectNoDifference(exportFolderName(artist: " ..AC/DC  Live "), "AC-DC Live")
+    expectNoDifference(exportFolderName(artist: "  "), nil)
+    expectNoDifference(exportFolderName(artist: "..."), nil)
+  }
+  @Test func artistFolderNameIsCappedAt255UTF8BytesWithoutSplittingUnicode() {
+    let name = exportFolderName(artist: String(repeating: "😀", count: 100))
+    expectNoDifference(name, String(repeating: "😀", count: 63))
+  }
   private func clip(_ number: Int, name: String, generated: Bool = true) -> Slice {
     var slice = Slice(
       id: Fixtures.uuid(number), name: name, startSample: 0, endSample: 100,
