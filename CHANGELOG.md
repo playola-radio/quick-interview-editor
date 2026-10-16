@@ -5,6 +5,23 @@ focus on changes that affect editing work rather than internal implementation.
 
 ## [Unreleased]
 
+## [2.5.0] - 2026-10-16
+
+- Delete several words at once: Cmd-click words, or Cmd-drag across a run of
+  words, to add them to the selection, then press Delete to remove every piece
+  in one undoable step, each with its own crossfade. Every selected piece is
+  highlighted in both the transcript and the waveform, and playback keeps going
+  while you build the selection.
+- Removed words are now faded in the transcript so cut text stands apart from
+  the words you kept.
+- Clips you mark by hand are now named the same way as accepted suggestions
+  (for example "Whiskey Rain 1, Hayes Carll" or "Spotlight 5") instead of
+  staying "Slice N". A hand-marked Song Intro can now be used with Prepare for
+  Mastering.
+- Cmd-Down / Cmd-Up make the waveform taller or shorter, like Logic Pro's
+  vertical zoom, and Cmd-Right / Cmd-Left keyboard zoom now keeps the playhead
+  centered.
+
 ## [2.4.1] - 2026-10-14
 
 - Fixed transcription failing as soon as it started, with a "Symbol not found"
