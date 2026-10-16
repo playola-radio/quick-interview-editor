@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 from logic_markers.editplan import _sample
-from logic_markers.word_edges import HOP_MS, PAD_MS, refine_word_edges
+from logic_markers.word_edges import HOP_MS, PAD_MS, _Envelope, refine_word_edges
 from logic_markers.words import Word
 
 SR = 16000
@@ -107,6 +107,16 @@ def test_connected_boundary_prefers_nearby_clear_dip_over_deeper_neighbour_dip()
     a, b = refine_word_edges((_w(1, 0.3, 0.7), _w(2, 0.7, 1.14)), sig, SR)
     assert a.end == b.start
     assert a.end == pytest.approx(0.7, abs=HOP_MS / 1000)
+
+
+def test_valley_boundary_rejects_a_tiny_ripple_near_the_gap_midpoint():
+    env = object.__new__(_Envelope)
+    env.db = np.array([-10.0, -14.0, -14.1, -14.0, -20.0, -14.0, -10.0])
+    env.hop = 1
+    env.win = 0
+
+    # Frame 2 is a 0.1 dB ripple near the midpoint; frame 4 is the clear dip.
+    assert env.valley_boundary(0, 6, 2) == 4
 
 
 def test_connected_flat_energy_keeps_raw_gap_midpoint():

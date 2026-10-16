@@ -118,13 +118,43 @@ class _Envelope:
         if first > last:
             return fallback
         window = self.db[first : last + 1]
-        left = np.maximum.accumulate(window)
-        right = np.maximum.accumulate(window[::-1])[::-1]
         local_min = np.zeros(len(window), dtype=bool)
         local_min[1:-1] = (window[1:-1] <= window[:-2]) & (window[1:-1] <= window[2:])
-        candidates = np.flatnonzero(
-            local_min & (np.minimum(left, right) - window >= PROMINENCE_DB)
-        ) + first
+        left_lower = np.full(len(window), -1)
+        right_lower = np.full(len(window), len(window))
+        stack = []
+        for i, value in enumerate(window):
+            while stack and window[stack[-1]] >= value:
+                stack.pop()
+            if stack:
+                left_lower[i] = stack[-1]
+            stack.append(i)
+        stack.clear()
+        for i in range(len(window) - 1, -1, -1):
+            while stack and window[stack[-1]] >= window[i]:
+                stack.pop()
+            if stack:
+                right_lower[i] = stack[-1]
+            stack.append(i)
+
+        max_table = [window]
+        width = 1
+        while width * 2 <= len(window):
+            max_table.append(np.maximum(max_table[-1][:-width], max_table[-1][width:]))
+            width *= 2
+
+        def range_max(start: int, end: int) -> float:
+            width = int(end - start)
+            level = width.bit_length() - 1
+            span = 1 << level
+            return max(max_table[level][start], max_table[level][end - span])
+
+        candidates = []
+        for i in np.flatnonzero(local_min):
+            left = range_max(left_lower[i] + 1, i + 1)
+            right = range_max(i, right_lower[i])
+            if min(left, right) - window[i] >= PROMINENCE_DB:
+                candidates.append(i + first)
         if not len(candidates):
             return fallback
         v = int(min(candidates, key=lambda f: abs(self.center(f) - fallback)))
