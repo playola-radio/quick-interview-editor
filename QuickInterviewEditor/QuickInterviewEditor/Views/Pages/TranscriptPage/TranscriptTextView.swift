@@ -142,8 +142,10 @@ struct TranscriptTextView: NSViewRepresentable {
 
     private static let selectedFG = NSColor.white
     private static let normalFG = NSColor(calibratedWhite: 0.56, alpha: 1)
-    /// Removed words fade on top of their strikethrough so cut text reads apart from kept text.
-    private static let removedAlpha: CGFloat = 0.5
+    /// Removed words darken on top of their strikethrough so cut text reads apart from kept
+    /// text. Blending toward black (not lowering alpha) keeps the glyphs opaque, so a clip's
+    /// fill never shows through them.
+    private static let removedDarkening: CGFloat = 0.5
 
     private static func nsColor(_ color: ClipStyleColor) -> NSColor {
       NSColor(
@@ -368,7 +370,7 @@ struct TranscriptTextView: NSViewRepresentable {
       storage.addAttribute(
         .foregroundColor,
         value: removed && !selected
-          ? color.withAlphaComponent(color.alphaComponent * Self.removedAlpha) : color,
+          ? color.blended(withFraction: Self.removedDarkening, of: .black) ?? color : color,
         range: wordRange)
       let struck = kind == .rejected || removed
       if struck {
