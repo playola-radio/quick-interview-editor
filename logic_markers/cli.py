@@ -30,6 +30,7 @@ from .editplan import (
 from .silence import detect_silences
 from .slicer import slice_aiff
 from .transcribe import Word
+from .word_edges import refine_word_edges
 from .words import Transcript, Word as RichWord, render_transcript
 
 SNAP_PARAMS = {"search_radius_ms": 800.0, "roll_ms": 20.0, "pad_ms": 100.0, "tail_ms": 250.0}
@@ -468,7 +469,9 @@ def run_plan(source: Path, work_dir: Path, sample_rate: int, refresh: bool = Fal
                       confidence=w.confidence)
         for w in transcript.words
     )
-    transcript = Transcript(words=filled, segments=transcript.segments)
+    transcript = Transcript(
+        words=refine_word_edges(filled, mono, sr), segments=transcript.segments
+    )
 
     _progress("finalizing", "Finding silence…",
               index=3, count=phase_count, label="Finalizing")
