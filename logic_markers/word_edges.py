@@ -3,9 +3,9 @@
 CTC alignment edges are loose: next to pauses, ends run early and starts late;
 in connected speech the true boundary is the nearby energy valley. The edit plan
 cuts exactly `start..end`, so we move each edge to where the signal actually
-goes quiet. At a pause an edge only ever grows outward, across continuous sound
-until it first goes quiet: cutting extra silence is harmless, cutting a quiet
-consonant or the neighbour's onset is the bug. Every refined
+goes quiet. At a pause an edge only ever grows outward, across its word's sound
+until it goes quiet or dips into a different sound: cutting extra silence is
+harmless, cutting a quiet consonant or a neighbouring sound is the bug. Every refined
 boundary is clamped to lie between the two words' midpoints, so words keep
 `start < end` and never cross, whatever the alignment.
 """
@@ -26,6 +26,7 @@ MIN_QUIET_MS = 60
 PAD_MS = 10
 VALLEY_RADIUS_MS = 80
 PROMINENCE_DB = 3.0
+DIP_DB = 6.0
 OUTER_SEARCH_MS = 300
 
 
@@ -70,19 +71,44 @@ class _Envelope:
             f = g
         return runs
 
-    def sound_end(self, x: int, limit: int) -> int:
-        """Where the sound running forward from `x` first goes quiet, no later than `limit`."""
-        f = -(-x // self.hop)
-        while f * self.hop < limit and f < len(self.quiet) and not self.quiet[f]:
-            f += 1
-        return min(f * self.hop, limit)
+    def grow_end(self, e: int, limit: int, anchor: int) -> int:
+        """Grow an end forward across its word's sound: stop at the first quiet frame (plus pad),
+        or sooner at a dip that marks the start of a different sound. Never before `e`."""
+        f0 = -(-e // self.hop)
+        stop = f0
+        while stop * self.hop < limit and stop < len(self.quiet) and not self.quiet[stop]:
+            stop += 1
+        dip = self._first_dip(range(f0, stop), self.db[anchor // self.hop : f0])
+        edge = self.center(dip) if dip is not None else min(stop * self.hop, limit) + self.pad
+        return max(e, edge)
 
-    def sound_start(self, x: int, limit: int) -> int:
-        """Where the sound running back from `x` began after quiet, no earlier than `limit`."""
-        g = min(len(self.quiet) - 1, (x - self.win) // self.hop)
-        while g >= 0 and g * self.hop + self.win > limit and not self.quiet[g]:
-            g -= 1
-        return max(g * self.hop + self.win, limit)
+    def grow_start(self, s: int, limit: int, anchor: int) -> int:
+        """Mirror of `grow_end`: grow a start backward. Never after `s`."""
+        g0 = min(len(self.quiet) - 1, (s - self.win) // self.hop)
+        stop = g0
+        while stop >= 0 and stop * self.hop + self.win > limit and not self.quiet[stop]:
+            stop -= 1
+        dip = self._first_dip(range(g0, stop, -1), self.db[g0 + 1 : anchor // self.hop + 1])
+        if dip is not None:
+            edge = self.center(dip)
+        else:
+            edge = max(stop * self.hop + self.win, limit) - self.pad
+        return min(s, edge)
+
+    def _first_dip(self, frames: range, behind) -> int | None:
+        """First frame along `frames` lying DIP_DB below both the louder sound behind it
+        (`behind`, then the frames already walked) and the sound still ahead; slid to the
+        dip's floor."""
+        near = behind.max() if len(behind) else -np.inf
+        walked = list(frames)
+        for k, v in enumerate(walked):
+            ahead = self.db[walked[k + 1 :]] if k + 1 < len(walked) else None
+            if ahead is not None and near - self.db[v] >= DIP_DB and ahead.max() - self.db[v] >= DIP_DB:
+                while k + 1 < len(walked) and self.db[walked[k + 1]] <= self.db[walked[k]]:
+                    k += 1
+                return walked[k]
+            near = max(near, self.db[v])
+        return None
 
     def valley_boundary(self, lo: int, hi: int, fallback: int) -> int:
         first = max(0, -(-(lo - self.win // 2) // self.hop))
@@ -107,8 +133,8 @@ def _clamp(value: int, lo: int, hi: int) -> int:
 def _pair_edges(env: _Envelope, e_a: int, s_b: int, m_a: int, m_b: int) -> tuple[int, int]:
     runs = env.quiet_runs(m_a, m_b, min(e_a, s_b), max(e_a, s_b))
     if runs:
-        end_a = max(e_a, env.sound_end(e_a, runs[0][0]) + env.pad)
-        start_b = min(s_b, env.sound_start(s_b, runs[-1][1]) - env.pad)
+        end_a = env.grow_end(e_a, runs[0][0], m_a)
+        start_b = env.grow_start(s_b, runs[-1][1], m_b)
     else:
         c = (e_a + s_b) // 2
         lo, hi = max(m_a, c - env.valley_radius), min(m_b, c + env.valley_radius)
@@ -125,14 +151,14 @@ def _first_start(env: _Envelope, s: int, m: int) -> int:
     runs = env.quiet_runs(max(0, s - env.outer), m, 0, s)
     if not runs:
         return s
-    return _clamp(min(s, env.sound_start(s, runs[-1][1]) - env.pad), 0, m)
+    return _clamp(env.grow_start(s, runs[-1][1], m), 0, m)
 
 
 def _last_end(env: _Envelope, e: int, m: int) -> int:
     runs = env.quiet_runs(m, min(env.total, e + env.outer), e, env.total)
     if not runs:
         return e
-    return _clamp(max(e, env.sound_end(e, runs[0][0]) + env.pad), m + 1, env.total)
+    return _clamp(env.grow_end(e, runs[0][0], m), m + 1, env.total)
 
 
 def refine_word_edges(words: tuple[Word, ...], samples, sr: int) -> tuple[Word, ...]:

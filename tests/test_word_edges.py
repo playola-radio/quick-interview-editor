@@ -66,6 +66,23 @@ def test_end_never_jumps_over_the_next_words_onset_to_a_later_closure():
     assert 0.6 <= a.end <= 0.64
 
 
+def test_end_stops_at_an_unquiet_short_pause_before_the_next_words_onset():
+    # the 15 ms pause between a and b's onset never registers as quiet under the noise floor
+    noise = np.random.default_rng(0).uniform(-0.001, 0.001, round(1.475 * SR)).astype(np.float32)
+    sig = _sig(_silence(0.2), _tone(0.4), _silence(0.015), _tone(0.11), _silence(0.1),
+               _tone(0.35), _silence(0.3)) + noise
+    a, _ = refine_word_edges((_w(1, 0.2, 0.58), _w(2, 0.78, 1.175)), sig, SR)
+    assert 0.59 <= a.end <= 0.615
+
+
+def test_start_stops_at_a_dip_before_an_untranscribed_sound():
+    # an untranscribed sound 0.8-1.0 runs into word b (1.02-1.3) through a dip, not silence
+    sig = _sig(_silence(0.3), _tone(0.4), _silence(0.1), _tone(0.2), _tone(0.02, amp=0.08),
+               _tone(0.28), _silence(0.3))
+    _, b = refine_word_edges((_w(1, 0.3, 0.7), _w(2, 1.05, 1.3)), sig, SR)
+    assert 1.0 <= b.start <= 1.05
+
+
 def test_speech_entirely_below_the_quiet_threshold_keeps_its_span():
     sig = _sig(_silence(0.2), _tone(0.4, amp=0.0005), _silence(0.2),
                _tone(0.4, amp=0.0005), _silence(0.3))
