@@ -142,6 +142,10 @@ struct TranscriptTextView: NSViewRepresentable {
 
     private static let selectedFG = NSColor.white
     private static let normalFG = NSColor(calibratedWhite: 0.56, alpha: 1)
+    /// Removed words darken on top of their strikethrough so cut text reads apart from kept
+    /// text. Blending toward black (not lowering alpha) keeps the glyphs opaque, so a clip's
+    /// fill never shows through them.
+    private static let removedDarkening: CGFloat = 0.5
 
     private static func nsColor(_ color: ClipStyleColor) -> NSColor {
       NSColor(
@@ -360,11 +364,15 @@ struct TranscriptTextView: NSViewRepresentable {
     private func setForeground(storage: NSTextStorage, wordRange: NSRange, wordID: Word.ID) {
       let container = lastClipContainers.first { NSLocationInRange(wordRange.location, $0.range) }
       let kind = container?.kind
+      let selected = lastSelected.contains(wordID)
+      let removed = lastRemovedWordIDs.contains(wordID)
+      let color = foregroundColor(selected: selected, container: container)
       storage.addAttribute(
         .foregroundColor,
-        value: foregroundColor(selected: lastSelected.contains(wordID), container: container),
+        value: removed && !selected
+          ? color.blended(withFraction: Self.removedDarkening, of: .black) ?? color : color,
         range: wordRange)
-      let struck = kind == .rejected || lastRemovedWordIDs.contains(wordID)
+      let struck = kind == .rejected || removed
       if struck {
         storage.addAttribute(
           .strikethroughStyle, value: NSUnderlineStyle.single.rawValue, range: wordRange)
@@ -606,6 +614,7 @@ final class HitTestingTextView: NSTextView {
   private var anchorOffset: Int?
   private var pointer = TranscriptPointerGesture()
   private var beganWordDrag = false
+  private var additiveClick = false
 
   override func accessibilityChildren() -> [Any]? {
     var children = super.accessibilityChildren() ?? []
@@ -620,6 +629,7 @@ final class HitTestingTextView: NSTextView {
     anchorOffset = coordinator?.utf16Offset(at: convert(event.locationInWindow, from: nil))
     pointer.began(at: event.locationInWindow)
     beganWordDrag = false
+    additiveClick = event.modifierFlags.contains(.command)
   }
 
   override func mouseDragged(with event: NSEvent) {
@@ -628,7 +638,8 @@ final class HitTestingTextView: NSTextView {
     let point = convert(event.locationInWindow, from: nil)
     let offset = coordinator.utf16Offset(at: point)
     if !beganWordDrag {
-      beganWordDrag = coordinator.model.transcriptDragBegan(atUTF16Offset: anchorOffset ?? offset)
+      beganWordDrag = coordinator.model.transcriptDragBegan(
+        atUTF16Offset: anchorOffset ?? offset, additive: additiveClick)
     }
     if beganWordDrag, let offset { coordinator.model.transcriptDragged(toUTF16Offset: offset) }
   }
@@ -637,6 +648,7 @@ final class HitTestingTextView: NSTextView {
     defer {
       anchorOffset = nil
       beganWordDrag = false
+      additiveClick = false
     }
     guard let coordinator else {
       pointer.cancelled()
@@ -646,7 +658,7 @@ final class HitTestingTextView: NSTextView {
     case .click(let count):
       coordinator.model.transcriptClicked(
         atUTF16Offset: anchorOffset, extending: event.modifierFlags.contains(.shift),
-        clickCount: count, timestamp: event.timestamp,
+        additive: additiveClick, clickCount: count, timestamp: event.timestamp,
         doubleClickInterval: NSEvent.doubleClickInterval)
     case .dragEnded:
       coordinator.model.transcriptDragEnded()
@@ -679,6 +691,7 @@ final class HitTestingTextView: NSTextView {
     pointer.cancelled()
     anchorOffset = nil
     beganWordDrag = false
+    additiveClick = false
     coordinator?.model.clickCapture = nil
   }
 

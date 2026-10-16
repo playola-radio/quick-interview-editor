@@ -75,6 +75,12 @@ class TranscriptPageModel: ViewModel {
     case word(Word.ID, extending: Bool)
     /// Clear the selection entirely.
     case clear
+    /// A Cmd-drag began on a word: the editor snapshots its current selection as the base the drag
+    /// adds to (or acts as a plain word selection when there is no multi-selectable base).
+    case additiveDragBegan(Word.ID)
+    /// A Cmd-drag's run from its anchor word to its current focus word. Always applied on top of the
+    /// base captured at `additiveDragBegan`, so dragging back shrinks the run.
+    case additiveWords(anchor: Word.ID, focus: Word.ID)
   }
 
   // MARK: - Initialization
@@ -116,6 +122,7 @@ class TranscriptPageModel: ViewModel {
   /// handlers reads them; the renderer draws the pushed-in `highlightedWordIDs` instead.
   private var selectionAnchorID: Word.ID?
   private var selectionFocusID: Word.ID?
+  private var dragIsAdditive = false
   var document = TranscriptDocument(words: [])
   var plainTranscriptText: String { document.text }
   let minFontSize = 11.0
@@ -351,15 +358,16 @@ class TranscriptPageModel: ViewModel {
   }
 
   func transcriptClicked(
-    atUTF16Offset offset: Int?, extending: Bool = false, clickCount: Int = 1,
-    timestamp: TimeInterval = 0, doubleClickInterval: TimeInterval = 0.5
+    atUTF16Offset offset: Int?, extending: Bool = false, additive: Bool = false,
+    clickCount: Int = 1, timestamp: TimeInterval = 0, doubleClickInterval: TimeInterval = 0.5
   ) {
     let id = offset.flatMap { document.wordID(atUTF16Offset: $0) }
     if let onGroupClick {
       onGroupClick(
         TranscriptClick(
           wordID: id, extending: extending, count: clickCount,
-          timestamp: timestamp, doubleClickInterval: doubleClickInterval, utf16Offset: offset))
+          timestamp: timestamp, doubleClickInterval: doubleClickInterval, utf16Offset: offset,
+          additive: additive))
       return
     }
     guard let id else {
@@ -395,15 +403,17 @@ class TranscriptPageModel: ViewModel {
   }
 
   @discardableResult
-  func transcriptDragBegan(atUTF16Offset offset: Int?) -> Bool {
+  func transcriptDragBegan(atUTF16Offset offset: Int?, additive: Bool = false) -> Bool {
     overlap.dismiss()
     overlapClick = nil
     overlap.update([], anchor: nil, selected: nil)
     clickCapture = nil
+    dragIsAdditive = false
     guard let offset, let id = document.wordID(atUTF16Offset: offset) else { return false }
     selectionAnchorID = id
     selectionFocusID = id
-    onSelectionIntent?(.word(id, extending: false))
+    dragIsAdditive = additive
+    onSelectionIntent?(additive ? .additiveDragBegan(id) : .word(id, extending: false))
     return true
   }
 
@@ -412,7 +422,9 @@ class TranscriptPageModel: ViewModel {
       return
     }
     selectionFocusID = id
-    onSelectionIntent?(.words(anchor: anchor, focus: id))
+    onSelectionIntent?(
+      dragIsAdditive ? .additiveWords(anchor: anchor, focus: id) : .words(anchor: anchor, focus: id)
+    )
   }
 
   func transcriptDragEnded() {}

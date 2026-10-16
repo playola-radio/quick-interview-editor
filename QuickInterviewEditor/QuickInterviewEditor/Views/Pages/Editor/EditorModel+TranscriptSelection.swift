@@ -156,6 +156,10 @@ extension EditorModel {
   }
 
   func transcriptClicked(_ click: TranscriptClick) {
+    if click.additive {
+      additiveTranscriptClicked(click)
+      return
+    }
     if click.count == 2 {
       openCapturedTranscriptClick(click)
       return
@@ -187,6 +191,41 @@ extension EditorModel {
     guard let range = audioSelection else { return }
     transcript.clickCapture = TranscriptClickCapture(
       selection: selection, range: range, timestamp: click.timestamp)
+  }
+
+  private func additiveTranscriptClicked(_ click: TranscriptClick) {
+    // Cmd-click only ever adds a word: it never opens (any click count) and a miss never clears.
+    transcript.clickCapture = nil
+    transcript.overlapClick = nil
+    defer { reconcileTranscriptOverlap() }
+    guard let wordID = click.wordID,
+      click.utf16Offset.map({ transcript.document.containsWord(atUTF16Offset: $0) }) ?? true
+    else { return }
+    addWordToSelection(wordID)
+  }
+
+  func additiveTranscriptDragBegan(_ id: Word.ID) {
+    switch selection {
+    case .range, .ranges:
+      additiveDragBase = selection
+      additiveTranscriptDragged(anchorID: id, focusID: id)
+    case .none, .object, .seam:
+      additiveDragBase = nil
+      selectWord(id, extending: false)
+    }
+  }
+
+  func additiveTranscriptDragged(anchorID: Word.ID, focusID: Word.ID) {
+    guard let base = additiveDragBase else {
+      selectWords(anchorID: anchorID, focusID: focusID)
+      return
+    }
+    guard let run = sourceRange(coveringWords: anchorID, focusID) else { return }
+    // A run over only removed audio adds nothing, so the selection falls back to the pre-drag base.
+    selection =
+      SliceRenderPlanBuilder.hasAudio(sliceRange: run, removals: Array(timelineRemovals))
+      ? base.adding(run.clamped(to: 0..<editPlan.source.durationSamples)) : base
+    selectionPreservesTransport = true
   }
 
   private func openCapturedTranscriptClick(_ click: TranscriptClick) {

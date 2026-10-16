@@ -660,7 +660,9 @@ final class EditSliceModel: ViewModel, Identifiable {
     transcript.onSelectionIntent = { [weak self] intent in
       guard let self else { return }
       switch intent {
-      case .words(let anchor, let focus): selectTranscriptWords(anchorID: anchor, focusID: focus)
+      case .words(let anchor, let focus), .additiveWords(let anchor, let focus):
+        selectTranscriptWords(anchorID: anchor, focusID: focus)
+      case .additiveDragBegan(let id): selectTranscriptWords(anchorID: id, focusID: id)
       case .word(let id, extending: true): extendTranscriptSelection(toWord: id)
       case .word(let id, extending: false): selectTranscriptWords(anchorID: id, focusID: id)
       case .clear: clearTranscriptSelection()

@@ -54,7 +54,9 @@ range and cannot have holes. This is preserved.
 - **Single-click** selects one word (anchor == focus).
 - **Click-drag** extends the focus contiguously to paint a run of words.
 - **Clicking the sole selected word** clears the selection.
-- No non-contiguous multi-word selection is introduced.
+- ~~No non-contiguous multi-word selection is introduced.~~ Superseded 2026-10-15: Cmd-click adds
+  non-adjacent words as separate pieces for removal (see
+  `2026-10-15-transcript-cmd-click-multi-delete-design.md`).
 
 ### Rendering — `TranscriptTextView: NSViewRepresentable` (TextKit 1)
 

@@ -363,4 +363,177 @@ struct EditorSelectionTests {
     model.addSliceTapped()
     expectNoDifference(model.slices.last?.wordIDs, wordIDs(anyOverlap: range, words: words))
   }
+
+  // MARK: - Multi-range selection
+
+  @Test func addingDisjointPieceToRangeMakesRanges() {
+    let selection = EditorSelection.range(70648..<74176, anchor: 70648).adding(164228..<166874)
+    expectNoDifference(
+      selection,
+      .ranges(
+        MultiRangeSelection(primary: 70648..<74176, anchor: 70648, additional: [164228..<166874])))
+  }
+
+  @Test func addingOverlappingPieceIsNoOp() {
+    let start = EditorSelection.range(70648..<119202, anchor: 70648)
+    expectNoDifference(start.adding(107736..<119202), start)
+  }
+
+  @Test func addingPartiallyOverlappingPieceMergesIntoIt() {
+    let selection = EditorSelection.range(100..<200, anchor: 100).adding(150..<250)
+    expectNoDifference(selection, .range(100..<250, anchor: 100))
+  }
+
+  @Test func addingAbuttingPieceMergesAndDemotesToRange() {
+    let selection = EditorSelection.range(74176..<77704, anchor: 74176).adding(70648..<74176)
+    expectNoDifference(selection, .range(70648..<77704, anchor: 70648))
+  }
+
+  @Test func addingPieceThatBridgesTwoPiecesKeepsPrimaryIdentity() {
+    let multi = EditorSelection.ranges(
+      MultiRangeSelection(primary: 100..<200, anchor: 200, additional: [300..<400, 900..<950]))
+    expectNoDifference(
+      multi.adding(200..<300),
+      .ranges(MultiRangeSelection(primary: 100..<400, anchor: 100, additional: [900..<950])))
+  }
+
+  @Test func addingFromNonRangeSelectionIsNoOp() {
+    expectNoDifference(EditorSelection.none.adding(10..<20), .none)
+    expectNoDifference(
+      EditorSelection.seam(Fixtures.uuid(1)).adding(10..<20), .seam(Fixtures.uuid(1)))
+  }
+
+  @Test func selectedRangesListsEveryPieceInOrder() {
+    let multi = EditorSelection.ranges(
+      MultiRangeSelection(primary: 500..<600, anchor: 500, additional: [100..<200]))
+    expectNoDifference(multi.selectedRanges, [100..<200, 500..<600])
+    expectNoDifference(EditorSelection.range(1..<2, anchor: 1).selectedRanges, [1..<2])
+    expectNoDifference(EditorSelection.none.selectedRanges, [])
+  }
+
+  @Test func freeformRangeIsNilForMultiSelection() {
+    let multi = EditorSelection.ranges(
+      MultiRangeSelection(primary: 500..<600, anchor: 500, additional: [100..<200]))
+    #expect(multi.freeformRange == nil)
+  }
+
+  @Test func selectionAnchorSampleReadsMultiAnchor() {
+    let model = editor()
+    model.selection = .ranges(
+      MultiRangeSelection(primary: 70648..<74176, anchor: 74176, additional: [164228..<166874]))
+    expectNoDifference(model.selectionAnchorSample, 74176)
+  }
+
+  // MARK: - Multi-selection gating
+
+  private let wordsTwoAndEight = EditorSelection.ranges(
+    MultiRangeSelection(primary: 70648..<74176, anchor: 70648, additional: [164228..<166874]))
+
+  @Test func multiSelectionDisablesSingleRangeFeatures() {
+    let model = editor()
+    model.selection = wordsTwoAndEight
+    #expect(!model.canAddSlice)
+    #expect(!model.canOpenSelection)
+    #expect(!model.canEditSelectionEdges)
+    #expect(!model.canAudition)
+    #expect(model.fineTuneTarget == nil)
+  }
+
+  @Test func multiSelectionOffersRemoval() {
+    let model = editor()
+    model.selection = wordsTwoAndEight
+    #expect(model.canRemoveSelectedSection)
+    #expect(model.shouldShowRemoveSectionControl)
+  }
+
+  @Test func multiSelectionIgnoresStaleFineTuneDraft() {
+    let model = editor()
+    model.selectSourceRange(70648..<74176, snapPlayhead: false, origin: .transcript)
+    model.syncEditSession()
+    model.selection = wordsTwoAndEight
+    #expect(model.activeEditingRange == nil)
+    model.syncEditSession()
+    #expect(model.fineTune.target == nil)
+  }
+
+  @Test func multiSelectionNudgeIsNoOp() {
+    let model = editor()
+    model.selection = wordsTwoAndEight
+    model.selectionNudged(.start, byMs: 10)
+    expectNoDifference(model.selection, wordsTwoAndEight)
+  }
+
+  @Test func multiSelectionHighlightsEveryPieceInTranscript() {
+    let model = editor()
+    model.selection = wordsTwoAndEight
+    expectNoDifference(model.selectedWordIDs, [2, 8])
+  }
+
+  @Test func multiSelectionSummaryCountsWordsAcrossPieces() {
+    let model = editor()
+    model.selection = wordsTwoAndEight
+    expectNoDifference(model.selectionSummary, "2 words selected")
+  }
+
+  @Test func waveformMultiSelectionRangesListEveryPiece() {
+    let model = editor()
+    model.selection = wordsTwoAndEight
+    expectNoDifference(model.waveformMultiSelectionRanges, [70648..<74176, 164228..<166874])
+    model.selection = .range(70648..<74176, anchor: 70648)
+    expectNoDifference(model.waveformMultiSelectionRanges, [])
+  }
+
+  @Test func multiSelectionHasNoTranscriptResizeSelectionItem() {
+    let model = editor()
+    model.selection = wordsTwoAndEight
+    #expect(!model.transcriptResizeItems.contains { $0.identity == .selection })
+  }
+
+  @Test func multiSelectionRefusesTranscriptResize() {
+    let model = editor()
+    model.selection = wordsTwoAndEight
+    #expect(!model.transcriptResizeBegan(.selection, .start))
+    expectNoDifference(model.selection, wordsTwoAndEight)
+  }
+
+  @Test func singleRangeKeepsTranscriptResizeSelectionItem() {
+    let model = editor()
+    model.selection = .range(70648..<74176, anchor: 70648)
+    #expect(model.transcriptResizeItems.contains { $0.identity == .selection })
+    #expect(model.transcriptResizeBegan(.selection, .start))
+  }
+
+  // MARK: - Resize handles during a multi-piece selection
+
+  private func clipAndMultiSelection() -> (EditorModel, UUID) {
+    let clipID = Fixtures.uuid(1)
+    let model = EditorModel(
+      sourceURL: URL(fileURLWithPath: "/clip.m4a"),
+      canonicalAudioURL: Fixtures.canonicalAudioURL,
+      editPlan: Fixtures.editPlan(),
+      initialDocument: EditorDocumentState(
+        slices: [
+          Slice(
+            id: clipID, name: "A story", startSample: 54772, endSample: 74176,
+            wordIDs: [1, 2], snippet: "So a")
+        ]))
+    return (model, clipID)
+  }
+
+  @Test func multiRangeSelectionHidesEveryResizeItem() {
+    let (model, clipID) = clipAndMultiSelection()
+    model.selection = .ranges(
+      MultiRangeSelection(primary: 70648..<74176, anchor: 70648, additional: [164228..<166874]))
+    expectNoDifference(model.transcriptResizeItems, [])
+    let slicesBefore = model.slices
+    expectNoDifference(model.transcriptResizeBegan(.clip(clipID), .end), false)
+    expectNoDifference(model.transcriptResizeDraft, nil)
+    expectNoDifference(model.slices, slicesBefore)
+  }
+
+  @Test func singleRangeSelectionStillShowsClipResizeItems() {
+    let (model, clipID) = clipAndMultiSelection()
+    model.selection = .range(164228..<166874, anchor: 164228)
+    #expect(model.transcriptResizeItems.contains { $0.identity == .clip(clipID) })
+  }
 }

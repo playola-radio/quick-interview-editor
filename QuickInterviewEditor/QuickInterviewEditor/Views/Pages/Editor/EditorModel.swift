@@ -155,16 +155,20 @@ final class EditorModel: ViewModel {
     // on the model (not a view `.onChange`) so headless model tests apply intents without a view.
     // One-directional — the model never writes the transcript's selection back through this.
     wireTranscriptInteractions()
-    transcript.onSelectionIntent = { [weak self] intent in
-      guard let self else { return }
-      switch intent {
-      case .words(let anchor, let focus): self.selectWords(anchorID: anchor, focusID: focus)
-      case .word(let id, extending: true): self.selectWord(id, extending: true)
-      case .word(let id, extending: false): self.selectWord(id, extending: false)
-      case .clear: self.clearSelection()
-      }
-    }
+    transcript.onSelectionIntent = { [weak self] in self?.applyTranscriptSelectionIntent($0) }
     wireTranscriptResize()
+  }
+
+  private func applyTranscriptSelectionIntent(_ intent: TranscriptPageModel.SelectionIntent) {
+    switch intent {
+    case .words(let anchor, let focus): selectWords(anchorID: anchor, focusID: focus)
+    case .word(let id, extending: true): selectWord(id, extending: true)
+    case .word(let id, extending: false): selectWord(id, extending: false)
+    case .clear: clearSelection()
+    case .additiveDragBegan(let id): additiveTranscriptDragBegan(id)
+    case .additiveWords(let anchor, let focus):
+      additiveTranscriptDragged(anchorID: anchor, focusID: focus)
+    }
   }
 
   private func wireTranscriptResize() {
@@ -584,7 +588,9 @@ final class EditorModel: ViewModel {
   // MARK: - Display Text
   let markAsClipLabel = "Mark as Clip"
   let clearButtonLabel = "Clear"
-  let removeSectionLabel = "Remove Section"
+  var removeSectionLabel: String {
+    selection.selectedRanges.count > 1 ? "Remove Sections" : "Remove Section"
+  }
   let scrollToCurrentWordLabel = "Scroll to current word"
   let emptyStateMessage = "Select words in the transcript, then Mark as Clip."
   let playLabel = "Play"
@@ -645,7 +651,10 @@ final class EditorModel: ViewModel {
   /// leaves `draftRange` populated (via `syncEditSession`) even with nothing tuned, so the moving
   /// marquee must take precedence or the overlay would freeze on the stale draft.
   var activeEditingRange: Range<Int>? {
-    marqueePreview ?? fineTune.draftRange ?? activeOrSelectedRange
+    // A multi-selection has no single editable range: never fall back to a stale fine-tune draft
+    // or the active slice. Its pieces are drawn from `waveformMultiSelectionRanges`.
+    if case .ranges = selection { return marqueePreview }
+    return marqueePreview ?? fineTune.draftRange ?? activeOrSelectedRange
   }
 
   // MARK: - Selection (source samples — the single source of truth)
@@ -663,6 +672,7 @@ final class EditorModel: ViewModel {
   }
   /// Explicit clears and history restore selection without changing transport.
   var selectionPreservesTransport = false
+  @ObservationIgnored var additiveDragBase: EditorSelection?
 
   var audioSelection: Range<Int>? {
     get { selection.freeformRange ?? selectedTranscriptObject?.range }
@@ -677,8 +687,11 @@ final class EditorModel: ViewModel {
 
   var selectionAnchorSample: Int? {
     get {
-      if case .range(_, let anchor) = selection { return anchor }
-      return selectedTranscriptObject?.range.lowerBound
+      switch selection {
+      case .range(_, let anchor): return anchor
+      case .ranges(let multi): return multi.anchor
+      case .none, .object, .seam: return selectedTranscriptObject?.range.lowerBound
+      }
     }
     set {
       guard case .range(let range, _) = selection else { return }
@@ -778,6 +791,21 @@ final class EditorModel: ViewModel {
     }
   }
 
+  /// Cmd-click: adds the word as another selected piece without moving the playhead. From a clip,
+  /// suggestion, seam, or empty selection it starts a fresh single-word range instead. A fully
+  /// removed word is ignored.
+  func addWordToSelection(_ id: Word.ID) {
+    guard !removedWordIDs.contains(id), let wordRange = sourceRange(ofWord: id) else { return }
+    switch selection {
+    case .range, .ranges:
+      selection = selection.adding(
+        wordRange.clamped(to: 0..<editPlan.source.durationSamples))
+      selectionPreservesTransport = true
+    case .none, .object, .seam:
+      selectWord(id, extending: false)
+    }
+  }
+
   /// The exact source range of one word, or nil if it has no monotonic sample bounds.
   func sourceRange(ofWord id: Word.ID) -> Range<Int>? {
     guard let word = editPlan.words.first(where: { $0.id == id }),
@@ -788,7 +816,7 @@ final class EditorModel: ViewModel {
 
   /// The source range spanning two words — the earlier word's start to the later word's end — so a
   /// selection from `a` to `b` covers everything between them regardless of drag direction.
-  private func sourceRange(coveringWords lhs: Word.ID, _ rhs: Word.ID) -> Range<Int>? {
+  func sourceRange(coveringWords lhs: Word.ID, _ rhs: Word.ID) -> Range<Int>? {
     guard let left = sourceRange(ofWord: lhs), let right = sourceRange(ofWord: rhs) else {
       return nil
     }
@@ -799,6 +827,7 @@ final class EditorModel: ViewModel {
   /// selection is a new-slice intent that retargets the pane), else the active slice.
   /// `sliceSelected` clears the selection so an edited slice cleanly becomes the driver.
   var fineTuneTarget: FineTuneModel.Target? {
+    if case .ranges = selection { return nil }
     if selection.freeformRange != nil { return .pendingSelection }
     if let activeSliceID { return .slice(activeSliceID) }
     return nil
@@ -884,7 +913,7 @@ final class EditorModel: ViewModel {
   /// (non-word-aligned) selection highlights the partially-covered words at its edges too. Empty
   /// when there's no selection.
   var selectedWordIDs: Set<Word.ID> {
-    selection.freeformRange.map { Set(wordIDs(anyOverlap: $0, words: editPlan.words)) } ?? []
+    Set(selection.selectedRanges.flatMap { wordIDs(anyOverlap: $0, words: editPlan.words) })
   }
 
   /// Waveform render data, geometry delegated to the edited adapter (the view reads these; it
@@ -892,6 +921,14 @@ final class EditorModel: ViewModel {
   /// a fine-tune drag live and collapses correctly around any removed spans it straddles.
   var waveformHighlightSpan: WaveformSpan? {
     activeEditingRange.flatMap { editedWaveform.span(forSource: $0) }
+  }
+
+  /// Every piece of a Cmd-click multi-selection, drawn as plain (non-interactive) waveform fills.
+  /// Empty for a single range (it keeps the interactive `activeEditingRange` highlight) and while a
+  /// marquee is live (the marquee is replacing the selection).
+  var waveformMultiSelectionRanges: [Range<Int>] {
+    guard marqueePreview == nil, case .ranges(let multi) = selection else { return [] }
+    return multi.allRanges
   }
 
   /// View-x of the persistent cursor on the edited axis, or nil when it's scrolled out of the
@@ -903,6 +940,7 @@ final class EditorModel: ViewModel {
   /// Resize handles follow the same full geometry and foreground ordering as the text bands.
   /// Freeform selection edges take priority, followed by the selected object.
   var transcriptResizeItems: [TranscriptResizeItem] {
+    if case .ranges = selection { return [] }
     // Index every transcript position of each word ID ONCE, then order each item by gathering its
     // IDs' positions + sort — O(n) once plus O(m log m) per item — instead of a full O(n)
     // `order.filter` per item. On a long transcript with many clips/suggestions this per-item full
@@ -918,7 +956,7 @@ final class EditorModel: ViewModel {
       }
     }
     var items: [TranscriptResizeItem] = []
-    if !selectedWordIDs.isEmpty {
+    if selection.freeformRange != nil, !selectedWordIDs.isEmpty {
       items.append(.init(identity: .selection, wordOccurrences: ordered(selectedWordIDs)))
     }
     for object in visibleTranscriptObjects {
@@ -1055,8 +1093,9 @@ final class EditorModel: ViewModel {
   }
 
   private func canBeginTranscriptResize(_ identity: TranscriptResizeItemIdentity) -> Bool {
-    switch identity {
-    case .selection: true
+    if case .ranges = selection { return false }
+    return switch identity {
+    case .selection: selection.freeformRange != nil
     case .clip: !isExporting && !hasUncommittedSliceEdit
     case .suggestion: !isExporting && !cutSuggestions.candidateActionsDisabled
     }
@@ -1223,7 +1262,7 @@ final class EditorModel: ViewModel {
   /// Clear is available for every main-editor selection, including objects and seams.
   var canClearSelection: Bool { selection != .none }
   var canEditSelectionEdges: Bool { selection.freeformRange != nil }
-  var shouldShowRemoveSectionControl: Bool { selection.freeformRange != nil }
+  var shouldShowRemoveSectionControl: Bool { !selection.selectedRanges.isEmpty }
   var shouldShowSelectedClipControls: Bool {
     if case .object(.clip) = selection { return true }
     return false
@@ -1241,8 +1280,9 @@ final class EditorModel: ViewModel {
   /// a silence-only selection reads "0 words selected".
   var selectionSummary: String {
     if selectedSeamID != nil { return crossfadeSelectedSummary }
-    guard let range = audioSelection else { return "No selection" }
-    let count = wordIDs(anyOverlap: range, words: editPlan.words).count
+    let ranges = audioSelection.map { [$0] } ?? selection.selectedRanges
+    guard !ranges.isEmpty else { return "No selection" }
+    let count = Set(ranges.flatMap { wordIDs(anyOverlap: $0, words: editPlan.words) }).count
     return "\(count) word\(count == 1 ? "" : "s") selected"
   }
   // Undo/redo restore `slices` wholesale; doing that under an open cut edit would leave the
@@ -2648,11 +2688,6 @@ final class EditorModel: ViewModel {
   /// rate. PR 2 makes it user-editable per removal.
   var defaultCrossfadeSamples: Int { Int(0.020 * Double(editPlan.source.sampleRate)) }
 
-  /// The SOURCE range a removal would apply to: the primary selection. Edge drag + nudge now mutate
-  /// `audioSelection` directly (see `selectionNudged` / `selectionEdgeDragged`), so there is no
-  /// separate fine-tune draft to prefer — the selection is already the (possibly nudged) truth.
-  private var pendingRemovalSourceRange: Range<Int>? { selection.freeformRange }
-
   /// Whether `range` can become a removal: non-empty. Cross-seam is now allowed — a range that
   /// overlaps existing removals merges them into one larger removal via `removeSourceRange`
   /// (Item ①: the Edit-Slice modal and the main timeline share one collapsed axis, so Delete
@@ -2661,45 +2696,43 @@ final class EditorModel: ViewModel {
     range.lowerBound < range.upperBound
   }
 
-  /// Drives ⌫ enablement and the Remove Section menu item. Also blocked while an export is
-  /// in flight — an in-progress export is rendering the un-cut canonical audio, so adding a
-  /// removal mid-export would leave the finished AIFF stale relative to what the editor shows.
+  /// Drives ⌫ enablement and the Remove Section menu item for one range or several Cmd-clicked
+  /// pieces. Blocked while an export is in flight — an in-progress export is rendering the un-cut
+  /// canonical audio, so adding a removal mid-export would leave the finished AIFF stale.
   var canRemoveSelectedSection: Bool {
-    guard let range = pendingRemovalSourceRange else { return false }
-    return canRemove(sourceRange: range) && !isExporting
+    !isExporting && selection.selectedRanges.contains { canRemove(sourceRange: $0) }
   }
 
-  /// Turns the current selection (or its nudged draft, if a boundary-nudge session is open) into
-  /// a `TimelineRemoval` with the default 20 ms equal-power crossfade, then clears the selection
-  /// and the fine-tune session. Belt-and-suspenders guard on `isExporting` (mirrors
-  /// `canRemoveSelectedSection`) so a stale invocation can't mutate the document while an export
-  /// is rendering.
+  /// Turns every selected piece into a `TimelineRemoval` with the default 20 ms equal-power
+  /// crossfade, then clears the selection and the fine-tune session.
   func removeSelectedSectionTapped() async {
-    guard let range = pendingRemovalSourceRange else { return }
-    await removeSourceRange(range)
+    await removeSourceRanges(selection.selectedRanges)
   }
 
-  /// Removes a SOURCE range, merging any existing removals it overlaps into ONE larger removal
-  /// (Item ①). The single funnel both the main timeline (`removeSelectedSectionTapped`) and the
-  /// Edit-Slice modal route Remove through, so cross-seam behavior is identical on both surfaces —
-  /// the modal is a truncated view of the same collapsed axis. The merged removal spans
-  /// `min(lower)..<max(upper)` of the range and every absorbed removal, and carries the default
-  /// crossfade: an absorbed removal's crossfade was internal to audio that stays removed, so it is
-  /// no longer an audible seam. `normalize` runs only as a validation backstop. A no-op while
-  /// exporting (a removal mid-export would leave the finished AIFF stale) or for an empty range.
+  /// One-range form of `removeSourceRanges`, used by the Edit-Slice modal's Remove.
   func removeSourceRange(_ range: Range<Int>) async {
-    guard !isExporting, canRemove(sourceRange: range) else { return }
-    let absorbed = timelineRemovals.filter { $0.removedRange.overlaps(range) }
-    let mergedLower = min(
-      range.lowerBound, absorbed.map(\.removedRange.lowerBound).min() ?? range.lowerBound)
-    let mergedUpper = max(
-      range.upperBound, absorbed.map(\.removedRange.upperBound).max() ?? range.upperBound)
-    let removal = TimelineRemoval(
-      id: UUID(), removedRange: mergedLower..<mergedUpper,
-      crossfade: Crossfade(lengthSamples: defaultCrossfadeSamples, curve: .equalPower))
-    mutateDocument(label: "Remove Section") { doc in
-      for absorbedRemoval in absorbed { doc.timelineRemovals.remove(id: absorbedRemoval.id) }
-      doc.timelineRemovals.append(removal)
+    await removeSourceRanges([range])
+  }
+
+  /// Removes SOURCE pieces in ONE undo step. Touching pieces merge; each piece absorbs the existing
+  /// removals it strictly overlaps (Item ①: an absorbed removal's crossfade was internal to audio
+  /// that stays removed). Each resulting span becomes one removal with the default crossfade;
+  /// untouched removals keep their IDs and crossfades. `normalize` runs only as a validation
+  /// backstop. A no-op while exporting (a removal mid-export would leave the finished AIFF stale)
+  /// or when no piece is removable.
+  func removeSourceRanges(_ ranges: [Range<Int>]) async {
+    let source = 0..<editPlan.source.durationSamples
+    let pieces = ranges.map { $0.clamped(to: source) }.filter { canRemove(sourceRange: $0) }
+    guard !isExporting, !pieces.isEmpty else { return }
+    let plan = TimelineRemovals.mergedSpans(removing: pieces, existing: Array(timelineRemovals))
+    let removals = plan.spans.map {
+      TimelineRemoval(
+        id: UUID(), removedRange: $0,
+        crossfade: Crossfade(lengthSamples: defaultCrossfadeSamples, curve: .equalPower))
+    }
+    mutateDocument(label: removals.count == 1 ? "Remove Section" : "Remove Sections") { doc in
+      for id in plan.absorbedIDs { doc.timelineRemovals.remove(id: id) }
+      doc.timelineRemovals.append(contentsOf: removals)
       doc.timelineRemovals = IdentifiedArray(
         uniqueElements: TimelineRemovals.normalize(Array(doc.timelineRemovals))
           ?? Array(doc.timelineRemovals))
