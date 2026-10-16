@@ -142,6 +142,8 @@ struct TranscriptTextView: NSViewRepresentable {
 
     private static let selectedFG = NSColor.white
     private static let normalFG = NSColor(calibratedWhite: 0.56, alpha: 1)
+    /// Removed words fade on top of their strikethrough so cut text reads apart from kept text.
+    private static let removedAlpha: CGFloat = 0.5
 
     private static func nsColor(_ color: ClipStyleColor) -> NSColor {
       NSColor(
@@ -360,11 +362,15 @@ struct TranscriptTextView: NSViewRepresentable {
     private func setForeground(storage: NSTextStorage, wordRange: NSRange, wordID: Word.ID) {
       let container = lastClipContainers.first { NSLocationInRange(wordRange.location, $0.range) }
       let kind = container?.kind
+      let selected = lastSelected.contains(wordID)
+      let removed = lastRemovedWordIDs.contains(wordID)
+      let color = foregroundColor(selected: selected, container: container)
       storage.addAttribute(
         .foregroundColor,
-        value: foregroundColor(selected: lastSelected.contains(wordID), container: container),
+        value: removed && !selected
+          ? color.withAlphaComponent(color.alphaComponent * Self.removedAlpha) : color,
         range: wordRange)
-      let struck = kind == .rejected || lastRemovedWordIDs.contains(wordID)
+      let struck = kind == .rejected || removed
       if struck {
         storage.addAttribute(
           .strikethroughStyle, value: NSUnderlineStyle.single.rawValue, range: wordRange)
