@@ -17,6 +17,15 @@ struct CutSuggestClientTests {
     }
   }
 
+  @Test func testValueNameClipFailsCleanlyWithoutOverride() async {
+    await withKnownIssue {
+      let request = ClipNamingRequest(
+        configuration: SuggestionDefaults.configuration, model: "m", clipText: "t",
+        clipStartSample: 0, clipEndSample: 1, transcriptUnits: [], interviewArtist: nil)
+      _ = try await CutSuggestClient.testValue.nameClip(request, "key")
+    }
+  }
+
   @Test func previewValueEmitsProgressThenEmptyCompletion() async throws {
     var events: [CutSuggestEvent] = []
     for try await event in CutSuggestClient.previewValue.suggestCuts(Self.request, nil) {

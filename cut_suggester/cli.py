@@ -24,6 +24,11 @@ Request shape (written by the app):
 
 Result on stdout: `{"suggestions": [<CutCandidate.to_dict()>, ...], "meta": {...}}`.
 
+`name-clip --request r.json` makes one LLM call that classifies a single hand-marked
+clip against the configured suggestion types and extracts that type's naming fields.
+Result on stdout: `{"type_id": "intro", "fields": {"artist-name": "X", ...}}`, or
+`{"type_id": null, "fields": {}}` when no configured type fits (see `clip_naming`).
+
 Auth: the model/provider come from `options.model`; the API key is read from the
 environment by the live client (`OPENAI_KEY` / the Anthropic SDK's own env). No key
 is ever hardcoded or accepted on the command line.
@@ -32,6 +37,7 @@ is ever hardcoded or accepted on the command line.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import sys
@@ -45,6 +51,7 @@ from .config import (
     STAGE1_STEP,
     STAGE1_WINDOW,
 )
+from .clip_naming import run_name_clip, validate_clip_request
 from .cutter import suggest_cuts
 from .configured_run import immutable_request, request_identity, run_configured_suggest, validate_request
 from .run_journal import RunJournal
@@ -164,16 +171,38 @@ class _JournalOnlyClient:
         raise CacheMiss(f"no validated journal response for {purpose}")
 
 
+def _read_request(path: str) -> dict:
+    # The app writes UTF-8 JSON with non-ASCII transcript text; read it as UTF-8
+    # explicitly so a non-UTF-8 child locale (e.g. LC_ALL=C) can't raise on decode.
+    with open(path, encoding="utf-8") as f:
+        request = json.load(f)
+    if not isinstance(request, dict):
+        raise ValueError("request must be an object")
+    return request
+
+
+@contextlib.contextmanager
+def _stdout_to_stderr():
+    # stdout is a pure-JSON channel the app decodes wholesale. Redirect fd 1 to
+    # stderr for the whole run (an SDK or dependency might print a warning to
+    # stdout), then restore it and write only the result JSON — the same proven
+    # discipline `logic_markers.cli` uses for `plan`/`render`.
+    sys.stdout.flush()
+    saved_stdout_fd = os.dup(1)
+    try:
+        os.dup2(2, 1)
+        yield
+    finally:
+        sys.stdout.flush()
+        os.dup2(saved_stdout_fd, 1)
+        os.close(saved_stdout_fd)
+
+
 def _cmd_suggest(args) -> int:
     if not os.path.exists(args.request):
         print(f"error: no such request file: {args.request}", file=sys.stderr)
         return 2
-    # The app writes UTF-8 JSON with non-ASCII transcript text; read it as UTF-8
-    # explicitly so a non-UTF-8 child locale (e.g. LC_ALL=C) can't raise on decode.
-    with open(args.request, encoding="utf-8") as f:
-        request = json.load(f)
-    if not isinstance(request, dict):
-        raise ValueError("request must be an object")
+    request = _read_request(args.request)
     is_v2 = "schema_version" in request
     if is_v2:
         validate_request(request)
@@ -183,14 +212,7 @@ def _cmd_suggest(args) -> int:
         raise ValueError("--refresh requires --cache-dir")
     options = request.get("options") or {}
 
-    # stdout is a pure-JSON channel the app decodes wholesale. Redirect fd 1 to
-    # stderr for the whole run (an SDK or dependency might print a warning to
-    # stdout), then restore it and write only the result JSON — the same proven
-    # discipline `logic_markers.cli` uses for `plan`/`render`.
-    sys.stdout.flush()
-    saved_stdout_fd = os.dup(1)
-    try:
-        os.dup2(2, 1)
+    with _stdout_to_stderr():
         if is_v2:
             journal = RunJournal(args.journal_dir, request_identity=request_identity(request),
                                  immutable_request=immutable_request(request))
@@ -199,13 +221,22 @@ def _cmd_suggest(args) -> int:
         else:
             llm = build_llm(options, cache_dir=args.cache_dir, cached_only=args.cached, refresh=args.refresh)
             result = run_suggest(request, llm)
-    finally:
-        sys.stdout.flush()
-        os.dup2(saved_stdout_fd, 1)
-        os.close(saved_stdout_fd)
     json.dump(result, sys.stdout)
     sys.stdout.flush()
     return 1 if result.get("status") == "needs_retry" else 0
+
+
+def _cmd_name_clip(args) -> int:
+    if not os.path.exists(args.request):
+        print(f"error: no such request file: {args.request}", file=sys.stderr)
+        return 2
+    request = _read_request(args.request)
+    validate_clip_request(request)
+    with _stdout_to_stderr():
+        result = run_name_clip(request, live_client_for(request["model"]))
+    json.dump(result, sys.stdout)
+    sys.stdout.flush()
+    return 0
 
 
 def main(argv=None) -> int:
@@ -234,6 +265,10 @@ def main(argv=None) -> int:
         help="ignore existing cache entries; recompute and overwrite",
     )
     s.set_defaults(func=_cmd_suggest)
+
+    n = sub.add_parser("name-clip", help="classify one hand-marked clip and extract its naming fields")
+    n.add_argument("--request", required=True, help="request.json (clip, configuration, transcript units)")
+    n.set_defaults(func=_cmd_name_clip)
 
     args = parser.parse_args(argv)
     # Reject flag combinations that would otherwise fail late with a misleading

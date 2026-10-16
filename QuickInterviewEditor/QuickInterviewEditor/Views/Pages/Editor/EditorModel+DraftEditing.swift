@@ -87,6 +87,11 @@ extension EditorModel {
     editing.invalidate(reason)
   }
 
+  private func freeformDraftCommitted(_ slice: Slice) {
+    advanceSliceNumber()
+    queueManualClipNaming(for: slice)
+  }
+
   func commitDraftEdit(_ editing: EditSliceModel, range: Range<Int>) -> ClipEditCommitResult {
     guard editSlice === editing, editing.target.isDraft else {
       return .failed("This draft is no longer available.")
@@ -135,7 +140,7 @@ extension EditorModel {
         $0.suggestionBatch = acceptance.batch
       }
     }
-    if case .freeformDraft = editing.target { advanceSliceNumber() }
+    if case .freeformDraft = editing.target { freeformDraftCommitted(slice) }
     selectTranscriptObject(.clip(id))
     return .committed
   }

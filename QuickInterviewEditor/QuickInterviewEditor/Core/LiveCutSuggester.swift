@@ -167,6 +167,61 @@ enum LiveCutSuggester {
     }
   }
 
+  // MARK: nameClip
+
+  static func nameClip(_ request: ClipNamingRequest, apiKey: String, runner: Runner = .live)
+    async throws -> ClipNamingResult?
+  {
+    let procBox = Mutex<ProcessHandle?>(nil)
+    return try await withTaskCancellationHandler {
+      let launch = runner.resolveLaunch()
+      let work = try runner.makeWorkDirectory()
+      defer { try? FileManager.default.removeItem(at: work) }
+
+      let requestURL = work.appendingPathComponent("request.json")
+      try encodedNameClipRequest(request).write(to: requestURL)
+
+      let proc = try runner.spawn(
+        launch, launch.arguments(subcommand: "name-clip", ["--request", requestURL.path]),
+        childEnvironment(base: launch.environment, apiKey: apiKey))
+      procBox.withLock { $0 = proc }
+      if Task.isCancelled { proc.terminate() }
+
+      async let stdoutData = proc.readStdoutToEnd()
+      async let exitCode = proc.waitForExit()
+      for await _ in proc.stderrLines() {}
+      let out = await stdoutData
+      let code = await exitCode
+
+      try Task.checkCancellation()
+      guard code == 0 else { throw mapFailure(stderr: proc.stderrTail()) }
+      return try decodeNameClipResult(from: out)
+    } onCancel: {
+      procBox.withLock { $0 }?.terminate()
+    }
+  }
+
+  private static func decodeNameClipResult(from out: Data) throws -> ClipNamingResult? {
+    let wire: ClipNamingResultWire
+    do {
+      wire = try JSONDecoder().decode(ClipNamingResultWire.self, from: out)
+    } catch {
+      throw CutSuggestClientError.decodeFailed(
+        "The name-clip helper returned unreadable output: \(error.localizedDescription)")
+    }
+    guard let typeID = wire.typeID else { return nil }
+    return ClipNamingResult(typeID: typeID, fields: wire.fields)
+  }
+
+  private struct ClipNamingResultWire: Decodable {
+    var typeID: String?
+    var fields: [String: String?]
+    enum CodingKeys: String, CodingKey {
+      case typeID = "type_id"
+      case fields
+    }
+  }
+
   /// The child's environment: the launch base plus the resolved credential injected as
   /// `ANTHROPIC_API_KEY` (only here — never argv, visible in `ps`, nor the on-disk request
   /// file). A whitespace-only key is treated as absent so the provider returns a clean auth
@@ -363,6 +418,12 @@ enum LiveCutSuggester {
     }
     return try JSONEncoder().encode(RequestWire(request))
   }
+
+  /// The `name-clip` request as the snake-cased JSON the Python CLI reads. Exposed (not
+  /// private) so the wire contract is unit-tested without spawning a subprocess.
+  static func encodedNameClipRequest(_ request: ClipNamingRequest) throws -> Data {
+    try JSONEncoder().encode(ClipNamingRequestWire(request))
+  }
 }
 
 // MARK: - Request wire types
@@ -479,6 +540,43 @@ private struct RequestWire: Encodable {
     var diarizationHash: String
     enum CodingKeys: String, CodingKey {
       case diarizationHash = "diarization_hash"
+    }
+  }
+}
+
+private struct ClipNamingRequestWire: Encodable {
+  var schemaVersion = 1
+  var model: String
+  var configuration: SuggestionConfiguration
+  var clip: Clip
+  var transcriptUnits: [RequestWire.Unit]
+  var interviewArtist: String?
+
+  enum CodingKeys: String, CodingKey {
+    case schemaVersion = "schema_version"
+    case model, configuration, clip
+    case transcriptUnits = "transcript_units"
+    case interviewArtist = "interview_artist"
+  }
+
+  init(_ request: ClipNamingRequest) {
+    model = request.model
+    configuration = request.configuration
+    clip = Clip(
+      text: request.clipText, startSample: request.clipStartSample,
+      endSample: request.clipEndSample)
+    transcriptUnits = request.transcriptUnits.map(RequestWire.Unit.init)
+    interviewArtist = request.interviewArtist
+  }
+
+  struct Clip: Encodable {
+    var text: String
+    var startSample: Int
+    var endSample: Int
+    enum CodingKeys: String, CodingKey {
+      case text
+      case startSample = "start_sample"
+      case endSample = "end_sample"
     }
   }
 }

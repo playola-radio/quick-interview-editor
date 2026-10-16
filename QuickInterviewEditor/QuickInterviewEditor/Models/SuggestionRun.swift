@@ -179,14 +179,8 @@ func suggestionForAcceptance(
   candidate.naming?.reservation =
     issued.first(where: { $0.identity == existing?.identity })
     ?? issued.last(where: { $0.candidateID == candidate.id && $0.key == key })
-  var floors = starts
-  floors.types = floors.types.mapValues { .init(number: $0.number, isExplicit: false) }
-  floors.groups = floors.groups.map {
-    .init(
-      key: $0.key, start: .init(number: $0.start.number, isExplicit: false), display: $0.display)
-  }
   var result = try numberSuggestions(
-    [candidate], snapshot: batch.snapshot, starts: floors, issued: issued,
+    [candidate], snapshot: batch.snapshot, starts: starts.withoutExplicitFlags, issued: issued,
     retained: [], existingBatch: batch)
   for recorded in batch.actualStarts.groups {
     result.batch.actualStarts.groups.removeAll { $0.key == recorded.key }

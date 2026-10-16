@@ -217,6 +217,19 @@ def _stable_key(expected: Mapping[str, set[str]]) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+def interview_artist_context(interview_artist: str | None) -> str:
+    context = (
+        "Never emit the literal placeholder SELF. "
+        "Use user-provided interview context only when the passage concerns the interview "
+        "subject's own music; resolve other performers from transcript evidence. "
+        "The name is not a blanket default for every speaker or artist mention. "
+        "Configured field instructions remain authoritative.\n"
+    )
+    if interview_artist is not None:
+        context += f"User-provided interview artist: {json.dumps(interview_artist, ensure_ascii=False)}\n"
+    return context
+
+
 def plan_extraction_batches(
     candidates: Sequence[Mapping], type_definitions: Sequence[Mapping], field_definitions: Sequence[Mapping],
     sentences: Sequence[Sentence], *, speaker_ids: Mapping[object, object] | None = None,
@@ -236,15 +249,7 @@ def plan_extraction_batches(
     types, fields = _type_and_fields(type_definitions, field_definitions)
     artist_context = ""
     if extraction_prompt_version in {"fields-v2", "fields-v3"}:
-        artist_context = (
-            "Never emit the literal placeholder SELF. "
-            "Use user-provided interview context only when the passage concerns the interview "
-            "subject's own music; resolve other performers from transcript evidence. "
-            "The name is not a blanket default for every speaker or artist mention. "
-            "Configured field instructions remain authoritative.\n"
-        )
-        if interview_artist is not None:
-            artist_context += f"User-provided interview artist: {json.dumps(interview_artist, ensure_ascii=False)}\n"
+        artist_context = interview_artist_context(interview_artist)
     if extraction_prompt_version == "fields-v3" and any(
         isinstance(candidate, Mapping) and candidate.get("product_type") == "intro" for candidate in candidates
     ):

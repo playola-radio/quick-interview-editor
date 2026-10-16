@@ -445,3 +445,147 @@ extension LiveCutSuggesterTests {
     expectNoDifference(encoded["interview_artist"] as? String, "River Vale")
   }
 }
+
+// MARK: - nameClip
+
+private struct SpawnCapture {
+  var args: [String]
+  var key: String?
+  var requestText: String
+}
+
+extension LiveCutSuggesterTests {
+  private static func nameRequest(interviewArtist: String? = "Hayes Carll") -> ClipNamingRequest {
+    ClipNamingRequest(
+      configuration: SuggestionDefaults.configuration, model: "claude-sonnet-5",
+      clipText: "So a young Hayes Carll", clipStartSample: 88200, clipEndSample: 132300,
+      transcriptUnits: request().transcriptUnits, interviewArtist: interviewArtist)
+  }
+
+  private static func nameObject(_ request: ClipNamingRequest) throws -> [String: Any] {
+    let data = try LiveCutSuggester.encodedNameClipRequest(request)
+    return try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+  }
+
+  private static func nameClip(
+    output: String, exitCode: Int32 = 0, stderr: String = ""
+  ) async throws -> ClipNamingResult? {
+    try await LiveCutSuggester.nameClip(
+      nameRequest(), apiKey: "key",
+      runner: runner(output: Data(output.utf8), exitCode: exitCode, stderr: stderr))
+  }
+
+  @Test func nameClipRequestMatchesWireContract() throws {
+    let request = Self.nameRequest()
+    let configuration = try JSONSerialization.jsonObject(
+      with: JSONEncoder().encode(request.configuration))
+    let unit: NSDictionary = [
+      "id": 3, "text": "So a young Hayes Carll", "word_ids": [7, 8, 9],
+      "start_sample": 88200, "end_sample": 132300, "start_sec": 2.0, "end_sec": 3.0,
+      "speaker_id": "SPEAKER_00",
+    ]
+    let expected: NSDictionary = [
+      "schema_version": 1,
+      "model": "claude-sonnet-5",
+      "configuration": configuration,
+      "clip": ["text": "So a young Hayes Carll", "start_sample": 88200, "end_sample": 132300],
+      "transcript_units": [unit],
+      "interview_artist": "Hayes Carll",
+    ]
+    expectNoDifference(try Self.nameObject(request) as NSDictionary, expected)
+  }
+
+  @Test func nameClipRequestOmitsInterviewArtistWhenNil() throws {
+    let object = try Self.nameObject(Self.nameRequest(interviewArtist: nil))
+    expectNoDifference(object.keys.contains("interview_artist"), false)
+  }
+
+  @Test func nameClipDecodesMatchWithNullField() async throws {
+    let result = try await Self.nameClip(
+      output: #"{"type_id": "intro", "fields": {"artist-name": "X", "song-title": null}}"#)
+    expectNoDifference(
+      result,
+      ClipNamingResult(typeID: "intro", fields: ["artist-name": "X", "song-title": nil]))
+  }
+
+  @Test func nameClipReturnsNilWhenNoTypeFits() async throws {
+    let result = try await Self.nameClip(output: #"{"type_id": null, "fields": {}}"#)
+    expectNoDifference(result, nil)
+  }
+
+  @Test func nameClipSpawnsSubcommandWithRequestFileAndKeyInEnvironment() async throws {
+    let spawned = Mutex<SpawnCapture?>(nil)
+    var runner = Self.runner(output: Data(#"{"type_id": null, "fields": {}}"#.utf8))
+    runner.spawn = { _, args, environment in
+      let path = try #require(args.last)
+      let text = try String(contentsOfFile: path, encoding: .utf8)
+      spawned.withLock {
+        $0 = SpawnCapture(args: args, key: environment["ANTHROPIC_API_KEY"], requestText: text)
+      }
+      return LiveCutSuggester.ProcessHandle(
+        readStdoutToEnd: { Data(#"{"type_id": null, "fields": {}}"#.utf8) },
+        waitForExit: { 0 }, stderrLines: { AsyncStream { $0.finish() } },
+        stderrTail: { "" }, terminate: {})
+    }
+    _ = try await LiveCutSuggester.nameClip(
+      Self.nameRequest(), apiKey: " secret-key ", runner: runner)
+    let captured = try #require(spawned.withLock { $0 })
+    expectNoDifference(captured.args.dropLast().last, "--request")
+    expectNoDifference(captured.args.dropLast(2).last, "name-clip")
+    expectNoDifference(captured.key, "secret-key")
+    #expect(!captured.requestText.contains("secret-key"))
+  }
+
+  @Test func nameClipNonzeroExitMapsToSuggestFailed() async throws {
+    await #expect(throws: CutSuggestClientError.suggestFailed("network unavailable")) {
+      _ = try await Self.nameClip(output: "", exitCode: 1, stderr: "network unavailable")
+    }
+  }
+
+  @Test func nameClipAuthFailureMapsToAuthMissing() async throws {
+    await #expect(throws: CutSuggestClientError.authMissing("401 unauthorized")) {
+      _ = try await Self.nameClip(output: "", exitCode: 1, stderr: "401 unauthorized")
+    }
+  }
+
+  @Test func nameClipMalformedStdoutIsDecodeFailed() async throws {
+    do {
+      _ = try await Self.nameClip(output: "not json")
+      Issue.record("Expected decode failure")
+    } catch {
+      #expect(error is CutSuggestClientError)
+      guard case .decodeFailed = error as? CutSuggestClientError else {
+        Issue.record("Expected decodeFailed, got \(error)")
+        return
+      }
+    }
+  }
+
+  @Test func nameClipCancellationTerminatesChild() async throws {
+    let started = AsyncStream<Void>.makeStream()
+    let stdout = AsyncStream<Data>.makeStream()
+    let terminated = Mutex(false)
+    var runner = Self.runner(output: Data())
+    runner.spawn = { _, _, _ in
+      started.continuation.yield(())
+      return LiveCutSuggester.ProcessHandle(
+        readStdoutToEnd: {
+          for await data in stdout.stream { return data }
+          return Data()
+        }, waitForExit: { 0 }, stderrLines: { AsyncStream { $0.finish() } }, stderrTail: { "" },
+        terminate: {
+          terminated.withLock { $0 = true }
+          stdout.continuation.yield(Data(#"{"type_id": null, "fields": {}}"#.utf8))
+          stdout.continuation.finish()
+        })
+    }
+    let task = Task { [runner] in
+      try await LiveCutSuggester.nameClip(Self.nameRequest(), apiKey: "key", runner: runner)
+    }
+    var startIterator = started.stream.makeAsyncIterator()
+    _ = await startIterator.next()
+    task.cancel()
+    await #expect(throws: CancellationError.self) { _ = try await task.value }
+    expectNoDifference(terminated.withLock { $0 }, true)
+  }
+}

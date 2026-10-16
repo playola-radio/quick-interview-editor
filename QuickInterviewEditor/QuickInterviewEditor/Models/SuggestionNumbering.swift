@@ -50,6 +50,18 @@ struct SuggestionStarts: Codable, Equatable, Sendable {
   var groups: [GroupStart] = []
 }
 
+extension SuggestionStarts {
+  var withoutExplicitFlags: SuggestionStarts {
+    var floors = self
+    floors.types = types.mapValues { .init(number: $0.number, isExplicit: false) }
+    floors.groups = groups.map {
+      .init(
+        key: $0.key, start: .init(number: $0.start.number, isExplicit: false), display: $0.display)
+    }
+    return floors
+  }
+}
+
 enum SuggestionReviewIntent {
   case fields(candidateID: UUID, runID: UUID, values: [String: String])
   case spelling(key: SuggestionSequenceKey, runID: UUID, values: [String: String])
