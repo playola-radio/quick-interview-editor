@@ -50,6 +50,7 @@ Design: `docs/superpowers/specs/2026-07-07-phase5-interactive-cut-editing-design
 - [ ] `PlayolaAlert` modal error type — 3b surfaced export errors as inline status text; a modal alert type can land with the broader error-UX work (Phase 6).
 - [ ] Offline model path is **English-only** for the spike — multi-language align model download is a later item.
 - [ ] **Global Cmd+Z / Cmd+Shift+Z** for undo/redo (CodeRabbit suggestion on PR #11, deferred). Needs focus-aware first-responder handling so it doesn't shadow the slice-rename field's native in-field undo — polish item, not a one-liner.
+- [ ] **Spectral word boundaries in connected speech** (follow-up to PR #115). `logic_markers/word_edges.py` snaps word edges by loudness, which fixes pause edges but can't see a boundary where the voice keeps going and only the timbre changes (e.g. "much as" — the midpoint fallback left half of "as"). A prototype log-mel spectral-change curve found that boundary ~80 ms from the midpoint split. Open question: picking the right peak, since every phoneme inside a word is also a timbre change.
 
 ---
 
