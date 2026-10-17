@@ -480,6 +480,56 @@ extension SuggestionRecoveryClientTests {
     }
   }
 
+  @Test func pythonCheckpointWithExtendedFailureKeysValidatesAndYieldsStructuredFailures()
+    async throws
+  {
+    let root = FileManager.default.temporaryDirectory.appending(component: UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let (fixture, originalPython) = try RecoveryFixture.python()
+    var python = originalPython
+    let checkpoint = try JSONDecoder().decode(
+      SuggestionRunWireCheckpoint.self, from: python.checkpoint)
+    let failedKey = try #require(
+      python.records.keys.first { !checkpoint.completedRequestKeys.contains($0) })
+    var object = try #require(
+      JSONSerialization.jsonObject(with: python.checkpoint) as? [String: Any])
+    object["phase"] = "needs_retry"
+    object["failed_request_keys"] = [failedKey]
+    object["failed_batches"] = [
+      [
+        "kind": "extraction", "request_key": failedKey, "candidate_ids": ["uuid-1"],
+        "category": "credits", "message": "Your credit balance is too low.", "status_code": 400,
+        "request_id": "req_01ABC", "retry_after": NSNull(), "retryable": false,
+        "error_type": "BadRequestError",
+      ],
+      [
+        "kind": "input_size", "candidate_id": "uuid-2", "category": "input_size",
+        "message": "too big", "status_code": NSNull(), "request_id": NSNull(),
+        "retry_after": NSNull(), "retryable": false, "error_type": "InputSizeDiagnostic",
+        "mandatory_characters": 27120, "max_input_characters": 24000,
+      ],
+    ]
+    python.checkpoint = try signedPythonObject(object)
+    let store = SuggestionRecoveryStore(root: root, uuid: { UUID() })
+    let directory = try await store.prepare(fixture.owner, preparation: fixture.preparation)
+    try fixture.writePython(python, directory: directory)
+    let capture = try await store.capture(
+      fixture.owner, runID: fixture.snapshot.runID, minimumPythonRevision: 1)
+    expectNoDifference(capture.checkpoint.phase, .needsRetry)
+    expectNoDifference(
+      capture.checkpoint.failures,
+      [
+        SuggestionRunFailure(
+          kind: "extraction", stage: nil, category: .credits,
+          message: "Your credit balance is too low.", statusCode: 400, requestID: "req_01ABC",
+          retryAfter: nil, retryable: false, errorType: "BadRequestError"),
+        SuggestionRunFailure(
+          kind: "input_size", stage: nil, category: .inputSize, message: "too big",
+          statusCode: nil, requestID: nil, retryAfter: nil, retryable: false,
+          errorType: "InputSizeDiagnostic"),
+      ])
+  }
+
   @Test(arguments: [false, true])
   func untitledAppliedRunAllowsSuccessorAndDiscardRecoversPortablePredecessor(successorFailed: Bool)
     async throws

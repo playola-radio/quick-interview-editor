@@ -637,3 +637,38 @@ struct SuggestionRunTests {
     return candidate
   }
 }
+
+extension SuggestionRunTests {
+  @Test func checkpointWithStructuredFailuresRoundTripsThroughCodable() throws {
+    let failures = [
+      SuggestionRunFailure(
+        kind: "extraction", stage: nil, category: .unknown("quota_exhausted"), message: "Out",
+        statusCode: 429, requestID: "req_1", retryAfter: 12.5, retryable: false,
+        errorType: "QuotaError")
+    ]
+    let checkpoint = SuggestionRunCheckpoint(
+      pythonRevision: 1, controlRevision: 0, originalBatchFingerprint: nil,
+      snapshot: suggestionResultSnapshot(), phase: .needsRetry, candidates: [],
+      completedRequestKeys: [], failedRequestKeys: [], proposedStarts: .init(),
+      failures: failures)
+    let decoded = try JSONDecoder().decode(
+      SuggestionRunCheckpoint.self, from: JSONEncoder().encode(checkpoint))
+    expectNoDifference(decoded, checkpoint)
+    expectNoDifference(decoded.failures, failures)
+  }
+
+  @Test func legacyCheckpointWithOnlyFailureMessageDecodesWithoutFailures() throws {
+    let legacy = SuggestionRunCheckpoint(
+      pythonRevision: 1, controlRevision: 0, originalBatchFingerprint: nil,
+      snapshot: suggestionResultSnapshot(), phase: .needsRetry, candidates: [],
+      completedRequestKeys: [], failedRequestKeys: [], proposedStarts: .init(),
+      failureMessage: "Some requests failed. Resume to retry the unfinished requests.")
+    var object = try #require(
+      JSONSerialization.jsonObject(with: JSONEncoder().encode(legacy)) as? [String: Any])
+    object.removeValue(forKey: "failures")
+    let decoded = try JSONDecoder().decode(
+      SuggestionRunCheckpoint.self, from: JSONSerialization.data(withJSONObject: object))
+    expectNoDifference(decoded, legacy)
+    #expect(decoded.failures == nil)
+  }
+}

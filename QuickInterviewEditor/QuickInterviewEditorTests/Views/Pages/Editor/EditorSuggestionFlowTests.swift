@@ -969,7 +969,7 @@ struct EditorSuggestionFlowTests {
       let runID = try #require(fixture.state.value.checkpoint?.snapshot.runID)
       fixture.state.value.continuations[1].yield(
         .recoverableFailure(
-          runID: runID, failedRequestKeys: ["naming"], message: "Naming failed"))
+          runID: runID, failedRequestKeys: ["naming"], failures: []))
       fixture.state.value.continuations[1].finish()
     case "cancel":
       model.cutSuggestions.run.cancelSearchTapped()

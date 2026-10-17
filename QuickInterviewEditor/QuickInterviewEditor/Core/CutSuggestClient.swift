@@ -77,7 +77,8 @@ enum CutSuggestEvent: Equatable, Sendable {
   case progress(String)
   case diagnostic(String)
   case checkpoint(runID: UUID, revision: Int)
-  case recoverableFailure(runID: UUID, failedRequestKeys: [String], message: String)
+  case recoverableFailure(
+    runID: UUID, failedRequestKeys: [String], failures: [SuggestionRunFailure])
   case completed([CutSuggestion])
 }
 

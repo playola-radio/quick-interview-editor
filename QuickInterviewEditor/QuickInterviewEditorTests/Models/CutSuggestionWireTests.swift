@@ -168,7 +168,14 @@ extension CutSuggestionWireTests {
       snapshot: snapshot, proposedStarts: .init(), controlRevision: 99,
       originalBatchFingerprint: "original")
     expectNoDifference(checkpoint.pythonRevision, 7)
-    #expect(checkpoint.failureMessage?.contains("Retrying unchanged input cannot complete") == true)
+    expectNoDifference(
+      checkpoint.failures,
+      [
+        SuggestionRunFailure(
+          kind: "input_size", stage: nil, category: .inputSize, message: nil, statusCode: nil,
+          requestID: nil, retryAfter: nil, retryable: false, errorType: nil)
+      ])
+    #expect(checkpoint.failureMessage == nil)
     expectNoDifference(
       try JSONDecoder().decode(
         SuggestionRunCheckpoint.self,
@@ -321,5 +328,122 @@ extension CutSuggestionWireTests {
       numbered.candidates.map { $0.naming?.extractedValues },
       result.candidates.map { $0.naming?.extractedValues })
     expectNoDifference(numbered.batch.snapshot, snapshot)
+  }
+}
+
+extension CutSuggestionWireTests {
+  @Test(arguments: [
+    ("auth", SuggestionFailureCategory.auth), ("credits", .credits),
+    ("rate_limit", .rateLimit), ("overloaded", .overloaded), ("network", .network),
+    ("timeout", .timeout), ("server", .server), ("bad_request", .badRequest),
+    ("bad_response", .badResponse), ("input_size", .inputSize),
+  ])
+  func failureCategoryDecodesFromItsWireName(name: String, expected: SuggestionFailureCategory)
+    throws
+  {
+    let failure = try decodeFailure(["kind": "extraction", "retryable": true, "category": name])
+    expectNoDifference(failure.category, expected)
+    expectNoDifference(
+      try JSONDecoder().decode(
+        [SuggestionFailureCategory].self, from: JSONEncoder().encode([expected])),
+      [expected])
+  }
+
+  @Test func unknownFutureCategoryDecodesWithoutThrowingAndRoundTripsItsName() throws {
+    let failure = try decodeFailure([
+      "kind": "extraction", "retryable": false, "category": "quota_exhausted",
+    ])
+    expectNoDifference(failure.category, .unknown("quota_exhausted"))
+    let encoded = try JSONEncoder().encode([failure.category])
+    expectNoDifference(String(data: encoded, encoding: .utf8), "[\"quota_exhausted\"]")
+  }
+
+  @Test func failureWithoutCategoryFallsBackToInputSizeOrErrorTypeOrKind() throws {
+    expectNoDifference(
+      try decodeFailure(["kind": "input_size", "retryable": false]).category, .inputSize)
+    expectNoDifference(
+      try decodeFailure([
+        "kind": "extraction", "retryable": true, "error_type": "ExtractionError",
+      ]).category,
+      .unknown("ExtractionError"))
+    expectNoDifference(
+      try decodeFailure(["kind": "provider", "retryable": true]).category, .unknown("provider"))
+  }
+
+  @Test(arguments: [("30", 30.0), ("12.5", 12.5)])
+  func retryAfterDecodesFromIntegerAndFloat(wire: String, expected: Double) throws {
+    let json = Data(
+      """
+      {"kind":"extraction","retryable":true,"category":"rate_limit","retry_after":\(wire)}
+      """.utf8)
+    let failure = try JSONDecoder().decode(SuggestionRunWireFailure.self, from: json).failure
+    expectNoDifference(failure.retryAfter, expected)
+  }
+
+  @Test func failureCarriesEveryPersistedFactAndIgnoresUnknownKeys() throws {
+    let failure = try decodeFailure([
+      "kind": "discovery", "stage": "classify:110:239", "request_key": "digest",
+      "category": "credits", "message": "Your credit balance is too low.", "status_code": 400,
+      "request_id": "req_01ABC", "retry_after": NSNull(), "retryable": false,
+      "error_type": "BadRequestError", "mandatory_characters": 5, "future_key": "ignored",
+    ])
+    expectNoDifference(
+      failure,
+      SuggestionRunFailure(
+        kind: "discovery", stage: "classify:110:239", category: .credits,
+        message: "Your credit balance is too low.", statusCode: 400, requestID: "req_01ABC",
+        retryAfter: nil, retryable: false, errorType: "BadRequestError"))
+  }
+
+  @Test func needsRetryResultCarriesStructuredFailuresInOrder() throws {
+    var object = try resultObject()
+    object["status"] = "needs_retry"
+    object["failed_batches"] = [
+      ["kind": "extraction", "request_key": "a", "category": "network", "retryable": true],
+      ["kind": "discovery", "category": "auth", "retryable": false],
+    ]
+    let result = try SuggestionRunWireResult.decode(
+      from: JSONSerialization.data(withJSONObject: object), snapshot: suggestionResultSnapshot())
+    expectNoDifference(result.failures.map(\.category), [.network, .auth])
+    expectNoDifference(result.failedRequestKeys, ["a"])
+  }
+
+  @Test func checkpointFailuresRoundTripAndLegacyMessageStaysNil() throws {
+    var object = try resultObject()
+    object["schema_version"] = 1
+    object["revision"] = 2
+    object["request_identity"] = "python-owned-identity"
+    object["phase"] = "needs_retry"
+    object["completed_request_keys"] = []
+    object["failed_request_keys"] = []
+    object["failed_batches"] = [
+      [
+        "kind": "extraction", "request_key": "k", "category": "rate_limit",
+        "message": "Slow down", "status_code": 429, "request_id": "req_1", "retry_after": 30,
+        "retryable": true, "error_type": "RateLimitError",
+      ]
+    ]
+    let wire = try JSONDecoder().decode(
+      SuggestionRunWireCheckpoint.self, from: JSONSerialization.data(withJSONObject: object))
+    let checkpoint = try wire.checkpoint(
+      snapshot: suggestionResultSnapshot(), proposedStarts: .init(), controlRevision: 0)
+    expectNoDifference(
+      checkpoint.failures,
+      [
+        SuggestionRunFailure(
+          kind: "extraction", stage: nil, category: .rateLimit, message: "Slow down",
+          statusCode: 429, requestID: "req_1", retryAfter: 30, retryable: true,
+          errorType: "RateLimitError")
+      ])
+    #expect(checkpoint.failureMessage == nil)
+    expectNoDifference(
+      try JSONDecoder().decode(
+        SuggestionRunCheckpoint.self, from: JSONEncoder().encode(checkpoint)), checkpoint)
+  }
+
+  private func decodeFailure(_ object: [String: Any]) throws -> SuggestionRunFailure {
+    try JSONDecoder().decode(
+      SuggestionRunWireFailure.self, from: JSONSerialization.data(withJSONObject: object)
+    ).failure
   }
 }

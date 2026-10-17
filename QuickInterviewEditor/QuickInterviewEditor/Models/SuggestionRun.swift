@@ -79,6 +79,7 @@ struct SuggestionRunCheckpoint: Codable, Equatable, Sendable {
   var failedRequestKeys: [String]
   var proposedStarts: SuggestionStarts
   var failureMessage: String?
+  var failures: [SuggestionRunFailure]?
 }
 
 enum SuggestionNumberingMode: Sendable {

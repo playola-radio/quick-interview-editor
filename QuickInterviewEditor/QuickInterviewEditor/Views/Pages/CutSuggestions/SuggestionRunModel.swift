@@ -91,6 +91,7 @@ final class SuggestionRunModel: ViewModel {
   let applyNumberingTitle = "Apply Numbering"
   let numberingTitle = "Choose starting numbers"
   let noResultsMessage = "The search completed with no suggestions."
+  static let genericRetryMessage = "Some requests failed. Resume to retry the unfinished requests."
   var isRunning: Bool { activeAttemptID != nil }
   var candidatesLocked: Bool {
     if case .needsNumbering = phase { return true }
@@ -102,12 +103,25 @@ final class SuggestionRunModel: ViewModel {
       && confirmation == nil
   }
   var canResume: Bool {
+    hasActionableUnfinishedRun && !resumeCannotSucceed
+  }
+  var canDiscard: Bool {
+    !isRunning && stopTask == nil && (hasActionableUnfinishedRun || staleDiscardAvailable)
+  }
+  private var hasActionableUnfinishedRun: Bool {
     !ownershipBlocked && !isRunning && stopTask == nil
       && currentDocument().unfinishedSuggestionRun != nil
       && confirmation == nil
   }
-  var canDiscard: Bool {
-    !isRunning && stopTask == nil && (canResume || staleDiscardAvailable)
+  private var resumeCannotSucceed: Bool {
+    guard let failures = currentDocument().unfinishedSuggestionRun?.failures,
+      let primary = Self.primaryFailure(failures)
+    else { return false }
+    switch primary.category {
+    case .badRequest, .inputSize: return true
+    case .unknown: return !primary.retryable
+    default: return false
+    }
   }
   var showsNumbering: Bool {
     if case .needsNumbering = phase { return true }
@@ -387,31 +401,75 @@ final class SuggestionRunModel: ViewModel {
   private func consume(_ request: CutSuggestRequest, key: String, attemptID: UUID) async throws {
     guard let snapshot = request.snapshot else { throw SuggestionRecoveryError.missingRun }
     let runID = snapshot.runID
-    for try await event in cutSuggest.suggestCuts(request, key) {
+    let startRevision = currentDocument().unfinishedSuggestionRun?.pythonRevision
+    var events = cutSuggest.suggestCuts(request, key).makeAsyncIterator()
+    while true {
+      let next: CutSuggestEvent?
+      do {
+        next = try await events.next()
+      } catch {
+        try await presentRecordedFailureOrRethrow(
+          error, runID: runID, attemptID: attemptID, startRevision: startRevision)
+        return
+      }
+      guard let event = next else { break }
       try check(runID, attemptID)
       switch event {
       case .progress(let message): phase = .running(runID: runID, message: message)
       case .diagnostic(let message): diagnostic = message
       case .checkpoint(let eventRunID, let revision):
+        try await captureCheckpointEvent(
+          eventRunID: eventRunID, runID: runID, attemptID: attemptID, revision: revision)
+      case .recoverableFailure(let eventRunID, _, let eventFailures):
         guard eventRunID == runID else { continue }
-        _ = try await readCapture(runID, attemptID: attemptID, minimumRevision: revision)
-      case .recoverableFailure(let eventRunID, _, let message):
-        guard eventRunID == runID else { continue }
-        let capture = try await readCapture(runID, attemptID: attemptID)
-        phase = .needsRetry(runID: runID, message: capture.checkpoint.failureMessage ?? message)
+        try await presentRecoverableFailure(
+          runID: runID, attemptID: attemptID, failures: eventFailures)
         return
       case .completed:
-        let capture = try await readCapture(runID, attemptID: attemptID)
-        guard capture.checkpoint.phase == .ready else {
-          throw SuggestionRecoveryError.invalid(
-            "The helper finished without a complete saved checkpoint.")
-        }
-        try apply(capture.checkpoint, attemptID: attemptID, automatic: request.mode == .automatic)
+        try await applyCompletedRun(
+          runID: runID, attemptID: attemptID, automatic: request.mode == .automatic)
         return
       }
     }
     try check(runID, attemptID)
     throw CutSuggestClientError.suggestFailed("The cut-suggester stopped before returning results.")
+  }
+
+  private func captureCheckpointEvent(
+    eventRunID: UUID, runID: UUID, attemptID: UUID, revision: Int
+  ) async throws {
+    guard eventRunID == runID else { return }
+    _ = try await readCapture(runID, attemptID: attemptID, minimumRevision: revision)
+  }
+
+  private func applyCompletedRun(runID: UUID, attemptID: UUID, automatic: Bool) async throws {
+    let capture = try await readCapture(runID, attemptID: attemptID)
+    guard capture.checkpoint.phase == .ready else {
+      throw SuggestionRecoveryError.invalid(
+        "The helper finished without a complete saved checkpoint.")
+    }
+    try apply(capture.checkpoint, attemptID: attemptID, automatic: automatic)
+  }
+
+  private func presentRecoverableFailure(
+    runID: UUID, attemptID: UUID, failures: [SuggestionRunFailure]
+  ) async throws {
+    let capture = try await readCapture(runID, attemptID: attemptID)
+    phase = .needsRetry(
+      runID: runID,
+      message: recoveryMessage(capture.checkpoint, fallbackFailures: failures)
+        ?? capture.checkpoint.failureMessage ?? Self.genericRetryMessage)
+  }
+
+  private func presentRecordedFailureOrRethrow(
+    _ streamError: any Error, runID: UUID, attemptID: UUID, startRevision: Int?
+  ) async throws {
+    guard !(streamError is CancellationError),
+      let capture = try? await readCapture(runID, attemptID: attemptID),
+      capture.checkpoint.pythonRevision > (startRevision ?? -1),
+      let message = recoveryMessage(capture.checkpoint)
+    else { throw streamError }
+    phase = .needsRetry(runID: runID, message: message)
   }
 
   private func readCapture(
@@ -532,13 +590,25 @@ final class SuggestionRunModel: ViewModel {
     let runID = checkpoint.snapshot.runID
     switch checkpoint.phase {
     case .paused:
-      phase = .paused(runID: runID, message: checkpoint.failureMessage ?? "Search paused.")
+      phase = .paused(
+        runID: runID,
+        message: recoveryMessage(checkpoint) ?? checkpoint.failureMessage ?? "Search paused.")
     case .ready, .needsNumbering:
       phase = .paused(runID: runID, message: "Search complete. Resume to apply its suggestions.")
     case .discovering, .extracting, .needsRetry:
       phase = .needsRetry(
-        runID: runID, message: checkpoint.failureMessage ?? "Resume the unfinished search.")
+        runID: runID,
+        message: recoveryMessage(checkpoint) ?? checkpoint.failureMessage
+          ?? "Resume the unfinished search.")
     }
+  }
+
+  private func recoveryMessage(
+    _ checkpoint: SuggestionRunCheckpoint, fallbackFailures: [SuggestionRunFailure] = []
+  ) -> String? {
+    let recorded = checkpoint.failures ?? []
+    return Self.recoveryMessage(
+      failures: recorded.isEmpty ? fallbackFailures : recorded, model: checkpoint.snapshot.model)
   }
 
   private func seedNumbering(minimum: Int) {
@@ -635,4 +705,114 @@ func suggestionBaselineMatches(
     return document.cutSuggestions.isEmpty
   }
   return try baseline == suggestionBatchFingerprint(document)
+}
+
+extension SuggestionRunModel {
+  static func primaryFailure(_ failures: [SuggestionRunFailure]) -> SuggestionRunFailure? {
+    failures.min { priority($0.category) < priority($1.category) }
+  }
+
+  static func providerName(model: String) -> String {
+    let name = model.lowercased()
+    return ["gpt-", "o1", "o3", "o4"].contains(where: name.hasPrefix) ? "OpenAI" : "Anthropic"
+  }
+
+  static func recoveryMessage(failures: [SuggestionRunFailure], model: String) -> String? {
+    guard let primary = primaryFailure(failures) else { return nil }
+    let provider = providerName(model: model)
+    var text = primaryText(primary, provider: provider)
+    if failures.count > 1 { text += " \(failures.count) requests failed." }
+    text += providerDetail(primary)
+    return text
+  }
+
+  private static let priorityOrder = [
+    "auth", "credits", "bad_request", "input_size", "rate_limit", "overloaded", "timeout",
+    "network", "server", "bad_response",
+  ]
+
+  private static func priority(_ category: SuggestionFailureCategory) -> Int {
+    priorityOrder.firstIndex(of: category.wireName) ?? priorityOrder.count
+  }
+
+  // swiftlint:disable:next cyclomatic_complexity
+  private static func primaryText(_ failure: SuggestionRunFailure, provider: String) -> String {
+    switch failure.category {
+    case .auth:
+      return "\(provider) rejected your API key. Check or replace the key in Settings, then Resume."
+    case .credits:
+      let billing =
+        provider == "OpenAI"
+        ? "platform.openai.com/settings/organization/billing"
+        : "console.anthropic.com/settings/billing"
+      return "Your \(provider) account is out of credits. Add credits at \(billing), then Resume."
+    case .rateLimit:
+      return
+        "\(provider)'s rate limit was reached. Wait \(retryWait(failure.retryAfter)), then Resume."
+    case .overloaded:
+      return "\(provider) is temporarily overloaded. Wait a few minutes, then Resume."
+    case .network:
+      return
+        "The app could not reach \(provider). Check your internet connection, VPN, or firewall, then Resume."
+    case .timeout:
+      return "\(provider) did not respond in time. Check your connection, then Resume."
+    case .server:
+      return "\(provider) returned a server error. Wait a few minutes, then Resume."
+    case .badRequest:
+      return "\(provider) rejected the suggestion request. Discard this search and start a new one."
+    case .badResponse:
+      return
+        "\(provider) returned a response the app could not read. Resume to try that request again."
+    case .inputSize:
+      return
+        "Some suggestion evidence is too large to send to \(provider). "
+        + "Discard this search and shorten the transcript or naming instructions."
+    case .unknown:
+      return
+        "The suggestion search failed while \(unknownPhase(failure.kind)): \(unknownDetail(failure))."
+    }
+  }
+
+  private static func retryWait(_ retryAfter: Double?) -> String {
+    guard let retryAfter, retryAfter > 0 else { return "a few minutes" }
+    let seconds = Int(min(retryAfter, 31_536_000).rounded(.up))
+    guard seconds >= 60 else { return unit(seconds, "second") }
+    return unit((seconds + 59) / 60, "minute")
+  }
+
+  private static func unit(_ count: Int, _ name: String) -> String {
+    count == 1 ? "1 \(name)" : "\(count) \(name)s"
+  }
+
+  private static func unknownPhase(_ kind: String) -> String {
+    switch kind {
+    case "discovery": "finding suggestions"
+    case "extraction": "reading suggestion details"
+    default: "searching"
+    }
+  }
+
+  private static func unknownDetail(_ failure: SuggestionRunFailure) -> String {
+    var detail = nonEmpty(failure.message) ?? nonEmpty(failure.errorType) ?? "unknown error"
+    if detail.hasSuffix(".") { detail.removeLast() }
+    return detail
+  }
+
+  private static func providerDetail(_ failure: SuggestionRunFailure) -> String {
+    switch failure.category {
+    case .inputSize, .unknown: return ""
+    default: break
+    }
+    guard let message = nonEmpty(failure.message) else { return "" }
+    var parts: [String] = []
+    if let status = failure.statusCode { parts.append("HTTP \(status)") }
+    if let id = nonEmpty(failure.requestID) { parts.append("request \(id)") }
+    let reference = parts.isEmpty ? "" : " (\(parts.joined(separator: "; ")))"
+    return " Provider message: \"\(message)\"\(reference)."
+  }
+
+  private static func nonEmpty(_ text: String?) -> String? {
+    guard let text, !text.isEmpty else { return nil }
+    return text
+  }
 }

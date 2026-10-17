@@ -171,7 +171,8 @@ final class SuggestionRunFixture: Sendable {
 
   func checkpoint(
     phase: SuggestionRunCheckpoint.Phase, candidates: [CutSuggestion] = [],
-    completed: [String] = [], failed: [String] = [], message: String? = nil
+    completed: [String] = [], failed: [String] = [], message: String? = nil,
+    failures: [SuggestionRunFailure]? = nil
   ) {
     state.withValue {
       $0.pythonPhase = phase
@@ -192,6 +193,7 @@ final class SuggestionRunFixture: Sendable {
       $0.checkpoint?.completedRequestKeys = completed
       $0.checkpoint?.failedRequestKeys = failed
       $0.checkpoint?.failureMessage = message
+      $0.checkpoint?.failures = failures
     }
   }
 
@@ -256,7 +258,7 @@ struct SuggestionRunModelTests {
         fixture.state.value.continuations[0].yield(
           .recoverableFailure(
             runID: try #require(first.snapshot?.runID),
-            failedRequestKeys: ["retry"], message: "retry"))
+            failedRequestKeys: ["retry"], failures: []))
         fixture.state.value.continuations[0].finish()
         await task.value
         fixture.document.withValue { $0.interviewArtist = "Changed Project Artist" }
@@ -401,7 +403,7 @@ struct SuggestionRunModelTests {
           failed: ["five"], message: "One field request failed.")
         fixture.state.value.continuations[0].yield(
           .recoverableFailure(
-            runID: runID, failedRequestKeys: ["five"], message: "retry"))
+            runID: runID, failedRequestKeys: ["five"], failures: []))
         fixture.state.value.continuations[0].finish()
         await task.value
         expectNoDifference(model.message, "One field request failed.")
@@ -677,7 +679,7 @@ struct SuggestionRunModelTests {
         oldStream.yield(.progress("Old attempt"))
         oldStream.yield(.checkpoint(runID: runID, revision: 900))
         oldStream.yield(
-          .recoverableFailure(runID: runID, failedRequestKeys: [], message: "Old error"))
+          .recoverableFailure(runID: runID, failedRequestKeys: [], failures: []))
         oldStream.yield(.completed([]))
         expectNoDifference(model.activeAttemptID, currentAttempt)
         expectNoDifference(fixture.document.value, before)
@@ -791,4 +793,399 @@ struct SuggestionRunModelTests {
     }
   }
 
+}
+
+extension SuggestionRunFixture {
+  func failure(
+    _ category: SuggestionFailureCategory, kind: String = "extraction", message: String? = nil,
+    statusCode: Int? = nil, requestID: String? = nil, retryAfter: Double? = nil,
+    retryable: Bool = true, errorType: String? = nil
+  ) -> SuggestionRunFailure {
+    SuggestionRunFailure(
+      kind: kind, stage: nil, category: category, message: message, statusCode: statusCode,
+      requestID: requestID, retryAfter: retryAfter, retryable: retryable, errorType: errorType)
+  }
+
+  @MainActor func reopened(
+    failures: [SuggestionRunFailure]?, failureMessage: String? = nil,
+    providerModel: String = "claude-sonnet-5"
+  ) -> SuggestionRunModel {
+    let snapshot: SuggestionRunSnapshot = {
+      var snapshot = suggestionResultSnapshot()
+      snapshot.model = providerModel
+      return snapshot
+    }()
+    document.withValue {
+      $0.suggestionRecoveryOwnerID = owner.id
+      $0.unfinishedSuggestionRun = SuggestionRunCheckpoint(
+        pythonRevision: 2, controlRevision: 0, originalBatchFingerprint: nil, snapshot: snapshot,
+        phase: .needsRetry, candidates: [], completedRequestKeys: [], failedRequestKeys: [],
+        proposedStarts: .init(), failureMessage: failureMessage, failures: failures)
+    }
+    let model = model()
+    model.synchronizeDocument()
+    return model
+  }
+}
+
+private let anthropicBilling = "console.anthropic.com/settings/billing"
+
+@MainActor
+extension SuggestionRunModelTests {
+  @Test(arguments: [
+    (
+      SuggestionFailureCategory.auth,
+      "Anthropic rejected your API key. Check or replace the key in Settings, then Resume.", true
+    ),
+    (
+      .credits,
+      "Your Anthropic account is out of credits. Add credits at \(anthropicBilling), then Resume.",
+      true
+    ),
+    (.rateLimit, "Anthropic's rate limit was reached. Wait a few minutes, then Resume.", true),
+    (.overloaded, "Anthropic is temporarily overloaded. Wait a few minutes, then Resume.", true),
+    (
+      .network,
+      "The app could not reach Anthropic. Check your internet connection, VPN, or firewall, "
+        + "then Resume.", true
+    ),
+    (.timeout, "Anthropic did not respond in time. Check your connection, then Resume.", true),
+    (.server, "Anthropic returned a server error. Wait a few minutes, then Resume.", true),
+    (
+      .badRequest,
+      "Anthropic rejected the suggestion request. Discard this search and start a new one.", false
+    ),
+    (
+      .badResponse,
+      "Anthropic returned a response the app could not read. Resume to try that request again.",
+      true
+    ),
+    (
+      .inputSize,
+      "Some suggestion evidence is too large to send to Anthropic. "
+        + "Discard this search and shorten the transcript or naming instructions.", false
+    ),
+  ])
+  func failureCategoryShowsItsMessageAndResumePolicy(
+    category: SuggestionFailureCategory, text: String, resumeVisible: Bool
+  ) {
+    let fixture = SuggestionRunFixture()
+    let model = fixture.reopened(failures: [fixture.failure(category)])
+    expectNoDifference(model.message, text)
+    expectNoDifference(model.canResume, resumeVisible)
+    expectNoDifference(model.canDiscard, true)
+  }
+
+  @Test func creditsFailureShowsBillingLinkAndProviderDetails() {
+    let fixture = SuggestionRunFixture()
+    let model = fixture.reopened(failures: [
+      fixture.failure(
+        .credits, message: "Your credit balance is too low to access the Anthropic API.",
+        statusCode: 400, requestID: "req_01ABC", retryable: false)
+    ])
+    expectNoDifference(
+      model.message,
+      "Your Anthropic account is out of credits. Add credits at \(anthropicBilling), then Resume."
+        + " Provider message: \"Your credit balance is too low to access the Anthropic API.\""
+        + " (HTTP 400; request req_01ABC).")
+    expectNoDifference(model.canResume, true)
+  }
+
+  @Test(arguments: [
+    (400, "req_1" as String?, " (HTTP 400; request req_1)."),
+    (400, nil, " (HTTP 400)."),
+    (nil, "req_1", " (request req_1)."),
+    (nil, nil, "."),
+  ])
+  func providerMessageSuffixIncludesOnlyThePresentParts(
+    status: Int?, requestID: String?, suffix: String
+  ) {
+    let fixture = SuggestionRunFixture()
+    let model = fixture.reopened(failures: [
+      fixture.failure(.auth, message: "Bad key", statusCode: status, requestID: requestID)
+    ])
+    expectNoDifference(
+      model.message,
+      "Anthropic rejected your API key. Check or replace the key in Settings, then Resume."
+        + " Provider message: \"Bad key\"" + suffix)
+  }
+
+  @Test(arguments: [
+    (30.0, "30 seconds"), (1.0, "1 second"), (0.2, "1 second"), (59.0, "59 seconds"),
+    (60.0, "1 minute"), (59.5, "1 minute"), (61.0, "2 minutes"), (120.0, "2 minutes"),
+  ])
+  func rateLimitWaitUsesRoundedUpSecondsThenMinutes(retryAfter: Double, wait: String) {
+    let fixture = SuggestionRunFixture()
+    let model = fixture.reopened(failures: [fixture.failure(.rateLimit, retryAfter: retryAfter)])
+    expectNoDifference(
+      model.message, "Anthropic's rate limit was reached. Wait \(wait), then Resume.")
+  }
+
+  @Test func networkFailureAppendsTheTransportMessage() {
+    let fixture = SuggestionRunFixture()
+    let model = fixture.reopened(failures: [
+      fixture.failure(
+        .network, message: "[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed")
+    ])
+    expectNoDifference(
+      model.message,
+      "The app could not reach Anthropic. Check your internet connection, VPN, or firewall, "
+        + "then Resume. Provider message: "
+        + "\"[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed\".")
+  }
+
+  @Test func mixedFailuresShowTheMostActionableOneWithCountAndOnlyItsProviderMessage() {
+    let fixture = SuggestionRunFixture()
+    let model = fixture.reopened(failures: [
+      fixture.failure(.rateLimit, message: "Slow down", retryAfter: 30),
+      fixture.failure(.credits, message: "Out of credits", statusCode: 400, requestID: "req_c"),
+      fixture.failure(.network, message: "TLS broke"),
+    ])
+    expectNoDifference(
+      model.message,
+      "Your Anthropic account is out of credits. Add credits at \(anthropicBilling), then Resume."
+        + " 3 requests failed. Provider message: \"Out of credits\" (HTTP 400; request req_c).")
+  }
+
+  @Test func equalPriorityFailuresUseTheFirstOne() {
+    let fixture = SuggestionRunFixture()
+    let model = fixture.reopened(failures: [
+      fixture.failure(.server, message: "first"), fixture.failure(.server, message: "second"),
+    ])
+    expectNoDifference(
+      model.message,
+      "Anthropic returned a server error. Wait a few minutes, then Resume."
+        + " 2 requests failed. Provider message: \"first\".")
+  }
+
+  @Test(arguments: [
+    ("gpt-5", "OpenAI"), ("GPT-4o", "OpenAI"), ("o1-preview", "OpenAI"), ("o3-mini", "OpenAI"),
+    ("o4-mini", "OpenAI"), ("claude-sonnet-5", "Anthropic"), ("fixture-model", "Anthropic"),
+  ])
+  func providerNameComesFromTheRunSnapshotModel(modelName: String, provider: String) {
+    let fixture = SuggestionRunFixture()
+    let model = fixture.reopened(
+      failures: [fixture.failure(.auth)], providerModel: modelName)
+    expectNoDifference(
+      model.message,
+      "\(provider) rejected your API key. Check or replace the key in Settings, then Resume.")
+  }
+
+  @Test func openAICreditsFailureLinksTheOpenAIBillingPage() {
+    let fixture = SuggestionRunFixture()
+    let model = fixture.reopened(failures: [fixture.failure(.credits)], providerModel: "gpt-5")
+    expectNoDifference(
+      model.message,
+      "Your OpenAI account is out of credits. Add credits at "
+        + "platform.openai.com/settings/organization/billing, then Resume.")
+  }
+
+  @Test(arguments: [
+    ("discovery", "Strange failure.", "WeirdError", "finding suggestions: Strange failure"),
+    ("extraction", nil, "WeirdError", "reading suggestion details: WeirdError"),
+    ("provider", nil, nil, "searching: unknown error"),
+  ])
+  func unknownFailureNamesThePhaseAndTheBestAvailableDetail(
+    kind: String, message: String?, errorType: String?, detail: String
+  ) {
+    let fixture = SuggestionRunFixture()
+    let model = fixture.reopened(failures: [
+      fixture.failure(
+        .unknown("WeirdError"), kind: kind, message: message, statusCode: 500, requestID: "req_x",
+        errorType: errorType)
+    ])
+    expectNoDifference(model.message, "The suggestion search failed while \(detail).")
+  }
+
+  @Test(arguments: [(false, false), (true, true)])
+  func unknownFailureHidesResumeOnlyWhenNotRetryable(retryable: Bool, resumeVisible: Bool) {
+    let fixture = SuggestionRunFixture()
+    let model = fixture.reopened(failures: [
+      fixture.failure(.unknown("WeirdError"), retryable: retryable)
+    ])
+    expectNoDifference(model.canResume, resumeVisible)
+    expectNoDifference(model.canDiscard, true)
+  }
+
+  @Test func hiddenResumeDoesNotStartASearch() async {
+    let fixture = SuggestionRunFixture()
+    await withDependencies {
+      fixture.install(&$0)
+    } operation: {
+      let model = fixture.reopened(failures: [fixture.failure(.badRequest)])
+      await model.resumeTapped()
+      expectNoDifference(fixture.state.value.requests.count, 0)
+    }
+  }
+
+  @Test func legacyCheckpointWithoutFailuresShowsItsSavedMessage() {
+    let fixture = SuggestionRunFixture()
+    let model = fixture.reopened(failures: nil, failureMessage: "Saved before structured errors")
+    expectNoDifference(model.message, "Saved before structured errors")
+    expectNoDifference(model.canResume, true)
+  }
+
+  @Test func checkpointWithNoFailureDetailsKeepsTheGenericResumeMessage() {
+    let fixture = SuggestionRunFixture()
+    let model = fixture.reopened(failures: nil)
+    expectNoDifference(model.message, "Resume the unfinished search.")
+  }
+
+  @Test func liveRecoverableFailureAndReopenedDocumentShowTheSameMessage() async throws {
+    try await withMainSerialExecutor {
+      let fixture = SuggestionRunFixture()
+      try await withDependencies {
+        fixture.install(&$0)
+      } operation: {
+        let model = fixture.model()
+        let task = Task { await model.suggestTapped() }
+        await fixture.waitForRequests()
+        let runID = try #require(model.activeRunID)
+        fixture.checkpoint(
+          phase: .needsRetry, failed: ["key"],
+          failures: [
+            fixture.failure(
+              .credits, message: "Your credit balance is too low.", statusCode: 400,
+              requestID: "req_1", retryable: false)
+          ])
+        fixture.state.value.continuations[0].yield(
+          .recoverableFailure(runID: runID, failedRequestKeys: ["key"], failures: []))
+        fixture.state.value.continuations[0].finish()
+        await task.value
+        let expected =
+          "Your Anthropic account is out of credits. Add credits at \(anthropicBilling), "
+          + "then Resume. Provider message: \"Your credit balance is too low.\""
+          + " (HTTP 400; request req_1)."
+        expectNoDifference(model.message, expected)
+        expectNoDifference(model.canResume, true)
+        let reopened = fixture.model()
+        reopened.synchronizeDocument()
+        expectNoDifference(reopened.message, expected)
+      }
+    }
+  }
+
+  @Test func eventFailuresAreUsedWhenTheCapturedCheckpointHasNone() async throws {
+    try await withMainSerialExecutor {
+      let fixture = SuggestionRunFixture()
+      try await withDependencies {
+        fixture.install(&$0)
+      } operation: {
+        let model = fixture.model()
+        let task = Task { await model.suggestTapped() }
+        await fixture.waitForRequests()
+        let runID = try #require(model.activeRunID)
+        fixture.checkpoint(phase: .needsRetry, failed: ["key"])
+        fixture.state.value.continuations[0].yield(
+          .recoverableFailure(
+            runID: runID, failedRequestKeys: ["key"],
+            failures: [fixture.failure(.timeout)]))
+        fixture.state.value.continuations[0].finish()
+        await task.value
+        expectNoDifference(
+          model.message, "Anthropic did not respond in time. Check your connection, then Resume.")
+      }
+    }
+  }
+
+  @Test func liveRecoverableFailureWithoutAnyDetailsKeepsTheGenericMessage() async throws {
+    try await withMainSerialExecutor {
+      let fixture = SuggestionRunFixture()
+      try await withDependencies {
+        fixture.install(&$0)
+      } operation: {
+        let model = fixture.model()
+        let task = Task { await model.suggestTapped() }
+        await fixture.waitForRequests()
+        let runID = try #require(model.activeRunID)
+        fixture.checkpoint(phase: .needsRetry, failed: ["key"])
+        fixture.state.value.continuations[0].yield(
+          .recoverableFailure(runID: runID, failedRequestKeys: ["key"], failures: []))
+        fixture.state.value.continuations[0].finish()
+        await task.value
+        expectNoDifference(
+          model.message, "Some requests failed. Resume to retry the unfinished requests.")
+      }
+    }
+  }
+
+  @Test func discoveryFailureThatEndsTheStreamWithAnErrorShowsTheRecordedFailure() async throws {
+    try await withMainSerialExecutor {
+      let fixture = SuggestionRunFixture()
+      try await withDependencies {
+        fixture.install(&$0)
+      } operation: {
+        let model = fixture.model()
+        let task = Task { await model.suggestTapped() }
+        await fixture.waitForRequests()
+        let runID = try #require(model.activeRunID)
+        fixture.checkpoint(
+          phase: .needsRetry,
+          failures: [
+            fixture.failure(
+              .credits, kind: "discovery", message: "Your credit balance is too low.",
+              statusCode: 400, requestID: "req_d", retryable: false)
+          ])
+        fixture.state.value.continuations[0].finish(
+          throwing: CutSuggestClientError.suggestFailed("exit status 1"))
+        await task.value
+        expectNoDifference(
+          model.phase,
+          .needsRetry(
+            runID: runID,
+            message:
+              "Your Anthropic account is out of credits. Add credits at \(anthropicBilling), "
+              + "then Resume. Provider message: \"Your credit balance is too low.\""
+              + " (HTTP 400; request req_d)."))
+        expectNoDifference(model.canResume, true)
+        expectNoDifference(model.canDiscard, true)
+      }
+    }
+  }
+
+  @Test func resumeCrashBeforeANewCheckpointDoesNotReplayThePreviousFailure() async throws {
+    try await withMainSerialExecutor {
+      let fixture = SuggestionRunFixture()
+      try await withDependencies {
+        fixture.install(&$0)
+      } operation: {
+        let model = fixture.model()
+        let task = Task { await model.suggestTapped() }
+        await fixture.waitForRequests()
+        let runID = try #require(model.activeRunID)
+        fixture.checkpoint(
+          phase: .needsRetry, failed: ["key"], failures: [fixture.failure(.timeout)])
+        fixture.state.value.continuations[0].yield(
+          .recoverableFailure(runID: runID, failedRequestKeys: ["key"], failures: []))
+        fixture.state.value.continuations[0].finish()
+        await task.value
+        let retry = Task { await model.resumeTapped() }
+        await fixture.waitForRequests(2)
+        let error = CutSuggestClientError.suggestFailed("helper crashed")
+        fixture.state.value.continuations[1].finish(throwing: error)
+        await retry.value
+        expectNoDifference(
+          model.phase, .needsRetry(runID: runID, message: error.localizedDescription))
+      }
+    }
+  }
+
+  @Test func streamErrorWithoutRecordedFailuresKeepsTheOriginalError() async throws {
+    try await withMainSerialExecutor {
+      let fixture = SuggestionRunFixture()
+      try await withDependencies {
+        fixture.install(&$0)
+      } operation: {
+        let model = fixture.model()
+        let task = Task { await model.suggestTapped() }
+        await fixture.waitForRequests()
+        let runID = try #require(model.activeRunID)
+        let error = CutSuggestClientError.suggestFailed("exit status 1")
+        fixture.state.value.continuations[0].finish(throwing: error)
+        await task.value
+        expectNoDifference(
+          model.phase, .needsRetry(runID: runID, message: error.localizedDescription))
+      }
+    }
+  }
 }

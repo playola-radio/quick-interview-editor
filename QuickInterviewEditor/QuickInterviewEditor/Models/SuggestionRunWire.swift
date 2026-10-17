@@ -63,7 +63,7 @@ struct SuggestionRunWireResult: Sendable {
   var candidates: [CutSuggestion]
   var failedRequestKeys: [String]
   var meta: CutSuggestion.WireMeta?
-  var failureMessage: String
+  var failures: [SuggestionRunFailure]
 
   private struct Envelope: Decodable {
     var schemaVersion: Int
@@ -98,7 +98,7 @@ struct SuggestionRunWireResult: Sendable {
         candidates: try convertCandidates(
           wire.suggestions, snapshot: snapshot, complete: wire.status == .ready),
         failedRequestKeys: wire.failedBatches?.compactMap(\.requestKey) ?? [], meta: wire.meta,
-        failureMessage: suggestionFailureMessage(wire.failedBatches ?? []))
+        failures: (wire.failedBatches ?? []).map(\.failure))
     } catch let error as CutSuggestClientError {
       throw error
     } catch {
@@ -161,7 +161,7 @@ struct SuggestionRunWireCheckpoint: Decodable, Sendable {
       candidates: try convertCandidates(suggestions, snapshot: snapshot, complete: phase == .ready),
       completedRequestKeys: completedRequestKeys, failedRequestKeys: failedRequestKeys,
       proposedStarts: proposedStarts,
-      failureMessage: phase == .needsRetry ? suggestionFailureMessage(failedBatches ?? []) : nil)
+      failures: phase == .needsRetry ? (failedBatches ?? []).map(\.failure) : nil)
   }
 }
 
@@ -175,21 +175,89 @@ private func convertCandidates(
   return try wires.map { try $0.candidate(snapshot: snapshot, requiresCompleteFields: complete) }
 }
 
-struct SuggestionRunWireFailure: Decodable, Sendable {
-  var kind: String
-  var requestKey: String?
-  var retryable: Bool
-  enum CodingKeys: String, CodingKey {
-    case kind, retryable
-    case requestKey = "request_key"
+enum SuggestionFailureCategory: Codable, Equatable, Hashable, Sendable {
+  case auth
+  case credits
+  case rateLimit
+  case overloaded
+  case network
+  case timeout
+  case server
+  case badRequest
+  case badResponse
+  case inputSize
+  case unknown(String)
+
+  private static let wireNames: [String: SuggestionFailureCategory] = [
+    "auth": .auth, "credits": .credits, "rate_limit": .rateLimit, "overloaded": .overloaded,
+    "network": .network, "timeout": .timeout, "server": .server, "bad_request": .badRequest,
+    "bad_response": .badResponse, "input_size": .inputSize,
+  ]
+
+  var wireName: String {
+    switch self {
+    case .auth: "auth"
+    case .credits: "credits"
+    case .rateLimit: "rate_limit"
+    case .overloaded: "overloaded"
+    case .network: "network"
+    case .timeout: "timeout"
+    case .server: "server"
+    case .badRequest: "bad_request"
+    case .badResponse: "bad_response"
+    case .inputSize: "input_size"
+    case .unknown(let name): name
+    }
+  }
+
+  init(from decoder: any Decoder) throws {
+    let name = try decoder.singleValueContainer().decode(String.self)
+    self = Self.wireNames[name] ?? .unknown(name)
+  }
+
+  func encode(to encoder: any Encoder) throws {
+    var container = encoder.singleValueContainer()
+    try container.encode(wireName)
   }
 }
 
-private func suggestionFailureMessage(_ failures: [SuggestionRunWireFailure]) -> String {
-  if failures.contains(where: { $0.kind == "input_size" && !$0.retryable }) {
-    return "Some candidates exceed the extraction input limit. "
-      + "Retrying unchanged input cannot complete them; "
-      + "discard this run and start a new search with adjusted settings."
+struct SuggestionRunFailure: Codable, Equatable, Sendable {
+  var kind: String
+  var stage: String?
+  var category: SuggestionFailureCategory
+  var message: String?
+  var statusCode: Int?
+  var requestID: String?
+  var retryAfter: Double?
+  var retryable: Bool
+  var errorType: String?
+}
+
+struct SuggestionRunWireFailure: Decodable, Sendable {
+  var kind: String
+  var requestKey: String?
+  var stage: String?
+  var category: SuggestionFailureCategory?
+  var message: String?
+  var statusCode: Int?
+  var requestID: String?
+  var retryAfter: Double?
+  var retryable: Bool
+  var errorType: String?
+  enum CodingKeys: String, CodingKey {
+    case kind, stage, category, message, retryable
+    case requestKey = "request_key"
+    case statusCode = "status_code"
+    case requestID = "request_id"
+    case retryAfter = "retry_after"
+    case errorType = "error_type"
   }
-  return "Some requests failed. Resume to retry the unfinished requests."
+
+  var failure: SuggestionRunFailure {
+    SuggestionRunFailure(
+      kind: kind, stage: stage,
+      category: category ?? (kind == "input_size" ? .inputSize : .unknown(errorType ?? kind)),
+      message: message, statusCode: statusCode, requestID: requestID, retryAfter: retryAfter,
+      retryable: retryable, errorType: errorType)
+  }
 }

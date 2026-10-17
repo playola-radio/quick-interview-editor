@@ -186,7 +186,11 @@ extension LiveCutSuggesterTests {
         as? [String: Any])
     object["status"] = "needs_retry"
     object["failed_batches"] = [
-      ["kind": "extraction", "request_key": "retry-key", "retryable": true]
+      [
+        "kind": "extraction", "request_key": "retry-key", "category": "credits",
+        "message": "Your credit balance is too low.", "status_code": 400,
+        "request_id": "req_1", "retryable": false, "error_type": "BadRequestError",
+      ]
     ]
     let output = try JSONSerialization.data(withJSONObject: object)
     let events = try await Array(
@@ -198,10 +202,15 @@ extension LiveCutSuggesterTests {
       .recoverableFailure(
         runID: suggestionResultSnapshot().runID,
         failedRequestKeys: ["retry-key"],
-        message: "Some requests failed. Resume to retry the unfinished requests."))
+        failures: [
+          SuggestionRunFailure(
+            kind: "extraction", stage: nil, category: .credits,
+            message: "Your credit balance is too low.", statusCode: 400, requestID: "req_1",
+            retryAfter: nil, retryable: false, errorType: "BadRequestError")
+        ]))
   }
 
-  @Test func inputSizeFailureExplainsThatRetryCannotFixIt() async throws {
+  @Test func inputSizeFailureIsReportedAsAStructuredFailure() async throws {
     let id = suggestionResultSnapshot().runID
     let data = Data(
       """
@@ -217,11 +226,11 @@ extension LiveCutSuggesterTests {
       events.last,
       .recoverableFailure(
         runID: id, failedRequestKeys: [],
-        message:
-          "Some candidates exceed the extraction input limit. "
-          + "Retrying unchanged input cannot complete them; "
-          + "discard this run and start a new search with adjusted settings."
-      ))
+        failures: [
+          SuggestionRunFailure(
+            kind: "input_size", stage: nil, category: .inputSize, message: nil, statusCode: nil,
+            requestID: nil, retryAfter: nil, retryable: false, errorType: nil)
+        ]))
   }
 
   @Test func nonzeroReadyDoesNotCompleteAndProgressDoesNotClassifyAuth() async throws {
