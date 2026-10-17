@@ -10,6 +10,7 @@ from .configured_discovery import _candidate_id, _overlap, _span_length, discove
 from .cutter import suggest_cuts
 from .extraction import (completed_extraction_values, parse_extraction_response,
                          plan_extraction_batches, required_field_ids)
+from .intro_refinement import IntroInputSizeError
 from .intro_qualification import QUALIFICATION_FIELD_IDS, qualify_intros
 from .llm import failure_record
 from .run_journal import JournalRecoveryError, JournalStorageError, RunJournal, canonical_json, digest
@@ -173,6 +174,11 @@ def run_configured_suggest(request: dict, llm, journal: RunJournal, emit) -> dic
     except (JournalStorageError, JournalRecoveryError):
         raise
     except Exception as exc:
+        if not failed_batches:
+            record = failure_record(exc)
+            if isinstance(exc, IntroInputSizeError):
+                record.update(category='input_size', retryable=False)
+            failed_batches.append({'kind': 'discovery', 'stage': 'local', **record})
         try:
             checkpoint('needs_retry')
         except Exception as write_error:

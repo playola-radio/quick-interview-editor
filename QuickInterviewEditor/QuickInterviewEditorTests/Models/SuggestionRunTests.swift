@@ -642,7 +642,7 @@ extension SuggestionRunTests {
   @Test func checkpointWithStructuredFailuresRoundTripsThroughCodable() throws {
     let failures = [
       SuggestionRunFailure(
-        kind: "extraction", stage: nil, category: .unknown("quota_exhausted"), message: "Out",
+        kind: "extraction", category: .unknown("quota_exhausted"), message: "Out",
         statusCode: 429, requestID: "req_1", retryAfter: 12.5, retryable: false,
         errorType: "QuotaError")
     ]

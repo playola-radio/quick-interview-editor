@@ -13,7 +13,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from .config import DEFAULT_SAMPLE_RATE, STAGE1_STEP, STAGE1_WINDOW
-from .llm import LLMClient
+from .llm import LLMClient, json_error_detail
 from .models import CutCandidate, DEFAULT_SPECS, ProductSpec, ProductType, Sentence, TopicPartition
 from .postprocess import (
     build_candidate,
@@ -49,11 +49,6 @@ def _noop_progress(**_kwargs: object) -> None:
     pass
 
 
-def _preview_response(text: str, limit: int = 240) -> str:
-    one_line = " ".join(text.strip().split())
-    return one_line[:limit] + ("…" if len(one_line) > limit else "")
-
-
 def parse_partition_response(text: str, a: int, b: int) -> list[TopicPartition]:
     """Parse a window's paragraph JSON, clamping spans into [a, b)."""
     if not text.strip():
@@ -62,8 +57,7 @@ def parse_partition_response(text: str, a: int, b: int) -> list[TopicPartition]:
         data = json.loads(text)
     except json.JSONDecodeError as exc:
         raise CutSuggesterOutputError(
-            "partition response was not valid JSON "
-            f"({exc.msg} at char {exc.pos}); response began with: {_preview_response(text)!r}"
+            f"partition response was not valid JSON ({json_error_detail(exc)})"
         ) from exc
     paras = data.get("paragraphs") if isinstance(data, dict) else None
     if not isinstance(paras, list):
@@ -97,8 +91,7 @@ def _parse_clip_array(text: str) -> list[object]:
         data = json.loads(text)
     except json.JSONDecodeError as exc:
         raise CutSuggesterOutputError(
-            "classification response was not valid JSON "
-            f"({exc.msg} at char {exc.pos}); response began with: {_preview_response(text)!r}"
+            f"classification response was not valid JSON ({json_error_detail(exc)})"
         ) from exc
     clips = data.get("clips") if isinstance(data, dict) else None
     if not isinstance(clips, list):

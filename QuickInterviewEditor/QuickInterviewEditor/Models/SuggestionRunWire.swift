@@ -223,7 +223,6 @@ enum SuggestionFailureCategory: Codable, Equatable, Hashable, Sendable {
 
 struct SuggestionRunFailure: Codable, Equatable, Sendable {
   var kind: String
-  var stage: String?
   var category: SuggestionFailureCategory
   var message: String?
   var statusCode: Int?
@@ -236,7 +235,6 @@ struct SuggestionRunFailure: Codable, Equatable, Sendable {
 struct SuggestionRunWireFailure: Decodable, Sendable {
   var kind: String
   var requestKey: String?
-  var stage: String?
   var category: SuggestionFailureCategory?
   var message: String?
   var statusCode: Int?
@@ -245,7 +243,7 @@ struct SuggestionRunWireFailure: Decodable, Sendable {
   var retryable: Bool
   var errorType: String?
   enum CodingKeys: String, CodingKey {
-    case kind, stage, category, message, retryable
+    case kind, category, message, retryable
     case requestKey = "request_key"
     case statusCode = "status_code"
     case requestID = "request_id"
@@ -255,7 +253,7 @@ struct SuggestionRunWireFailure: Decodable, Sendable {
 
   var failure: SuggestionRunFailure {
     SuggestionRunFailure(
-      kind: kind, stage: stage,
+      kind: kind,
       category: category ?? (kind == "input_size" ? .inputSize : .unknown(errorType ?? kind)),
       message: message, statusCode: statusCode, requestID: requestID, retryAfter: retryAfter,
       retryable: retryable, errorType: errorType)

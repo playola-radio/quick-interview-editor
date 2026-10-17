@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
@@ -33,7 +34,7 @@ class LLMClient(Protocol):
 _RETRYABLE_CATEGORIES = frozenset(
     {"rate_limit", "overloaded", "network", "timeout", "server", "bad_response", "unknown"}
 )
-_CREDIT_WORDS = ("credit", "billing", "balance", "quota")
+_CREDIT_WORDS = re.compile(r"\b(credits?|billing|balance|quota)\b")
 _CREDIT_ERROR_KINDS = frozenset({"billing_error", "insufficient_quota"})
 
 
@@ -93,7 +94,7 @@ def _status_error(status: int, body: object, headers, request_id: str | None,
     if status == 401:
         category = "auth"
     elif kinds & _CREDIT_ERROR_KINDS or (
-        status == 400 and any(word in message.lower() for word in _CREDIT_WORDS)
+        status == 400 and _CREDIT_WORDS.search(message.lower())
     ):
         category = "credits"
     elif status == 429:
@@ -198,9 +199,13 @@ class OpenAIClient:
         except TimeoutError as exc:
             raise LLMError("timeout", f"Request timed out: {exc}",
                            error_type=type(exc).__name__) from exc
-        choice = resp["choices"][0]
+        choices = resp.get("choices") if isinstance(resp, dict) else None
+        choice = choices[0] if isinstance(choices, list) and choices else None
+        message = choice.get("message") if isinstance(choice, dict) else None
+        text = message.get("content") if isinstance(message, dict) else None
+        if not isinstance(text, str):
+            raise LLMError("bad_response", f"OpenAI returned no message content for {purpose or 'prompt'}")
         finish_reason = choice.get("finish_reason")
-        text = choice["message"]["content"]
         if finish_reason == "length":
             raise LLMError(
                 "bad_response",

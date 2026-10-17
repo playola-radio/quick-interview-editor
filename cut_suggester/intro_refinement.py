@@ -18,6 +18,10 @@ class IntroRefinementError(ValueError):
     """A refinement proposal or response cannot be used safely."""
 
 
+class IntroInputSizeError(IntroRefinementError):
+    """A proposal's evidence alone exceeds the refinement input limit."""
+
+
 def _prompt(sentences: list[Sentence], proposals: dict[str, dict], guidance: str) -> str:
     evidence = "\n".join(
         f"Proposal {reference} ({raw['start']} through {raw['end']}):\n"
@@ -121,7 +125,7 @@ def refine_intro_clips(
     current = {}
     for reference, raw in proposals.items():
         if len(_prompt(sentences, {reference: raw}, guidance)) > max_input_characters:
-            raise IntroRefinementError(f"proposal {reference} exceeds the refinement input limit")
+            raise IntroInputSizeError(f"proposal {reference} exceeds the refinement input limit")
         prospective = {**current, reference: raw}
         if current and (len(prospective) > max_proposals or len(_prompt(sentences, prospective, guidance)) > max_input_characters):
             batches.append(current)

@@ -172,7 +172,7 @@ extension CutSuggestionWireTests {
       checkpoint.failures,
       [
         SuggestionRunFailure(
-          kind: "input_size", stage: nil, category: .inputSize, message: nil, statusCode: nil,
+          kind: "input_size", category: .inputSize, message: nil, statusCode: nil,
           requestID: nil, retryAfter: nil, retryable: false, errorType: nil)
       ])
     #expect(checkpoint.failureMessage == nil)
@@ -390,7 +390,7 @@ extension CutSuggestionWireTests {
     expectNoDifference(
       failure,
       SuggestionRunFailure(
-        kind: "discovery", stage: "classify:110:239", category: .credits,
+        kind: "discovery", category: .credits,
         message: "Your credit balance is too low.", statusCode: 400, requestID: "req_01ABC",
         retryAfter: nil, retryable: false, errorType: "BadRequestError"))
   }
@@ -431,7 +431,7 @@ extension CutSuggestionWireTests {
       checkpoint.failures,
       [
         SuggestionRunFailure(
-          kind: "extraction", stage: nil, category: .rateLimit, message: "Slow down",
+          kind: "extraction", category: .rateLimit, message: "Slow down",
           statusCode: 429, requestID: "req_1", retryAfter: 30, retryable: true,
           errorType: "RateLimitError")
       ])

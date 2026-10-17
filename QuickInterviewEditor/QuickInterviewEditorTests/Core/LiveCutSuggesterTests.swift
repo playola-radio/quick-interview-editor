@@ -204,7 +204,7 @@ extension LiveCutSuggesterTests {
         failedRequestKeys: ["retry-key"],
         failures: [
           SuggestionRunFailure(
-            kind: "extraction", stage: nil, category: .credits,
+            kind: "extraction", category: .credits,
             message: "Your credit balance is too low.", statusCode: 400, requestID: "req_1",
             retryAfter: nil, retryable: false, errorType: "BadRequestError")
         ]))
@@ -228,7 +228,7 @@ extension LiveCutSuggesterTests {
         runID: id, failedRequestKeys: [],
         failures: [
           SuggestionRunFailure(
-            kind: "input_size", stage: nil, category: .inputSize, message: nil, statusCode: nil,
+            kind: "input_size", category: .inputSize, message: nil, statusCode: nil,
             requestID: nil, retryAfter: nil, retryable: false, errorType: nil)
         ]))
   }

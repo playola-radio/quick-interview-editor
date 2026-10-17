@@ -174,6 +174,7 @@ def testLowCreditBalanceIsACreditsFailureWithProviderFacts(failing_anthropic):
         (401, _body("invalid x-api-key", "authentication_error"), "auth", False),
         (403, _body("not allowed", "permission_error"), "bad_request", False),
         (400, _body("max_tokens: too large"), "bad_request", False),
+        (400, _body("unbalanced quotation marks in messages"), "bad_request", False),
         (429, _body("rate limited", "rate_limit_error"), "rate_limit", True),
         (529, _body("Overloaded", "overloaded_error"), "overloaded", True),
         (500, _body("Overloaded", "overloaded_error"), "overloaded", True),
@@ -357,3 +358,22 @@ def testOpenAITLSFailureIsNetworkWithCause(monkeypatch):
 ])
 def testOpenAITimeoutIsTimeout(monkeypatch, make):
     assert _openai_failure(monkeypatch, make())["category"] == "timeout"
+
+
+@pytest.mark.parametrize("body", [
+    {"choices": []}, {"choices": [{"finish_reason": "stop"}]},
+    {"choices": [{"message": {"content": None}}]},
+])
+def testOpenAIMalformedResponseIsABadResponse(monkeypatch, body):
+    import io
+    import json
+    import urllib.request
+
+    from cut_suggester.llm import LLMError, OpenAIClient
+
+    monkeypatch.setenv("OPENAI_KEY", "sk-test")
+    monkeypatch.setattr(urllib.request, "urlopen",
+                        lambda *a, **k: io.BytesIO(json.dumps(body).encode()))
+    with pytest.raises(LLMError) as caught:
+        OpenAIClient("gpt-4o").complete("prompt", purpose="classify")
+    assert caught.value.category == "bad_response"

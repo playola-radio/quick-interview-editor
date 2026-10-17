@@ -520,11 +520,11 @@ extension SuggestionRecoveryClientTests {
       capture.checkpoint.failures,
       [
         SuggestionRunFailure(
-          kind: "extraction", stage: nil, category: .credits,
+          kind: "extraction", category: .credits,
           message: "Your credit balance is too low.", statusCode: 400, requestID: "req_01ABC",
           retryAfter: nil, retryable: false, errorType: "BadRequestError"),
         SuggestionRunFailure(
-          kind: "input_size", stage: nil, category: .inputSize, message: "too big",
+          kind: "input_size", category: .inputSize, message: "too big",
           statusCode: nil, requestID: nil, retryAfter: nil, retryable: false,
           errorType: "InputSizeDiagnostic"),
       ])

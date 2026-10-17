@@ -565,3 +565,18 @@ def test_failed_retry_checkpoint_does_not_hide_the_provider_failure(tmp_path, mo
         run_configured_suggest(req, provider, j, lambda e: None)
     assert 'credit balance' in str(caught.value)
     assert not isinstance(caught.value, JournalStorageError)
+
+
+def test_local_input_limit_before_any_request_is_a_nonretryable_failure(tmp_path, monkeypatch):
+    import cut_suggester.configured_run as configured
+    from cut_suggester.intro_refinement import IntroInputSizeError
+
+    def oversized(*args, **kwargs):
+        raise IntroInputSizeError('proposal p0 exceeds the refinement input limit')
+    monkeypatch.setattr(configured, 'suggest_cuts', oversized)
+    req = request(4, fields=False, tuned=True)
+    with pytest.raises(IntroInputSizeError):
+        run_configured_suggest(req, Provider(), journal(tmp_path, req), lambda e: None)
+    checkpoint = json.loads((tmp_path / 'checkpoint.json').read_text())
+    [failure] = checkpoint['failed_batches']
+    assert (failure['kind'], failure['category'], failure['retryable']) == ('discovery', 'input_size', False)

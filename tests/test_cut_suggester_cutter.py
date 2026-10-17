@@ -72,6 +72,13 @@ def test_parse_clip_response_raises_on_malformed_json_or_empty_text():
         parse_clip_response("")
 
 
+def test_malformed_json_errors_never_echo_the_response():
+    with pytest.raises(CutSuggesterOutputError) as caught:
+        parse_partition_response("PRIVATE TRANSCRIPT PHRASE", a=0, b=1)
+    assert "at char 0" in str(caught.value)
+    assert "PRIVATE" not in str(caught.value)
+
+
 # --- end-to-end ------------------------------------------------------------
 def test_suggest_cuts_produces_ranked_candidates():
     sents = _sents(6, sec_per=20.0)  # 3-sentence clips = 60s (in the target window)

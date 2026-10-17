@@ -802,7 +802,7 @@ extension SuggestionRunFixture {
     retryable: Bool = true, errorType: String? = nil
   ) -> SuggestionRunFailure {
     SuggestionRunFailure(
-      kind: kind, stage: nil, category: category, message: message, statusCode: statusCode,
+      kind: kind, category: category, message: message, statusCode: statusCode,
       requestID: requestID, retryAfter: retryAfter, retryable: retryable, errorType: errorType)
   }
 
