@@ -9,6 +9,7 @@ from collections.abc import Mapping, Set
 from types import MappingProxyType
 from typing import Sequence
 
+from .llm import json_error_detail
 from .models import Sentence
 from .suggestion_config import _trim_foundation_whitespace
 
@@ -63,7 +64,7 @@ def parse_extraction_response(
     try:
         decoded = json.loads(text, object_pairs_hook=_no_duplicate_object_keys)
     except (TypeError, json.JSONDecodeError) as exc:
-        raise ExtractionError("extraction response is not valid JSON") from exc
+        raise ExtractionError(f"extraction response is not valid JSON ({json_error_detail(exc)})") from exc
     if not isinstance(decoded, Mapping) or set(decoded) != {"results"}:
         raise ExtractionError("extraction response must contain only a results array")
     results = decoded["results"]

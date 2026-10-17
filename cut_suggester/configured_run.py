@@ -11,6 +11,7 @@ from .cutter import suggest_cuts
 from .extraction import (completed_extraction_values, parse_extraction_response,
                          plan_extraction_batches, required_field_ids)
 from .intro_qualification import QUALIFICATION_FIELD_IDS, qualify_intros
+from .llm import failure_record
 from .run_journal import JournalRecoveryError, JournalStorageError, RunJournal, canonical_json, digest
 from .suggestion_config import (
     BROAD_INTRO_DISCOVERY_VERSIONS, CONFIGURED_DISCOVERY_VERSION, QUALIFIED_INTRO_DISCOVERY_VERSIONS,
@@ -23,6 +24,8 @@ _OPTION_KEYS = ('model', 'sample_rate', 'stage1_window', 'stage1_step',
                 'discovery_prompt_version', 'extraction_prompt_version', 'product_spec_version')
 _IMMUTABLE_KEYS = ('schema_version', 'run_id', 'transcript_hash', 'source_fingerprint',
                    'transcript_units', 'configuration')
+# Every later request would fail the same way until the user fixes the account or input.
+_STOPPING_CATEGORIES = frozenset({'auth', 'credits', 'bad_request'})
 
 
 def validate_transcript_units(units: object) -> None:
@@ -131,7 +134,14 @@ def run_configured_suggest(request: dict, llm, journal: RunJournal, emit) -> dic
 
     def validated_request(stage, prompt, validate):
         key = digest({'request_identity': journal.request_identity, 'stage': stage, 'prompt': prompt})
-        result = journal.request(key, lambda: llm.complete(prompt, purpose=stage).text, validate)
+        try:
+            result = journal.request(key, lambda: llm.complete(prompt, purpose=stage).text, validate)
+        except (JournalStorageError, JournalRecoveryError):
+            raise
+        except Exception as exc:
+            failed_batches.append({'kind': 'discovery', 'stage': stage, 'request_key': key,
+                                   **failure_record(exc)})
+            raise
         checkpoint('discovering')
         return result
 
@@ -162,8 +172,11 @@ def run_configured_suggest(request: dict, llm, journal: RunJournal, emit) -> dic
                 validated_request=validated_request))
     except (JournalStorageError, JournalRecoveryError):
         raise
-    except Exception:
-        checkpoint('needs_retry')
+    except Exception as exc:
+        try:
+            checkpoint('needs_retry')
+        except Exception as write_error:
+            exc.add_note(f'The retry checkpoint could not be saved: {write_error}')
         raise
     discovery_complete = True
     if broad_intros and not qualify:
@@ -193,11 +206,15 @@ def run_configured_suggest(request: dict, llm, journal: RunJournal, emit) -> dic
             extra_field_ids_by_type=qualification_fields,
             interview_artist=request.get('interview_artist'),
             extraction_prompt_version=options['extraction_prompt_version'])
-        failed_batches.extend({'kind': 'input_size', 'retryable': False, **asdict(d)}
+        failed_batches.extend({'kind': 'input_size', 'category': 'input_size', 'status_code': None,
+                               'request_id': None, 'retry_after': None, 'retryable': False,
+                               'error_type': 'InputSizeDiagnostic', **asdict(d)}
                               for d in plan.input_size_diagnostics)
         checkpoint('extracting')
         by_id = {c['candidate_id']: c for c in candidates}
         for index, batch in enumerate(plan.batches):
+            if any(f['category'] in _STOPPING_CATEGORIES for f in failed_batches):
+                break
             stage = f'extract:{batch.stable_key}'
             key = digest({'request_identity': journal.request_identity, 'stage': stage, 'prompt': batch.prompt})
             progress(phase='extracting', message=f'Naming batch {index + 1} of {len(plan.batches)}',
@@ -209,8 +226,8 @@ def run_configured_suggest(request: dict, llm, journal: RunJournal, emit) -> dic
                 raise
             except Exception as exc:
                 failed_batches.append({'kind': 'extraction', 'request_key': key,
-                                       'candidate_ids': list(batch.candidate_ids), 'retryable': True,
-                                       'error_type': type(exc).__name__})
+                                       'candidate_ids': list(batch.candidate_ids),
+                                       **failure_record(exc)})
             else:
                 evidence.update(values)
                 for candidate_id, fields in values.items():

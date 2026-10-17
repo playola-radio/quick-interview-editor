@@ -77,6 +77,13 @@ def failure_record(exc: BaseException) -> dict:
     }
 
 
+def json_error_detail(exc: Exception) -> str:
+    """Where a provider response stopped being JSON, without echoing its content."""
+    if isinstance(exc, json.JSONDecodeError):
+        return f"{exc.msg} at char {exc.pos}"
+    return str(exc)
+
+
 def _status_error(status: int, body: object, headers, request_id: str | None,
                   fallback: str, error_type: str) -> LLMError:
     error = body.get("error") if isinstance(body, dict) else None

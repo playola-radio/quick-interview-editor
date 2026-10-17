@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 
-from .llm import LLMClient
+from .llm import LLMClient, json_error_detail
 from .models import Sentence
 from .postprocess import _norm_tokens, validate_clip, verify_song
 
@@ -64,7 +64,7 @@ def _parse(text: str, proposals: dict[str, dict], sentences: list[Sentence]) -> 
     try:
         decoded = json.loads(text, object_pairs_hook=_unique_keys)
     except (TypeError, json.JSONDecodeError) as exc:
-        raise IntroRefinementError("refinement response is not JSON") from exc
+        raise IntroRefinementError(f"refinement response is not JSON ({json_error_detail(exc)})") from exc
     if not isinstance(decoded, dict) or set(decoded) != {"results"} or not isinstance(decoded['results'], list):
         raise IntroRefinementError("refinement must contain only a results array")
     parsed = {}
