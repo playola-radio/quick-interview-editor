@@ -474,3 +474,109 @@ def test_v3_saved_broad_discovery_survives_checkpoint_interruption(tmp_path, mon
     assert result['status'] == 'ready'
     assert len(result['suggestions']) == 1
     assert len(retry.calls) == 1 and retry.calls[0][0].startswith('extract:')
+
+
+class FailingProvider(Provider):
+    """Raises a classified provider failure for chosen request purposes."""
+    def __init__(self, n=1, *, fail_on, error, fail_batch=None):
+        super().__init__(n)
+        self.fail_on, self.error, self.fail_batch_number = fail_on, error, fail_batch
+    def complete(self, prompt, *, purpose=''):
+        if purpose.startswith(self.fail_on):
+            if self.fail_on != 'extract':
+                self.calls.append((purpose, prompt))
+                raise self.error
+            if self.fail_batch_number in (None, self.extractions + 1):
+                self.calls.append((purpose, prompt))
+                self.extractions += 1
+                raise self.error
+        return super().complete(prompt, purpose=purpose)
+
+
+def credits_error():
+    from cut_suggester.llm import LLMError
+    return LLMError('credits', 'Your credit balance is too low to access the Anthropic API.',
+                    status_code=400, request_id='req_01ABC', error_type='BadRequestError')
+
+
+def test_credits_failure_records_provider_facts_and_sends_no_further_batches(tmp_path):
+    req = request(81)
+    provider = FailingProvider(81, fail_on='extract', error=credits_error(), fail_batch=1)
+    result = run_configured_suggest(req, provider, journal(tmp_path, req), lambda e: None)
+    assert provider.extractions == 1
+    assert result['status'] == 'needs_retry'
+    [failure] = result['failed_batches']
+    assert {k: v for k, v in failure.items() if k not in ('request_key', 'candidate_ids')} == {
+        'kind': 'extraction', 'category': 'credits',
+        'message': 'Your credit balance is too low to access the Anthropic API.',
+        'status_code': 400, 'request_id': 'req_01ABC', 'retry_after': None,
+        'retryable': False, 'error_type': 'BadRequestError'}
+    checkpoint = json.loads((tmp_path / 'checkpoint.json').read_text())
+    assert checkpoint['phase'] == 'needs_retry'
+    assert checkpoint['failed_batches'] == result['failed_batches']
+
+
+@pytest.mark.parametrize('category', ['rate_limit', 'overloaded', 'server', 'network', 'timeout', 'bad_response'])
+def test_transient_failure_keeps_sending_remaining_batches(tmp_path, category):
+    from cut_suggester.llm import LLMError
+    req = request(81)
+    error = LLMError(category, 'try again later', status_code=429, retry_after=30)
+    provider = FailingProvider(81, fail_on='extract', error=error, fail_batch=3)
+    result = run_configured_suggest(req, provider, journal(tmp_path, req), lambda e: None)
+    assert provider.extractions == 5
+    [failure] = result['failed_batches']
+    assert (failure['category'], failure['retry_after'], failure['retryable']) == (category, 30, True)
+
+
+def test_unparseable_extraction_response_is_a_bad_response_failure(tmp_path):
+    req = request()
+    class Garbled(Provider):
+        def complete(self, prompt, *, purpose=''):
+            if purpose.startswith('extract'):
+                self.extractions += 1
+                return LLMResponse(text='{"results": [')
+            return super().complete(prompt, purpose=purpose)
+    result = run_configured_suggest(req, Garbled(), journal(tmp_path, req), lambda e: None)
+    [failure] = result['failed_batches']
+    assert (failure['category'], failure['error_type']) == ('bad_response', 'ExtractionError')
+    assert 'at char' in failure['message']
+
+
+def test_discovery_failure_is_persisted_before_the_run_stops(tmp_path):
+    req = request(fields=False)
+    provider = FailingProvider(fail_on='configured-discovery', error=credits_error())
+    with pytest.raises(Exception, match='credit balance'):
+        run_configured_suggest(req, provider, journal(tmp_path, req), lambda e: None)
+    checkpoint = json.loads((tmp_path / 'checkpoint.json').read_text())
+    assert checkpoint['phase'] == 'needs_retry'
+    [failure] = checkpoint['failed_batches']
+    assert (failure['kind'], failure['stage'], failure['category'], failure['request_id']) == (
+        'discovery', 'configured-discovery', 'credits', 'req_01ABC')
+    assert failure['request_key'] in checkpoint['failed_request_keys']
+
+
+def test_failed_retry_checkpoint_does_not_hide_the_provider_failure(tmp_path, monkeypatch):
+    req = request(fields=False)
+    j = journal(tmp_path, req)
+    def fail(**kwargs): raise JournalStorageError('disk full')
+    monkeypatch.setattr(j, 'write_checkpoint', fail)
+    provider = FailingProvider(fail_on='configured-discovery', error=credits_error())
+    with pytest.raises(Exception) as caught:
+        run_configured_suggest(req, provider, j, lambda e: None)
+    assert 'credit balance' in str(caught.value)
+    assert not isinstance(caught.value, JournalStorageError)
+
+
+def test_local_input_limit_before_any_request_is_a_nonretryable_failure(tmp_path, monkeypatch):
+    import cut_suggester.configured_run as configured
+    from cut_suggester.intro_refinement import IntroInputSizeError
+
+    def oversized(*args, **kwargs):
+        raise IntroInputSizeError('proposal p0 exceeds the refinement input limit')
+    monkeypatch.setattr(configured, 'suggest_cuts', oversized)
+    req = request(4, fields=False, tuned=True)
+    with pytest.raises(IntroInputSizeError):
+        run_configured_suggest(req, Provider(), journal(tmp_path, req), lambda e: None)
+    checkpoint = json.loads((tmp_path / 'checkpoint.json').read_text())
+    [failure] = checkpoint['failed_batches']
+    assert (failure['kind'], failure['category'], failure['retryable']) == ('discovery', 'input_size', False)

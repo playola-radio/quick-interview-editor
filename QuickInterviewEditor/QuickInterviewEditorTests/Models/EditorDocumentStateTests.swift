@@ -81,6 +81,24 @@ struct EditorDocumentStateTests {
     expectNoDifference(state.rekeyed(to: plan), expected)
   }
 
+  @Test func legacyDocumentWithUnfinishedRunFailureMessageStillDecodes() throws {
+    let checkpoint = SuggestionRunCheckpoint(
+      pythonRevision: 4, controlRevision: 3, originalBatchFingerprint: nil,
+      snapshot: suggestionResultSnapshot(), phase: .needsRetry, candidates: [],
+      completedRequestKeys: [], failedRequestKeys: ["failed"], proposedStarts: .init(),
+      failureMessage: "Retry field extraction")
+    let state = EditorDocumentState(unfinishedSuggestionRun: checkpoint)
+    var object = try #require(
+      JSONSerialization.jsonObject(with: JSONEncoder().encode(state)) as? [String: Any])
+    var run = try #require(object["unfinishedSuggestionRun"] as? [String: Any])
+    run.removeValue(forKey: "failures")
+    object["unfinishedSuggestionRun"] = run
+    let decoded = try JSONDecoder().decode(
+      EditorDocumentState.self, from: JSONSerialization.data(withJSONObject: object))
+    expectNoDifference(decoded.unfinishedSuggestionRun?.failureMessage, "Retry field extraction")
+    #expect(decoded.unfinishedSuggestionRun?.failures == nil)
+  }
+
   @Test func roundTripsAllFields() throws {
     let state = Fixtures.editorDocumentState()
     let data = try JSONEncoder().encode(state)

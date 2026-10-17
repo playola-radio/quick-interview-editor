@@ -11,7 +11,7 @@ import json
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 
-from .llm import LLMClient
+from .llm import LLMClient, json_error_detail
 from .models import Sentence
 from .suggestion_config import (
     BROAD_INTRO_DISCOVERY_VERSIONS, CONFIGURED_DISCOVERY_VERSION,
@@ -251,7 +251,7 @@ def discover_configured(
             try:
                 decoded = json.loads(text)
             except (TypeError, json.JSONDecodeError) as exc:
-                raise DiscoveryError("configured discovery response is not JSON") from exc
+                raise DiscoveryError(f"configured discovery response is not JSON ({json_error_detail(exc)})") from exc
             clips = decoded.get("clips") if isinstance(decoded, Mapping) else None
             if not isinstance(clips, list):
                 raise DiscoveryError("configured discovery response must contain a clips array")

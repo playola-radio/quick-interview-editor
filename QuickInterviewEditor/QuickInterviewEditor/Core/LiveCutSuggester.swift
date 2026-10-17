@@ -287,7 +287,7 @@ enum LiveCutSuggester {
       return events + [
         .recoverableFailure(
           runID: snapshot.runID,
-          failedRequestKeys: result.failedRequestKeys, message: result.failureMessage)
+          failedRequestKeys: result.failedRequestKeys, failures: result.failures)
       ]
     }
     guard exitCode == 0 else { throw mapFailure(stderr: stderr) }
