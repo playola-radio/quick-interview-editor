@@ -114,6 +114,11 @@ class _SDKTimeoutError(_SDKConnectionError):
         super().__init__("Request timed out or interrupted.")
 
 
+class _SDKResponseValidationError(_SDKError):
+    def __init__(self):
+        super().__init__("Data returned by API invalid for expected schema.")
+
+
 class _RaisingMessages:
     def __init__(self, error):
         self.error = error
@@ -131,6 +136,7 @@ def failing_anthropic(monkeypatch):
         module.APIStatusError = _SDKStatusError
         module.APIConnectionError = _SDKConnectionError
         module.APITimeoutError = _SDKTimeoutError
+        module.APIResponseValidationError = _SDKResponseValidationError
         module.Anthropic = lambda: types.SimpleNamespace(messages=_RaisingMessages(error))
         monkeypatch.setitem(sys.modules, "anthropic", module)
 
@@ -232,6 +238,12 @@ def testTimeoutIsNotReportedAsNetwork(failing_anthropic):
     assert _record(_anthropic_failure(error))["category"] == "timeout"
 
 
+def testMalformedSDKResponseIsABadResponse(failing_anthropic):
+    error = _SDKResponseValidationError()
+    failing_anthropic(error)
+    assert _record(_anthropic_failure(error))["category"] == "bad_response"
+
+
 def testTruncatedResponseIsABadResponse(fake_anthropic):
     from cut_suggester.llm import LLMError
 
@@ -278,6 +290,9 @@ def testRealSDKExceptionsClassify(monkeypatch):
             response=httpx.Response(529, request=request)),
          ("overloaded", 529, None)),
         (anthropic.APITimeoutError(request=request), ("timeout", None, None)),
+        (anthropic.APIResponseValidationError(
+            response=httpx.Response(200, request=request), body=None),
+         ("bad_response", None, None)),
         (anthropic.APIConnectionError(request=request), ("network", None, None)),
     ]
     for error, expected in cases:

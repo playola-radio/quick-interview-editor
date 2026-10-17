@@ -262,6 +262,9 @@ class AnthropicClient:
         except anthropic.APIStatusError as exc:
             raise _status_error(exc.status_code, exc.body, exc.response.headers, exc.request_id,
                                 exc.message, type(exc).__name__) from exc
+        except anthropic.APIResponseValidationError as exc:
+            raise LLMError("bad_response", "Anthropic returned a response in an unexpected shape",
+                           error_type=type(exc).__name__) from exc
         text = "".join(b.text for b in msg.content if getattr(b, "type", None) == "text")
         stop_reason = getattr(msg, "stop_reason", None)
         usage = {}
