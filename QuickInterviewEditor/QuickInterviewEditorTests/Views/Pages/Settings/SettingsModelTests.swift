@@ -164,21 +164,15 @@ struct SettingsModelTests {
         "Couldn't check for a saved key: macOS Keychain error: User interaction is not "
           + "allowed. (code -25308) Make sure your login keychain is unlocked in Keychain "
           + "Access, then reopen Settings.")
-      expectNoDifference(model.canClear, true)
     }
   }
 
   @Test func successfulSaveClearsAnEarlierKeyReadFailure() {
-    let loadFails = LockIsolated(true)
-    let storage = LockIsolated<String?>(nil)
     withDependencies {
       $0.keychain = KeychainClient(
-        save: { key in storage.setValue(key) },
-        load: {
-          if loadFails.value { throw KeychainError.unexpectedStatus(errSecInteractionNotAllowed) }
-          return storage.value
-        },
-        delete: { storage.setValue(nil) })
+        save: { _ in },
+        load: { throw KeychainError.unexpectedStatus(errSecInteractionNotAllowed) },
+        delete: {})
     } operation: {
       let model = SettingsModel()
       model.onAppear()

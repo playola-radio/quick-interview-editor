@@ -387,6 +387,64 @@ struct CutSuggestionsPageTests {
     }
   }
 
+  @Test func autoSuggestKeychainReadFailureShowsTheReadErrorInOnboarding() async {
+    let store = LockIsolated<IdentifiedArrayOf<CutSuggestion>>([])
+    let capture = LockIsolated<CutSuggestRequest?>(nil)
+    let reads = LockIsolated(0)
+    await withDependencies {
+      $0.keychain = KeychainClient(
+        save: { _ in },
+        load: {
+          reads.withValue { $0 += 1 }
+          if reads.value > 1 { throw KeychainError.unexpectedStatus(errSecInteractionNotAllowed) }
+          return "sk-keychain"
+        },
+        delete: {})
+      $0.environment = .constant([:])
+      $0.cutSuggest = fixtureClient(completed: [], capture: capture)
+    } operation: {
+      let model = CutSuggestionsPageModel(
+        editPlan: Fixtures.editPlan(), sourceFingerprint: "fp-auto-read-error")
+      wire(model, to: store)
+      model.viewAppeared()
+      await model.autoSuggestCutsIfNeeded()
+
+      expectNoDifference(model.showsOnboarding, true)
+      expectNoDifference(model.onboardingTitle, "Couldn't read your Anthropic API key")
+    }
+    #expect(capture.value == nil)
+  }
+
+  @Test func readingTheKeyAfterAnEarlierReadFailureRestoresTheSuggestButton() async {
+    let fixture = SuggestionRunFixture()
+    let unlocked = LockIsolated(false)
+    await withDependencies {
+      fixture.install(&$0)
+      $0.keychain = KeychainClient(
+        save: { _ in },
+        load: {
+          guard unlocked.value else {
+            throw KeychainError.unexpectedStatus(errSecInteractionNotAllowed)
+          }
+          return "sk-keychain"
+        },
+        delete: {})
+      $0.environment = .constant([:])
+    } operation: {
+      let model = CutSuggestionsPageModel(
+        editPlan: Fixtures.editPlan(), sourceFingerprint: fixture.owner.sourceFingerprint)
+      fixture.wirePage(model)
+      model.viewAppeared()
+      unlocked.setValue(true)
+      let task = Task { await model.suggestCutsTapped() }
+      await fixture.waitForRequests()
+      fixture.finish()
+      await task.value
+
+      expectNoDifference(model.suggestButtonLabel, "Suggest Cuts")
+    }
+  }
+
   @Test func envVarKeyStillWorksWhenTheKeychainCannotBeRead() {
     withDependencies {
       $0.keychain = .failingToRead

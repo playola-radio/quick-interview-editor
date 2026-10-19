@@ -447,6 +447,23 @@ struct SuggestionSettingsTests {
     expectNoDifference(published, SuggestionDefaults.configuration)
   }
 
+  @Test func rulesStoreSaveFailureIsDescribedInPlainEnglish() async {
+    @Shared(.suggestionConfiguration) var published = SuggestionDefaults.configuration
+    let model = withDependencies {
+      $0.suggestionConfiguration.save = { _, _ in
+        throw SuggestionConfigurationStoreError.revisionOverflow
+      }
+    } operation: {
+      SuggestionSettingsModel(configuration: SuggestionDefaults.configuration, onSaved: {})
+    }
+    model.typeName = "My Intro"
+    await model.saveTapped()
+    expectNoDifference(
+      model.statusMessage,
+      "Could not save rules. Your draft is unchanged. The saved rules have reached their "
+        + "revision limit and can't be saved again.")
+  }
+
   @Test func loadOnceAndFailedReloadProtectDraft() async {
     let model = withDependencies {
       $0.suggestionConfiguration = .inMemory()

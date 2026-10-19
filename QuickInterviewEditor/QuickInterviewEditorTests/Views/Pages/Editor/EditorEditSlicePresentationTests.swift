@@ -674,6 +674,25 @@ struct EditorEditSlicePresentationTests {
     }
   }
 
+  @Test func playbackFailureInTheSheetIsShownInTheSheet() async {
+    let model = editor()
+    addSlice(model, 0, 3)
+    model.editSliceTapped(model.slices[0].id)
+    let child = model.editSlice!
+
+    await withDependencies {
+      $0.audioPlayer.play = { _, _, _, _, _ in
+        throw NSError(domain: NSOSStatusErrorDomain, code: -10851)
+      }
+    } operation: {
+      await child.playPauseTapped()
+    }
+    expectNoDifference(
+      child.playbackErrorMessage,
+      "Playback failed: The Mac's audio system reported a problem (code -10851). Check your "
+        + "sound output in System Settings › Sound, then press Play again.")
+  }
+
   /// FIX 1 (dismiss→reopen race): a stale sheet `onDismiss` callback that fires after a new modal
   /// has taken over must NOT tear down the new modal's transport.
   @Test func sheetDismissCallbackSkipsWhenANewModalIsAlreadyPresent() async {

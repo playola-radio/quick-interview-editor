@@ -259,6 +259,22 @@ struct EditorTransportTests {
         + "System Settings › Sound, then press Play again.")
   }
 
+  @Test func audioSystemErrorWithOnlyACodeIsDescribedInWords() async {
+    let model = editor()
+    model.playheadEditedSample = 1000
+    await withDependencies {
+      $0.audioPlayer.playEdited = { _, _, _, _, _ in
+        throw NSError(domain: NSOSStatusErrorDomain, code: -10851)
+      }
+    } operation: {
+      await model.transportPlayTapped()
+    }
+    expectNoDifference(
+      model.playbackErrorMessage,
+      "Playback failed: The Mac's audio system reported a problem (code -10851). Check your "
+        + "sound output in System Settings › Sound, then press Play again.")
+  }
+
   @Test func aSuccessfulPlayClearsAnEarlierPlaybackError() async {
     let model = editor()
     model.playheadEditedSample = 1000

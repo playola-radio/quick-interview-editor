@@ -77,6 +77,8 @@ final class EditSliceModel: ViewModel, Identifiable {
   }
   var onInvalidatePreview: () -> Void = {}
   private(set) var commitError: String?
+  /// Mirrors the owning editor's playback error so a failed play is visible over the sheet.
+  var playbackErrorMessage: String?
   private(set) var invalidationReason: String?
   private(set) var didCommit = false
   private var draftHistory = UndoStack<Range<Int>>()

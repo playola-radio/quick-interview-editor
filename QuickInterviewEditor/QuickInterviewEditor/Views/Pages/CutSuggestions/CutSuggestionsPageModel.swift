@@ -600,7 +600,7 @@ final class CutSuggestionsPageModel: ViewModel {
       canonicalValues: canonical)
   }
 
-  private func refreshKeyState() { hasAPIKey = (try? resolvedAPIKey()) != nil }
+  private func refreshKeyState() { _ = try? resolvedAPIKey() }
 
   private func finishTitleEditing(_ id: CutSuggestion.ID) {
     guard editingTitleID == id else { return }
@@ -610,18 +610,22 @@ final class CutSuggestionsPageModel: ViewModel {
 
   private let unlockKeychainHint = "Make sure your login keychain is unlocked in Keychain Access"
 
-  /// Resolves the key by the fixed order (Keychain, then `ANTHROPIC_API_KEY`). A Keychain
-  /// read failure is recorded and, when no environment key covers it, thrown — so it is
-  /// never mistaken for "no key saved".
+  /// Resolves the key by the fixed order (Keychain, then `ANTHROPIC_API_KEY`) and keeps
+  /// `hasAPIKey` in step with every lookup. A Keychain read failure is recorded and, when no
+  /// environment key covers it, thrown — so it is never mistaken for "no key saved".
   private func resolvedAPIKey() throws -> String? {
     let env = environment.value(anthropicAPIKeyEnvVar)
     do {
       let stored = try keychain.load()
       keyReadFailure = nil
-      return resolveAnthropicAPIKey(keychain: stored, env: env)
+      let key = resolveAnthropicAPIKey(keychain: stored, env: env)
+      hasAPIKey = key != nil
+      return key
     } catch {
       keyReadFailure = error.localizedDescription
-      if let key = resolveAnthropicAPIKey(keychain: nil, env: env) { return key }
+      let envKey = resolveAnthropicAPIKey(keychain: nil, env: env)
+      hasAPIKey = envKey != nil
+      if let envKey { return envKey }
       throw APIKeyReadError(
         message: "Couldn't read your Anthropic API key from the Keychain: "
           + "\(error.localizedDescription) \(unlockKeychainHint), then try again.")

@@ -90,7 +90,9 @@ final class EditorModel: ViewModel {
   var editSlice: EditSliceModel?
   var clipEditorMessage: String?
   /// Why the last play or resume failed and what to do next; cleared when playback starts.
-  private(set) var playbackErrorMessage: String?
+  private(set) var playbackErrorMessage: String? {
+    didSet { editSlice?.playbackErrorMessage = playbackErrorMessage }
+  }
   @ObservationIgnored var committingDraftID: UUID?
   @ObservationIgnored var clipNamingQueue: [ManualClipNamingJob] = []
   @ObservationIgnored var clipNamingTask: Task<Void, Never>?
@@ -3501,8 +3503,13 @@ final class EditorModel: ViewModel {
   }
 
   private func playbackFailure(_ error: any Error) -> String {
-    "Playback failed: \(error.localizedDescription) Check your sound output in System Settings › "
-      + "Sound, then press Play again."
+    let nsError = error as NSError
+    let cause =
+      nsError.domain == NSOSStatusErrorDomain && nsError.userInfo[NSLocalizedDescriptionKey] == nil
+      ? "The Mac's audio system reported a problem (code \(nsError.code))."
+      : error.localizedDescription
+    return "Playback failed: \(cause) Check your sound output in System Settings › Sound, then "
+      + "press Play again."
   }
 
   /// The one funnel every playback flows through — plain Play (`.free`) and the slice/preview/

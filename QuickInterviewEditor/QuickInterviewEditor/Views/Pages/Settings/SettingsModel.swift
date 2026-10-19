@@ -52,7 +52,7 @@ final class SettingsModel: ViewModel, Identifiable {
   var canSave: Bool {
     !apiKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
   }
-  var canClear: Bool { hasStoredKey || keyReadFailure != nil }
+  var canClear: Bool { hasStoredKey }
   var storedKeyStatus: String {
     if let keyReadFailure {
       return "Couldn't check for a saved key: \(keyReadFailure) \(unlockKeychainHint), "
@@ -94,7 +94,6 @@ final class SettingsModel: ViewModel, Identifiable {
       try keychain.delete()
       apiKeyDraft = ""
       hasStoredKey = false
-      keyReadFailure = nil
       statusMessage = "Removed."
       onSaved?()
     } catch {
