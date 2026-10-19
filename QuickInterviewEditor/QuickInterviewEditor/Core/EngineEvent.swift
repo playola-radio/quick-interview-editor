@@ -150,11 +150,17 @@ extension HelperErrorReport: Decodable {
   }
 }
 
-/// A helper process that exited unsuccessfully: its exit code, the last valid
+struct HelperProcessExit: Equatable, Sendable {
+  var exitCode: Int32
+  var terminationSignal: Int32?
+}
+
+/// A helper process that exited unsuccessfully: its exit code, termination signal, the last valid
 /// ``HelperErrorReport`` on stderr (or the last non-protocol stderr line when there is none),
 /// and the diagnostic log written for it. Raw stderr is never kept, so it can't reach the UI.
 struct HelperFailure: Equatable, Sendable {
   var exitCode: Int32
+  var terminationSignal: Int32?
   var report: HelperErrorReport?
   var lastStderrLine: String?
   var logURL: URL?
@@ -162,8 +168,9 @@ struct HelperFailure: Equatable, Sendable {
   private static let errorPrefix = "QIE_ERROR "
   private static let maxFallbackLength = 300
 
-  init(exitCode: Int32, stderr: String, logURL: URL?) {
+  init(exitCode: Int32, terminationSignal: Int32? = nil, stderr: String, logURL: URL?) {
     self.exitCode = exitCode
+    self.terminationSignal = terminationSignal
     self.logURL = logURL
     let lines = stderr.split(whereSeparator: \.isNewline).map(String.init)
     report =
@@ -182,7 +189,7 @@ struct HelperFailure: Equatable, Sendable {
       && !line.hasPrefix("Traceback (")
   }
 
-  var signal: Int32? { exitCode > 128 ? exitCode - 128 : nil }
+  var signal: Int32? { terminationSignal }
 
   var phase: String? { report?.phase }
 

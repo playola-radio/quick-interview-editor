@@ -181,21 +181,24 @@ enum LiveEngine {
           }
 
           let out = await stdoutData
-          let code = await exitCode
+          let exit = await exitCode
 
           // Persist a per-run log (command, exit, full stdout, stderr tail) so any
           // transcription is inspectable after the fact.
           let logURL = writeJobLog(
-            kind: "transcribe", audio: audio, exitCode: code, stdout: out, stderr: proc.stderrTail()
+            kind: "transcribe", audio: audio, exitCode: exit.exitCode, stdout: out,
+            stderr: proc.stderrTail()
           )
 
           if Task.isCancelled {
             continuation.finish()
             return
           }
-          guard code == 0 else {
+          guard exit.exitCode == 0 else {
             throw EngineClientError.transcriptionExited(
-              HelperFailure(exitCode: code, stderr: proc.stderrTail(), logURL: logURL))
+              HelperFailure(
+                exitCode: exit.exitCode, terminationSignal: exit.terminationSignal,
+                stderr: proc.stderrTail(), logURL: logURL))
           }
           let plan: EditPlan
           do {
@@ -328,9 +331,9 @@ enum LiveEngine {
       for await _ in proc.stderrLines() {}
 
       let out = await stdoutData
-      let code = await exitCode
+      let exit = await exitCode
       let logURL = writeJobLog(
-        kind: "inject-markers", audio: files[0].url, exitCode: code, stdout: out,
+        kind: "inject-markers", audio: files[0].url, exitCode: exit.exitCode, stdout: out,
         stderr: proc.stderrTail())
 
       // A cancel-triggered kill surfaces as a nonzero exit; report it as cancellation,
@@ -338,9 +341,11 @@ enum LiveEngine {
       if Task.isCancelled {
         throw CancellationError()
       }
-      guard code == 0 else {
+      guard exit.exitCode == 0 else {
         throw EngineClientError.injectExited(
-          HelperFailure(exitCode: code, stderr: proc.stderrTail(), logURL: logURL))
+          HelperFailure(
+            exitCode: exit.exitCode, terminationSignal: exit.terminationSignal,
+            stderr: proc.stderrTail(), logURL: logURL))
       }
       let expectedMarkerCounts = Dictionary(
         files.map { ($0.url.path, $0.markers.count) }, uniquingKeysWith: { first, _ in first })
@@ -762,13 +767,13 @@ final class SpawnedProcess: Sendable {
   /// runs under the same lock as signaling, so the reap can't race a `kill` onto a
   /// reused pid. The 20 ms poll interval keeps this off a busy-wait while adding
   /// negligible latency to a multi-second transcription.
-  func waitForExit() async -> Int32 {
+  func waitForExit() async -> HelperProcessExit {
     let reaper = reaper
     return await withCheckedContinuation { continuation in
       DispatchQueue.global().async {
         while true {
-          if let code = reaper.tryReap() {
-            continuation.resume(returning: code)
+          if let exit = reaper.tryReap() {
+            continuation.resume(returning: exit)
             return
           }
           usleep(20_000)
@@ -825,7 +830,7 @@ final class SpawnedProcess: Sendable {
 private final class ChildReaper: Sendable {
   private enum State {
     case running
-    case exited(Int32)
+    case exited(HelperProcessExit)
   }
   private let pid: pid_t
   private let state = Mutex<State>(.running)
@@ -834,8 +839,8 @@ private final class ChildReaper: Sendable {
 
   /// One non-blocking reap attempt, performed **under the lock** so the pid can't
   /// be signalled by `signalGroupIfAlive` between the `waitpid` that frees it and
-  /// the state transition. Returns the exit code once reaped, else `nil`.
-  func tryReap() -> Int32? {
+  /// the state transition. Returns the exit status once reaped, else `nil`.
+  func tryReap() -> HelperProcessExit? {
     state.withLock { current in
       if case .exited(let code) = current { return code }
       var status: Int32 = 0
@@ -844,15 +849,16 @@ private final class ChildReaper: Sendable {
       if result == -1 {
         if errno == EINTR { return nil }  // caller retries
         // ECHILD or other: already reaped/unwaitable. Treat as abnormal exit.
-        current = .exited(-1)
-        return -1
+        let exit = HelperProcessExit(exitCode: -1, terminationSignal: nil)
+        current = .exited(exit)
+        return exit
       }
-      let code: Int32 =
-        (status & 0x7f) == 0
-        ? (status >> 8) & 0xff  // WIFEXITED → WEXITSTATUS
-        : 128 + (status & 0x7f)  // signalled → 128 + WTERMSIG
-      current = .exited(code)
-      return code
+      let signal = status & 0x7f
+      let exit = HelperProcessExit(
+        exitCode: signal == 0 ? (status >> 8) & 0xff : 128 + signal,
+        terminationSignal: signal == 0 ? nil : signal)
+      current = .exited(exit)
+      return exit
     }
   }
 

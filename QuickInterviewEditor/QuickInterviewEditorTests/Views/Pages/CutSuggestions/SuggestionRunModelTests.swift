@@ -1165,7 +1165,7 @@ extension SuggestionRunModelTests {
           ])
         fixture.state.value.continuations[0].finish(
           throwing: CutSuggestClientError.helperFailed(
-            HelperFailure(exitCode: 137, stderr: "", logURL: nil)))
+            HelperFailure(exitCode: 137, terminationSignal: 9, stderr: "", logURL: nil)))
         await task.value
         expectNoDifference(
           model.phase,
@@ -1230,6 +1230,11 @@ extension SuggestionRunModelTests {
             runID: runID,
             message: "The suggestion search stopped while searching: the helper exited with code 1."
           ))
+        expectNoDifference(model.failureDetail, "Diagnostic log: /tmp/cut-suggester-1.log")
+        fixture.document.withValue { $0.cutSuggestions = [fixture.candidate()] }
+        await model.resumeTapped()
+        expectNoDifference(model.phase, .confirmingReplacement)
+        model.cancelReplacementTapped()
         expectNoDifference(model.failureDetail, "Diagnostic log: /tmp/cut-suggester-1.log")
       }
     }
@@ -1307,7 +1312,8 @@ extension SuggestionRunModelTests {
     expectNoDifference(
       SuggestionRunModel.hardFailureMessage(
         CutSuggestClientError.exitMismatch(
-          status: "ready", HelperFailure(exitCode: 137, stderr: "", logURL: nil)),
+          status: "ready",
+          HelperFailure(exitCode: 137, terminationSignal: 9, stderr: "", logURL: nil)),
         model: "claude-sonnet-5"),
       "The suggestion search ended unexpectedly: the helper was stopped by signal 9.")
   }

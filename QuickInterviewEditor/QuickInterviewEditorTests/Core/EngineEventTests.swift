@@ -161,7 +161,7 @@ struct EngineEventTests {
   }
 
   @Test func helperFailureNamesASignalWhenThereIsNoReport() {
-    let failure = HelperFailure(exitCode: 137, stderr: "", logURL: nil)
+    let failure = HelperFailure(exitCode: 137, terminationSignal: 9, stderr: "", logURL: nil)
     expectNoDifference(failure.signal, 9)
     expectNoDifference(failure.cause, "the helper was stopped by signal 9")
   }
@@ -170,6 +170,12 @@ struct EngineEventTests {
     let failure = HelperFailure(exitCode: 3, stderr: "QIE_EVENT {}\n", logURL: nil)
     expectNoDifference(failure.signal, nil)
     expectNoDifference(failure.cause, "the helper exited with code 3")
+  }
+
+  @Test func helperFailureDoesNotInferASignalFromANormalExitCode() {
+    let failure = HelperFailure(exitCode: 255, stderr: "", logURL: nil)
+    expectNoDifference(failure.signal, nil)
+    expectNoDifference(failure.cause, "the helper exited with code 255")
   }
 
   @Test func helperFailureTruncatesLongFallbackText() {
@@ -194,7 +200,7 @@ struct EngineEventTests {
 
   @Test func transcriptionExitBySignalSaysSo() {
     let error = EngineClientError.transcriptionExited(
-      HelperFailure(exitCode: 139, stderr: "", logURL: nil))
+      HelperFailure(exitCode: 139, terminationSignal: 11, stderr: "", logURL: nil))
     expectNoDifference(
       error.errorDescription, "Transcription failed: the helper was stopped by signal 11.")
   }

@@ -144,11 +144,11 @@ enum LiveCutSuggester {
           }
 
           let out = await stdoutData
-          let code = await exitCode
+          let exit = await exitCode
 
           try Task.checkCancellation()
           let run = HelperRun(
-            subcommand: "suggest", exitCode: code, stdout: out, stderr: proc.stderrTail(),
+            subcommand: "suggest", exit: exit, stdout: out, stderr: proc.stderrTail(),
             apiKey: apiKey, logsDirectory: runner.logsDirectory)
           let events = try completedEvents(run, request: request, latestRevision: latestRevision)
           try Task.checkCancellation()
@@ -192,13 +192,13 @@ enum LiveCutSuggester {
       async let exitCode = proc.waitForExit()
       for await _ in proc.stderrLines() {}
       let out = await stdoutData
-      let code = await exitCode
+      let exit = await exitCode
 
       try Task.checkCancellation()
       let run = HelperRun(
-        subcommand: "name-clip", exitCode: code, stdout: out, stderr: proc.stderrTail(),
+        subcommand: "name-clip", exit: exit, stdout: out, stderr: proc.stderrTail(),
         apiKey: apiKey, logsDirectory: runner.logsDirectory)
-      guard code == 0 else { throw CutSuggestClientError.helperFailed(run.failure()) }
+      guard exit.exitCode == 0 else { throw CutSuggestClientError.helperFailed(run.failure()) }
       do {
         return try decodeNameClipResult(from: out)
       } catch {
@@ -257,7 +257,7 @@ enum LiveCutSuggester {
     if let snapshot = request.snapshot {
       return try configuredCompletionEvents(run, snapshot: snapshot, latestRevision: latestRevision)
     }
-    guard run.exitCode == 0 else { throw CutSuggestClientError.helperFailed(run.failure()) }
+    guard run.exit.exitCode == 0 else { throw CutSuggestClientError.helperFailed(run.failure()) }
     let payload: (suggestions: [CutSuggestion], meta: CutSuggestion.WireMeta?)
     do {
       payload = try CutSuggestion.decodeSuggestionPayload(
@@ -285,10 +285,10 @@ enum LiveCutSuggester {
       }
       result = try SuggestionRunWireResult.decode(from: run.stdout, snapshot: snapshot)
     } catch {
-      guard run.exitCode == 0 else { throw CutSuggestClientError.helperFailed(run.failure()) }
+      guard run.exit.exitCode == 0 else { throw CutSuggestClientError.helperFailed(run.failure()) }
       throw run.unreadable(unreadableDetail(error))
     }
-    switch (result.status, run.exitCode) {
+    switch (result.status, run.exit.exitCode) {
     case (.ready, 0), (.needsRetry, 1): break
     default:
       throw CutSuggestClientError.exitMismatch(status: result.status.rawValue, run.failure())
@@ -363,18 +363,18 @@ enum LiveCutSuggester {
   /// API key is scrubbed from both, and the environment is never recorded.
   private struct HelperRun {
     var subcommand: String
-    var exitCode: Int32
+    var exit: HelperProcessExit
     var stdout: Data
     var stderr: String
     var logsDirectory: @Sendable () -> URL?
     private var key: String
 
     init(
-      subcommand: String, exitCode: Int32, stdout: Data, stderr: String, apiKey: String?,
+      subcommand: String, exit: HelperProcessExit, stdout: Data, stderr: String, apiKey: String?,
       logsDirectory: @escaping @Sendable () -> URL?
     ) {
       self.subcommand = subcommand
-      self.exitCode = exitCode
+      self.exit = exit
       self.stdout = stdout
       self.logsDirectory = logsDirectory
       key = apiKey?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -387,7 +387,9 @@ enum LiveCutSuggester {
 
     /// Call once per failure: each call writes a log.
     func failure(problem: String? = nil) -> HelperFailure {
-      var failure = HelperFailure(exitCode: exitCode, stderr: stderr, logURL: nil)
+      var failure = HelperFailure(
+        exitCode: exit.exitCode, terminationSignal: exit.terminationSignal, stderr: stderr,
+        logURL: nil)
       failure.logURL = HelperLog.write(
         logBody(failure.report, problem: problem), prefix: "cut-suggester", in: logsDirectory())
       return failure
@@ -398,7 +400,7 @@ enum LiveCutSuggester {
     }
 
     private func logBody(_ report: HelperErrorReport?, problem: String?) -> String {
-      var lines = ["subcommand: \(subcommand)", "exit: \(exitCode)"]
+      var lines = ["subcommand: \(subcommand)", "exit: \(exit.exitCode)"]
       if let problem { lines.append("problem: \(problem)") }
       if let report {
         lines.append(
@@ -434,7 +436,7 @@ enum LiveCutSuggester {
 
   struct ProcessHandle: Sendable {
     var readStdoutToEnd: @Sendable () async -> Data
-    var waitForExit: @Sendable () async -> Int32
+    var waitForExit: @Sendable () async -> HelperProcessExit
     var stderrLines: @Sendable () -> AsyncStream<String>
     var stderrTail: @Sendable () -> String
     var terminate: @Sendable () -> Void

@@ -79,7 +79,7 @@ final class SuggestionRunModel: ViewModel {
   @ObservationIgnored private var confirmation: Confirmation?
   private enum Confirmation {
     case fresh
-    case resume(UUID, SuggestionRunPhase)
+    case resume(UUID, SuggestionRunPhase, String?)
   }
 
   // MARK: - View Helpers
@@ -190,12 +190,17 @@ final class SuggestionRunModel: ViewModel {
     }
     switch target {
     case .fresh: await startFresh(mode: .fresh)
-    case .resume(let runID, _): await startResume(runID: runID, replaceBaseline: true)
+    case .resume(let runID, _, _): await startResume(runID: runID, replaceBaseline: true)
     }
   }
 
   func cancelReplacementTapped() {
-    if case .resume(_, let previous) = confirmation { phase = previous } else { phase = .idle }
+    if case .resume(_, let previous, let previousFailureDetail) = confirmation {
+      phase = previous
+      failureDetail = previousFailureDetail
+    } else {
+      phase = .idle
+    }
     confirmation = nil
   }
 
@@ -343,11 +348,12 @@ final class SuggestionRunModel: ViewModel {
 
   private func startResume(runID: UUID, replaceBaseline: Bool) async {
     let previous = phase
+    let previousFailureDetail = failureDetail
     await perform(runID: runID) { attemptID in
       var capture = try await self.readCapture(runID, attemptID: attemptID)
       try self.validateSource(capture.checkpoint.snapshot)
       if !replaceBaseline, try self.baselineChanged(capture.checkpoint) {
-        self.confirmation = .resume(runID, previous)
+        self.confirmation = .resume(runID, previous, previousFailureDetail)
         self.phase = .confirmingReplacement
         return
       }

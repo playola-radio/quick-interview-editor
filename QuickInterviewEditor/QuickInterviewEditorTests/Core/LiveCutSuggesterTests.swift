@@ -433,7 +433,8 @@ extension LiveCutSuggesterTests {
       }, cacheDirectory: { nil }, logsDirectory: { logsDirectory },
       spawn: { _, _, _ in
         LiveCutSuggester.ProcessHandle(
-          readStdoutToEnd: { output }, waitForExit: { exitCode },
+          readStdoutToEnd: { output },
+          waitForExit: { .init(exitCode: exitCode, terminationSignal: nil) },
           stderrLines: {
             AsyncStream { continuation in
               for line in lines { continuation.yield(line) }
@@ -474,7 +475,8 @@ extension LiveCutSuggesterTests {
         readStdoutToEnd: {
           for await data in stdout.stream { return data }
           return Data()
-        }, waitForExit: { 0 }, stderrLines: { stderr.stream }, stderrTail: { "" },
+        }, waitForExit: { .init(exitCode: 0, terminationSignal: nil) },
+        stderrLines: { stderr.stream }, stderrTail: { "" },
         terminate: {
           terminationObserved.withLock { $0 = true }
           terminated.continuation.yield(())
@@ -645,7 +647,8 @@ extension LiveCutSuggesterTests {
       }
       return LiveCutSuggester.ProcessHandle(
         readStdoutToEnd: { Data(#"{"type_id": null, "fields": {}}"#.utf8) },
-        waitForExit: { 0 }, stderrLines: { AsyncStream { $0.finish() } },
+        waitForExit: { .init(exitCode: 0, terminationSignal: nil) },
+        stderrLines: { AsyncStream { $0.finish() } },
         stderrTail: { "" }, terminate: {})
     }
     _ = try await LiveCutSuggester.nameClip(
@@ -692,7 +695,8 @@ extension LiveCutSuggesterTests {
         readStdoutToEnd: {
           for await data in stdout.stream { return data }
           return Data()
-        }, waitForExit: { 0 }, stderrLines: { AsyncStream { $0.finish() } }, stderrTail: { "" },
+        }, waitForExit: { .init(exitCode: 0, terminationSignal: nil) },
+        stderrLines: { AsyncStream { $0.finish() } }, stderrTail: { "" },
         terminate: {
           terminated.withLock { $0 = true }
           stdout.continuation.yield(Data(#"{"type_id": null, "fields": {}}"#.utf8))
