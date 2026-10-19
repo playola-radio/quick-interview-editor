@@ -11,6 +11,9 @@ import Testing
 
 @MainActor
 struct ProjectModelTests {
+  static let noModelsFailure =
+    "Transcription failed: no models\n\nClick Retry to try again, or drop a different audio file here."
+
   @Test func malformedPartTimingCannotBeCommitted() {
     let run = MasteringRun(
       id: Fixtures.uuid(123), artist: "Artist", inputsDigest: "v1:x",
@@ -513,7 +516,12 @@ struct ProjectModelTests {
       await model.importAudioTapped(URL(fileURLWithPath: "/clip.m4a"))
     }
 
-    expectNoDifference(model.phase, .failed(model.missingCanonicalAudioMessage))
+    let cause = readErrorDescription { _ = try missing.resourceValues(forKeys: [.fileSizeKey]) }
+    expectNoDifference(
+      model.phase,
+      .failed(
+        "Transcription finished but its audio file couldn't be read: \(cause) Try importing again."
+      ))
     #expect(model.editor == nil)
     expectNoDifference(record.commits, [])
   }
@@ -567,8 +575,8 @@ struct ProjectModelTests {
     } operation: {
       await model.importAudioTapped(URL(fileURLWithPath: "/clip.m4a"))
     }
-    expectNoDifference(model.phase, .failed("Transcription failed: no models"))
-    expectNoDifference(model.errorMessage, "Transcription failed: no models")
+    expectNoDifference(model.phase, .failed(Self.noModelsFailure))
+    expectNoDifference(model.errorMessage, Self.noModelsFailure)
     #expect(model.showsError)
     #expect(model.acceptsImport)
     #expect(model.editor == nil)
@@ -821,10 +829,13 @@ struct ProjectModelTests {
   @Test func filePickFailureIsSurfacedNotSwallowed() {
     let (sink, record) = ProjectDocumentSink.recorder()
     let model = ProjectModel(file: nil, plan: nil, audio: nil, sink: sink)
-    withKnownIssue {
-      model.filePickFailed(NSError(domain: "test", code: 1))
-    }
+    let error = NSError(domain: "test", code: 1)
+    model.filePickFailed(error)
     expectNoDifference(model.phase, .empty)  // no phantom import on a failed pick
+    expectNoDifference(
+      model.importErrorMessage,
+      "Couldn't open the audio file: \(error.localizedDescription) "
+        + "Click Open Audio File… to choose it again.")
     expectNoDifference(record.commits, [])
   }
 
@@ -1197,7 +1208,7 @@ struct ProjectModelTests {
       await model.importAudioTapped(URL(fileURLWithPath: "/clip.m4a"))
       try #require(model.editor).mutateDocument { $0.speakerCountOverride = 3 }
       await model.reimportIgnoringCacheTapped()
-      expectNoDifference(model.phase, .failed("Transcription failed: no models"))
+      expectNoDifference(model.phase, .failed(Self.noModelsFailure))
 
       // A failed window takes new audio; another file's edits must not carry over.
       #expect(model.fileDropped([URL(fileURLWithPath: "/other.m4a")]))
@@ -1237,7 +1248,7 @@ struct ProjectModelTests {
       await model.reimportIgnoringCacheTapped()
     }
 
-    expectNoDifference(model.phase, .failed("Transcription failed: no models"))
+    expectNoDifference(model.phase, .failed(Self.noModelsFailure))
     #expect(model.editor == nil)
     // The document still points at the first run's audio, so a save must still find it.
     expectNoDifference(record.commits.count, 1)
@@ -1312,5 +1323,14 @@ struct ProjectModelTests {
     }
 
     expectNoDifference(removed.value, [canonical])
+  }
+}
+
+func readErrorDescription(_ read: () throws -> Void) -> String {
+  do {
+    try read()
+    return "no error"
+  } catch {
+    return error.localizedDescription
   }
 }

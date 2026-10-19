@@ -64,6 +64,13 @@ struct ProjectView: View {
       .padding(.top, 8)
       Button(model.importButtonLabel) { model.importButtonTapped() }
         .padding(.top, 8)
+      if let importError = model.importErrorMessage {
+        Text(importError)
+          .foregroundStyle(Color(red: 0.89, green: 0.58, blue: 0.58))
+          .multilineTextAlignment(.center)
+          .textSelection(.enabled)
+          .frame(maxWidth: 360)
+      }
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
   }

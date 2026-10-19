@@ -1,6 +1,5 @@
 import Dependencies
 import Foundation
-import IssueReporting
 import Observation
 import Sharing
 import UniformTypeIdentifiers
@@ -142,6 +141,7 @@ final class ProjectModel: ViewModel {
   let prepareForMasteringLabel = "Prepare for Mastering"
   // swiftlint:enable inclusive_language
   var isImporterPresented = false
+  private(set) var importErrorMessage: String?
   var interviewArtistText = ""
   private var maxFraction: Double?
   private var elapsedSeconds: Double = 0
@@ -173,8 +173,6 @@ final class ProjectModel: ViewModel {
   let progressNote = "This can take several minutes — longer files take longer."
   let missingCanonicalAudioMessage =
     "Transcription finished but its audio file is missing. Try importing again."
-  let uncomputableFingerprintMessage =
-    "Couldn't read the transcribed audio to fingerprint it. Try importing again."
   let missingPackageMessage =
     "This project has no saved location to load its audio from. Reopen it from its .pie file."
 
@@ -272,9 +270,12 @@ final class ProjectModel: ViewModel {
     beginTranscription(of: .importedSource(url), policy: .useCache)
   }
 
-  /// Surface (don't swallow) an open-panel failure.
+  /// Surface (don't swallow) an open-panel failure; the window stays empty so the user can
+  /// pick again.
   func filePickFailed(_ error: Error) {
-    reportIssue("Audio import failed: \(error.localizedDescription)")
+    importErrorMessage =
+      "Couldn't open the audio file: \(error.localizedDescription) "
+      + "Click \(importButtonLabel) to choose it again."
   }
 
   /// A drop can carry anything; the first audio file wins (one project per window). Returns
@@ -373,6 +374,7 @@ final class ProjectModel: ViewModel {
   private func beginTranscription(of input: TranscriptionInput, policy: CachePolicy) -> Task<
     Void, Never
   > {
+    importErrorMessage = nil
     let previous = transcriptionTask
     previous?.cancel()
     let task = Task { [weak self] in
@@ -412,7 +414,9 @@ final class ProjectModel: ViewModel {
     } catch is CancellationError {
       return  // cancel/close already decided the phase; leave the last progress alone
     } catch {
-      phase = .failed(error.localizedDescription)
+      phase = .failed(
+        "\(error.localizedDescription)\n\nClick Retry to try again, or drop a different audio "
+          + "file here.")
     }
   }
 
@@ -442,30 +446,40 @@ final class ProjectModel: ViewModel {
     // The package records the canonical AIFF's size so a later open can refuse audio that was
     // truncated or swapped (ProjectPackage.verifyAudio). Read it from the file system, never by
     // loading the (potentially multi-GB) file.
-    guard
-      let byteCount = try? result.canonicalAudioURL.resourceValues(forKeys: [.fileSizeKey])
-        .fileSize
-    else {
-      phase = .failed(missingCanonicalAudioMessage)
+    let byteCount: Int
+    do {
+      guard let size = try result.canonicalAudioURL.resourceValues(forKeys: [.fileSizeKey]).fileSize
+      else {
+        phase = .failed(missingCanonicalAudioMessage)
+        return
+      }
+      byteCount = size
+    } catch {
+      phase = .failed(
+        "Transcription finished but its audio file couldn't be read: \(error.localizedDescription) "
+          + "Try importing again.")
       return
     }
     // Content-hash the bundled canonical AIFF (off-main), so a re-transcribe from a saved copy
-    // keys on the audio's own identity rather than the original MP3's (spec A8, Task 5.1).
-    let canonicalFingerprint = await SourceFingerprint.make(for: result.canonicalAudioURL)
+    // keys on the audio's own identity rather than the original MP3's (spec A8, Task 5.1). It
+    // must be a real content hash — never a per-session path — so an unreadable file fails the
+    // run and drops the uncommitted session audio.
+    let canonicalFingerprint: String
+    do {
+      canonicalFingerprint = try await SourceFingerprint.contentHash(for: result.canonicalAudioURL)
+    } catch {
+      canonicalAudioStore.remove(result.canonicalAudioURL)
+      guard !Task.isCancelled else { return }
+      phase = .failed(
+        "Couldn't read the transcribed audio to fingerprint it: \(error.localizedDescription) "
+          + "Try importing again.")
+      return
+    }
     guard !Task.isCancelled else {
       // Cancelled after the engine produced this AIFF but before it was committed: nothing
       // references it (no commit, no save), so remove the orphaned session copy rather than
       // leak it until the weekly reap — mirrors hydrate()'s clone-on-cancel cleanup.
       canonicalAudioStore.remove(result.canonicalAudioURL)
-      return
-    }
-    // The canonical fingerprint is the re-transcribe cache key and must be a real content hash
-    // (spec A8, Task 5.1). SourceFingerprint falls back to a `path:` of the session-local file
-    // when it can't read it; persisting that would key the cache on a per-session path (or
-    // collide across projects), so fail the run and drop the uncommitted session audio instead.
-    guard canonicalFingerprint.hasPrefix("sha256:") else {
-      canonicalAudioStore.remove(result.canonicalAudioURL)
-      phase = .failed(uncomputableFingerprintMessage)
       return
     }
     let newSource = makeProjectSource(
@@ -552,7 +566,9 @@ final class ProjectModel: ViewModel {
         self.loadedAudio = .packageChild(sessionCopy: clone)
         sink.commit(file, nil, .packageChild(sessionCopy: clone))
       } catch {
-        phase = .failed("Couldn't load the project's audio: \(error.localizedDescription)")
+        phase = .failed(
+          "Couldn't load the project's audio: \(error.localizedDescription)\n\nClick Retry to try "
+            + "again.")
         return
       }
     }

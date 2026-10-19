@@ -13,13 +13,22 @@ enum SourceFingerprint {
     await Task.detached(priority: .utility) { compute(for: url) }.value
   }
 
+  /// The `sha256:<hex>` content hash, computed off the main actor, throwing the read error
+  /// instead of falling back to the path.
+  static func contentHash(for url: URL) async throws -> String {
+    try await Task.detached(priority: .utility) { try hash(of: url) }.value
+  }
+
   /// Synchronous fingerprint: `sha256:<hex>` of the file, or `path:<standardized path>`
-  /// when unreadable. Memory-maps the file so a large interview isn't loaded whole.
+  /// when unreadable.
   static func compute(for url: URL) -> String {
-    if let data = try? Data(contentsOf: url, options: .mappedIfSafe) {
-      let digest = SHA256.hash(data: data)
-      return "sha256:" + digest.map { String(format: "%02x", $0) }.joined()
-    }
-    return "path:" + url.standardizedFileURL.path
+    (try? hash(of: url)) ?? "path:" + url.standardizedFileURL.path
+  }
+
+  /// Memory-maps the file so a large interview isn't loaded whole.
+  private static func hash(of url: URL) throws -> String {
+    let data = try Data(contentsOf: url, options: .mappedIfSafe)
+    let digest = SHA256.hash(data: data)
+    return "sha256:" + digest.map { String(format: "%02x", $0) }.joined()
   }
 }

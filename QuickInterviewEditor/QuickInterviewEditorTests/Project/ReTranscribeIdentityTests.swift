@@ -173,7 +173,10 @@ struct ReTranscribeIdentityTests {
       await model.importAudioTapped(URL(fileURLWithPath: "/clip.m4a"))
     }
 
-    expectNoDifference(model.phase, .failed(model.uncomputableFingerprintMessage))
+    let cause = readErrorDescription { _ = try Data(contentsOf: unreadable) }
+    expectNoDifference(
+      model.phase,
+      .failed("Couldn't read the transcribed audio to fingerprint it: \(cause) Try importing again."))
     expectNoDifference(record.commits, [])
     expectNoDifference(removed.value, [unreadable])
   }
