@@ -3,11 +3,23 @@ import Foundation
 import IssueReporting
 import Sharing
 
-enum SuggestionConfigurationStoreError: Error, Equatable {
+enum SuggestionConfigurationStoreError: Error, Equatable, LocalizedError {
   case staleDraft
   case invalid([String])
   case revisionOverflow
   case unimplemented(String)
+
+  var errorDescription: String? {
+    switch self {
+    case .staleDraft:
+      "The rules were saved in another window. Reload saved rules, then make your change again."
+    case .invalid(let messages):
+      "The rules have problems: \(messages.joined(separator: " "))"
+    case .revisionOverflow:
+      "The saved rules have reached their revision limit and can't be saved again."
+    case .unimplemented(let operation): "Saved rules aren't available (\(operation))."
+    }
+  }
 }
 
 actor SuggestionConfigurationStore {

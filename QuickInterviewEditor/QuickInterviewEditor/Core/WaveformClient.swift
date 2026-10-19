@@ -110,10 +110,18 @@ struct WaveformClient: Sendable {
     @Sendable (_ url: URL, _ planSampleRate: Int, _ durationSamples: Int) async throws -> Waveform
 }
 
-enum WaveformClientError: Error, Equatable {
+enum WaveformClientError: Error, Equatable, LocalizedError {
   case unimplemented(String)
   case noAudioTrack
   case readFailed(String)
+
+  var errorDescription: String? {
+    switch self {
+    case .unimplemented(let endpoint): "Waveform loading isn't available (\(endpoint))."
+    case .noAudioTrack: "The file has no audio track."
+    case .readFailed(let detail): "The audio couldn't be read (\(detail))."
+    }
+  }
 }
 
 extension WaveformClient: DependencyKey {

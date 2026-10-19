@@ -95,3 +95,23 @@ struct WaveformClientTests {
     #expect(waveform.baseLevel?.bucketSize == Waveform.baseBucketSize)
   }
 }
+
+struct WaveformClientErrorTests {
+  @Test func noAudioTrackDescribesTheProblem() {
+    expectNoDifference(
+      WaveformClientError.noAudioTrack.localizedDescription,
+      "The file has no audio track.")
+  }
+
+  @Test func readFailedIncludesTheUnderlyingDetail() {
+    expectNoDifference(
+      WaveformClientError.readFailed("The file couldn’t be opened.").localizedDescription,
+      "The audio couldn't be read (The file couldn’t be opened.).")
+  }
+
+  @Test func unimplementedNamesTheMissingEndpoint() {
+    expectNoDifference(
+      WaveformClientError.unimplemented("loadWaveform").localizedDescription,
+      "Waveform loading isn't available (loadWaveform).")
+  }
+}

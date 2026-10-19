@@ -1,4 +1,5 @@
 import CustomDump
+import Security
 import Testing
 
 @testable import PlayolaInterviewEditor
@@ -43,5 +44,17 @@ struct KeychainClientTests {
   @Test func serviceIdIsStable() {
     expectNoDifference(
       KeychainStore.service, "fm.playola.PlayolaInterviewEditor.anthropicAPIKey")
+  }
+
+  @Test func keychainErrorDescribesTheStatusInPlainEnglish() {
+    expectNoDifference(
+      KeychainError.unexpectedStatus(errSecInteractionNotAllowed).localizedDescription,
+      "macOS Keychain error: User interaction is not allowed. (code -25308)")
+  }
+
+  @Test func keychainErrorForAnUnknownStatusIsNotJustANumber() {
+    expectNoDifference(
+      KeychainError.unexpectedStatus(12345).localizedDescription,
+      "macOS Keychain error: an unknown Keychain problem. (code 12345)")
   }
 }
