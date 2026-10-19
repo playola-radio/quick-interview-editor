@@ -35,12 +35,16 @@ def _load_audio_16k_mono(source: Path):
     fd, wav_path = tempfile.mkstemp(suffix=".wav")
     os.close(fd)
     try:
-        subprocess.run(
+        result = subprocess.run(
             ["afconvert", "-f", "WAVE", "-d", f"LEI16@{SAMPLE_RATE}", "-c", "1",
              str(source), wav_path],
-            check=True,
             capture_output=True,
+            text=True,
         )
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"afconvert failed ({result.returncode}): {result.stderr.strip()}"
+            )
         with wave.open(wav_path, "rb") as w:
             frames = w.readframes(w.getnframes())
     finally:

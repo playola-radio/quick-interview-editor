@@ -37,9 +37,36 @@ SNAP_PARAMS = {"search_radius_ms": 800.0, "roll_ms": 20.0, "pad_ms": 100.0, "tai
 SILENCE_PARAMS = {"min_silence_ms": 120.0, "margin_db": 8.0, "floor_percentile": 20.0}
 
 
+_last_phase: str | None = None
+
+
+class UsageError(Exception):
+    """A bad invocation (e.g. a missing input file); exits 2 instead of 1."""
+
+
 def _emit_event(event: dict) -> None:
     """One machine event per stderr line; stdout stays pure JSON."""
+    global _last_phase
+    if event.get("phase"):
+        _last_phase = event["phase"]
     print(f"QIE_EVENT {json.dumps(event)}", file=sys.stderr, flush=True)
+
+
+def _error_message(exc: BaseException) -> str:
+    message = str(exc) or type(exc).__name__
+    cause = exc.__cause__ or (None if exc.__suppress_context__ else exc.__context__)
+    if cause is None:
+        return message
+    return f"{message} (caused by {type(cause).__name__}: {str(cause) or 'no message'})"
+
+
+def _emit_error(exc: BaseException, operation: str) -> None:
+    """The single structured hard-failure line the app parses (never a traceback)."""
+    report = {
+        "schema_version": 1, "domain": "logic_markers", "operation": operation,
+        "phase": _last_phase, "message": _error_message(exc), "error_type": type(exc).__name__,
+    }
+    print(f"QIE_ERROR {json.dumps(report)}", file=sys.stderr, flush=True)
 
 
 def _progress(
@@ -275,11 +302,7 @@ def run(
 
 def _cmd_markers(args) -> int:
     if args.engine == "openai" and not args.api_key:
-        print(
-            "error: --engine openai needs a key. Pass --api-key or set OPENAI_KEY.",
-            file=sys.stderr,
-        )
-        return 2
+        raise UsageError("--engine openai needs a key. Pass --api-key or set OPENAI_KEY.")
     dest = run(args.input, args.engine, args.api_key, args.sample_rate, args.refresh)
     print(f"\nDone -> {dest}")
     print("In Logic: Navigate > Other > Import Markers from Audio File, pick that AIFF.")
@@ -378,8 +401,7 @@ def run_cut(source: Path, edit_path: Path):
 
 def _cmd_cut(args) -> int:
     if not args.edit.exists():
-        print(f"error: no such edit file: {args.edit}", file=sys.stderr)
-        return 2
+        raise UsageError(f"no such edit file: {args.edit}")
     outputs, plan_path, segments = run_cut(args.input, args.edit)
     print(f"Wrote {len(outputs)} file(s):")
     for out, seg in zip(outputs, segments):
@@ -618,8 +640,7 @@ def run_inject(request_path: Path) -> dict:
 
 def _cmd_inject(args) -> int:
     if not args.request.exists():
-        print(f"error: no such request file: {args.request}", file=sys.stderr)
-        return 2
+        raise UsageError(f"no such request file: {args.request}")
     result = _redirect_stdout_during(lambda: run_inject(args.request))
     json.dump(result, sys.stdout)
     sys.stdout.flush()
@@ -645,8 +666,7 @@ def _redirect_stdout_during(func):
 
 def _cmd_render(args) -> int:
     if not args.request.exists():
-        print(f"error: no such request file: {args.request}", file=sys.stderr)
-        return 2
+        raise UsageError(f"no such request file: {args.request}")
     result = _redirect_stdout_during(
         lambda: run_render(args.input, args.request, args.work_dir, args.sample_rate)
     )
@@ -729,23 +749,22 @@ def main(argv=None) -> int:
 
     # inject-markers has no positional `input` (it addresses files inside the
     # request); every other subcommand does.
-    input_path = getattr(args, "input", None)
-    if input_path is not None and not input_path.exists():
-        print(f"error: no such file: {input_path}", file=sys.stderr)
-        return 2
-
+    global _last_phase
+    _last_phase = None
     try:
+        input_path = getattr(args, "input", None)
+        if input_path is not None and not input_path.exists():
+            raise UsageError(f"no such file: {input_path}")
         return args.func(args)
-    except Exception as exc:  # fail fast with a clear message
+    except Exception as exc:  # fail fast with one structured line
         # Set QIE_DEBUG=1 for the full traceback (incl. the chained cause that a
-        # library like transformers/pyannote hides behind a terse message). This
-        # is the difference between a diagnosable packaged helper and a black box.
-        if os.environ.get("QIE_DEBUG"):
+        # library like transformers/pyannote hides behind a terse message).
+        if os.environ.get("QIE_DEBUG") and not isinstance(exc, UsageError):
             import traceback
 
             traceback.print_exc(file=sys.stderr)
-        print(f"error: {exc}", file=sys.stderr)
-        return 1
+        _emit_error(exc, args.command)
+        return 2 if isinstance(exc, UsageError) else 1
 
 
 if __name__ == "__main__":

@@ -55,14 +55,57 @@ from .clip_naming import run_name_clip, validate_clip_request
 from .cutter import suggest_cuts
 from .configured_run import immutable_request, request_identity, run_configured_suggest, validate_request
 from .run_journal import RunJournal
-from .llm import LLMClient, live_client_for
+from .llm import LLMClient, LLMError, failure_record, live_client_for
 from .models import DEFAULT_SPECS, ProductSpec, ProductType
 from .transcript import sentences_from_units
 
 
+_last_phase: str | None = None
+
+
+class UsageError(Exception):
+    """A bad invocation (e.g. a missing request file); exits 2 instead of 1."""
+
+
 def _emit_event(event: dict) -> None:
     """One machine event per stderr line; stdout stays pure JSON (mirrors the engine)."""
+    global _last_phase
+    if event.get("phase"):
+        _last_phase = event["phase"]
     print(f"QIE_EVENT {json.dumps(event)}", file=sys.stderr, flush=True)
+
+
+def _provider_failure(exc: BaseException) -> LLMError | None:
+    seen = set()
+    while exc is not None and id(exc) not in seen:
+        if isinstance(exc, LLMError):
+            return exc
+        seen.add(id(exc))
+        exc = exc.__cause__ or exc.__context__
+    return None
+
+
+def _error_message(exc: BaseException) -> str:
+    message = str(exc) or type(exc).__name__
+    cause = exc.__cause__ or (None if exc.__suppress_context__ else exc.__context__)
+    if cause is None or isinstance(exc, LLMError):
+        return message
+    detail = cause.message if isinstance(cause, LLMError) else (str(cause) or "no message")
+    return f"{message} (caused by {type(cause).__name__}: {detail})"
+
+
+def _emit_error(exc: BaseException, operation: str) -> None:
+    """The single structured hard-failure line the app parses (never a traceback)."""
+    report = {
+        "schema_version": 1, "domain": "cut_suggester", "operation": operation,
+        "phase": _last_phase, "message": _error_message(exc), "error_type": type(exc).__name__,
+    }
+    provider = _provider_failure(exc)
+    if provider is not None:
+        record = failure_record(provider)
+        record.pop("error_type")
+        report["provider_error"] = record
+    print(f"QIE_ERROR {json.dumps(report)}", file=sys.stderr, flush=True)
 
 
 def specs_from_request(product_specs: list[dict] | None) -> dict[ProductType, ProductSpec]:
@@ -200,8 +243,7 @@ def _stdout_to_stderr():
 
 def _cmd_suggest(args) -> int:
     if not os.path.exists(args.request):
-        print(f"error: no such request file: {args.request}", file=sys.stderr)
-        return 2
+        raise UsageError(f"no such request file: {args.request}")
     request = _read_request(args.request)
     is_v2 = "schema_version" in request
     if is_v2:
@@ -228,8 +270,7 @@ def _cmd_suggest(args) -> int:
 
 def _cmd_name_clip(args) -> int:
     if not os.path.exists(args.request):
-        print(f"error: no such request file: {args.request}", file=sys.stderr)
-        return 2
+        raise UsageError(f"no such request file: {args.request}")
     request = _read_request(args.request)
     validate_clip_request(request)
     with _stdout_to_stderr():
@@ -279,18 +320,17 @@ def main(argv=None) -> int:
     if (getattr(args, "refresh", False) and getattr(args, "cache_dir", None) is None
             and getattr(args, "journal_dir", None) is None):
         parser.error("--refresh requires --cache-dir")
+    global _last_phase
+    _last_phase = None
     try:
         return args.func(args)
-    except CacheMiss as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return 1
-    except Exception as exc:  # fail fast with a clear message
-        if os.environ.get("QIE_DEBUG"):
+    except Exception as exc:  # fail fast with one structured line
+        if os.environ.get("QIE_DEBUG") and not isinstance(exc, (CacheMiss, UsageError)):
             import traceback
 
             traceback.print_exc(file=sys.stderr)
-        print(f"error: {exc}", file=sys.stderr)
-        return 1
+        _emit_error(exc, args.command)
+        return 2 if isinstance(exc, UsageError) else 1
 
 
 if __name__ == "__main__":
