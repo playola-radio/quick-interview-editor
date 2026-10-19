@@ -95,9 +95,10 @@ enum InstallLocation {
     } catch {
       NSLog("InstallLocation: move to /Applications failed: \(error)")
       try? fileManager.removeItem(at: staging)
-      // Tell the user rather than failing silently: /Applications may not be
-      // writable (e.g. a non-admin account). They can still drag it over by hand.
-      presentMoveFailed()
+      // /Applications may not be writable (e.g. a non-admin account). They can still
+      // drag it over by hand.
+      presentAlert(
+        title: "Couldn't move to the Applications folder", message: moveFailedMessage(for: error))
       return false  // Stay running from the current location; nothing destructive done.
     }
 
@@ -107,9 +108,12 @@ enum InstallLocation {
       _, error in
       // Only quit this instance once the relocated copy has actually launched —
       // otherwise a failed relaunch would leave the user with no running app.
-      guard error == nil else {
-        NSLog(
-          "InstallLocation: relaunch from /Applications failed: \(String(describing: error))")
+      if let error {
+        NSLog("InstallLocation: relaunch from /Applications failed: \(error)")
+        let message = relaunchFailedMessage(for: error)
+        Task { @MainActor in
+          presentAlert(title: "Couldn't open the moved copy", message: message)
+        }
         return
       }
       Task { @MainActor in NSApp.terminate(nil) }
@@ -117,13 +121,22 @@ enum InstallLocation {
     return true
   }
 
+  static func moveFailedMessage(for error: any Error) -> String {
+    "\(error.localizedDescription)\n\nYou can move Playola Interview Editor yourself by "
+      + "dragging it into Applications in Finder. Auto-update works best once it lives there."
+  }
+
+  static func relaunchFailedMessage(for error: any Error) -> String {
+    "The app was moved to your Applications folder, but the moved copy couldn't be opened: "
+      + "\(error.localizedDescription)\n\nQuit this copy, then open Playola Interview Editor "
+      + "from your Applications folder."
+  }
+
   @MainActor
-  private static func presentMoveFailed() {
+  private static func presentAlert(title: String, message: String) {
     let alert = NSAlert()
-    alert.messageText = "Couldn't move to the Applications folder"
-    alert.informativeText =
-      "You can move Playola Interview Editor yourself by dragging it into "
-      + "Applications in Finder. Auto-update works best once it lives there."
+    alert.messageText = title
+    alert.informativeText = message
     alert.addButton(withTitle: "OK")
     alert.runModal()
   }
