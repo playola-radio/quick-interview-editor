@@ -14,6 +14,11 @@ focus on changes that affect editing work rather than internal implementation.
   message now names the real cause and the step that failed instead of a
   generic error, and points to a diagnostic log you can copy and send along
   with a bug report.
+- When opening an audio file, saving or reading your API key, playing audio,
+  drawing the waveform, or moving the app into Applications fails, the app now
+  tells you what went wrong and what to try next instead of failing silently or
+  showing a generic message. A locked Keychain is no longer mistaken for a
+  missing API key.
 
 ## [2.5.0] - 2026-10-16
 
