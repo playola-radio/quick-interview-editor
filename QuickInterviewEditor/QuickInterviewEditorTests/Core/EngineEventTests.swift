@@ -144,6 +144,17 @@ struct EngineEventTests {
     expectNoDifference(failure.cause, "ModuleNotFoundError: No module named 'whisperx'")
   }
 
+  @Test func helperFailureFallbackSkipsTracebackFramesAndSourceLines() {
+    let stderr = [
+      "ValueError: earlier",
+      "Traceback (most recent call last):",
+      #"  File "cli.py", line 4, in main"#,
+      #"    raise RuntimeError(body)"#,
+    ].joined(separator: "\n")
+    let failure = HelperFailure(exitCode: 1, stderr: stderr, logURL: nil)
+    expectNoDifference(failure.cause, "ValueError: earlier")
+  }
+
   @Test func helperFailureNamesASignalWhenThereIsNoReport() {
     let failure = HelperFailure(exitCode: 137, stderr: "", logURL: nil)
     expectNoDifference(failure.signal, 9)

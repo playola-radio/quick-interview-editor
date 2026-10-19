@@ -151,3 +151,18 @@ def test_error_line_is_single_line_json_even_with_newlines(cli, capsys):
     report, stderr = _only_error(capsys)
     assert len(stderr.splitlines()) == 1
     assert report["message"] == "line one\nline two"
+
+
+@pytest.mark.parametrize("cli, argv, operation", [
+    (suggester_cli, ["suggest"], "suggest"),
+    (suggester_cli, ["suggest", "--request", "r.json", "--cached", "--refresh"], "suggest"),
+    (engine_cli, ["plan"], "plan"),
+    (engine_cli, [], "logic-markers"),
+])
+def test_argument_errors_are_one_error_line(cli, argv, operation, capsys):
+    with pytest.raises(SystemExit) as exit_info:
+        cli.main(argv)
+    report, stderr = _only_error(capsys)
+    assert exit_info.value.code == 2
+    assert (report["operation"], report["error_type"]) == (operation, "UsageError")
+    assert stderr.strip() == _error_lines(stderr)[0]

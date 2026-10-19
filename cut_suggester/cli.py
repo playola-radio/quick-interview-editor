@@ -280,8 +280,18 @@ def _cmd_name_clip(args) -> int:
     return 0
 
 
+class _ArgumentParser(argparse.ArgumentParser):
+    """Bad arguments are hard failures too, reported as the one `QIE_ERROR` line."""
+
+    def error(self, message):
+        _emit_error(UsageError(message), self.prog.split()[-1])
+        raise SystemExit(2)
+
+
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(
+    global _last_phase
+    _last_phase = None
+    parser = _ArgumentParser(
         prog="cut-suggester",
         description="Suggest product-shaped cut candidates from an interview transcript.",
     )
@@ -316,12 +326,10 @@ def main(argv=None) -> int:
     # message: --refresh recomputes through the live client, so it needs one (not
     # --cached) and a --cache-dir to overwrite.
     if getattr(args, "cached", False) and getattr(args, "refresh", False):
-        parser.error("--refresh cannot be combined with --cached (no live client to recompute)")
+        s.error("--refresh cannot be combined with --cached (no live client to recompute)")
     if (getattr(args, "refresh", False) and getattr(args, "cache_dir", None) is None
             and getattr(args, "journal_dir", None) is None):
-        parser.error("--refresh requires --cache-dir")
-    global _last_phase
-    _last_phase = None
+        s.error("--refresh requires --cache-dir")
     try:
         return args.func(args)
     except Exception as exc:  # fail fast with one structured line

@@ -167,13 +167,21 @@ struct HelperFailure: Equatable, Sendable {
   init(exitCode: Int32, stderr: String, logURL: URL?) {
     self.exitCode = exitCode
     self.logURL = logURL
-    let lines = stderr.split(whereSeparator: \.isNewline).map {
-      $0.trimmingCharacters(in: .whitespaces)
+    let lines = stderr.split(whereSeparator: \.isNewline).map(String.init)
+    report =
+      lines.reversed().lazy.compactMap {
+        Self.decodeReport($0.trimmingCharacters(in: .whitespaces))
+      }.first
+    lastStderrLine = lines.last(where: Self.isPlainLine).map {
+      Self.truncated($0.trimmingCharacters(in: .whitespaces))
     }
-    report = lines.reversed().lazy.compactMap(Self.decodeReport).first
-    lastStderrLine = lines.last { line in
-      !line.isEmpty && !line.hasPrefix("QIE_EVENT ") && !line.hasPrefix(Self.errorPrefix)
-    }.map(Self.truncated)
+  }
+
+  /// Not a protocol line, a traceback header, or an indented traceback frame/source line.
+  private static func isPlainLine(_ line: String) -> Bool {
+    guard let first = line.first, !first.isWhitespace else { return false }
+    return !line.hasPrefix("QIE_EVENT ") && !line.hasPrefix(errorPrefix)
+      && !line.hasPrefix("Traceback (")
   }
 
   var signal: Int32? { exitCode > 128 ? exitCode - 128 : nil }

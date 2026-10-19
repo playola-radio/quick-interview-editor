@@ -696,8 +696,18 @@ def _cmd_plan(args) -> int:
     return 0
 
 
+class _ArgumentParser(argparse.ArgumentParser):
+    """Bad arguments are hard failures too, reported as the one `QIE_ERROR` line."""
+
+    def error(self, message):
+        _emit_error(UsageError(message), self.prog.split()[-1])
+        raise SystemExit(2)
+
+
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(
+    global _last_phase
+    _last_phase = None
+    parser = _ArgumentParser(
         prog="logic-markers",
         description="Transcribe audio, embed Logic markers, and chunk by transcript.",
     )
@@ -749,8 +759,6 @@ def main(argv=None) -> int:
 
     # inject-markers has no positional `input` (it addresses files inside the
     # request); every other subcommand does.
-    global _last_phase
-    _last_phase = None
     try:
         input_path = getattr(args, "input", None)
         if input_path is not None and not input_path.exists():

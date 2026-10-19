@@ -1146,6 +1146,38 @@ extension SuggestionRunModelTests {
     }
   }
 
+  @Test func signalKillAfterARecordedFailureNamesTheSignal() async throws {
+    try await withMainSerialExecutor {
+      let fixture = SuggestionRunFixture()
+      try await withDependencies {
+        fixture.install(&$0)
+      } operation: {
+        let model = fixture.model()
+        let task = Task { await model.suggestTapped() }
+        await fixture.waitForRequests()
+        let runID = try #require(model.activeRunID)
+        fixture.checkpoint(
+          phase: .needsRetry,
+          failures: [
+            fixture.failure(
+              .credits, kind: "discovery", message: "Your credit balance is too low.",
+              statusCode: 400, requestID: "req_d", retryable: false)
+          ])
+        fixture.state.value.continuations[0].finish(
+          throwing: CutSuggestClientError.helperFailed(
+            HelperFailure(exitCode: 137, stderr: "", logURL: nil)))
+        await task.value
+        expectNoDifference(
+          model.phase,
+          .needsRetry(
+            runID: runID,
+            message:
+              "The suggestion search stopped while searching: the helper was stopped by signal 9."
+          ))
+      }
+    }
+  }
+
   @Test func resumeCrashBeforeANewCheckpointDoesNotReplayThePreviousFailure() async throws {
     try await withMainSerialExecutor {
       let fixture = SuggestionRunFixture()

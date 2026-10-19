@@ -468,7 +468,7 @@ final class SuggestionRunModel: ViewModel {
   private func presentRecordedFailureOrRethrow(
     _ streamError: any Error, runID: UUID, attemptID: UUID, startRevision: Int?
   ) async throws {
-    guard !(streamError is CancellationError),
+    guard !(streamError is CancellationError), !Self.isUnexpectedExit(streamError),
       let capture = try? await readCapture(runID, attemptID: attemptID),
       capture.checkpoint.pythonRevision > (startRevision ?? -1),
       let message = recoveryMessage(capture.checkpoint)
@@ -764,6 +764,14 @@ extension SuggestionRunModel {
     default:
       return error.localizedDescription
     }
+  }
+
+  /// A helper killed by a signal, or whose result disagrees with its exit code, is shown as
+  /// that, not as whatever its last checkpoint recorded.
+  private static func isUnexpectedExit(_ error: any Error) -> Bool {
+    guard let error = error as? CutSuggestClientError else { return false }
+    if case .exitMismatch = error { return true }
+    return error.helperFailure?.signal != nil
   }
 
   private static func failureDetail(_ error: any Error) -> String? {
