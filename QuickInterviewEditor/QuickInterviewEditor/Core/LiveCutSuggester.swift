@@ -367,6 +367,7 @@ enum LiveCutSuggester {
     var stdout: Data
     var stderr: String
     var logsDirectory: @Sendable () -> URL?
+    private var key: String
 
     init(
       subcommand: String, exitCode: Int32, stdout: Data, stderr: String, apiKey: String?,
@@ -376,8 +377,12 @@ enum LiveCutSuggester {
       self.exitCode = exitCode
       self.stdout = stdout
       self.logsDirectory = logsDirectory
-      let key = apiKey?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-      self.stderr = key.isEmpty ? stderr : stderr.replacingOccurrences(of: key, with: "[redacted]")
+      key = apiKey?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+      self.stderr = Self.redacting(key, in: stderr)
+    }
+
+    private static func redacting(_ key: String, in text: String) -> String {
+      key.isEmpty ? text : text.replacingOccurrences(of: key, with: "[redacted]")
     }
 
     /// Call once per failure: each call writes a log.
@@ -409,8 +414,10 @@ enum LiveCutSuggester {
             + "retry_after=\(provider.retryAfter.map { "\($0)" } ?? "none") "
             + "retryable=\(provider.retryable)")
       }
+      // swiftlint:disable:next optional_data_string_conversion
+      let stdoutText = String(decoding: stdout, as: UTF8.self)
       return lines.joined(separator: "\n") + "\n\n"
-        + HelperLog.streams(stdout: stdout, stderr: stderr)
+        + HelperLog.streams(stdout: Data(Self.redacting(key, in: stdoutText).utf8), stderr: stderr)
     }
   }
 

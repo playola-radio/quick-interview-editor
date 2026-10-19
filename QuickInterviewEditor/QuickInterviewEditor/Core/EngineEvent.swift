@@ -78,7 +78,6 @@ enum EngineClientError: Error, Equatable, LocalizedError {
   case engineNotFound(String)
   case engineFailed(String)
   case decodeFailed(String)
-  case injectFailed(String)
   case injectDecodeFailed(String)
   case transcriptionExited(HelperFailure)
   case injectExited(HelperFailure)
@@ -89,7 +88,6 @@ enum EngineClientError: Error, Equatable, LocalizedError {
     case .engineNotFound(let path): return "Transcription engine not found at \(path)."
     case .engineFailed(let message): return "Transcription failed: \(message)"
     case .decodeFailed(let message): return "Could not read the transcription result: \(message)"
-    case .injectFailed(let message): return "Marker injection failed: \(message)"
     case .injectDecodeFailed(let message):
       return "Could not read the marker injection result: \(message)"
     case .transcriptionExited(let failure): return Self.describe("Transcription", failure)
@@ -180,7 +178,7 @@ struct HelperFailure: Equatable, Sendable {
   /// Not a protocol line, a traceback header, or an indented traceback frame/source line.
   private static func isPlainLine(_ line: String) -> Bool {
     guard let first = line.first, !first.isWhitespace else { return false }
-    return !line.hasPrefix("QIE_EVENT ") && !line.hasPrefix(errorPrefix)
+    return !line.hasPrefix("QIE_EVENT") && !line.hasPrefix("QIE_ERROR")
       && !line.hasPrefix("Traceback (")
   }
 

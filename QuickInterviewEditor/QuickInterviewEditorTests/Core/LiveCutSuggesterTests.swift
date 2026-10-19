@@ -339,7 +339,8 @@ extension LiveCutSuggesterTests {
     try Data().write(to: logs.appendingPathComponent("transcribe-0000.log"))
     let stderr = "leaked sk-ant-secret\n" + Self.creditsError
     let error = await Self.configuredFailure(
-      output: Data(), exitCode: 1, stderr: stderr, logsDirectory: logs, apiKey: " sk-ant-secret ")
+      output: Data("echo sk-ant-secret".utf8), exitCode: 1, stderr: stderr, logsDirectory: logs,
+      apiKey: " sk-ant-secret ")
 
     let logURL = try #require(error?.helperFailure?.logURL)
     let text = try String(contentsOf: logURL, encoding: .utf8)

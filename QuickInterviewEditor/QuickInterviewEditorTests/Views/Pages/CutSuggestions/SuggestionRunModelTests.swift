@@ -1235,6 +1235,26 @@ extension SuggestionRunModelTests {
     }
   }
 
+  @Test func discardClearsThePreviousFailureDetail() async throws {
+    try await withMainSerialExecutor {
+      let fixture = SuggestionRunFixture()
+      try await withDependencies {
+        fixture.install(&$0)
+      } operation: {
+        let model = fixture.model()
+        let task = Task { await model.suggestTapped() }
+        await fixture.waitForRequests()
+        fixture.state.value.continuations[0].finish(
+          throwing: CutSuggestClientError.helperFailed(
+            HelperFailure(
+              exitCode: 1, stderr: "", logURL: URL(fileURLWithPath: "/tmp/cut-suggester-1.log"))))
+        await task.value
+        await model.discardSearchTapped()
+        expectNoDifference(model.failureDetail, nil)
+      }
+    }
+  }
+
   @Test func newAttemptClearsThePreviousFailureDetail() async throws {
     try await withMainSerialExecutor {
       let fixture = SuggestionRunFixture()

@@ -268,6 +268,7 @@ final class SuggestionRunModel: ViewModel {
     guard let checkpoint = currentDocument().unfinishedSuggestionRun else {
       activeRunID = nil
       phase = .idle
+      failureDetail = nil
       return
     }
     if activeRunID == checkpoint.snapshot.runID {
@@ -277,6 +278,7 @@ final class SuggestionRunModel: ViewModel {
       }
     }
     activeRunID = checkpoint.snapshot.runID
+    failureDetail = nil
     present(checkpoint)
   }
 

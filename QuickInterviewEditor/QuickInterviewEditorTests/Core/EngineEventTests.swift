@@ -155,6 +155,11 @@ struct EngineEventTests {
     expectNoDifference(failure.cause, "ValueError: earlier")
   }
 
+  @Test func helperFailureFallbackSkipsAnUnterminatedProtocolPrefix() {
+    let failure = HelperFailure(exitCode: 1, stderr: "warning: slow\nQIE_ERROR", logURL: nil)
+    expectNoDifference(failure.cause, "warning: slow")
+  }
+
   @Test func helperFailureNamesASignalWhenThereIsNoReport() {
     let failure = HelperFailure(exitCode: 137, stderr: "", logURL: nil)
     expectNoDifference(failure.signal, 9)
