@@ -76,9 +76,10 @@ struct AudioPlayerClient: Sendable {
   /// exact resting sample, tagged with its coordinate axis (nil if `session` is not current).
   /// Does not end the `play` call.
   var pause: @Sendable (PlaybackSessionID) async -> PlaybackSample?
-  /// Resumes `session` if it is the current paused playback. Returns whether it is now playing,
-  /// so a caller can keep its UI honest when a restart fails (e.g. the engine stopped mid-pause).
-  var resume: @Sendable (PlaybackSessionID) async -> Bool
+  /// Resumes `session` if it is the current paused playback. Returns whether it is now playing
+  /// (false when `session` isn't current), and throws when the audio engine can't restart (e.g.
+  /// it stopped mid-pause), so a caller can keep its UI honest and tell the user why.
+  var resume: @Sendable (PlaybackSessionID) async throws -> Bool
   /// Stops the current playback if `session` is nil or matches it; otherwise no-op.
   var stop: @Sendable (PlaybackSessionID?) async -> Void
   /// Sets the pitch-preserving playback speed (e.g. 0.5–3.0). Applies live to any current
@@ -193,7 +194,7 @@ extension AudioPlayerClient {
           url: url, plan: plan, planSampleRate: sampleRate, rate: rate, session: session)
       },
       pause: { session in await box.pause(session: session) },
-      resume: { session in await box.resume(session: session) },
+      resume: { session in try await box.resume(session: session) },
       stop: { session in await box.stop(session: session) },
       setRate: { rate in await box.setRate(rate) },
       positions: {
@@ -613,20 +614,13 @@ private actor LivePlayerBox {
 
   /// Resumes a paused session: restart the node and the tick loop. Returns whether the session
   /// is now playing — false if `session` isn't current, or true if it was already playing.
-  func resume(session: PlaybackSessionID) -> Bool {
+  func resume(session: PlaybackSessionID) throws -> Bool {
     guard currentSession == session else { return false }
     if node.isPlaying { return true }
     // An interruption/device-change can stop the engine while the session stays current;
-    // restart it before `node.play()`. If the restart fails, surface it and stay paused
-    // rather than fake a silent resume — the caller keeps its UI paused and can retry or stop.
-    if !engine.isRunning {
-      do {
-        try engine.start()
-      } catch {
-        reportIssue(error)
-        return false
-      }
-    }
+    // restart it before `node.play()`. If the restart fails, throw rather than fake a silent
+    // resume — the caller keeps its UI paused, tells the user, and can retry or stop.
+    if !engine.isRunning { try engine.start() }
     node.play()
     startTicking()
     return true
