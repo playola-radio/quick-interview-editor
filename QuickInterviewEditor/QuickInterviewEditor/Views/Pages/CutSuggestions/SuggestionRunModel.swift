@@ -149,8 +149,15 @@ final class SuggestionRunModel: ViewModel {
   // MARK: - User Actions
   func suggestTapped() async {
     guard canStart else { return }
-    guard !hasNoAPIKey else {
-      onMissingAPIKey()
+    let key: String
+    do {
+      guard let resolvedKey = try resolveAPIKey() else {
+        onMissingAPIKey()
+        return
+      }
+      key = resolvedKey
+    } catch {
+      presentImmediateFailure(error)
       return
     }
     if !currentDocument().cutSuggestions.isEmpty {
@@ -163,7 +170,7 @@ final class SuggestionRunModel: ViewModel {
       }
       return
     }
-    await startFresh(mode: .fresh)
+    await startFresh(mode: .fresh, key: key)
   }
 
   func automaticSearchIfNeeded() async {
@@ -181,15 +188,24 @@ final class SuggestionRunModel: ViewModel {
   func replaceConfirmed() async {
     acceptingConfirmation = false
     guard let target = confirmation, !ownershipBlocked, !isRunning, stopTask == nil else { return }
-    confirmation = nil
+    let key: String
     do {
+      guard let resolvedKey = try resolveAPIKey() else {
+        confirmation = nil
+        phase = .idle
+        onMissingAPIKey()
+        return
+      }
+      key = resolvedKey
+      confirmation = nil
       try onReplacementConfirmed()
     } catch {
-      phase = .failed(message: error.localizedDescription)
+      confirmation = nil
+      presentImmediateFailure(error)
       return
     }
     switch target {
-    case .fresh: await startFresh(mode: .fresh)
+    case .fresh: await startFresh(mode: .fresh, key: key)
     case .resume(let runID, _, _): await startResume(runID: runID, replaceBaseline: true)
     }
   }
@@ -288,12 +304,6 @@ final class SuggestionRunModel: ViewModel {
   }
 
   // MARK: - Private Helpers
-  /// True only when key resolution cleanly found no key; a read failure is left for the run
-  /// to surface rather than sending the user to key entry.
-  private var hasNoAPIKey: Bool {
-    do { return try resolveAPIKey() == nil } catch { return false }
-  }
-
   private func validConfiguration() async throws -> SuggestionConfiguration {
     let value = try await configuration.load()
     let messages = value.validationMessages()
@@ -303,13 +313,18 @@ final class SuggestionRunModel: ViewModel {
     return value
   }
 
-  private func startFresh(mode: SuggestionSearchMode) async {
+  private func presentImmediateFailure(_ error: any Error) {
+    phase = .failed(message: Self.hardFailureMessage(error, model: options.model))
+    failureDetail = Self.failureDetail(error)
+  }
+
+  private func startFresh(mode: SuggestionSearchMode, key: String? = nil) async {
     guard !isRunning, currentDocument().unfinishedSuggestionRun == nil else { return }
     let runID = uuid()
     await perform(runID: runID) { attemptID in
       let configuration = try await self.validConfiguration()
       try self.check(runID, attemptID)
-      guard let key = try self.resolveAPIKey() else {
+      guard let key = try key ?? self.resolveAPIKey() else {
         if mode == .fresh { self.onMissingAPIKey() }
         throw CutSuggestClientError.authMissing("Add an API key to resume this search.")
       }

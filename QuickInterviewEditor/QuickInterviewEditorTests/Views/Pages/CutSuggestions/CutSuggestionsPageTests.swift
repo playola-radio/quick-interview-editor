@@ -176,6 +176,63 @@ struct CutSuggestionsPageTests {
     }
   }
 
+  @Test func keychainReadFailureWithExistingSuggestionsIsReportedBeforeReplacement() async {
+    let fixture = SuggestionRunFixture()
+    let existing = fixture.candidate()
+    fixture.document.withValue { $0.cutSuggestions = [existing] }
+    await withDependencies {
+      fixture.install(&$0)
+      $0.keychain = .failingToRead
+    } operation: {
+      let model = CutSuggestionsPageModel(
+        editPlan: Fixtures.editPlan(), sourceFingerprint: fixture.owner.sourceFingerprint)
+      fixture.wirePage(model)
+
+      await model.suggestCutsTapped()
+
+      let expectedError =
+        "Couldn't read your Anthropic API key from the Keychain: test Keychain failure. "
+        + "Make sure your login keychain is unlocked in Keychain Access, then try again."
+      expectNoDifference(
+        model.errorMessage,
+        expectedError)
+      expectNoDifference(model.run.phase, .failed(message: expectedError))
+      expectNoDifference(fixture.document.value.cutSuggestions, [existing])
+    }
+  }
+
+  @Test func replacementKeepsExistingSuggestionsWhenTheSecondKeyReadFails() async {
+    let fixture = SuggestionRunFixture()
+    let existing = fixture.candidate()
+    let reads = LockIsolated(0)
+    fixture.document.withValue { $0.cutSuggestions = [existing] }
+    await withDependencies {
+      fixture.install(&$0)
+      $0.keychain = KeychainClient(
+        save: { _ in },
+        load: {
+          reads.withValue { $0 += 1 }
+          if reads.value == 1 { return "test-key" }
+          throw TestKeychainError()
+        },
+        delete: {})
+    } operation: {
+      let model = CutSuggestionsPageModel(
+        editPlan: Fixtures.editPlan(), sourceFingerprint: fixture.owner.sourceFingerprint)
+      fixture.wirePage(model)
+
+      await model.suggestCutsTapped()
+      expectNoDifference(model.run.phase, .confirmingReplacement)
+      await model.run.replaceConfirmed()
+
+      let expectedError =
+        "Couldn't read your Anthropic API key from the Keychain: test Keychain failure. "
+        + "Make sure your login keychain is unlocked in Keychain Access, then try again."
+      expectNoDifference(model.errorMessage, expectedError)
+      expectNoDifference(fixture.document.value.cutSuggestions, [existing])
+    }
+  }
+
   // MARK: - Helpers
 
   /// A fixture cutter: optionally captures the request + key it was handed, emits progress
@@ -360,7 +417,7 @@ struct CutSuggestionsPageTests {
       expectNoDifference(model.onboardingTitle, "Couldn't read your Anthropic API key")
       expectNoDifference(
         model.onboardingBody,
-        "macOS Keychain error: User interaction is not allowed. (code -25308) Make sure your "
+        "test Keychain failure. Make sure your "
           + "login keychain is unlocked in Keychain Access, or add your key again.")
     }
   }
@@ -381,8 +438,8 @@ struct CutSuggestionsPageTests {
       expectNoDifference(fixture.state.value.requests.count, 0)
       expectNoDifference(
         model.errorMessage,
-        "Couldn't read your Anthropic API key from the Keychain: macOS Keychain error: User "
-          + "interaction is not allowed. (code -25308) Make sure your login keychain is "
+        "Couldn't read your Anthropic API key from the Keychain: test Keychain failure. "
+          + "Make sure your login keychain is "
           + "unlocked in Keychain Access, then try again.")
     }
   }
@@ -840,7 +897,11 @@ extension KeychainClient {
   fileprivate static var failingToRead: KeychainClient {
     KeychainClient(
       save: { _ in },
-      load: { throw KeychainError.unexpectedStatus(errSecInteractionNotAllowed) },
+      load: { throw TestKeychainError() },
       delete: {})
   }
+}
+
+private struct TestKeychainError: LocalizedError {
+  var errorDescription: String? { "test Keychain failure." }
 }

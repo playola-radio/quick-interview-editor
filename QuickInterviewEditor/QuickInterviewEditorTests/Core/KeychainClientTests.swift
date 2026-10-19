@@ -47,9 +47,15 @@ struct KeychainClientTests {
   }
 
   @Test func keychainErrorDescribesTheStatusInPlainEnglish() {
+    let status = errSecInteractionNotAllowed
+    let systemMessage = SecCopyErrorMessageString(status, nil) as String?
+    let expectedSystemMessage =
+      systemMessage?.hasPrefix("OSStatus") == false
+      ? systemMessage!
+      : "an unknown Keychain problem."
     expectNoDifference(
-      KeychainError.unexpectedStatus(errSecInteractionNotAllowed).localizedDescription,
-      "macOS Keychain error: User interaction is not allowed. (code -25308)")
+      KeychainError.unexpectedStatus(status).localizedDescription,
+      "macOS Keychain error: \(expectedSystemMessage) (code \(status))")
   }
 
   @Test func keychainErrorForAnUnknownStatusIsNotJustANumber() {

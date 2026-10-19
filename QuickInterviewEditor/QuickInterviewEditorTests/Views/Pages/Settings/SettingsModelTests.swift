@@ -108,8 +108,8 @@ struct SettingsModelTests {
 
       expectNoDifference(
         model.statusMessage,
-        "Couldn't save the key: macOS Keychain error: User interaction is not allowed. "
-          + "(code -25308) Make sure your login keychain is unlocked in Keychain Access, "
+        "Couldn't save the key: test Keychain failure. "
+          + "Make sure your login keychain is unlocked in Keychain Access, "
           + "then try again.")
       expectNoDifference(model.apiKeyDraft, "sk-new")
       expectNoDifference(saved.value, false)
@@ -125,8 +125,8 @@ struct SettingsModelTests {
 
       expectNoDifference(
         model.statusMessage,
-        "Couldn't remove the key: macOS Keychain error: User interaction is not allowed. "
-          + "(code -25308) Make sure your login keychain is unlocked in Keychain Access, "
+        "Couldn't remove the key: test Keychain failure. "
+          + "Make sure your login keychain is unlocked in Keychain Access, "
           + "then try again.")
     }
   }
@@ -161,8 +161,7 @@ struct SettingsModelTests {
 
       expectNoDifference(
         model.storedKeyStatus,
-        "Couldn't check for a saved key: macOS Keychain error: User interaction is not "
-          + "allowed. (code -25308) Make sure your login keychain is unlocked in Keychain "
+        "Couldn't check for a saved key: test Keychain failure. Make sure your login keychain is unlocked in Keychain "
           + "Access, then reopen Settings.")
     }
   }
@@ -187,10 +186,14 @@ struct SettingsModelTests {
 
 extension KeychainClient {
   fileprivate static var failing: KeychainClient {
-    let error = KeychainError.unexpectedStatus(errSecInteractionNotAllowed)
+    let error = TestKeychainError()
     return KeychainClient(
       save: { _ in throw error },
       load: { throw error },
       delete: { throw error })
   }
+}
+
+private struct TestKeychainError: LocalizedError {
+  var errorDescription: String? { "test Keychain failure." }
 }

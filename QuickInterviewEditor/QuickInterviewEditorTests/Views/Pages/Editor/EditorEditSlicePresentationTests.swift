@@ -66,6 +66,27 @@ struct EditorEditSlicePresentationTests {
       model.editSlice?.fineTune.committedRange, slice.startSample..<slice.endSample)
   }
 
+  @Test func editSliceTappedCarriesAnExistingPlaybackErrorIntoTheSheet() async {
+    let model = editor()
+    addSlice(model, 0, 3)
+    let slice = model.slices[0]
+
+    await withDependencies {
+      $0.audioPlayer.play = { _, _, _, _, _ in
+        throw NSError(domain: NSOSStatusErrorDomain, code: -10851)
+      }
+    } operation: {
+      await model.playSliceTapped(slice.id)
+    }
+
+    model.editSliceTapped(slice.id)
+
+    expectNoDifference(
+      model.editSlice?.playbackErrorMessage,
+      "Playback failed: The Mac's audio system reported a problem (code -10851). Check your "
+        + "sound output in System Settings › Sound, then press Play again.")
+  }
+
   @Test func editSliceTappedIsANoOpWhenTheFineTunePaneHasAnUnsavedEdit() {
     let model = editor()
     addSlice(model, 0, 3)

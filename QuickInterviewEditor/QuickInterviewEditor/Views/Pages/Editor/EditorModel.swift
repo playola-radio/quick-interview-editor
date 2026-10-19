@@ -2542,6 +2542,7 @@ final class EditorModel: ViewModel {
       stopActiveTransportSnapshotting()
       editSlice = nil
     }
+    child.playbackErrorMessage = playbackErrorMessage
     editSlice = child
   }
 
