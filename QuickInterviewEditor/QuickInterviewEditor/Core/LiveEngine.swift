@@ -116,55 +116,22 @@ enum LiveEngine {
   }
 
   /// Writes a per-run log (command, exit code, full stdout, stderr tail) and
-  /// returns its URL so error messages can point the user at it. Returns nil if
-  /// the write fails, so error messages never point at a path that isn't there.
+  /// returns its URL so error messages can point the user at it.
   private static func writeJobLog(
     kind: String, audio: URL, exitCode: Int32, stdout: Data, stderr: String
   ) -> URL? {
-    guard let dir = logsDirectory else { return nil }
-    pruneOldLogs(in: dir, prefix: "\(kind)-", keepingLast: 20)
-    let file = dir.appendingPathComponent("\(kind)-\(logTimestamp()).log")
-    // `String(decoding:as:)` substitutes U+FFFD for any invalid byte rather than
-    // yielding nil, so a stray non-UTF-8 byte can't blank the whole log body.
-    // swiftlint:disable:next optional_data_string_conversion
-    let stdoutText = String(decoding: stdout, as: UTF8.self)
-    let body = """
+    HelperLog.write(
+      """
       audio: \(audio.path)
       exit: \(exitCode)
 
-      ===== STDOUT (\(stdout.count) bytes) =====
-      \(stdoutText)
-
-      ===== STDERR (tail) =====
-      \(stderr)
-      """
-    guard (try? body.write(to: file, atomically: true, encoding: .utf8)) != nil else { return nil }
-    return file
+      \(HelperLog.streams(stdout: stdout, stderr: stderr))
+      """, prefix: kind, in: logsDirectory)
   }
 
-  /// Keeps only the most recent `keepingLast` `transcribe-*.log` files. Logs hold
-  /// transcribed speech, so they shouldn't accumulate on disk unbounded. The
-  /// timestamped names sort chronologically, so lexical order is chronological.
-  private static func pruneOldLogs(in dir: URL, prefix: String, keepingLast: Int) {
-    guard
-      let names = try? FileManager.default.contentsOfDirectory(atPath: dir.path)
-    else { return }
-    let logs = names.filter { $0.hasPrefix(prefix) && $0.hasSuffix(".log") }.sorted()
-    guard logs.count > keepingLast else { return }
-    for name in logs.dropLast(keepingLast) {
-      try? FileManager.default.removeItem(at: dir.appendingPathComponent(name))
-    }
-  }
-
-  private static func logHint(_ url: URL?) -> String {
+  static func logHint(_ url: URL?) -> String {
     guard let url else { return "" }
     return "\n\nFull engine log: \(url.path)"
-  }
-
-  private static func logTimestamp() -> String {
-    let formatter = DateFormatter()
-    formatter.dateFormat = "yyyy-MM-dd_HH-mm-ss"
-    return formatter.string(from: Date())
   }
 
   // MARK: transcribe
@@ -227,7 +194,8 @@ enum LiveEngine {
             return
           }
           guard code == 0 else {
-            throw EngineClientError.engineFailed(proc.stderrTail() + logHint(logURL))
+            throw EngineClientError.transcriptionExited(
+              HelperFailure(exitCode: code, stderr: proc.stderrTail(), logURL: logURL))
           }
           let plan: EditPlan
           do {
@@ -371,7 +339,8 @@ enum LiveEngine {
         throw CancellationError()
       }
       guard code == 0 else {
-        throw EngineClientError.injectFailed(proc.stderrTail() + logHint(logURL))
+        throw EngineClientError.injectExited(
+          HelperFailure(exitCode: code, stderr: proc.stderrTail(), logURL: logURL))
       }
       let expectedMarkerCounts = Dictionary(
         files.map { ($0.url.path, $0.markers.count) }, uniquingKeysWith: { first, _ in first })
@@ -921,5 +890,53 @@ private final class StderrTail: Sendable {
 
   func snapshot() -> String {
     storage.withLock { $0.joined(separator: "\n") }
+  }
+}
+
+/// The bounded per-run diagnostic logs both helpers write under ``LiveEngine/logsDirectory``.
+/// Logs can hold transcribed speech, so each `prefix` keeps only its newest 20.
+enum HelperLog {
+  static let keepingLast = 20
+
+  /// Writes `body` to a new timestamped `<prefix>-….log` and prunes older ones. Returns nil
+  /// when the write fails, so no error message points at a file that isn't there.
+  static func write(_ body: String, prefix: String, in directory: URL?) -> URL? {
+    guard let directory else { return nil }
+    let file = directory.appendingPathComponent(
+      "\(prefix)-\(timestamp())-\(UUID().uuidString.prefix(8)).log")
+    guard (try? body.write(to: file, atomically: true, encoding: .utf8)) != nil else { return nil }
+    prune(in: directory, prefix: "\(prefix)-")
+    return file
+  }
+
+  static func streams(stdout: Data, stderr: String) -> String {
+    // `String(decoding:as:)` substitutes U+FFFD for any invalid byte rather than
+    // yielding nil, so a stray non-UTF-8 byte can't blank the whole log body.
+    // swiftlint:disable:next optional_data_string_conversion
+    let stdoutText = String(decoding: stdout, as: UTF8.self)
+    return """
+      ===== STDOUT (\(stdout.count) bytes) =====
+      \(stdoutText)
+
+      ===== STDERR (tail) =====
+      \(stderr)
+      """
+  }
+
+  /// The timestamped names sort chronologically, so lexical order is chronological.
+  private static func prune(in directory: URL, prefix: String) {
+    guard let names = try? FileManager.default.contentsOfDirectory(atPath: directory.path)
+    else { return }
+    let logs = names.filter { $0.hasPrefix(prefix) && $0.hasSuffix(".log") }.sorted()
+    for name in logs.dropLast(keepingLast) {
+      try? FileManager.default.removeItem(at: directory.appendingPathComponent(name))
+    }
+  }
+
+  private static func timestamp() -> String {
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.dateFormat = "yyyy-MM-dd_HH-mm-ss.SSS"
+    return formatter.string(from: Date())
   }
 }

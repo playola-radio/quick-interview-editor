@@ -40,6 +40,9 @@ final class SuggestionRunModel: ViewModel {
   private(set) var activeRunID: UUID?
   private(set) var activeAttemptID: UUID?
   var diagnostic: String?
+  /// Copyable detail under a hard failure (the helper's diagnostic log), kept out of the
+  /// primary sentence.
+  var failureDetail: String?
   var ownershipBlocked = false
   var staleDiscardAvailable = false
   var automaticEnabled = true
@@ -374,6 +377,7 @@ final class SuggestionRunModel: ViewModel {
     attemptOwner = currentOwner()
     phase = .running(runID: runID, message: "Analyzing transcript…")
     diagnostic = nil
+    failureDetail = nil
     let task = Task { [weak self] in
       guard let self else { return }
       do { try await operation(attemptID) } catch {
@@ -432,7 +436,7 @@ final class SuggestionRunModel: ViewModel {
       }
     }
     try check(runID, attemptID)
-    throw CutSuggestClientError.suggestFailed("The cut-suggester stopped before returning results.")
+    throw CutSuggestClientError.endedWithoutResult
   }
 
   private func captureCheckpointEvent(
@@ -470,6 +474,7 @@ final class SuggestionRunModel: ViewModel {
       let message = recoveryMessage(capture.checkpoint)
     else { throw streamError }
     phase = .needsRetry(runID: runID, message: message)
+    failureDetail = Self.failureDetail(streamError)
   }
 
   private func readCapture(
@@ -579,10 +584,14 @@ final class SuggestionRunModel: ViewModel {
         phase = .needsNumbering(
           runID: runID, message: "There are no safe numbers left for this group.")
       }
-    } else if currentDocument().unfinishedSuggestionRun != nil {
-      phase = .needsRetry(runID: runID, message: error.localizedDescription)
     } else {
-      phase = .failed(message: error.localizedDescription)
+      let message = Self.hardFailureMessage(error, model: options.model)
+      if currentDocument().unfinishedSuggestionRun != nil {
+        phase = .needsRetry(runID: runID, message: message)
+      } else {
+        phase = .failed(message: message)
+      }
+      failureDetail = Self.failureDetail(error)
     }
   }
 
@@ -724,6 +733,49 @@ extension SuggestionRunModel {
     if failures.count > 1 { text += " \(failures.count) requests failed." }
     text += providerDetail(primary)
     return text
+  }
+
+  /// The sentence for a search that stopped without a recorded per-request failure. A
+  /// helper's structured provider error reuses the per-request wording; nothing raw from the
+  /// helper's output is shown.
+  static func hardFailureMessage(_ error: any Error, model: String) -> String {
+    switch error as? CutSuggestClientError {
+    case .helperFailed(let failure):
+      let kind = helperKind(failure.phase)
+      if let provider = failure.report?.providerError,
+        let message = recoveryMessage(
+          failures: [
+            SuggestionRunFailure(
+              kind: kind, category: provider.category, message: provider.message,
+              statusCode: provider.statusCode, requestID: provider.requestID,
+              retryAfter: provider.retryAfter, retryable: provider.retryable,
+              errorType: failure.report?.errorType)
+          ], model: model)
+      {
+        return message
+      }
+      return "The suggestion search stopped while \(unknownPhase(kind)): \(failure.cause)."
+    case .exitMismatch(_, let failure):
+      return "The suggestion search ended unexpectedly: \(failure.exitSummary)."
+    case .unreadableOutput:
+      return "The suggestion search returned a result the app could not read."
+    case .endedWithoutResult:
+      return "The suggestion search stopped without returning results or saying why."
+    default:
+      return error.localizedDescription
+    }
+  }
+
+  private static func failureDetail(_ error: any Error) -> String? {
+    (error as? CutSuggestClientError)?.helperFailure?.logURL.map { "Diagnostic log: \($0.path)" }
+  }
+
+  private static func helperKind(_ phase: String?) -> String {
+    switch phase {
+    case "discovering": "discovery"
+    case "extracting": "extraction"
+    default: "search"
+    }
   }
 
   private static let priorityOrder = [

@@ -360,6 +360,8 @@ final class CutSuggestionsPageModel: ViewModel {
     return nil
   }
 
+  var failureDetail: String? { run.failureDetail }
+
   var showsProgress: Bool { isSuggesting }
   /// The onboarding panel replaces the empty state when no key resolved and there's nothing
   /// to act on yet.

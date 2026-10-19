@@ -79,6 +79,9 @@ struct CutSuggestionsPageView: View {
           .foregroundStyle(.red)
           .textSelection(.enabled)
       }
+      if let failureDetail = model.failureDetail {
+        Text(failureDetail).foregroundStyle(.secondary).textSelection(.enabled)
+      }
 
       if let actionMessage = model.actionMessage {
         Text(actionMessage)

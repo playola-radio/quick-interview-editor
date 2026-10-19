@@ -80,6 +80,8 @@ enum EngineClientError: Error, Equatable, LocalizedError {
   case decodeFailed(String)
   case injectFailed(String)
   case injectDecodeFailed(String)
+  case transcriptionExited(HelperFailure)
+  case injectExited(HelperFailure)
 
   var errorDescription: String? {
     switch self {
@@ -90,6 +92,122 @@ enum EngineClientError: Error, Equatable, LocalizedError {
     case .injectFailed(let message): return "Marker injection failed: \(message)"
     case .injectDecodeFailed(let message):
       return "Could not read the marker injection result: \(message)"
+    case .transcriptionExited(let failure): return Self.describe("Transcription", failure)
+    case .injectExited(let failure): return Self.describe("Marker injection", failure)
     }
+  }
+
+  private static func describe(_ operation: String, _ failure: HelperFailure) -> String {
+    let phase = failure.phase.map { " while \($0)" } ?? ""
+    return "\(operation) failed\(phase): \(failure.cause).\(LiveEngine.logHint(failure.logURL))"
+  }
+}
+
+/// The one structured `QIE_ERROR {json}` stderr line a Python helper prints when it fails.
+struct HelperErrorReport: Equatable, Sendable {
+  var domain: String
+  var operation: String
+  var phase: String?
+  var message: String
+  var errorType: String
+  var providerError: ProviderError?
+
+  struct ProviderError: Decodable, Equatable, Sendable {
+    var category: SuggestionFailureCategory
+    var message: String?
+    var statusCode: Int?
+    var requestID: String?
+    var retryAfter: Double?
+    var retryable: Bool
+    enum CodingKeys: String, CodingKey {
+      case category, message, retryable
+      case statusCode = "status_code"
+      case requestID = "request_id"
+      case retryAfter = "retry_after"
+    }
+  }
+}
+
+extension HelperErrorReport: Decodable {
+  enum CodingKeys: String, CodingKey {
+    case domain, operation, phase, message
+    case schemaVersion = "schema_version"
+    case errorType = "error_type"
+    case providerError = "provider_error"
+  }
+
+  init(from decoder: any Decoder) throws {
+    let values = try decoder.container(keyedBy: CodingKeys.self)
+    let version = try values.decode(Int.self, forKey: .schemaVersion)
+    guard version == 1 else {
+      throw DecodingError.dataCorruptedError(
+        forKey: .schemaVersion, in: values, debugDescription: "Unsupported version \(version).")
+    }
+    domain = try values.decode(String.self, forKey: .domain)
+    operation = try values.decode(String.self, forKey: .operation)
+    phase = try values.decodeIfPresent(String.self, forKey: .phase)
+    message = try values.decode(String.self, forKey: .message)
+    errorType = try values.decode(String.self, forKey: .errorType)
+    providerError = try values.decodeIfPresent(ProviderError.self, forKey: .providerError)
+  }
+}
+
+/// A helper process that exited unsuccessfully: its exit code, the last valid
+/// ``HelperErrorReport`` on stderr (or the last non-protocol stderr line when there is none),
+/// and the diagnostic log written for it. Raw stderr is never kept, so it can't reach the UI.
+struct HelperFailure: Equatable, Sendable {
+  var exitCode: Int32
+  var report: HelperErrorReport?
+  var lastStderrLine: String?
+  var logURL: URL?
+
+  private static let errorPrefix = "QIE_ERROR "
+  private static let maxFallbackLength = 300
+
+  init(exitCode: Int32, stderr: String, logURL: URL?) {
+    self.exitCode = exitCode
+    self.logURL = logURL
+    let lines = stderr.split(whereSeparator: \.isNewline).map {
+      $0.trimmingCharacters(in: .whitespaces)
+    }
+    report = lines.reversed().lazy.compactMap(Self.decodeReport).first
+    lastStderrLine = lines.last { line in
+      !line.isEmpty && !line.hasPrefix("QIE_EVENT ") && !line.hasPrefix(Self.errorPrefix)
+    }.map(Self.truncated)
+  }
+
+  var signal: Int32? { exitCode > 128 ? exitCode - 128 : nil }
+
+  var phase: String? { report?.phase }
+
+  var exitSummary: String {
+    signal.map { "the helper was stopped by signal \($0)" }
+      ?? "the helper exited with code \(exitCode)"
+  }
+
+  /// One sanitized sentence fragment naming why the helper stopped, without a final period.
+  var cause: String {
+    var text: String
+    if let message = report?.message.trimmingCharacters(in: .whitespacesAndNewlines),
+      !message.isEmpty
+    {
+      text = Self.truncated(message.replacingOccurrences(of: "\n", with: " "))
+    } else if signal == nil, let lastStderrLine {
+      text = lastStderrLine
+    } else {
+      text = exitSummary
+    }
+    if text.hasSuffix(".") { text.removeLast() }
+    return text
+  }
+
+  private static func decodeReport(_ line: String) -> HelperErrorReport? {
+    guard line.hasPrefix(errorPrefix) else { return nil }
+    return try? JSONDecoder().decode(
+      HelperErrorReport.self, from: Data(line.dropFirst(errorPrefix.count).utf8))
+  }
+
+  private static func truncated(_ text: String) -> String {
+    text.count > maxFallbackLength ? String(text.prefix(maxFallbackLength)) + "…" : text
   }
 }

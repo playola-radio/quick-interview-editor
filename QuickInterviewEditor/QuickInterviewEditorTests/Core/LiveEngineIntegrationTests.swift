@@ -1,3 +1,4 @@
+import CustomDump
 import Foundation
 import Testing
 
@@ -52,5 +53,21 @@ struct LiveEngineIntegrationTests {
     // The canonical AIFF was copied into the app cache and exists on disk.
     #expect(FileManager.default.fileExists(atPath: result.canonicalAudioURL.path))
     CanonicalAudioStore.remove(result.canonicalAudioURL)
+  }
+
+  @Test(.enabled(if: ProcessInfo.processInfo.environment["QIE_RUN_LIVE_ENGINE"] == "1"))
+  func missingAudioSurfacesTheEngineErrorReport() async throws {
+    try #require(venvPython != nil, "QIE_ENGINE_REPO must have a working .venv/bin/python")
+    let missing = FileManager.default.temporaryDirectory
+      .appendingPathComponent("\(UUID().uuidString).wav")
+    do {
+      for try await _ in LiveEngine.transcribe(audio: missing) {}
+      Issue.record("Expected the engine to fail")
+    } catch EngineClientError.transcriptionExited(let failure) {
+      expectNoDifference(failure.exitCode, 2)
+      expectNoDifference(failure.report?.domain, "logic_markers")
+      expectNoDifference(failure.report?.operation, "plan")
+      #expect(failure.logURL != nil)
+    }
   }
 }

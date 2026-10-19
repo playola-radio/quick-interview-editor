@@ -8,6 +8,12 @@ focus on changes that affect editing work rather than internal implementation.
 - Word edges now line up with the audio in newly transcribed interviews:
   deleting a single word no longer leaves part of it behind or clips the start
   of the next word. Projects you already edited keep their existing word edges.
+- When a suggestion search stops, the app now says why — a bad API key, no
+  credits, a rate limit, a network problem — and what to do next.
+- When transcription, marker injection, or a suggestion search fails, the
+  message now names the real cause and the step that failed instead of a
+  generic error, and points to a diagnostic log you can copy and send along
+  with a bug report.
 
 ## [2.5.0] - 2026-10-16
 

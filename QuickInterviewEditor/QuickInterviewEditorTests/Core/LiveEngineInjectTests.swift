@@ -140,4 +140,18 @@ struct LiveEngineInjectTests {
       try LiveEngine.decodeInjectResult(out, expectedMarkerCounts: ["/tmp/anything.aiff": 2])
     }
   }
+
+  // MARK: - injectExited
+
+  @Test func injectExitDescribesTheStructuredCauseAndLog() {
+    let report =
+      #"QIE_ERROR {"schema_version":1,"domain":"logic_markers","operation":"inject-markers","#
+      + #""phase":null,"message":"no such file: /tmp/a.aiff","error_type":"FileNotFoundError"}"#
+    let failure = HelperFailure(
+      exitCode: 2, stderr: "QIE_EVENT {}\n" + report,
+      logURL: URL(fileURLWithPath: "/tmp/inject-1.log"))
+    expectNoDifference(
+      EngineClientError.injectExited(failure).errorDescription,
+      "Marker injection failed: no such file: /tmp/a.aiff.\n\nFull engine log: /tmp/inject-1.log")
+  }
 }

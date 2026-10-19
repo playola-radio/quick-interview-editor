@@ -89,12 +89,17 @@ enum CutSuggestClientError: Error, Equatable, LocalizedError {
   /// Neither the bundled `cut-suggester-engine` helper nor the dev `.venv` python
   /// was found at the resolved path.
   case helperNotFound(String)
-  /// The provider rejected the request for lack of credentials (no API key /
-  /// gateway token in the environment). Kept distinct so the UI can prompt for auth.
+  /// No API key resolved for a run that needs one. Kept distinct so the UI can prompt for auth.
   case authMissing(String)
-  /// The subprocess exited nonzero (provider/network failure, invalid request, a
-  /// cache miss in cached-only mode, …). Carries the helper's stderr tail.
-  case suggestFailed(String)
+  /// The helper exited nonzero. Carries its structured report and diagnostic log.
+  case helperFailed(HelperFailure)
+  /// The helper's result status disagrees with its exit code (`ready` needs 0,
+  /// `needs_retry` needs 1), e.g. it was killed by a signal after printing output.
+  case exitMismatch(status: String, HelperFailure)
+  /// The helper's output could not be read; the detail names what was wrong.
+  case unreadableOutput(String, HelperFailure)
+  /// The suggestion stream finished without a result or an error.
+  case endedWithoutResult
   /// The subprocess exited cleanly but produced no usable candidates. Carries
   /// run diagnostics so the UI can explain whether the model returned no clips,
   /// clips were malformed, or all candidates were dropped by duration filters.
@@ -111,12 +116,27 @@ enum CutSuggestClientError: Error, Equatable, LocalizedError {
       return "The cut-suggester helper was not found at \(path)."
     case .authMissing(let detail):
       return "The cut-suggester could not authenticate with the model provider.\n\n\(detail)"
-    case .suggestFailed(let detail):
-      return "The cut-suggester failed.\n\n\(detail)"
+    case .helperFailed(let failure):
+      return "The cut-suggester failed: \(failure.cause)."
+    case .exitMismatch(let status, let failure):
+      return "The cut-suggester reported \(status) but exited with code \(failure.exitCode)."
+    case .unreadableOutput(let detail, _):
+      return "The cut-suggester returned output that could not be read: \(detail)"
+    case .endedWithoutResult:
+      return "The cut-suggester stopped before returning results."
     case .noSuggestions(let detail):
       return "The cut-suggester completed but produced no usable suggestions.\n\n\(detail)"
     case .decodeFailed(let detail):
       return "The cut-suggester returned output that could not be read.\n\n\(detail)"
+    }
+  }
+
+  var helperFailure: HelperFailure? {
+    switch self {
+    case .helperFailed(let failure), .exitMismatch(_, let failure),
+      .unreadableOutput(_, let failure):
+      failure
+    default: nil
     }
   }
 }
