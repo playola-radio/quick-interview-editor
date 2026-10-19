@@ -3,6 +3,7 @@ import CustomDump
 import Dependencies
 import Foundation
 import IdentifiedCollections
+import Security
 import Testing
 
 @testable import PlayolaInterviewEditor
@@ -342,6 +343,58 @@ struct CutSuggestionsPageTests {
 
       // The onSaved hook refreshed key state and dismissed the sheet.
       #expect(model.keyEntry == nil)
+      expectNoDifference(model.showsOnboarding, false)
+    }
+  }
+
+  @Test func keychainReadFailureShowsOnboardingThatNamesTheReadError() {
+    withDependencies {
+      $0.keychain = .failingToRead
+      $0.environment = .constant([:])
+    } operation: {
+      let model = CutSuggestionsPageModel(
+        editPlan: Fixtures.editPlan(), sourceFingerprint: "fp-read-error")
+      model.viewAppeared()
+
+      expectNoDifference(model.showsOnboarding, true)
+      expectNoDifference(model.onboardingTitle, "Couldn't read your Anthropic API key")
+      expectNoDifference(
+        model.onboardingBody,
+        "macOS Keychain error: User interaction is not allowed. (code -25308) Make sure your "
+          + "login keychain is unlocked in Keychain Access, or add your key again.")
+    }
+  }
+
+  @Test func suggestWithAKeychainReadFailureSurfacesTheReadErrorInsteadOfKeyEntry() async {
+    let fixture = SuggestionRunFixture()
+    await withDependencies {
+      fixture.install(&$0)
+      $0.keychain = .failingToRead
+    } operation: {
+      let model = CutSuggestionsPageModel(
+        editPlan: Fixtures.editPlan(), sourceFingerprint: fixture.owner.sourceFingerprint)
+      fixture.wirePage(model)
+
+      await model.suggestCutsTapped()
+
+      #expect(model.keyEntry == nil)
+      expectNoDifference(fixture.state.value.requests.count, 0)
+      expectNoDifference(
+        model.errorMessage,
+        "Couldn't read your Anthropic API key from the Keychain: macOS Keychain error: User "
+          + "interaction is not allowed. (code -25308) Make sure your login keychain is "
+          + "unlocked in Keychain Access, then try again.")
+    }
+  }
+
+  @Test func envVarKeyStillWorksWhenTheKeychainCannotBeRead() {
+    withDependencies {
+      $0.keychain = .failingToRead
+      $0.environment = .constant([anthropicAPIKeyEnvVar: "env-key"])
+    } operation: {
+      let model = CutSuggestionsPageModel(
+        editPlan: Fixtures.editPlan(), sourceFingerprint: "fp-env-read-error")
+      model.viewAppeared()
       expectNoDifference(model.showsOnboarding, false)
     }
   }
@@ -722,5 +775,14 @@ struct CutSuggestionsPageTests {
       editPlan: Fixtures.editPlan(), sourceFingerprint: "fp-toggle-pending")
     wire(model, to: store)
     expectNoDifference(model.showsSuggestionsToggle, true)
+  }
+}
+
+extension KeychainClient {
+  fileprivate static var failingToRead: KeychainClient {
+    KeychainClient(
+      save: { _ in },
+      load: { throw KeychainError.unexpectedStatus(errSecInteractionNotAllowed) },
+      delete: {})
   }
 }

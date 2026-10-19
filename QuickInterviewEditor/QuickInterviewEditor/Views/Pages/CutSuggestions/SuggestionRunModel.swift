@@ -69,7 +69,7 @@ final class SuggestionRunModel: ViewModel {
   @ObservationIgnored var onDiscard: @MainActor () async throws -> Void = {
     throw SuggestionRecoveryError.missingRun
   }
-  @ObservationIgnored var resolveAPIKey: @MainActor () -> String? = { nil }
+  @ObservationIgnored var resolveAPIKey: @MainActor () throws -> String? = { nil }
   @ObservationIgnored var onMissingAPIKey: @MainActor () -> Void = {}
   @ObservationIgnored var onExplicitStart: @MainActor () -> Void = {}
   @ObservationIgnored private var attemptTask: Task<Void, Never>?
@@ -149,7 +149,7 @@ final class SuggestionRunModel: ViewModel {
   // MARK: - User Actions
   func suggestTapped() async {
     guard canStart else { return }
-    guard resolveAPIKey() != nil else {
+    guard !hasNoAPIKey else {
       onMissingAPIKey()
       return
     }
@@ -168,7 +168,7 @@ final class SuggestionRunModel: ViewModel {
 
   func automaticSearchIfNeeded() async {
     guard canStart, automaticEnabled, currentDocument().cutSuggestions.isEmpty,
-      currentDocument().suggestionBatch == nil, resolveAPIKey() != nil
+      currentDocument().suggestionBatch == nil, (try? resolveAPIKey()) != nil
     else { return }
     await startFresh(mode: .automatic)
   }
@@ -288,6 +288,12 @@ final class SuggestionRunModel: ViewModel {
   }
 
   // MARK: - Private Helpers
+  /// True only when key resolution cleanly found no key; a read failure is left for the run
+  /// to surface rather than sending the user to key entry.
+  private var hasNoAPIKey: Bool {
+    do { return try resolveAPIKey() == nil } catch { return false }
+  }
+
   private func validConfiguration() async throws -> SuggestionConfiguration {
     let value = try await configuration.load()
     let messages = value.validationMessages()
@@ -303,7 +309,7 @@ final class SuggestionRunModel: ViewModel {
     await perform(runID: runID) { attemptID in
       let configuration = try await self.validConfiguration()
       try self.check(runID, attemptID)
-      guard let key = self.resolveAPIKey() else {
+      guard let key = try self.resolveAPIKey() else {
         if mode == .fresh { self.onMissingAPIKey() }
         throw CutSuggestClientError.authMissing("Add an API key to resume this search.")
       }
@@ -365,7 +371,7 @@ final class SuggestionRunModel: ViewModel {
         try self.apply(capture.checkpoint, attemptID: attemptID, automatic: false)
         return
       }
-      guard let key = self.resolveAPIKey() else {
+      guard let key = try self.resolveAPIKey() else {
         self.onMissingAPIKey()
         throw CutSuggestClientError.authMissing("Add an API key to resume this search.")
       }
