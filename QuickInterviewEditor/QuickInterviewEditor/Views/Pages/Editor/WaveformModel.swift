@@ -1,7 +1,6 @@
 import CoreGraphics
 import Dependencies
 import Foundation
-import IssueReporting
 import Observation
 
 /// All waveform geometry, zoom, and hit-testing math for the editor — the sample↔pixel
@@ -51,11 +50,12 @@ final class WaveformModel: ViewModel {
   /// `amplitudeScale` captured at the start of an amplitude-zoom drag, so `amplitudeZoomDragged`
   /// recomputes from it each call instead of accumulating drift.
   @ObservationIgnored private var amplitudeZoomDragAnchor: CGFloat = 1.0
+  private var loadErrorMessage: String?
 
   // MARK: - Display Text
   let caption = "WAVEFORM"
   let loadingMessage = "Loading waveform…"
-  let emptyMessage = "No audio loaded."
+  var emptyMessage: String { loadErrorMessage ?? "No audio loaded." }
   let zoomInLabel = "Zoom in"
   let zoomOutLabel = "Zoom out"
   let amplitudeZoomLabel = "Waveform zoom (drag to adjust, double-click to reset)"
@@ -208,13 +208,16 @@ final class WaveformModel: ViewModel {
     amplitudeScale = 1.0
     amplitudeZoomDragAnchor = 1.0
     isLoading = true
+    loadErrorMessage = nil
     defer { isLoading = false }
     do {
       waveform = try await waveformClient.loadWaveform(url, planSampleRate, durationSamples)
     } catch is CancellationError {
       // The view went away mid-decode; stay unloaded and retry when it reappears.
     } catch {
-      reportIssue(error)
+      loadErrorMessage =
+        "Couldn't draw the waveform: \(error.localizedDescription) Close and reopen the project "
+        + "to try again."
     }
     if viewportWidth > 0 { samplesPerPixel = clampedSamplesPerPixel(fitSamplesPerPixel()) }
   }
