@@ -141,7 +141,7 @@ def parse_response(text: str, types: Sequence[Mapping]) -> dict:
         return {"type_id": None, "fields": {}}
     chosen = next((item for item in types if item["id"] == type_id), None) if isinstance(type_id, str) else None
     if chosen is None:
-        raise ClipNamingError(f"clip naming response has an unconfigured type_id {type_id!r}")
+        raise ClipNamingError("clip naming response has an unconfigured type_id")
     expected = required_field_ids(chosen)
     values: dict[str, str | None] = {}
     for field in fields:
@@ -149,9 +149,9 @@ def parse_response(text: str, types: Sequence[Mapping]) -> dict:
             raise ClipNamingError("clip naming field must contain field_id and value")
         field_id, value = field["field_id"], field["value"]
         if not isinstance(field_id, str) or field_id not in expected:
-            raise ClipNamingError(f"clip naming response has an undeclared field_id {field_id!r}")
+            raise ClipNamingError("clip naming response has an undeclared field_id")
         if field_id in values:
-            raise ClipNamingError(f"clip naming response has a duplicate field_id {field_id!r}")
+            raise ClipNamingError("clip naming response has a duplicate field_id")
         if value is not None and not isinstance(value, str):
             raise ClipNamingError("clip naming field value must be a string or null")
         values[field_id] = None if value is None else _trim_foundation_whitespace(value) or None

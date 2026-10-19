@@ -30,10 +30,13 @@ def _wire_bundled_ca_bundle() -> None:
         return
     try:
         import certifi
-    except ModuleNotFoundError:
+    except ImportError:
+        print("warning: certifi is not bundled; HTTPS may fail certificate checks",
+              file=sys.stderr)
         return
     ca = certifi.where()
     if not os.path.isfile(ca):
+        print(f"warning: bundled CA file is missing: {ca}", file=sys.stderr)
         return
     os.environ.setdefault("SSL_CERT_FILE", ca)
     os.environ.setdefault("REQUESTS_CA_BUNDLE", ca)

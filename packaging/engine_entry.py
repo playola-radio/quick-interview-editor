@@ -25,11 +25,11 @@ def _wire_bundled_nltk_data() -> None:
     if not base:
         return
     nltk_dir = os.path.join(base, "nltk_data")
-    if os.path.isdir(nltk_dir):
-        existing = os.environ.get("NLTK_DATA", "")
-        os.environ["NLTK_DATA"] = (
-            nltk_dir + os.pathsep + existing if existing else nltk_dir
-        )
+    if not os.path.isdir(nltk_dir):
+        print(f"warning: bundled NLTK data is missing: {nltk_dir}", file=sys.stderr)
+        return
+    existing = os.environ.get("NLTK_DATA", "")
+    os.environ["NLTK_DATA"] = nltk_dir + os.pathsep + existing if existing else nltk_dir
 
 
 def main() -> int:

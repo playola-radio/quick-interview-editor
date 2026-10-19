@@ -961,7 +961,8 @@ struct EditorSuggestionFlowTests {
     case "empty": fixture.finish([], attempt: 1)
     case "provider":
       fixture.state.value.continuations[1].finish(
-        throwing: CutSuggestClientError.suggestFailed("Provider failed"))
+        throwing: CutSuggestClientError.helperFailed(
+          HelperFailure(exitCode: 1, stderr: "Provider failed", logURL: nil)))
     case "extraction":
       fixture.checkpoint(
         phase: .needsRetry, candidates: [fixture.candidate(2)], failed: ["naming"],

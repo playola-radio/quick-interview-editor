@@ -649,7 +649,9 @@ struct SuggestionRunModelTests {
         stream.finish()
         await task.value
         #expect(!model.isRunning)
-        #expect(model.message?.contains("stopped before returning results") == true)
+        expectNoDifference(
+          model.message,
+          "The suggestion search stopped without returning results or saying why.")
         let failure = model.message
         model.synchronizeDocument()
         expectNoDifference(model.message, failure)
@@ -1127,7 +1129,8 @@ extension SuggestionRunModelTests {
               statusCode: 400, requestID: "req_d", retryable: false)
           ])
         fixture.state.value.continuations[0].finish(
-          throwing: CutSuggestClientError.suggestFailed("exit status 1"))
+          throwing: CutSuggestClientError.helperFailed(
+            HelperFailure(exitCode: 1, stderr: "", logURL: nil)))
         await task.value
         expectNoDifference(
           model.phase,
@@ -1139,6 +1142,38 @@ extension SuggestionRunModelTests {
               + " (HTTP 400; request req_d)."))
         expectNoDifference(model.canResume, true)
         expectNoDifference(model.canDiscard, true)
+      }
+    }
+  }
+
+  @Test func signalKillAfterARecordedFailureNamesTheSignal() async throws {
+    try await withMainSerialExecutor {
+      let fixture = SuggestionRunFixture()
+      try await withDependencies {
+        fixture.install(&$0)
+      } operation: {
+        let model = fixture.model()
+        let task = Task { await model.suggestTapped() }
+        await fixture.waitForRequests()
+        let runID = try #require(model.activeRunID)
+        fixture.checkpoint(
+          phase: .needsRetry,
+          failures: [
+            fixture.failure(
+              .credits, kind: "discovery", message: "Your credit balance is too low.",
+              statusCode: 400, requestID: "req_d", retryable: false)
+          ])
+        fixture.state.value.continuations[0].finish(
+          throwing: CutSuggestClientError.helperFailed(
+            HelperFailure(exitCode: 137, terminationSignal: 9, stderr: "", logURL: nil)))
+        await task.value
+        expectNoDifference(
+          model.phase,
+          .needsRetry(
+            runID: runID,
+            message:
+              "The suggestion search stopped while searching: the helper was stopped by signal 9."
+          ))
       }
     }
   }
@@ -1161,11 +1196,15 @@ extension SuggestionRunModelTests {
         await task.value
         let retry = Task { await model.resumeTapped() }
         await fixture.waitForRequests(2)
-        let error = CutSuggestClientError.suggestFailed("helper crashed")
-        fixture.state.value.continuations[1].finish(throwing: error)
+        fixture.state.value.continuations[1].finish(
+          throwing: CutSuggestClientError.helperFailed(
+            HelperFailure(exitCode: 1, stderr: "helper crashed", logURL: nil)))
         await retry.value
         expectNoDifference(
-          model.phase, .needsRetry(runID: runID, message: error.localizedDescription))
+          model.phase,
+          .needsRetry(
+            runID: runID, message: "The suggestion search stopped while searching: helper crashed.")
+        )
       }
     }
   }
@@ -1180,12 +1219,111 @@ extension SuggestionRunModelTests {
         let task = Task { await model.suggestTapped() }
         await fixture.waitForRequests()
         let runID = try #require(model.activeRunID)
-        let error = CutSuggestClientError.suggestFailed("exit status 1")
-        fixture.state.value.continuations[0].finish(throwing: error)
+        let log = URL(fileURLWithPath: "/tmp/cut-suggester-1.log")
+        fixture.state.value.continuations[0].finish(
+          throwing: CutSuggestClientError.helperFailed(
+            HelperFailure(exitCode: 1, stderr: "", logURL: log)))
         await task.value
         expectNoDifference(
-          model.phase, .needsRetry(runID: runID, message: error.localizedDescription))
+          model.phase,
+          .needsRetry(
+            runID: runID,
+            message: "The suggestion search stopped while searching: the helper exited with code 1."
+          ))
+        expectNoDifference(model.failureDetail, "Diagnostic log: /tmp/cut-suggester-1.log")
+        fixture.document.withValue { $0.cutSuggestions = [fixture.candidate()] }
+        await model.resumeTapped()
+        expectNoDifference(model.phase, .confirmingReplacement)
+        model.cancelReplacementTapped()
+        expectNoDifference(model.failureDetail, "Diagnostic log: /tmp/cut-suggester-1.log")
       }
     }
+  }
+
+  @Test func discardClearsThePreviousFailureDetail() async throws {
+    try await withMainSerialExecutor {
+      let fixture = SuggestionRunFixture()
+      try await withDependencies {
+        fixture.install(&$0)
+      } operation: {
+        let model = fixture.model()
+        let task = Task { await model.suggestTapped() }
+        await fixture.waitForRequests()
+        fixture.state.value.continuations[0].finish(
+          throwing: CutSuggestClientError.helperFailed(
+            HelperFailure(
+              exitCode: 1, stderr: "", logURL: URL(fileURLWithPath: "/tmp/cut-suggester-1.log"))))
+        await task.value
+        await model.discardSearchTapped()
+        expectNoDifference(model.failureDetail, nil)
+      }
+    }
+  }
+
+  @Test func newAttemptClearsThePreviousFailureDetail() async throws {
+    try await withMainSerialExecutor {
+      let fixture = SuggestionRunFixture()
+      try await withDependencies {
+        fixture.install(&$0)
+      } operation: {
+        let model = fixture.model()
+        let task = Task { await model.suggestTapped() }
+        await fixture.waitForRequests()
+        fixture.state.value.continuations[0].finish(
+          throwing: CutSuggestClientError.helperFailed(
+            HelperFailure(
+              exitCode: 1, stderr: "", logURL: URL(fileURLWithPath: "/tmp/cut-suggester-1.log"))))
+        await task.value
+        let retry = Task { await model.resumeTapped() }
+        await fixture.waitForRequests(2)
+        expectNoDifference(model.failureDetail, nil)
+        fixture.state.value.continuations[1].finish()
+        await retry.value
+      }
+    }
+  }
+
+  @Test func providerReportUsesTheProviderWording() {
+    let stderr =
+      #"QIE_ERROR {"schema_version":1,"domain":"cut_suggester","operation":"suggest","#
+      + #""phase":"extracting","message":"Too low.","error_type":"LLMError","#
+      + #""provider_error":{"category":"credits","message":"Too low.","status_code":400,"#
+      + #""request_id":"req_1","retry_after":null,"retryable":false}}"#
+    expectNoDifference(
+      SuggestionRunModel.hardFailureMessage(
+        CutSuggestClientError.helperFailed(HelperFailure(exitCode: 1, stderr: stderr, logURL: nil)),
+        model: "claude-sonnet-5"),
+      "Your Anthropic account is out of credits. Add credits at \(anthropicBilling), "
+        + "then Resume. Provider message: \"Too low.\" (HTTP 400; request req_1).")
+  }
+
+  @Test func nonProviderReportNamesThePhaseAndCause() {
+    let stderr =
+      #"QIE_ERROR {"schema_version":1,"domain":"cut_suggester","operation":"suggest","#
+      + #""phase":"discovering","message":"bad request shape","error_type":"ValueError"}"#
+    expectNoDifference(
+      SuggestionRunModel.hardFailureMessage(
+        CutSuggestClientError.helperFailed(HelperFailure(exitCode: 1, stderr: stderr, logURL: nil)),
+        model: "claude-sonnet-5"),
+      "The suggestion search stopped while finding suggestions: bad request shape.")
+  }
+
+  @Test func exitMismatchNamesTheSignal() {
+    expectNoDifference(
+      SuggestionRunModel.hardFailureMessage(
+        CutSuggestClientError.exitMismatch(
+          status: "ready",
+          HelperFailure(exitCode: 137, terminationSignal: 9, stderr: "", logURL: nil)),
+        model: "claude-sonnet-5"),
+      "The suggestion search ended unexpectedly: the helper was stopped by signal 9.")
+  }
+
+  @Test func unreadableOutputKeepsTheRawDetailOutOfTheMessage() {
+    expectNoDifference(
+      SuggestionRunModel.hardFailureMessage(
+        CutSuggestClientError.unreadableOutput(
+          "Invalid suggestion result: raw", HelperFailure(exitCode: 0, stderr: "", logURL: nil)),
+        model: "claude-sonnet-5"),
+      "The suggestion search returned a result the app could not read.")
   }
 }

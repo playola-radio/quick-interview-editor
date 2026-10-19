@@ -232,5 +232,5 @@ def test_cli_name_clip_fails_on_bad_request_and_missing_file(tmp_path, monkeypat
     monkeypatch.setattr(cli, "live_client_for", lambda model: pytest.fail("no client for a bad request"))
 
     assert cli.main(["name-clip", "--request", _write(tmp_path, _request(schema_version=2))]) != 0
-    assert "error:" in capfd.readouterr().err
+    assert "QIE_ERROR " in capfd.readouterr().err
     assert cli.main(["name-clip", "--request", str(tmp_path / "missing.json")]) != 0

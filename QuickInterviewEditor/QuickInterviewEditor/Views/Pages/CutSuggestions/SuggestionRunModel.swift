@@ -40,6 +40,9 @@ final class SuggestionRunModel: ViewModel {
   private(set) var activeRunID: UUID?
   private(set) var activeAttemptID: UUID?
   var diagnostic: String?
+  /// Copyable detail under a hard failure (the helper's diagnostic log), kept out of the
+  /// primary sentence.
+  var failureDetail: String?
   var ownershipBlocked = false
   var staleDiscardAvailable = false
   var automaticEnabled = true
@@ -76,7 +79,7 @@ final class SuggestionRunModel: ViewModel {
   @ObservationIgnored private var confirmation: Confirmation?
   private enum Confirmation {
     case fresh
-    case resume(UUID, SuggestionRunPhase)
+    case resume(UUID, SuggestionRunPhase, String?)
   }
 
   // MARK: - View Helpers
@@ -187,12 +190,17 @@ final class SuggestionRunModel: ViewModel {
     }
     switch target {
     case .fresh: await startFresh(mode: .fresh)
-    case .resume(let runID, _): await startResume(runID: runID, replaceBaseline: true)
+    case .resume(let runID, _, _): await startResume(runID: runID, replaceBaseline: true)
     }
   }
 
   func cancelReplacementTapped() {
-    if case .resume(_, let previous) = confirmation { phase = previous } else { phase = .idle }
+    if case .resume(_, let previous, let previousFailureDetail) = confirmation {
+      phase = previous
+      failureDetail = previousFailureDetail
+    } else {
+      phase = .idle
+    }
     confirmation = nil
   }
 
@@ -265,6 +273,7 @@ final class SuggestionRunModel: ViewModel {
     guard let checkpoint = currentDocument().unfinishedSuggestionRun else {
       activeRunID = nil
       phase = .idle
+      failureDetail = nil
       return
     }
     if activeRunID == checkpoint.snapshot.runID {
@@ -274,6 +283,7 @@ final class SuggestionRunModel: ViewModel {
       }
     }
     activeRunID = checkpoint.snapshot.runID
+    failureDetail = nil
     present(checkpoint)
   }
 
@@ -338,11 +348,12 @@ final class SuggestionRunModel: ViewModel {
 
   private func startResume(runID: UUID, replaceBaseline: Bool) async {
     let previous = phase
+    let previousFailureDetail = failureDetail
     await perform(runID: runID) { attemptID in
       var capture = try await self.readCapture(runID, attemptID: attemptID)
       try self.validateSource(capture.checkpoint.snapshot)
       if !replaceBaseline, try self.baselineChanged(capture.checkpoint) {
-        self.confirmation = .resume(runID, previous)
+        self.confirmation = .resume(runID, previous, previousFailureDetail)
         self.phase = .confirmingReplacement
         return
       }
@@ -374,6 +385,7 @@ final class SuggestionRunModel: ViewModel {
     attemptOwner = currentOwner()
     phase = .running(runID: runID, message: "Analyzing transcript…")
     diagnostic = nil
+    failureDetail = nil
     let task = Task { [weak self] in
       guard let self else { return }
       do { try await operation(attemptID) } catch {
@@ -432,7 +444,7 @@ final class SuggestionRunModel: ViewModel {
       }
     }
     try check(runID, attemptID)
-    throw CutSuggestClientError.suggestFailed("The cut-suggester stopped before returning results.")
+    throw CutSuggestClientError.endedWithoutResult
   }
 
   private func captureCheckpointEvent(
@@ -464,12 +476,13 @@ final class SuggestionRunModel: ViewModel {
   private func presentRecordedFailureOrRethrow(
     _ streamError: any Error, runID: UUID, attemptID: UUID, startRevision: Int?
   ) async throws {
-    guard !(streamError is CancellationError),
+    guard !(streamError is CancellationError), !Self.isUnexpectedExit(streamError),
       let capture = try? await readCapture(runID, attemptID: attemptID),
       capture.checkpoint.pythonRevision > (startRevision ?? -1),
       let message = recoveryMessage(capture.checkpoint)
     else { throw streamError }
     phase = .needsRetry(runID: runID, message: message)
+    failureDetail = Self.failureDetail(streamError)
   }
 
   private func readCapture(
@@ -579,10 +592,14 @@ final class SuggestionRunModel: ViewModel {
         phase = .needsNumbering(
           runID: runID, message: "There are no safe numbers left for this group.")
       }
-    } else if currentDocument().unfinishedSuggestionRun != nil {
-      phase = .needsRetry(runID: runID, message: error.localizedDescription)
     } else {
-      phase = .failed(message: error.localizedDescription)
+      let message = Self.hardFailureMessage(error, model: options.model)
+      if currentDocument().unfinishedSuggestionRun != nil {
+        phase = .needsRetry(runID: runID, message: message)
+      } else {
+        phase = .failed(message: message)
+      }
+      failureDetail = Self.failureDetail(error)
     }
   }
 
@@ -724,6 +741,57 @@ extension SuggestionRunModel {
     if failures.count > 1 { text += " \(failures.count) requests failed." }
     text += providerDetail(primary)
     return text
+  }
+
+  /// The sentence for a search that stopped without a recorded per-request failure. A
+  /// helper's structured provider error reuses the per-request wording; nothing raw from the
+  /// helper's output is shown.
+  static func hardFailureMessage(_ error: any Error, model: String) -> String {
+    switch error as? CutSuggestClientError {
+    case .helperFailed(let failure):
+      let kind = helperKind(failure.phase)
+      if let provider = failure.report?.providerError,
+        let message = recoveryMessage(
+          failures: [
+            SuggestionRunFailure(
+              kind: kind, category: provider.category, message: provider.message,
+              statusCode: provider.statusCode, requestID: provider.requestID,
+              retryAfter: provider.retryAfter, retryable: provider.retryable,
+              errorType: failure.report?.errorType)
+          ], model: model)
+      {
+        return message
+      }
+      return "The suggestion search stopped while \(unknownPhase(kind)): \(failure.cause)."
+    case .exitMismatch(_, let failure):
+      return "The suggestion search ended unexpectedly: \(failure.exitSummary)."
+    case .unreadableOutput:
+      return "The suggestion search returned a result the app could not read."
+    case .endedWithoutResult:
+      return "The suggestion search stopped without returning results or saying why."
+    default:
+      return error.localizedDescription
+    }
+  }
+
+  /// A helper killed by a signal, or whose result disagrees with its exit code, is shown as
+  /// that, not as whatever its last checkpoint recorded.
+  private static func isUnexpectedExit(_ error: any Error) -> Bool {
+    guard let error = error as? CutSuggestClientError else { return false }
+    if case .exitMismatch = error { return true }
+    return error.helperFailure?.signal != nil
+  }
+
+  private static func failureDetail(_ error: any Error) -> String? {
+    (error as? CutSuggestClientError)?.helperFailure?.logURL.map { "Diagnostic log: \($0.path)" }
+  }
+
+  private static func helperKind(_ phase: String?) -> String {
+    switch phase {
+    case "discovering": "discovery"
+    case "extracting": "extraction"
+    default: "search"
+    }
   }
 
   private static let priorityOrder = [

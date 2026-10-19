@@ -144,12 +144,13 @@ enum LiveCutSuggester {
           }
 
           let out = await stdoutData
-          let code = await exitCode
+          let exit = await exitCode
 
           try Task.checkCancellation()
-          let events = try completedEvents(
-            from: out, request: request, exitCode: code,
-            stderr: proc.stderrTail(), latestRevision: latestRevision)
+          let run = HelperRun(
+            subcommand: "suggest", exit: exit, stdout: out, stderr: proc.stderrTail(),
+            apiKey: apiKey, logsDirectory: runner.logsDirectory)
+          let events = try completedEvents(run, request: request, latestRevision: latestRevision)
           try Task.checkCancellation()
           for event in events { continuation.yield(event) }
           continuation.finish()
@@ -191,24 +192,25 @@ enum LiveCutSuggester {
       async let exitCode = proc.waitForExit()
       for await _ in proc.stderrLines() {}
       let out = await stdoutData
-      let code = await exitCode
+      let exit = await exitCode
 
       try Task.checkCancellation()
-      guard code == 0 else { throw mapFailure(stderr: proc.stderrTail()) }
-      return try decodeNameClipResult(from: out)
+      let run = HelperRun(
+        subcommand: "name-clip", exit: exit, stdout: out, stderr: proc.stderrTail(),
+        apiKey: apiKey, logsDirectory: runner.logsDirectory)
+      guard exit.exitCode == 0 else { throw CutSuggestClientError.helperFailed(run.failure()) }
+      do {
+        return try decodeNameClipResult(from: out)
+      } catch {
+        throw run.unreadable(unreadableDetail(error))
+      }
     } onCancel: {
       procBox.withLock { $0 }?.terminate()
     }
   }
 
   private static func decodeNameClipResult(from out: Data) throws -> ClipNamingResult? {
-    let wire: ClipNamingResultWire
-    do {
-      wire = try JSONDecoder().decode(ClipNamingResultWire.self, from: out)
-    } catch {
-      throw CutSuggestClientError.decodeFailed(
-        "The name-clip helper returned unreadable output: \(error.localizedDescription)")
-    }
+    let wire = try JSONDecoder().decode(ClipNamingResultWire.self, from: out)
     guard let typeID = wire.typeID else { return nil }
     return ClipNamingResult(typeID: typeID, fields: wire.fields)
   }
@@ -250,20 +252,19 @@ enum LiveCutSuggester {
   }
 
   private static func completedEvents(
-    from out: Data, request: CutSuggestRequest,
-    exitCode: Int32, stderr: String, latestRevision: Int
+    _ run: HelperRun, request: CutSuggestRequest, latestRevision: Int
   ) throws -> [CutSuggestEvent] {
-    if let snapshot = request.snapshot, !out.isEmpty {
-      return try configuredCompletionEvents(
-        from: out, snapshot: snapshot, exitCode: exitCode,
-        stderr: stderr, latestRevision: latestRevision)
+    if let snapshot = request.snapshot {
+      return try configuredCompletionEvents(run, snapshot: snapshot, latestRevision: latestRevision)
     }
-    guard exitCode == 0 else { throw mapFailure(stderr: stderr) }
-    guard request.snapshot == nil else {
-      throw CutSuggestClientError.decodeFailed("The helper returned no result JSON.")
+    guard run.exit.exitCode == 0 else { throw CutSuggestClientError.helperFailed(run.failure()) }
+    let payload: (suggestions: [CutSuggestion], meta: CutSuggestion.WireMeta?)
+    do {
+      payload = try CutSuggestion.decodeSuggestionPayload(
+        from: run.stdout, provenance: provenance(for: request), makeID: { UUID() })
+    } catch {
+      throw run.unreadable(unreadableDetail(error))
     }
-    let payload = try CutSuggestion.decodeSuggestionPayload(
-      from: out, provenance: provenance(for: request), makeID: { UUID() })
     var events: [CutSuggestEvent] = []
     if payload.suggestions.isEmpty, let meta = payload.meta {
       events.append(.diagnostic(meta.diagnosticDescription))
@@ -271,13 +272,31 @@ enum LiveCutSuggester {
     return events + [.completed(payload.suggestions)]
   }
 
+  /// A V2 result is trusted only when its status agrees with the exit code: `ready` exits 0
+  /// and `needs_retry` exits 1. Anything else — including a signal after printing — is a
+  /// hard failure, as is output that can't be read.
   private static func configuredCompletionEvents(
-    from out: Data, snapshot: SuggestionRunSnapshot,
-    exitCode: Int32, stderr: String, latestRevision: Int
+    _ run: HelperRun, snapshot: SuggestionRunSnapshot, latestRevision: Int
   ) throws -> [CutSuggestEvent] {
-    let result = try SuggestionRunWireResult.decode(from: out, snapshot: snapshot)
+    let result: SuggestionRunWireResult
+    do {
+      guard !run.stdout.isEmpty else {
+        throw CutSuggestClientError.decodeFailed("The helper returned no result JSON.")
+      }
+      result = try SuggestionRunWireResult.decode(from: run.stdout, snapshot: snapshot)
+    } catch {
+      guard run.exit.exitCode == 0 else { throw CutSuggestClientError.helperFailed(run.failure()) }
+      throw run.unreadable(unreadableDetail(error))
+    }
+    switch (result.status, run.exit.exitCode) {
+    case (.ready, 0), (.needsRetry, 1): break
+    default:
+      throw CutSuggestClientError.exitMismatch(status: result.status.rawValue, run.failure())
+    }
     guard result.checkpointRevision >= latestRevision else {
-      throw CutSuggestClientError.decodeFailed("Final result is older than the latest checkpoint.")
+      throw run.unreadable(
+        "Final result revision \(result.checkpointRevision) is older than checkpoint "
+          + "\(latestRevision).")
     }
     var events: [CutSuggestEvent] = []
     if result.checkpointRevision > latestRevision {
@@ -290,11 +309,21 @@ enum LiveCutSuggester {
           failedRequestKeys: result.failedRequestKeys, failures: result.failures)
       ]
     }
-    guard exitCode == 0 else { throw mapFailure(stderr: stderr) }
     if result.candidates.isEmpty, let meta = result.meta {
       events.append(.diagnostic(meta.diagnosticDescription))
     }
     return events + [.completed(result.candidates)]
+  }
+
+  private static func unreadableDetail(_ error: Error) -> String {
+    if case .decodeFailed(let detail) = error as? CutSuggestClientError { return detail }
+    switch error as? DecodingError {
+    case .dataCorrupted(let context), .keyNotFound(_, let context),
+      .typeMismatch(_, let context), .valueNotFound(_, let context):
+      return context.debugDescription
+    default:
+      return error.localizedDescription
+    }
   }
 
   private static func arguments(
@@ -330,30 +359,68 @@ enum LiveCutSuggester {
     return .progress(message)
   }
 
-  /// Classifies a nonzero-exit failure from the helper's stderr tail. A missing
-  /// credential is called out distinctly so the UI can prompt for auth instead of
-  /// showing a generic failure.
-  private static func mapFailure(stderr: String) -> CutSuggestClientError {
-    // The QIE_EVENT progress lines share this stream and carry free-form message
-    // text + counts (a partition index or candidate count could contain "401"), so
-    // they must not drive the classification — match only the non-progress lines.
-    let lowered =
-      stderr
-      .split(separator: "\n", omittingEmptySubsequences: true)
-      .filter { !$0.hasPrefix("QIE_EVENT ") }
-      .joined(separator: "\n")
-      .lowercased()
-    let authSignals = [
-      "openai_key", "anthropic_api_key", "api key", "api_key", "authentication",
-      "unauthorized", "credential",
-    ]
-    // Bounded match for the bare status code so an unrelated "401" substring
-    // (a sample index, a byte count) doesn't misclassify a genuine failure.
-    let statusUnauthorized = lowered.range(of: #"\b401\b"#, options: .regularExpression) != nil
-    if statusUnauthorized || authSignals.contains(where: lowered.contains) {
-      return .authMissing(stderr)
+  /// One finished helper run. A failure parses its stderr and writes a diagnostic log; the
+  /// API key is scrubbed from both, and the environment is never recorded.
+  private struct HelperRun {
+    var subcommand: String
+    var exit: HelperProcessExit
+    var stdout: Data
+    var stderr: String
+    var logsDirectory: @Sendable () -> URL?
+    private var key: String
+
+    init(
+      subcommand: String, exit: HelperProcessExit, stdout: Data, stderr: String, apiKey: String?,
+      logsDirectory: @escaping @Sendable () -> URL?
+    ) {
+      self.subcommand = subcommand
+      self.exit = exit
+      self.stdout = stdout
+      self.logsDirectory = logsDirectory
+      key = apiKey?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+      self.stderr = Self.redacting(key, in: stderr)
     }
-    return .suggestFailed(stderr)
+
+    private static func redacting(_ key: String, in text: String) -> String {
+      key.isEmpty ? text : text.replacingOccurrences(of: key, with: "[redacted]")
+    }
+
+    /// Call once per failure: each call writes a log.
+    func failure(problem: String? = nil) -> HelperFailure {
+      var failure = HelperFailure(
+        exitCode: exit.exitCode, terminationSignal: exit.terminationSignal, stderr: stderr,
+        logURL: nil)
+      failure.logURL = HelperLog.write(
+        logBody(failure.report, problem: problem), prefix: "cut-suggester", in: logsDirectory())
+      return failure
+    }
+
+    func unreadable(_ detail: String) -> CutSuggestClientError {
+      .unreadableOutput(detail, failure(problem: detail))
+    }
+
+    private func logBody(_ report: HelperErrorReport?, problem: String?) -> String {
+      var lines = ["subcommand: \(subcommand)", "exit: \(exit.exitCode)"]
+      if let problem { lines.append("problem: \(problem)") }
+      if let report {
+        lines.append(
+          "error: \(report.domain) \(report.operation) phase=\(report.phase ?? "none") "
+            + "type=\(report.errorType)")
+        lines.append("message: \(report.message)")
+      }
+      if let provider = report?.providerError {
+        lines.append(
+          "provider: category=\(provider.category.wireName) "
+            + "status=\(provider.statusCode.map(String.init) ?? "none") "
+            + "request=\(provider.requestID ?? "none") "
+            + "retry_after=\(provider.retryAfter.map { "\($0)" } ?? "none") "
+            + "retryable=\(provider.retryable)")
+      }
+      // swiftlint:disable:next optional_data_string_conversion
+      let stdoutText = String(decoding: stdout, as: UTF8.self)
+      return lines.joined(separator: "\n") + "\n\n"
+        + HelperLog.streams(stdout: Data(Self.redacting(key, in: stdoutText).utf8), stderr: stderr)
+    }
   }
 
   private struct WireEvent: Decodable {
@@ -369,7 +436,7 @@ enum LiveCutSuggester {
 
   struct ProcessHandle: Sendable {
     var readStdoutToEnd: @Sendable () async -> Data
-    var waitForExit: @Sendable () async -> Int32
+    var waitForExit: @Sendable () async -> HelperProcessExit
     var stderrLines: @Sendable () -> AsyncStream<String>
     var stderrTail: @Sendable () -> String
     var terminate: @Sendable () -> Void
@@ -379,12 +446,14 @@ enum LiveCutSuggester {
     var resolveLaunch: @Sendable () -> EngineLaunch
     var makeWorkDirectory: @Sendable () throws -> URL
     var cacheDirectory: @Sendable () -> URL?
+    var logsDirectory: @Sendable () -> URL?
     var spawn: @Sendable (EngineLaunch, [String], [String: String]) throws -> ProcessHandle
 
     static var live: Self {
       Self(
         resolveLaunch: { resolvedLaunch() }, makeWorkDirectory: { try makeWorkDir() },
         cacheDirectory: { LiveCutSuggester.cacheDirectory() },
+        logsDirectory: { LiveEngine.logsDirectory },
         spawn: { launch, arguments, environment in
           guard FileManager.default.isExecutableFile(atPath: launch.executable.path) else {
             throw CutSuggestClientError.helperNotFound(launch.executable.path)
@@ -410,10 +479,15 @@ enum LiveCutSuggester {
   /// so the Swift→Python wire contract is unit-tested without spawning a subprocess.
   static func encodedRequest(_ request: CutSuggestRequest) throws -> Data {
     if let snapshot = request.snapshot {
-      guard request.transcriptHash == snapshot.transcriptHash,
-        request.sourceFingerprint == snapshot.sourceFingerprint,
-        request.sampleRate == snapshot.sampleRate
-      else { throw CutSuggestClientError.decodeFailed("Request does not match its run snapshot.") }
+      let mismatched = [
+        request.transcriptHash == snapshot.transcriptHash ? nil : "transcript hash",
+        request.sourceFingerprint == snapshot.sourceFingerprint ? nil : "source fingerprint",
+        request.sampleRate == snapshot.sampleRate ? nil : "sample rate",
+      ].compactMap { $0 }
+      guard mismatched.isEmpty else {
+        throw CutSuggestClientError.decodeFailed(
+          "Request \(mismatched.joined(separator: ", ")) does not match its run snapshot.")
+      }
       return try JSONEncoder().encode(ConfiguredRequestWire(request: request, snapshot: snapshot))
     }
     return try JSONEncoder().encode(RequestWire(request))

@@ -116,55 +116,22 @@ enum LiveEngine {
   }
 
   /// Writes a per-run log (command, exit code, full stdout, stderr tail) and
-  /// returns its URL so error messages can point the user at it. Returns nil if
-  /// the write fails, so error messages never point at a path that isn't there.
+  /// returns its URL so error messages can point the user at it.
   private static func writeJobLog(
     kind: String, audio: URL, exitCode: Int32, stdout: Data, stderr: String
   ) -> URL? {
-    guard let dir = logsDirectory else { return nil }
-    pruneOldLogs(in: dir, prefix: "\(kind)-", keepingLast: 20)
-    let file = dir.appendingPathComponent("\(kind)-\(logTimestamp()).log")
-    // `String(decoding:as:)` substitutes U+FFFD for any invalid byte rather than
-    // yielding nil, so a stray non-UTF-8 byte can't blank the whole log body.
-    // swiftlint:disable:next optional_data_string_conversion
-    let stdoutText = String(decoding: stdout, as: UTF8.self)
-    let body = """
+    HelperLog.write(
+      """
       audio: \(audio.path)
       exit: \(exitCode)
 
-      ===== STDOUT (\(stdout.count) bytes) =====
-      \(stdoutText)
-
-      ===== STDERR (tail) =====
-      \(stderr)
-      """
-    guard (try? body.write(to: file, atomically: true, encoding: .utf8)) != nil else { return nil }
-    return file
+      \(HelperLog.streams(stdout: stdout, stderr: stderr))
+      """, prefix: kind, in: logsDirectory)
   }
 
-  /// Keeps only the most recent `keepingLast` `transcribe-*.log` files. Logs hold
-  /// transcribed speech, so they shouldn't accumulate on disk unbounded. The
-  /// timestamped names sort chronologically, so lexical order is chronological.
-  private static func pruneOldLogs(in dir: URL, prefix: String, keepingLast: Int) {
-    guard
-      let names = try? FileManager.default.contentsOfDirectory(atPath: dir.path)
-    else { return }
-    let logs = names.filter { $0.hasPrefix(prefix) && $0.hasSuffix(".log") }.sorted()
-    guard logs.count > keepingLast else { return }
-    for name in logs.dropLast(keepingLast) {
-      try? FileManager.default.removeItem(at: dir.appendingPathComponent(name))
-    }
-  }
-
-  private static func logHint(_ url: URL?) -> String {
+  static func logHint(_ url: URL?) -> String {
     guard let url else { return "" }
     return "\n\nFull engine log: \(url.path)"
-  }
-
-  private static func logTimestamp() -> String {
-    let formatter = DateFormatter()
-    formatter.dateFormat = "yyyy-MM-dd_HH-mm-ss"
-    return formatter.string(from: Date())
   }
 
   // MARK: transcribe
@@ -214,20 +181,24 @@ enum LiveEngine {
           }
 
           let out = await stdoutData
-          let code = await exitCode
+          let exit = await exitCode
 
           // Persist a per-run log (command, exit, full stdout, stderr tail) so any
           // transcription is inspectable after the fact.
           let logURL = writeJobLog(
-            kind: "transcribe", audio: audio, exitCode: code, stdout: out, stderr: proc.stderrTail()
+            kind: "transcribe", audio: audio, exitCode: exit.exitCode, stdout: out,
+            stderr: proc.stderrTail()
           )
 
           if Task.isCancelled {
             continuation.finish()
             return
           }
-          guard code == 0 else {
-            throw EngineClientError.engineFailed(proc.stderrTail() + logHint(logURL))
+          guard exit.exitCode == 0 else {
+            throw EngineClientError.transcriptionExited(
+              HelperFailure(
+                exitCode: exit.exitCode, terminationSignal: exit.terminationSignal,
+                stderr: proc.stderrTail(), logURL: logURL))
           }
           let plan: EditPlan
           do {
@@ -360,9 +331,9 @@ enum LiveEngine {
       for await _ in proc.stderrLines() {}
 
       let out = await stdoutData
-      let code = await exitCode
+      let exit = await exitCode
       let logURL = writeJobLog(
-        kind: "inject-markers", audio: files[0].url, exitCode: code, stdout: out,
+        kind: "inject-markers", audio: files[0].url, exitCode: exit.exitCode, stdout: out,
         stderr: proc.stderrTail())
 
       // A cancel-triggered kill surfaces as a nonzero exit; report it as cancellation,
@@ -370,8 +341,11 @@ enum LiveEngine {
       if Task.isCancelled {
         throw CancellationError()
       }
-      guard code == 0 else {
-        throw EngineClientError.injectFailed(proc.stderrTail() + logHint(logURL))
+      guard exit.exitCode == 0 else {
+        throw EngineClientError.injectExited(
+          HelperFailure(
+            exitCode: exit.exitCode, terminationSignal: exit.terminationSignal,
+            stderr: proc.stderrTail(), logURL: logURL))
       }
       let expectedMarkerCounts = Dictionary(
         files.map { ($0.url.path, $0.markers.count) }, uniquingKeysWith: { first, _ in first })
@@ -793,13 +767,13 @@ final class SpawnedProcess: Sendable {
   /// runs under the same lock as signaling, so the reap can't race a `kill` onto a
   /// reused pid. The 20 ms poll interval keeps this off a busy-wait while adding
   /// negligible latency to a multi-second transcription.
-  func waitForExit() async -> Int32 {
+  func waitForExit() async -> HelperProcessExit {
     let reaper = reaper
     return await withCheckedContinuation { continuation in
       DispatchQueue.global().async {
         while true {
-          if let code = reaper.tryReap() {
-            continuation.resume(returning: code)
+          if let exit = reaper.tryReap() {
+            continuation.resume(returning: exit)
             return
           }
           usleep(20_000)
@@ -856,7 +830,7 @@ final class SpawnedProcess: Sendable {
 private final class ChildReaper: Sendable {
   private enum State {
     case running
-    case exited(Int32)
+    case exited(HelperProcessExit)
   }
   private let pid: pid_t
   private let state = Mutex<State>(.running)
@@ -865,8 +839,8 @@ private final class ChildReaper: Sendable {
 
   /// One non-blocking reap attempt, performed **under the lock** so the pid can't
   /// be signalled by `signalGroupIfAlive` between the `waitpid` that frees it and
-  /// the state transition. Returns the exit code once reaped, else `nil`.
-  func tryReap() -> Int32? {
+  /// the state transition. Returns the exit status once reaped, else `nil`.
+  func tryReap() -> HelperProcessExit? {
     state.withLock { current in
       if case .exited(let code) = current { return code }
       var status: Int32 = 0
@@ -875,15 +849,16 @@ private final class ChildReaper: Sendable {
       if result == -1 {
         if errno == EINTR { return nil }  // caller retries
         // ECHILD or other: already reaped/unwaitable. Treat as abnormal exit.
-        current = .exited(-1)
-        return -1
+        let exit = HelperProcessExit(exitCode: -1, terminationSignal: nil)
+        current = .exited(exit)
+        return exit
       }
-      let code: Int32 =
-        (status & 0x7f) == 0
-        ? (status >> 8) & 0xff  // WIFEXITED → WEXITSTATUS
-        : 128 + (status & 0x7f)  // signalled → 128 + WTERMSIG
-      current = .exited(code)
-      return code
+      let signal = status & 0x7f
+      let exit = HelperProcessExit(
+        exitCode: signal == 0 ? (status >> 8) & 0xff : 128 + signal,
+        terminationSignal: signal == 0 ? nil : signal)
+      current = .exited(exit)
+      return exit
     }
   }
 
@@ -921,5 +896,53 @@ private final class StderrTail: Sendable {
 
   func snapshot() -> String {
     storage.withLock { $0.joined(separator: "\n") }
+  }
+}
+
+/// The bounded per-run diagnostic logs both helpers write under ``LiveEngine/logsDirectory``.
+/// Logs can hold transcribed speech, so each `prefix` keeps only its newest 20.
+enum HelperLog {
+  static let keepingLast = 20
+
+  /// Writes `body` to a new timestamped `<prefix>-….log` and prunes older ones. Returns nil
+  /// when the write fails, so no error message points at a file that isn't there.
+  static func write(_ body: String, prefix: String, in directory: URL?) -> URL? {
+    guard let directory else { return nil }
+    let file = directory.appendingPathComponent(
+      "\(prefix)-\(timestamp())-\(UUID().uuidString.prefix(8)).log")
+    guard (try? body.write(to: file, atomically: true, encoding: .utf8)) != nil else { return nil }
+    prune(in: directory, prefix: "\(prefix)-")
+    return file
+  }
+
+  static func streams(stdout: Data, stderr: String) -> String {
+    // `String(decoding:as:)` substitutes U+FFFD for any invalid byte rather than
+    // yielding nil, so a stray non-UTF-8 byte can't blank the whole log body.
+    // swiftlint:disable:next optional_data_string_conversion
+    let stdoutText = String(decoding: stdout, as: UTF8.self)
+    return """
+      ===== STDOUT (\(stdout.count) bytes) =====
+      \(stdoutText)
+
+      ===== STDERR (tail) =====
+      \(stderr)
+      """
+  }
+
+  /// The timestamped names sort chronologically, so lexical order is chronological.
+  private static func prune(in directory: URL, prefix: String) {
+    guard let names = try? FileManager.default.contentsOfDirectory(atPath: directory.path)
+    else { return }
+    let logs = names.filter { $0.hasPrefix(prefix) && $0.hasSuffix(".log") }.sorted()
+    for name in logs.dropLast(keepingLast) {
+      try? FileManager.default.removeItem(at: directory.appendingPathComponent(name))
+    }
+  }
+
+  private static func timestamp() -> String {
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.dateFormat = "yyyy-MM-dd_HH-mm-ss.SSS"
+    return formatter.string(from: Date())
   }
 }

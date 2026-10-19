@@ -105,7 +105,10 @@ extension LiveCutSuggesterTests {
     expectNoDifference((object["options"] as? [String: Any])?["stage1_window"] as? Int, 160)
     expectNoDifference((object["options"] as? [String: Any])?["stage1_step"] as? Int, 140)
     resume.transcriptHash = "different"
-    #expect(throws: CutSuggestClientError.self) { try LiveCutSuggester.encodedRequest(resume) }
+    #expect(
+      throws: CutSuggestClientError.decodeFailed(
+        "Request transcript hash does not match its run snapshot.")
+    ) { try LiveCutSuggester.encodedRequest(resume) }
   }
 
   @Test func olderSnapshotDecodesPinnedWindowDefaults() throws {
@@ -233,29 +236,136 @@ extension LiveCutSuggesterTests {
         ]))
   }
 
-  @Test func nonzeroReadyDoesNotCompleteAndProgressDoesNotClassifyAuth() async throws {
-    let stderr =
-      "QIE_EVENT {\"type\":\"progress\",\"message\":\"401 credential\"}\nnetwork unavailable"
+  private static let progressNoise =
+    "QIE_EVENT {\"type\":\"progress\",\"message\":\"401 credential\"}\nnetwork unavailable"
+
+  private static let creditsError =
+    #"QIE_ERROR {"schema_version":1,"domain":"cut_suggester","operation":"suggest","#
+    + #""phase":"discovering","message":"Too low.","error_type":"LLMError","#
+    + #""provider_error":{"category":"credits","message":"Too low.","status_code":400,"#
+    + #""request_id":"req_1","retry_after":null,"retryable":false}}"#
+
+  private static func configuredFailure(
+    output: Data, exitCode: Int32, stderr: String = "", logsDirectory: URL? = nil,
+    apiKey: String? = nil
+  ) async -> CutSuggestClientError? {
     do {
       _ = try await Array(
         LiveCutSuggester.suggestCuts(
-          Self.configuredRequest(), apiKey: nil,
-          runner: Self.runner(
-            output: Self.emptyResult(suggestionResultSnapshot().runID), exitCode: 1, stderr: stderr)
-        ))
+          configuredRequest(), apiKey: apiKey,
+          runner: runner(
+            output: output, exitCode: exitCode, stderr: stderr, logsDirectory: logsDirectory)))
       Issue.record("Expected failure")
+      return nil
     } catch {
-      expectNoDifference(error as? CutSuggestClientError, .suggestFailed(stderr))
+      return error as? CutSuggestClientError
     }
+  }
+
+  @Test(arguments: [Int32(1), 137])
+  func readyWithNonzeroExitIsAHardFailure(exitCode: Int32) async {
+    let output = Self.emptyResult(suggestionResultSnapshot().runID)
+    let error = await Self.configuredFailure(
+      output: output, exitCode: exitCode, stderr: Self.progressNoise)
+    expectNoDifference(
+      error,
+      .exitMismatch(
+        status: "ready",
+        HelperFailure(exitCode: exitCode, stderr: Self.progressNoise, logURL: nil)))
+  }
+
+  @Test(arguments: [Int32(0), 2, 143])
+  func needsRetryWithoutExitOneIsAHardFailure(exitCode: Int32) async {
+    let id = suggestionResultSnapshot().runID
+    let output = Data(
+      """
+      {"schema_version":2,"run_id":"\(id)","checkpoint_revision":1,"status":"needs_retry",
+      "suggestions":[],"failed_batches":[]}
+      """.utf8)
+    let error = await Self.configuredFailure(output: output, exitCode: exitCode)
+    expectNoDifference(
+      error,
+      .exitMismatch(
+        status: "needs_retry", HelperFailure(exitCode: exitCode, stderr: "", logURL: nil)))
+  }
+
+  @Test func configuredHardFailureCarriesTheStructuredReport() async {
+    let stderr = Self.progressNoise + "\n" + Self.creditsError
+    let error = await Self.configuredFailure(output: Data(), exitCode: 1, stderr: stderr)
+    expectNoDifference(
+      error, .helperFailed(HelperFailure(exitCode: 1, stderr: stderr, logURL: nil)))
+    expectNoDifference(error?.helperFailure?.report?.providerError?.category, .credits)
+  }
+
+  @Test func configuredUnreadableOutputWithNonzeroExitIsAHelperFailure() async {
+    let error = await Self.configuredFailure(
+      output: Data("partial {".utf8), exitCode: 1, stderr: Self.creditsError)
+    expectNoDifference(
+      error,
+      .helperFailed(HelperFailure(exitCode: 1, stderr: Self.creditsError, logURL: nil)))
+  }
+
+  @Test func configuredEmptyOutputWithExitZeroIsUnreadable() async {
+    let error = await Self.configuredFailure(output: Data(), exitCode: 0)
+    expectNoDifference(
+      error,
+      .unreadableOutput(
+        "The helper returned no result JSON.",
+        HelperFailure(exitCode: 0, stderr: "", logURL: nil)))
+  }
+
+  @Test func unconfiguredNonzeroExitIsAHelperFailureWithoutGuessingAuth() async {
     do {
       _ = try await Array(
         LiveCutSuggester.suggestCuts(
           Self.request(), apiKey: nil,
           runner: Self.runner(output: Data(), exitCode: 1, stderr: "401 unauthorized")))
-      Issue.record("Expected authentication failure")
+      Issue.record("Expected failure")
     } catch {
-      expectNoDifference(error as? CutSuggestClientError, .authMissing("401 unauthorized"))
+      expectNoDifference(
+        error as? CutSuggestClientError,
+        .helperFailed(HelperFailure(exitCode: 1, stderr: "401 unauthorized", logURL: nil)))
     }
+  }
+
+  @Test func failureWritesABoundedLogWithoutKeyMaterial() async throws {
+    let logs = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: logs) }
+    for index in 0..<25 {
+      try Data().write(
+        to: logs.appendingPathComponent(String(format: "cut-suggester-0000-%02d.log", index)))
+    }
+    try Data().write(to: logs.appendingPathComponent("transcribe-0000.log"))
+    let stderr = "leaked sk-ant-secret\n" + Self.creditsError
+    let error = await Self.configuredFailure(
+      output: Data("echo sk-ant-secret".utf8), exitCode: 1, stderr: stderr, logsDirectory: logs,
+      apiKey: " sk-ant-secret ")
+
+    let logURL = try #require(error?.helperFailure?.logURL)
+    let text = try String(contentsOf: logURL, encoding: .utf8)
+    #expect(text.contains("subcommand: suggest"))
+    #expect(text.contains("exit: 1"))
+    #expect(text.contains("provider: category=credits status=400 request=req_1"))
+    #expect(text.contains("===== STDERR (tail) ====="))
+    #expect(!text.contains("sk-ant-secret"))
+    #expect(!text.contains("ANTHROPIC_API_KEY"))
+    let names = try FileManager.default.contentsOfDirectory(atPath: logs.path)
+    expectNoDifference(names.filter { $0.hasPrefix("cut-suggester-") }.count, 20)
+    #expect(names.contains("transcribe-0000.log"))
+    #expect(!names.contains("cut-suggester-0000-05.log"))
+  }
+
+  @Test func successWritesNoLog() async throws {
+    let logs = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: logs) }
+    _ = try await Array(
+      LiveCutSuggester.suggestCuts(
+        Self.configuredRequest(), apiKey: nil,
+        runner: Self.runner(
+          output: Self.emptyResult(suggestionResultSnapshot().runID), logsDirectory: logs)))
+    expectNoDifference(try FileManager.default.contentsOfDirectory(atPath: logs.path), [])
   }
 
   @Test(arguments: [SuggestionSearchMode.fresh, .automatic, .resume])
@@ -307,7 +417,7 @@ extension LiveCutSuggesterTests {
 
   private static func runner(
     output: Data, lines: [String] = [], exitCode: Int32 = 0,
-    stderr: String = ""
+    stderr: String = "", logsDirectory: URL? = nil
   ) -> LiveCutSuggester.Runner {
     LiveCutSuggester.Runner(
       resolveLaunch: {
@@ -320,10 +430,11 @@ extension LiveCutSuggesterTests {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url
-      }, cacheDirectory: { nil },
+      }, cacheDirectory: { nil }, logsDirectory: { logsDirectory },
       spawn: { _, _, _ in
         LiveCutSuggester.ProcessHandle(
-          readStdoutToEnd: { output }, waitForExit: { exitCode },
+          readStdoutToEnd: { output },
+          waitForExit: { .init(exitCode: exitCode, terminationSignal: nil) },
           stderrLines: {
             AsyncStream { continuation in
               for line in lines { continuation.yield(line) }
@@ -364,7 +475,8 @@ extension LiveCutSuggesterTests {
         readStdoutToEnd: {
           for await data in stdout.stream { return data }
           return Data()
-        }, waitForExit: { 0 }, stderrLines: { stderr.stream }, stderrTail: { "" },
+        }, waitForExit: { .init(exitCode: 0, terminationSignal: nil) },
+        stderrLines: { stderr.stream }, stderrTail: { "" },
         terminate: {
           terminationObserved.withLock { $0 = true }
           terminated.continuation.yield(())
@@ -432,7 +544,9 @@ extension LiveCutSuggesterTests {
     } catch {
       expectNoDifference(
         error as? CutSuggestClientError,
-        .decodeFailed("Final result is older than the latest checkpoint."))
+        .unreadableOutput(
+          "Final result revision 3 is older than checkpoint 4.",
+          HelperFailure(exitCode: 0, stderr: "", logURL: nil)))
     }
     expectNoDifference(events, [.checkpoint(runID: id, revision: 4)])
   }
@@ -533,7 +647,8 @@ extension LiveCutSuggesterTests {
       }
       return LiveCutSuggester.ProcessHandle(
         readStdoutToEnd: { Data(#"{"type_id": null, "fields": {}}"#.utf8) },
-        waitForExit: { 0 }, stderrLines: { AsyncStream { $0.finish() } },
+        waitForExit: { .init(exitCode: 0, terminationSignal: nil) },
+        stderrLines: { AsyncStream { $0.finish() } },
         stderrTail: { "" }, terminate: {})
     }
     _ = try await LiveCutSuggester.nameClip(
@@ -545,28 +660,27 @@ extension LiveCutSuggesterTests {
     #expect(!captured.requestText.contains("secret-key"))
   }
 
-  @Test func nameClipNonzeroExitMapsToSuggestFailed() async throws {
-    await #expect(throws: CutSuggestClientError.suggestFailed("network unavailable")) {
-      _ = try await Self.nameClip(output: "", exitCode: 1, stderr: "network unavailable")
-    }
-  }
-
-  @Test func nameClipAuthFailureMapsToAuthMissing() async throws {
-    await #expect(throws: CutSuggestClientError.authMissing("401 unauthorized")) {
+  @Test func nameClipNonzeroExitIsAHelperFailureWithoutGuessingAuth() async throws {
+    await #expect(
+      throws: CutSuggestClientError.helperFailed(
+        HelperFailure(exitCode: 1, stderr: "401 unauthorized", logURL: nil))
+    ) {
       _ = try await Self.nameClip(output: "", exitCode: 1, stderr: "401 unauthorized")
     }
   }
 
-  @Test func nameClipMalformedStdoutIsDecodeFailed() async throws {
+  @Test func nameClipMalformedStdoutIsUnreadableWithTheDecodingDetail() async throws {
     do {
       _ = try await Self.nameClip(output: "not json")
       Issue.record("Expected decode failure")
     } catch {
-      #expect(error is CutSuggestClientError)
-      guard case .decodeFailed = error as? CutSuggestClientError else {
-        Issue.record("Expected decodeFailed, got \(error)")
+      guard case .unreadableOutput(let detail, let failure) = error as? CutSuggestClientError
+      else {
+        Issue.record("Expected unreadableOutput, got \(error)")
         return
       }
+      #expect(detail.contains("not valid JSON"))
+      expectNoDifference(failure, HelperFailure(exitCode: 0, stderr: "", logURL: nil))
     }
   }
 
@@ -581,7 +695,8 @@ extension LiveCutSuggesterTests {
         readStdoutToEnd: {
           for await data in stdout.stream { return data }
           return Data()
-        }, waitForExit: { 0 }, stderrLines: { AsyncStream { $0.finish() } }, stderrTail: { "" },
+        }, waitForExit: { .init(exitCode: 0, terminationSignal: nil) },
+        stderrLines: { AsyncStream { $0.finish() } }, stderrTail: { "" },
         terminate: {
           terminated.withLock { $0 = true }
           stdout.continuation.yield(Data(#"{"type_id": null, "fields": {}}"#.utf8))
