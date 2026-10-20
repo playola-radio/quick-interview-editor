@@ -30,7 +30,14 @@ enum TranscriptCache {
   }
 
   private static func fileByteCount(_ url: URL) -> Int64? {
-    (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init)
+    do {
+      return try url.resourceValues(forKeys: [.fileSizeKey]).fileSize.map(Int64.init)
+    } catch {
+      AppLog.cache.error(
+        "Could not read size of \(url.path, privacy: .public): \(String(describing: error), privacy: .public)"
+      )
+      return nil
+    }
   }
 
   static func baseDirectory() throws -> URL {
@@ -45,18 +52,37 @@ enum TranscriptCache {
     let planURL = dir.appendingPathComponent(planName)
     let audioURL = dir.appendingPathComponent(audioName)
     let fm = FileManager.default
-    guard
-      fm.fileExists(atPath: manifestURL.path),
-      fm.fileExists(atPath: planURL.path),
-      fm.fileExists(atPath: audioURL.path),
-      let manifestData = try? Data(contentsOf: manifestURL),
-      let manifest = try? JSONDecoder().decode(Manifest.self, from: manifestData),
-      manifest.schemaVersion == schemaVersion,
-      manifest.key == key,
-      fileByteCount(audioURL) == manifest.audioByteCount,
-      let plan = try? EditPlan.decoded(from: planURL)
-    else { return nil }
-    return CachedTranscription(editPlan: plan, canonicalAudioURL: audioURL)
+    // No manifest is a normal miss; the manifest is the commit marker.
+    guard fm.fileExists(atPath: manifestURL.path) else { return nil }
+    guard fm.fileExists(atPath: planURL.path), fm.fileExists(atPath: audioURL.path) else {
+      AppLog.cache.warning(
+        "Ignoring incomplete cache entry \(key, privacy: .public): plan or audio is missing")
+      return nil
+    }
+    let manifest: Manifest
+    do {
+      manifest = try JSONDecoder().decode(Manifest.self, from: Data(contentsOf: manifestURL))
+    } catch {
+      AppLog.cache.error(
+        "Ignoring cache entry \(key, privacy: .public), bad manifest: \(String(describing: error), privacy: .public)"
+      )
+      return nil
+    }
+    guard manifest.schemaVersion == schemaVersion, manifest.key == key else { return nil }
+    guard fileByteCount(audioURL) == manifest.audioByteCount else {
+      AppLog.cache.warning(
+        "Ignoring cache entry \(key, privacy: .public): audio size does not match its manifest")
+      return nil
+    }
+    do {
+      let plan = try EditPlan.decoded(from: planURL)
+      return CachedTranscription(editPlan: plan, canonicalAudioURL: audioURL)
+    } catch {
+      AppLog.cache.error(
+        "Ignoring cache entry \(key, privacy: .public), unreadable plan: \(String(describing: error), privacy: .public)"
+      )
+      return nil
+    }
   }
 
   static func store(key: String, plan: EditPlan, canonicalAudioURL: URL, base: URL) throws
@@ -88,9 +114,25 @@ enum TranscriptCache {
   /// exists for the moment between creation and rename, and nothing reads temp dirs.
   static func sweepStaleTempDirs(base: URL) {
     let fm = FileManager.default
-    guard let names = try? fm.contentsOfDirectory(atPath: base.path) else { return }
+    let names: [String]
+    do {
+      names = try fm.contentsOfDirectory(atPath: base.path)
+    } catch {
+      if !error.isFileNotFound {
+        AppLog.cache.error(
+          "Could not list cache folder to sweep stale staging: \(String(describing: error), privacy: .public)"
+        )
+      }
+      return
+    }
     for name in names where name.contains(".tmp.") {
-      try? fm.removeItem(at: base.appendingPathComponent(name))
+      do {
+        try fm.removeItem(at: base.appendingPathComponent(name))
+      } catch {
+        AppLog.cache.error(
+          "Could not remove stale staging \(name, privacy: .public): \(String(describing: error), privacy: .public)"
+        )
+      }
     }
   }
 
@@ -136,7 +178,13 @@ extension TranscriptCacheClient: DependencyKey {
   static let liveValue: TranscriptCacheClient = {
     // Resolve the base lazily so an unavailable Application Support dir degrades to
     // a quiet miss rather than crashing at launch.
-    guard let base = try? TranscriptCache.baseDirectory() else {
+    let base: URL
+    do {
+      base = try TranscriptCache.baseDirectory()
+    } catch {
+      AppLog.cache.error(
+        "Transcript cache disabled, no base folder: \(String(describing: error), privacy: .public)"
+      )
       return TranscriptCacheClient(
         lookup: { _ in nil },
         store: { _, plan, url in CachedTranscription(editPlan: plan, canonicalAudioURL: url) },

@@ -27,18 +27,39 @@ enum AppDirectories {
   /// Support and Caches. Idempotent and cheap to call at every launch: each move is
   /// a no-op once done. Must run before any store reads these folders.
   static func migrateLegacyFolders(fileManager fm: FileManager = .default) {
-    if let appSupport = try? fm.url(
-      for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-    {
+    if let appSupport = resolveParent(.applicationSupportDirectory, fileManager: fm) {
       migrate(
         parent: appSupport, legacyNames: legacyApplicationSupportNames, newName: folderName,
         fileManager: fm)
     }
-    if let caches = try? fm.url(
-      for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-    {
+    if let caches = resolveParent(.cachesDirectory, fileManager: fm) {
       migrate(parent: caches, legacyNames: legacyCachesNames, newName: folderName, fileManager: fm)
     }
+  }
+
+  private static func resolveParent(
+    _ directory: FileManager.SearchPathDirectory, fileManager fm: FileManager
+  ) -> URL? {
+    do {
+      return try fm.url(for: directory, in: .userDomainMask, appropriateFor: nil, create: true)
+    } catch {
+      let cause = String(describing: error)
+      AppLog.project.error(
+        "Skipping legacy migration, no \(directory.rawValue, privacy: .public) folder: \(cause, privacy: .public)"
+      )
+      return nil
+    }
+  }
+
+  private static func logMoveFailure(
+    _ action: String, from source: URL, to destination: URL, error: Error
+  ) {
+    AppLog.project.error(
+      """
+      Legacy migration could not \(action, privacy: .public) \(source.path, privacy: .public) \
+      -> \(destination.path, privacy: .public): \(String(describing: error), privacy: .public)
+      """
+    )
   }
 
   /// Moves each existing legacy folder under `parent` into `parent/newName`. When the
@@ -63,14 +84,23 @@ enum AppDirectories {
       if !fm.fileExists(atPath: new.path) {
         // Fast path: no destination yet — one atomic rename carries everything. On
         // failure, fall through to the per-child merge instead of stranding the root.
-        if (try? fm.moveItem(at: old, to: new)) != nil { continue }
+        do {
+          try fm.moveItem(at: old, to: new)
+          continue
+        } catch {
+          logMoveFailure("rename", from: old, to: new, error: error)
+        }
       }
 
       // Destination exists (or the atomic rename failed) — deep-merge the legacy
       // contents in, then drop the emptied legacy folder. Ensure the destination
       // exists first, so the rename-failed fallback doesn't move children into a
       // missing directory (createDirectory is a no-op when it already exists).
-      try? fm.createDirectory(at: new, withIntermediateDirectories: true)
+      do {
+        try fm.createDirectory(at: new, withIntermediateDirectories: true)
+      } catch {
+        logMoveFailure("create destination for", from: old, to: new, error: error)
+      }
       mergeContents(of: old, into: new, fileManager: fm)
     }
   }
@@ -85,12 +115,21 @@ enum AppDirectories {
   private static func mergeContents(
     of source: URL, into destination: URL, fileManager fm: FileManager
   ) {
-    let children =
-      (try? fm.contentsOfDirectory(at: source, includingPropertiesForKeys: nil)) ?? []
+    let children: [URL]
+    do {
+      children = try fm.contentsOfDirectory(at: source, includingPropertiesForKeys: nil)
+    } catch {
+      logMoveFailure("list", from: source, to: destination, error: error)
+      children = []
+    }
     for child in children {
       let dest = destination.appending(component: child.lastPathComponent)
       if !fm.fileExists(atPath: dest.path) {
-        try? fm.moveItem(at: child, to: dest)
+        do {
+          try fm.moveItem(at: child, to: dest)
+        } catch {
+          logMoveFailure("move", from: child, to: dest, error: error)
+        }
         continue
       }
       var childIsDir: ObjCBool = false

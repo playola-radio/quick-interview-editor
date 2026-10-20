@@ -41,8 +41,11 @@ final class AppLaunchModel: ViewModel {
     // Warm the engine-fingerprint memo off the main actor so the first import
     // doesn't stall on hashing the engine (notably the frozen binary in packaged builds).
     Task.detached(priority: .utility) { _ = EngineFingerprint.current() }
-    if let base = try? TranscriptCache.baseDirectory() {
-      TranscriptCache.sweepStaleTempDirs(base: base)
+    do {
+      TranscriptCache.sweepStaleTempDirs(base: try TranscriptCache.baseDirectory())
+    } catch {
+      AppLog.cache.error(
+        "Skipping cache cleanup, no base folder: \(String(describing: error), privacy: .public)")
     }
     self.phase = requiresManagedModels ? .modelSetup : .ready
     if requiresManagedModels {

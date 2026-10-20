@@ -22,7 +22,15 @@ enum SourceFingerprint {
   /// Synchronous fingerprint: `sha256:<hex>` of the file, or `path:<standardized path>`
   /// when unreadable.
   static func compute(for url: URL) -> String {
-    (try? hash(of: url)) ?? "path:" + url.standardizedFileURL.path
+    do {
+      return try hash(of: url)
+    } catch {
+      let cause = String(describing: error)
+      AppLog.project.error(
+        "Fingerprint read of \(url.lastPathComponent, privacy: .public) failed, using path: \(cause, privacy: .public)"
+      )
+      return "path:" + url.standardizedFileURL.path
+    }
   }
 
   /// Memory-maps the file so a large interview isn't loaded whole.
