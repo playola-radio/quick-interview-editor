@@ -118,8 +118,14 @@ extension EditorModel {
   }
 
   private func resolvedClipNamingAPIKey() -> String? {
-    resolveAnthropicAPIKey(
-      keychain: (try? keychain.load()) ?? nil, env: environment.value(anthropicAPIKeyEnvVar))
+    var stored: String?
+    do {
+      stored = try keychain.load()
+    } catch {
+      AppLog.suggestions.error(
+        "Auto-naming could not read the API key: \(error.localizedDescription, privacy: .public)")
+    }
+    return resolveAnthropicAPIKey(keychain: stored, env: environment.value(anthropicAPIKeyEnvVar))
   }
 
   private func startClipNamingWorker() {
@@ -141,16 +147,32 @@ extension EditorModel {
   }
 
   private func performClipNaming(_ job: ManualClipNamingJob) async {
-    guard let configuration = try? await suggestionConfiguration.load(),
-      configuration.validationMessages().isEmpty
-    else { return }
+    let configuration: SuggestionConfiguration
+    do {
+      configuration = try await suggestionConfiguration.load()
+    } catch {
+      AppLog.suggestions.error(
+        "Auto-naming could not load the suggestion configuration: \(error.localizedDescription, privacy: .public)"
+      )
+      return
+    }
+    guard configuration.validationMessages().isEmpty else { return }
     guard !Task.isCancelled, job.matches(documentState) else { return }
     let request = ClipNamingRequest(
       configuration: configuration, model: CutSuggestOptions.freshConfigured.model,
       clipText: job.clipText, clipStartSample: job.startSample, clipEndSample: job.endSample,
       transcriptUnits: editPlan.transcriptUnits, interviewArtist: job.interviewArtist)
-    guard let result = try? await cutSuggest.nameClip(request, job.apiKey), !Task.isCancelled
-    else { return }
+    let named: ClipNamingResult?
+    do {
+      named = try await cutSuggest.nameClip(request, job.apiKey)
+    } catch {
+      if !(error is CancellationError) {
+        AppLog.suggestions.error(
+          "Auto-naming request failed: \(error.localizedDescription, privacy: .public)")
+      }
+      return
+    }
+    guard let result = named, !Task.isCancelled else { return }
     applyClipNaming(result, configuration: configuration, to: job)
   }
 
@@ -161,11 +183,17 @@ extension EditorModel {
       deferredClipNamings.append(.init(job: job, result: result, configuration: configuration))
       return
     }
-    guard !isEditingName(of: job.clipID), job.matches(documentState),
-      let named = try? manualClipName(
+    guard !isEditingName(of: job.clipID), job.matches(documentState) else { return }
+    let named: ManualClipName
+    do {
+      named = try manualClipName(
         for: job, result: result, snapshot: clipNamingSnapshot(configuration),
         starts: suggestionStarts, issued: issuedSuggestionNumbers)
-    else { return }
+    } catch {
+      AppLog.suggestions.error(
+        "Auto-naming result could not be applied: \(String(describing: error), privacy: .public)")
+      return
+    }
     let reservations = named.naming.reservation.map { [$0] } ?? []
     mutateDocument(recordUndo: false, recordingPermanentReservations: reservations) { state in
       guard job.matches(state) else { return }
