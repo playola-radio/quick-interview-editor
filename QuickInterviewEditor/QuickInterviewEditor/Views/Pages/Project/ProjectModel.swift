@@ -555,12 +555,12 @@ final class ProjectModel: ViewModel {
         }
         // The package was verified at open, but it is read again by path here; refuse a copy
         // whose size no longer matches `project.json` (the package changed in between).
-        guard
-          try clone.resourceValues(forKeys: [.fileSizeKey]).fileSize
-            == file.source.canonicalByteCount
-        else {
+        let cloneSize = try clone.resourceValues(forKeys: [.fileSizeKey]).fileSize
+        guard cloneSize == file.source.canonicalByteCount else {
           canonicalAudioStore.remove(clone)
-          throw ProjectPackageError.audioMismatch
+          throw ProjectPackageError.audioMismatch(
+            expectedByteCount: file.source.canonicalByteCount, actualByteCount: cloneSize,
+            readError: nil)
         }
         canonicalAudioURL = clone
         self.loadedAudio = .packageChild(sessionCopy: clone)

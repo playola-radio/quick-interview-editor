@@ -131,9 +131,97 @@ struct ProjectDocumentTests {
     defer { try? FileManager.default.removeItem(at: audioURL) }
     content.audio = .packageChild(sessionCopy: audioURL)
 
-    #expect(throws: ProjectPackage.MasteringReconcileError.missingArtifact(droppedName)) {
+    #expect(
+      throws: ProjectPackage.MasteringReconcileError.missingArtifact(
+        droppedName, cause: "No copy of it was available to save from.")
+    ) {
       try ProjectDocument.makeFileWrapper(snapshot: content, existingFile: nil)
     }
+
+    // When open-time staging recorded why the copy failed, the save error carries that cause.
+    content.masteringStagingFailures[droppedName] = "The disk is full."
+    #expect(
+      throws: ProjectPackage.MasteringReconcileError.missingArtifact(
+        droppedName, cause: "It couldn't be prepared for saving: The disk is full.")
+    ) {
+      try ProjectDocument.makeFileWrapper(snapshot: content, existingFile: nil)
+    }
+  }
+
+  @Test func freshTreeSaveCarriesTheOpenTimeStagingFailureForAReferencedArtifact() throws {
+    let name = Fixtures.uuid(93).uuidString.lowercased() + ".wav"
+    let audio = Data("canonical".utf8)
+    let (root, _) = try packageRootWithFinishedRunMedia(
+      name: name, bytes: Data("wav".utf8), audio: audio, seed: 93)
+    let document = try ProjectDocument(reading: root)
+    var content = try #require(document.content)
+    content.masteringStaged.removeValue(forKey: name)
+    content.masteringStagingFailures[name] = "The disk is full."
+    let audioURL = try tempAudioFile(audio)
+    defer { try? FileManager.default.removeItem(at: audioURL) }
+    content.audio = .packageChild(sessionCopy: audioURL)
+
+    #expect(
+      throws: ProjectPackage.MasteringReconcileError.missingArtifact(
+        name, cause: "It couldn't be prepared for saving: The disk is full.")
+    ) {
+      try ProjectDocument.makeFileWrapper(snapshot: content, existingFile: nil)
+    }
+  }
+
+  // MARK: - Legacy packages
+
+  @Test func legacyV1PackageOnDiskOpensUnchanged() throws {
+    let root = try fixturePackage()
+    let projectBytes = try #require(root.fileWrappers?["project.json"]?.regularFileContents)
+    let planBytes = try #require(root.fileWrappers?["plan.json"]?.regularFileContents)
+
+    let content = try #require(try ProjectDocument(reading: root).content)
+
+    expectNoDifference(
+      content.file,
+      try ProjectPackage.projectDecoder().decode(ProjectFile.self, from: projectBytes))
+    expectNoDifference(content.plan, try JSONDecoder().decode(EditPlan.self, from: planBytes))
+    expectNoDifference(content.file.schemaVersion, 1)
+    expectNoDifference(content.file.masteringRun, nil)
+    expectNoDifference(content.masteringManifestCorrupt, false)
+    expectNoDifference(content.masteringStaged, [:])
+    expectNoDifference(content.masteringStagingFailures, [:])
+    expectNoDifference(root.fileWrappers?["project.json"]?.regularFileContents, projectBytes)
+  }
+
+  // swiftlint:disable:next inclusive_language
+  @Test func legacyPackageWithACorruptMasteringManifestStillOpensWithTheFlagSet() throws {
+    // A schema-3 package written to disk whose `masteringRun` no longer decodes: the open must
+    // still succeed, flag the manifest as corrupt, and stage the intact on-disk media.
+    let name = Fixtures.uuid(94).uuidString.lowercased() + ".wav"
+    let bytes = Data("wav".utf8)
+    let (built, _) = try packageRootWithFinishedRunMedia(
+      name: name, bytes: bytes, audio: Data("canonical".utf8), seed: 94)
+    let projectData = try #require(built.fileWrappers?["project.json"]?.regularFileContents)
+    var json = try #require(
+      try JSONSerialization.jsonObject(with: projectData) as? [String: Any])
+    json["masteringRun"] = ["parts": "not a list"]
+    let corrupted = FileWrapper(
+      regularFileWithContents: try JSONSerialization.data(withJSONObject: json))
+    corrupted.preferredFilename = "project.json"
+    built.removeFileWrapper(try #require(built.fileWrappers?["project.json"]))
+    built.addFileWrapper(corrupted)
+    let url = FileManager.default.temporaryDirectory
+      .appendingPathComponent("qie-legacy-\(UUID().uuidString).pie")
+    try built.write(to: url, options: [], originalContentsURL: nil)
+    defer { try? FileManager.default.removeItem(at: url) }
+
+    let content = try #require(
+      try ProjectDocument(reading: try FileWrapper(url: url, options: [])).content)
+
+    expectNoDifference(content.file.schemaVersion, 3)
+    expectNoDifference(content.file.masteringRun, nil)
+    expectNoDifference(content.masteringManifestCorrupt, true)
+    expectNoDifference(content.masteringCorruptExpectedNames, [name])
+    expectNoDifference(content.masteringStagingFailures, [:])
+    expectNoDifference(
+      try Data(contentsOf: try #require(content.masteringStaged[name]?.url)), bytes)
   }
 
   private struct TestFailure: Error {}
@@ -519,7 +607,10 @@ struct ProjectDocumentTests {
     let root = try packageTree(
       file: Fixtures.projectFile(source: Fixtures.projectSource(canonicalByteCount: 10)),
       audio: Data("short".utf8))
-    #expect(throws: ProjectPackageError.audioMismatch) {
+    #expect(
+      throws: ProjectPackageError.audioMismatch(
+        expectedByteCount: 10, actualByteCount: 5, readError: nil)
+    ) {
       try ProjectDocument(reading: root)
     }
   }
@@ -609,7 +700,10 @@ struct ProjectDocumentTests {
         source: Fixtures.projectSource(canonicalByteCount: bytes.count + 1)),
       plan: Fixtures.editPlan(), audio: .packageChild(sessionCopy: nil))
 
-    #expect(throws: ProjectPackageError.audioMismatch) {
+    #expect(
+      throws: ProjectPackageError.audioMismatch(
+        expectedByteCount: bytes.count + 1, actualByteCount: bytes.count, readError: nil)
+    ) {
       try ProjectDocument.makeFileWrapper(snapshot: snapshot, existingFile: existing)
     }
   }
@@ -634,9 +728,34 @@ struct ProjectDocumentTests {
     let snapshot = ProjectDocument.Content(
       file: Fixtures.projectFile(), plan: Fixtures.editPlan(),
       audio: .packageChild(sessionCopy: nil))
-    #expect(throws: ProjectDocumentError.missingPackageAudio) {
+    #expect(
+      throws: ProjectDocumentError.missingPackageAudio(
+        cause: "there is no saved copy of the project to read it from")
+    ) {
       try ProjectDocument.makeFileWrapper(snapshot: snapshot, existingFile: nil)
     }
+  }
+
+  @Test func saveFromAPackageWithoutAudioNamesTheMissingFile() throws {
+    let existing = try packageTree(file: Fixtures.projectFile(), audio: Data("audio".utf8))
+    let audioDirectory = try #require(existing.fileWrappers?["audio"])
+    audioDirectory.removeFileWrapper(try #require(audioDirectory.fileWrappers?["canonical.aiff"]))
+    let snapshot = ProjectDocument.Content(
+      file: Fixtures.projectFile(), plan: Fixtures.editPlan(),
+      audio: .packageChild(sessionCopy: nil))
+
+    let error = try #require(
+      #expect(throws: ProjectDocumentError.self) {
+        try ProjectDocument.makeFileWrapper(snapshot: snapshot, existingFile: existing)
+      })
+
+    expectNoDifference(
+      error, .missingPackageAudio(cause: "the saved project has no audio file"))
+    expectNoDifference(
+      error.errorDescription,
+      "The project's audio (audio/canonical.aiff) could not be found: the saved project has no "
+        + "audio file, and the editor hasn't loaded its own copy yet. Reopen the project and try "
+        + "again.")
   }
 
   @Test func saveWritesTheSessionFileBytesAndProjectJSON() throws {
@@ -660,18 +779,34 @@ struct ProjectDocumentTests {
     let snapshot = ProjectDocument.Content(
       file: Fixtures.projectFile(source: Fixtures.projectSource(canonicalByteCount: 999)),
       plan: Fixtures.editPlan(), audio: .sessionFile(sessionFile))
-    #expect(throws: ProjectPackageError.audioMismatch) {
+    #expect(
+      throws: ProjectPackageError.audioMismatch(
+        expectedByteCount: 999, actualByteCount: 12, readError: nil)
+    ) {
       try ProjectDocument.makeFileWrapper(snapshot: snapshot, existingFile: nil)
     }
   }
 
-  @Test func saveRefusesAMissingSessionFile() {
+  @Test func saveRefusesAMissingSessionFile() throws {
     let missing = URL(fileURLWithPath: "/nonexistent/qie-missing.aiff")
+    let file = Fixtures.projectFile()
     let snapshot = ProjectDocument.Content(
-      file: Fixtures.projectFile(), plan: Fixtures.editPlan(), audio: .sessionFile(missing))
-    #expect(throws: ProjectPackageError.audioMismatch) {
-      try ProjectDocument.makeFileWrapper(snapshot: snapshot, existingFile: nil)
+      file: file, plan: Fixtures.editPlan(), audio: .sessionFile(missing))
+
+    let error = try #require(
+      #expect(throws: ProjectPackageError.self) {
+        try ProjectDocument.makeFileWrapper(snapshot: snapshot, existingFile: nil)
+      })
+
+    guard
+      case .audioMismatch(let expected, let actual, let readError) = error
+    else {
+      Issue.record("Expected audioMismatch, got \(error)")
+      return
     }
+    expectNoDifference(expected, file.source.canonicalByteCount)
+    expectNoDifference(actual, nil)
+    #expect(readError?.isEmpty == false)
   }
 
   // MARK: - Model seam
