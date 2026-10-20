@@ -41,7 +41,10 @@ final class MasteringConformer {
         let output = AVAudioPCMBuffer(
           pcmFormat: MasteringFormat.processingFormat, frameCapacity: input.frameLength),
         let channels = output.floatChannelData
-      else { throw ExportRenderError.bufferAllocationFailed }
+      else {
+        throw ExportRenderError.bufferAllocationFailed(
+          format: MasteringFormat.processingFormat, frames: Int(input.frameLength))
+      }
       output.frameLength = input.frameLength
       for frame in 0..<Int(input.frameLength) {
         let value = source[frame]
@@ -57,7 +60,10 @@ final class MasteringConformer {
         guard
           let output = AVAudioPCMBuffer(
             pcmFormat: MasteringFormat.processingFormat, frameCapacity: 65_536)
-        else { throw ExportRenderError.bufferAllocationFailed }
+        else {
+          throw ExportRenderError.bufferAllocationFailed(
+            format: MasteringFormat.processingFormat, frames: 65_536)
+        }
         var error: NSError?
         let status = converter.convert(to: output, error: &error) { _, inputStatus in
           if supplied {
@@ -97,7 +103,10 @@ final class MasteringConformer {
       guard
         let output = AVAudioPCMBuffer(
           pcmFormat: MasteringFormat.processingFormat, frameCapacity: 65_536)
-      else { throw ExportRenderError.bufferAllocationFailed }
+      else {
+        throw ExportRenderError.bufferAllocationFailed(
+          format: MasteringFormat.processingFormat, frames: 65_536)
+      }
       var error: NSError?
       let status = converter.convert(to: output, error: &error) { _, inputStatus in
         inputStatus.pointee = .endOfStream
@@ -119,7 +128,8 @@ final class MasteringConformer {
 
   private func emit(_ buffer: AVAudioPCMBuffer, sink: (AVAudioPCMBuffer) throws -> Void) throws {
     guard let channels = buffer.floatChannelData else {
-      throw ExportRenderError.bufferAllocationFailed
+      throw ExportRenderError.bufferAllocationFailed(
+        format: buffer.format, frames: Int(buffer.frameLength))
     }
     for channel in 0..<Int(buffer.format.channelCount) {
       for frame in 0..<Int(buffer.frameLength) {

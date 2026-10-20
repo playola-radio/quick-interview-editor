@@ -234,10 +234,10 @@ private enum MasteringReturnWorker {
       let conformer = try MasteringConformer(inputFormat: source.processingFormat)
       while source.framePosition < source.length {
         try Task.checkCancellation()
-        guard
-          let input = AVAudioPCMBuffer(
-            pcmFormat: source.processingFormat, frameCapacity: 65_536)
-        else { throw ExportRenderError.bufferAllocationFailed }
+        let format = source.processingFormat
+        guard let input = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 65_536) else {
+          throw ExportRenderError.bufferAllocationFailed(format: format, frames: 65_536)
+        }
         try source.read(into: input)
         guard input.frameLength > 0 else {
           throw MasteringReturnError.unreadable(fileName: master.lastPathComponent)

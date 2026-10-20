@@ -1264,7 +1264,10 @@ struct EditorTests {
     }
 
     expectNoDifference(
-      model.exportPhase, .failed(ExportRenderError.invalidWordStart.localizedDescription))
+      model.exportPhase,
+      .failed(
+        "Export failed: "
+          + ExportRenderError.invalidWordStart(wordIndex: lastIndex).localizedDescription))
   }
 
   @Test func wavExportSucceedsDespiteAWordWithAnInvalidStartTime() async throws {
@@ -1494,6 +1497,65 @@ struct EditorTests {
       return
     }
     #expect(message.contains("boom"))
+  }
+
+  @Test func renderFailureNamesTheFailingClipAndKeepsTheCause() async throws {
+    let model = editor()
+    addSlices(model, [(0, 1), (2, 3)])
+    let destination = try makeTempDir()
+    defer { try? FileManager.default.removeItem(at: destination) }
+    let renderCount = LockIsolated(0)
+
+    await withDependencies {
+      $0.exportRender.renderSlice = { job in
+        let count = renderCount.withValue {
+          $0 += 1
+          return $0
+        }
+        if count == 2 {
+          throw ExportRenderError.bufferAllocationFailed(
+            frames: 512, sampleRate: 48_000, channels: 2)
+        }
+        try writeStubAIFF(job)
+      }
+      $0.engine.injectMarkers = { _ in }
+      $0.workspace.reveal = { _ in }
+    } operation: {
+      model.destinationURL = destination
+      model.exportAllTapped()
+      await model.exportTask?.value
+    }
+
+    let secondName = try #require(model.slices.last?.name)
+    expectNoDifference(
+      model.exportPhase,
+      .failed(
+        "Export failed on clip 2 of 2, \"\(secondName)\": "
+          + ExportRenderError.bufferAllocationFailed(frames: 512, sampleRate: 48_000, channels: 2)
+          .localizedDescription))
+  }
+
+  @Test func markerInjectionFailureSaysItWasWritingMarkers() async throws {
+    let model = editor()
+    addSlices(model, [(0, 1)])
+    let destination = try makeTempDir()
+    defer { try? FileManager.default.removeItem(at: destination) }
+
+    await withDependencies {
+      $0.exportRender.renderSlice = { job in try writeStubAIFF(job) }
+      $0.engine.injectMarkers = { _ in throw EngineClientError.engineFailed("marker boom") }
+    } operation: {
+      model.destinationURL = destination
+      model.exportAllTapped()
+      await model.exportTask?.value
+    }
+
+    guard case .failed(let message) = model.exportPhase else {
+      Issue.record("expected .failed, got \(model.exportPhase)")
+      return
+    }
+    #expect(message.hasPrefix("Export failed while writing the clip markers"))
+    #expect(message.contains("marker boom"))
   }
 
   /// A renderer that silently leaves a target's output file missing (rather than

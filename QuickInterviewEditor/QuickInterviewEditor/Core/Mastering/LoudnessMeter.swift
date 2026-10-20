@@ -92,7 +92,10 @@ final class LoudnessMeter {
     while file.framePosition < file.length {
       try Task.checkCancellation()
       guard let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: 65_536)
-      else { throw ExportRenderError.bufferAllocationFailed }
+      else {
+        throw ExportRenderError.bufferAllocationFailed(
+          format: file.processingFormat, frames: 65_536)
+      }
       try file.read(into: buffer)
       guard buffer.frameLength > 0 else {
         throw ExportRenderError.shortRead(

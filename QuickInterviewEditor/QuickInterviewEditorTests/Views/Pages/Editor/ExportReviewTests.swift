@@ -129,6 +129,35 @@ struct ExportReviewTests {
       destination: URL(fileURLWithPath: "/destination"))
   }
 
+  @Test func missingRenderedFileNamesTheClipByNumberAndName() async {
+    var job = request([clip(1, name: "First"), clip(2, name: "Second")])
+    job.renderedByID[Fixtures.uuid(2)] = nil
+    let contents = LockIsolated<Set<String>>([])
+    let client = ExportCopyClient(
+      listNames: { _ in contents.value },
+      copy: { _, destination in
+        contents.withValue { _ = $0.insert(destination.lastPathComponent) }
+      })
+    let outcome = await copyRenderedExports(job, client: client)
+    expectNoDifference(outcome.copied.count, 1)
+    expectNoDifference(
+      outcome.errorMessage,
+      "The rendered file for clip 2 of 2, \"Second\" is missing, so it wasn't copied. Export again."
+    )
+  }
+
+  @Test func copyFailureNamesTheClipDestinationAndCause() async {
+    let client = ExportCopyClient(
+      listNames: { _ in [] },
+      copy: { _, _ in throw CocoaError(.fileNoSuchFile) })
+    let outcome = await copyRenderedExports(
+      request([clip(1, name: "ID 1")]), client: client)
+    let message = outcome.errorMessage ?? ""
+    #expect(
+      message.hasPrefix("Couldn't copy clip 1 of 1, \"ID 1\" to destination as \"ID 1.aiff\": "))
+    #expect(message.contains(CocoaError(.fileNoSuchFile).localizedDescription))
+  }
+
   @Test func safeNamesCopyWithoutReview() async {
     let copies = LockIsolated<[String]>([])
     let client = ExportCopyClient(

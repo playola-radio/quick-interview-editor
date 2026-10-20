@@ -203,7 +203,10 @@ private enum MasteringPreparer {
             guard
               let buffer = AVAudioPCMBuffer(
                 pcmFormat: input.processingFormat, frameCapacity: 65_536)
-            else { throw ExportRenderError.bufferAllocationFailed }
+            else {
+              throw ExportRenderError.bufferAllocationFailed(
+                format: input.processingFormat, frames: 65_536)
+            }
             try input.read(into: buffer)
             guard buffer.frameLength > 0, let channels = buffer.floatChannelData else {
               throw ExportRenderError.shortRead(

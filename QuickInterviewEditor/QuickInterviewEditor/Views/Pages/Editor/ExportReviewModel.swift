@@ -74,6 +74,7 @@ final class ExportReviewModel: ViewModel, Identifiable {
     copied.map { .init(id: $0.id, title: $0.url.lastPathComponent) }
   }
   var showsCopied: Bool { !copied.isEmpty }
+  var targets: [Slice] { request.targets }
   var total: Int { request.targets.count }
   var progressLabel: String {
     "\(copied.count) of \(total) \(request.kind == .masteredM4A ? "saved" : "exported")"
