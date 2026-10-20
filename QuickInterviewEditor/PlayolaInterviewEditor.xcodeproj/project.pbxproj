@@ -55,6 +55,7 @@
 		211A39885990B7091BAC6889 /* AppLaunchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0D25450C4B3308994C118AB /* AppLaunchTests.swift */; };
 		229F632A8B3AB6D8636805C1 /* EditorSelectionHistoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59E9B9B05CA1F476332FC28C /* EditorSelectionHistoryTests.swift */; };
 		22A49C6E3A720E204153854B /* edit-plan-v2.json in Resources */ = {isa = PBXBuildFile; fileRef = 0B22360CC0DFE5267E70B628 /* edit-plan-v2.json */; };
+		22CFC407675031D31961F61E /* AppLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2C62F9BCBF8FB238BDDB846 /* AppLog.swift */; };
 		22F736A8AE3F2A51F964C998 /* EditorSliceCommitTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DCC1D5C446C4954DE9F0F403 /* EditorSliceCommitTests.swift */; };
 		233EDE7C131AD50874F2BEE4 /* EngineClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10186BF34D47D6125EC51387 /* EngineClientTests.swift */; };
 		234E03B6FA375F0D5E52D42C /* ProjectPackageTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11D9F8DFA91C04D53475E20 /* ProjectPackageTests.swift */; };
@@ -663,6 +664,7 @@
 		C17FE98C318BB20FDBCAE4CB /* DraftEditingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DraftEditingTests.swift; sourceTree = "<group>"; };
 		C1B06DE5C0923C9A8BF3FD3B /* NamingTemplateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NamingTemplateView.swift; sourceTree = "<group>"; };
 		C201194EBAEB235AB244E0C1 /* SuggestionRun.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SuggestionRun.swift; sourceTree = "<group>"; };
+		C2C62F9BCBF8FB238BDDB846 /* AppLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLog.swift; sourceTree = "<group>"; };
 		C42A0D4FEC75083A4FD6AE05 /* LoudnessMeter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoudnessMeter.swift; sourceTree = "<group>"; };
 		C486B85FEBF4783601710CC4 /* suggestion-recovery-python.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "suggestion-recovery-python.json"; sourceTree = "<group>"; };
 		C494C2E61773F830EC6F3D47 /* TranscriptDocument.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptDocument.swift; sourceTree = "<group>"; };
@@ -1017,6 +1019,7 @@
 			isa = PBXGroup;
 			children = (
 				810BB19FF6D82B41F4DB1F51 /* AppDirectories.swift */,
+				C2C62F9BCBF8FB238BDDB846 /* AppLog.swift */,
 				9167FDCEFF586593E2BBCDD7 /* AudioOutputClient.swift */,
 				B1C4AE6015D3D8AB395EE3C3 /* AudioPlayerClient.swift */,
 				673C43F2570A4E37EC98B443 /* CanonicalAudioStore.swift */,
@@ -1517,7 +1520,7 @@
 			path = EditSlice;
 			sourceTree = "<group>";
 		};
-		"TEMP_EA3EB63B-F52F-43B0-B1FB-74C9F1D22633" /* Fixtures */ = {
+		"TEMP_1AD24E80-9AB3-4F7E-A8DC-704B6391B754" /* Fixtures */ = {
 			isa = PBXGroup;
 			children = (
 			);
@@ -1683,6 +1686,7 @@
 				F4D9CF0A240B5F85F4844606 /* AnthropicAPIKeyResolution.swift in Sources */,
 				D660C28C8702FC9F86550C4F /* AppDirectories.swift in Sources */,
 				294CDB287C4443600D05F032 /* AppLaunchModel.swift in Sources */,
+				22CFC407675031D31961F61E /* AppLog.swift in Sources */,
 				8A2AB51737A275F51760B89C /* AudioEditRenderPlan.swift in Sources */,
 				C0DFE6C49FC6559001963963 /* AudioOutputClient.swift in Sources */,
 				EC1BEF0A927E70413A4128D3 /* AudioPlayerClient.swift in Sources */,
