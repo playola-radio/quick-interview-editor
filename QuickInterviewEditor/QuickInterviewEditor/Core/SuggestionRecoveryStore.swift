@@ -167,7 +167,7 @@ actor SuggestionRecoveryStore {
       project = try ProjectPackage.projectDecoder().decode(ProjectFile.self, from: data)
     } catch {
       throw SuggestionRecoveryError.projectUndecodable(
-        file: projectURL.lastPathComponent, cause: String(describing: error))
+        file: projectURL.lastPathComponent, cause: ProjectPackage.decodeFailureDetail(error))
     }
     guard project.content.suggestionRecoveryOwnerID == owner.id else {
       throw SuggestionRecoveryError.savedOwnerMismatch(

@@ -141,11 +141,8 @@ enum LiveModelDownloader {
         try replaceItem(at: dest, with: tempURL, label: file.relativePath)
         return
       } catch let error as ModelDownloadError {
-        // A checksum/size failure won't fix itself on retry — surface it. A failed
-        // local save is retried like any other transient failure, but keeps its cause.
-        guard case .couldNotStoreDownload = error else { throw error }
-        lastError = error
-        resumeData = nil
+        // Checksums, sizes, and local saves cannot be repaired by downloading again.
+        throw error
       } catch {
         lastError = error
         resumeData = (error as NSError).userInfo[NSURLSessionDownloadTaskResumeData] as? Data

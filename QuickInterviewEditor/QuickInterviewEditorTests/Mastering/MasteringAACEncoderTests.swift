@@ -146,7 +146,7 @@ struct MasteringAACEncoderTests {
     do {
       _ = try await MasteringAACEncoder.encode(source, target: target, outputURL: missing)
       Issue.record("Expected encode to throw")
-    } catch let MasteringReturnError.encodeFailed(title, reason) {
+    } catch MasteringReturnError.encodeFailed(let title, let reason) {
       expectNoDifference(title, "Nowhere")
       #expect(reason.contains("writer status"))
       #expect(reason.contains("Domain"))

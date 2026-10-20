@@ -54,10 +54,13 @@ enum AppDirectories {
   private static func logMoveFailure(
     _ action: String, from source: URL, to destination: URL, error: Error
   ) {
+    let nsError = error as NSError
     AppLog.project.error(
       """
-      Legacy migration could not \(action, privacy: .public) \(source.path, privacy: .public) \
-      -> \(destination.path, privacy: .public): \(String(describing: error), privacy: .public)
+      Legacy migration could not \(action, privacy: .public) \(source.lastPathComponent, privacy: .public) \
+      -> \(destination.lastPathComponent, privacy: .public) \
+      (\(nsError.domain, privacy: .public) \(nsError.code, privacy: .public)): \
+      \(String(describing: error), privacy: .private)
       """
     )
   }

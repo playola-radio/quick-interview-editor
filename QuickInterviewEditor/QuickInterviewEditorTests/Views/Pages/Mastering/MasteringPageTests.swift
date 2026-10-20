@@ -237,7 +237,7 @@ struct MasteringPageTests {
     do {
       try MasteringArtifactValidationClient.liveValue.validate(url, ext, frames)
       return nil
-    } catch let MasteringArtifactError.corrupt(corruption) {
+    } catch MasteringArtifactError.corrupt(let corruption) {
       return corruption
     } catch { return .unreadable(cause: "unexpected \(error)") }
   }

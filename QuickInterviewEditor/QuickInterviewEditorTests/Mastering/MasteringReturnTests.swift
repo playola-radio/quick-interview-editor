@@ -88,7 +88,7 @@ struct MasteringReturnTests {
     do {
       _ = try await MasteringReturnClient.liveValue.inspect(unreadable)
       Issue.record("Expected inspect to throw")
-    } catch let MasteringReturnError.unreadable(fileName, cause) {
+    } catch MasteringReturnError.unreadable(let fileName, let cause) {
       expectNoDifference(fileName, "broken.wav")
       #expect(!cause.isEmpty)
     }

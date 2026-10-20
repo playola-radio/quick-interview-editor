@@ -83,7 +83,8 @@ enum MasteringStagingStore {
       let lock = dir.appendingPathComponent(".lease")
       let descriptor = open(lock.path, O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
       guard descriptor >= 0 else {
-        throw MasteringStagingError.lease("open", path: lock.path, errnoCode: errno)
+        let code = errno
+        throw MasteringStagingError.lease("open", path: lock.path, errnoCode: code)
       }
       guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else {
         let code = errno
