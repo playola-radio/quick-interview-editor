@@ -2,6 +2,7 @@ import ConcurrencyExtras
 import CustomDump
 import Dependencies
 import Foundation
+import Security
 import Testing
 
 @testable import PlayolaInterviewEditor
@@ -95,4 +96,104 @@ struct SettingsModelTests {
     #expect(cleared.value)
     #expect(!model.canClearCache)
   }
+
+  @Test func saveFailureNamesTheKeychainErrorAndNextStep() {
+    let saved = LockIsolated(false)
+    withDependencies {
+      $0.keychain = .failing
+    } operation: {
+      let model = SettingsModel(onSaved: { saved.setValue(true) })
+      model.apiKeyDraft = "sk-new"
+      model.saveTapped()
+
+      expectNoDifference(
+        model.statusMessage,
+        "Couldn't save the key: test Keychain failure. "
+          + "Make sure your login keychain is unlocked in Keychain Access, "
+          + "then try again.")
+      expectNoDifference(model.apiKeyDraft, "sk-new")
+      expectNoDifference(saved.value, false)
+    }
+  }
+
+  @Test func removeFailureNamesTheKeychainErrorAndNextStep() {
+    withDependencies {
+      $0.keychain = .failing
+    } operation: {
+      let model = SettingsModel()
+      model.clearTapped()
+
+      expectNoDifference(
+        model.statusMessage,
+        "Couldn't remove the key: test Keychain failure. "
+          + "Make sure your login keychain is unlocked in Keychain Access, "
+          + "then try again.")
+    }
+  }
+
+  @Test func clearCacheFailureNamesTheCauseAndNextStep() {
+    let model = withDependencies {
+      $0.transcriptCache = TranscriptCacheClient(
+        lookup: { _ in nil },
+        store: { _, plan, url in CachedTranscription(editPlan: plan, canonicalAudioURL: url) },
+        clear: { throw CocoaError(.fileWriteNoPermission) },
+        totalSize: { 1_000 })
+    } operation: {
+      SettingsModel()
+    }
+    model.onAppear()
+
+    model.clearCacheTapped()
+
+    expectNoDifference(
+      model.statusMessage,
+      "Couldn't clear the transcription cache: \(CocoaError(.fileWriteNoPermission).localizedDescription) "
+        + "Check that the app is allowed to change files in your Library folder, then try again.")
+    expectNoDifference(model.canClearCache, true)
+  }
+
+  @Test func keyReadFailureIsNotReportedAsNoKeySaved() {
+    withDependencies {
+      $0.keychain = .failing
+    } operation: {
+      let model = SettingsModel()
+      model.onAppear()
+
+      expectNoDifference(
+        model.storedKeyStatus,
+        "Couldn't check for a saved key: test Keychain failure. Make sure your login keychain is unlocked in Keychain "
+          + "Access, then reopen Settings.")
+    }
+  }
+
+  @Test func successfulSaveClearsAnEarlierKeyReadFailure() {
+    withDependencies {
+      $0.keychain = KeychainClient(
+        save: { _ in },
+        load: { throw KeychainError.unexpectedStatus(errSecInteractionNotAllowed) },
+        delete: {})
+    } operation: {
+      let model = SettingsModel()
+      model.onAppear()
+      model.apiKeyDraft = "sk-new"
+
+      model.saveTapped()
+
+      expectNoDifference(model.storedKeyStatus, "A key is saved for this machine.")
+    }
+  }
+}
+
+extension KeychainClient {
+  fileprivate static var failing: KeychainClient {
+    let error = TestKeychainError()
+    return KeychainClient(
+      save: { _ in throw error },
+      load: { throw error },
+      delete: { throw error })
+  }
+}
+
+private struct TestKeychainError: LocalizedError {
+  var errorDescription: String? { "test Keychain failure." }
 }

@@ -345,3 +345,30 @@ struct SuggestionConfigurationClientTests {
 }
 
 private final class ConfigurationMigrationFixtureBundle {}
+
+struct SuggestionConfigurationStoreErrorTests {
+  @Test func staleDraftExplainsTheConflictAndNextStep() {
+    expectNoDifference(
+      SuggestionConfigurationStoreError.staleDraft.localizedDescription,
+      "The rules were saved in another window. Reload saved rules, then make your change again.")
+  }
+
+  @Test func invalidListsTheValidationMessages() {
+    expectNoDifference(
+      SuggestionConfigurationStoreError.invalid(["Name is required.", "Prompt is too long."])
+        .localizedDescription,
+      "The rules have problems: Name is required. Prompt is too long.")
+  }
+
+  @Test func revisionOverflowDescribesTheLimit() {
+    expectNoDifference(
+      SuggestionConfigurationStoreError.revisionOverflow.localizedDescription,
+      "The saved rules have reached their revision limit and can't be saved again.")
+  }
+
+  @Test func unimplementedNamesTheMissingOperation() {
+    expectNoDifference(
+      SuggestionConfigurationStoreError.unimplemented("load").localizedDescription,
+      "Saved rules aren't available (load).")
+  }
+}

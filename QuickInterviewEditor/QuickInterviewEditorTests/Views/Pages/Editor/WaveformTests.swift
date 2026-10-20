@@ -429,6 +429,49 @@ struct WaveformTests {
     #expect(model.isLoading == false)
   }
 
+  @Test func loadFailureNamesTheCauseAndNextStepInTheEmptyState() async {
+    let model = withDependencies {
+      $0.waveform = WaveformClient(loadWaveform: { _, _, _ in
+        throw WaveformClientError.noAudioTrack
+      })
+    } operation: {
+      WaveformModel()
+    }
+    await model.load(url: URL(fileURLWithPath: "/x"), planSampleRate: 44100, durationSamples: 1000)
+    expectNoDifference(
+      model.emptyMessage,
+      "Couldn't draw the waveform: The file has no audio track. Close and reopen the project "
+        + "to try again.")
+  }
+
+  @Test func cancelledLoadKeepsTheUsualEmptyMessage() async {
+    let model = withDependencies {
+      $0.waveform = WaveformClient(loadWaveform: { _, _, _ in throw CancellationError() })
+    } operation: {
+      WaveformModel()
+    }
+    await model.load(url: URL(fileURLWithPath: "/x"), planSampleRate: 44100, durationSamples: 1000)
+    expectNoDifference(model.emptyMessage, "No audio loaded.")
+  }
+
+  @Test func aLaterSuccessfulLoadClearsTheLoadFailure() async {
+    let fails = LockIsolated(true)
+    let model = withDependencies {
+      $0.waveform = WaveformClient(loadWaveform: { _, _, _ in
+        if fails.value { throw WaveformClientError.noAudioTrack }
+        return Waveform.pyramid(
+          baseMins: [0, -0.5], baseMaxs: [0.1, 0.8], sampleRate: 44100, totalSamples: 1000)
+      })
+    } operation: {
+      WaveformModel()
+    }
+    await model.load(url: URL(fileURLWithPath: "/x"), planSampleRate: 44100, durationSamples: 1000)
+    fails.setValue(false)
+    await model.load(url: URL(fileURLWithPath: "/x"), planSampleRate: 44100, durationSamples: 1000)
+    #expect(model.waveform != nil)
+    expectNoDifference(model.emptyMessage, "No audio loaded.")
+  }
+
   // MARK: - Cursor-anchored zoom + wheel pan
 
   @Test func zoomByFactorKeepsSampleUnderCursorFixedZoomingIn() {

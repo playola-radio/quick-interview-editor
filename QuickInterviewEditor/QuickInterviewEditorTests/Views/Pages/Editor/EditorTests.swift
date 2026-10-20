@@ -518,9 +518,7 @@ struct EditorTests {
     await withDependencies {
       $0.audioPlayer.play = { _, _, _, _, _ in throw EngineClientError.engineFailed("boom") }
     } operation: {
-      await withKnownIssue {
-        await model.playSliceTapped(slice.id)
-      }
+      await model.playSliceTapped(slice.id)
     }
     expectNoDifference(model.transportContext.sliceID, nil)
   }

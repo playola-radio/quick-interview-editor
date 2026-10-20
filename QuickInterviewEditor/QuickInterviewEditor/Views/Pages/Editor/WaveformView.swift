@@ -68,6 +68,12 @@ struct WaveformView: View {
           .font(.system(size: 11, weight: .medium))
           .foregroundStyle(Color(red: 0.96, green: 0.86, blue: 0.4))
       }
+      if let playbackError = model.playbackErrorMessage {
+        Text(playbackError)
+          .font(.system(size: 11, weight: .medium))
+          .foregroundStyle(Color(red: 0.89, green: 0.58, blue: 0.58))
+          .textSelection(.enabled)
+      }
       Spacer()
       WaveformAmplitudeZoomButton(waveform: model.waveform)
         .disabled(!model.waveform.canAmplitudeZoom)

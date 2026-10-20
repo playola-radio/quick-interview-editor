@@ -122,14 +122,21 @@ enum KeychainStore {
   }
 }
 
-/// A Keychain failure. The `OSStatus` is surfaced for debugging; the key value is never
-/// included in the message.
+/// A Keychain failure, described with macOS's own wording for the `OSStatus` (the code is
+/// appended for debugging). The key value is never included in the message.
 enum KeychainError: Error, Equatable, LocalizedError {
   case unexpectedStatus(OSStatus)
   var errorDescription: String? {
     switch self {
     case .unexpectedStatus(let status):
-      return "Keychain access failed (status \(status))."
+      return "macOS Keychain error: \(Self.systemMessage(for: status)) (code \(status))"
     }
+  }
+
+  private static func systemMessage(for status: OSStatus) -> String {
+    guard let message = SecCopyErrorMessageString(status, nil) as String?,
+      !message.hasPrefix("OSStatus")
+    else { return "an unknown Keychain problem." }
+    return message
   }
 }

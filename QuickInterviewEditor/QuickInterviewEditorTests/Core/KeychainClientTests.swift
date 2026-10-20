@@ -1,4 +1,5 @@
 import CustomDump
+import Security
 import Testing
 
 @testable import PlayolaInterviewEditor
@@ -43,5 +44,23 @@ struct KeychainClientTests {
   @Test func serviceIdIsStable() {
     expectNoDifference(
       KeychainStore.service, "fm.playola.PlayolaInterviewEditor.anthropicAPIKey")
+  }
+
+  @Test func keychainErrorDescribesTheStatusInPlainEnglish() {
+    let status = errSecInteractionNotAllowed
+    let systemMessage = SecCopyErrorMessageString(status, nil) as String?
+    let expectedSystemMessage =
+      systemMessage?.hasPrefix("OSStatus") == false
+      ? systemMessage!
+      : "an unknown Keychain problem."
+    expectNoDifference(
+      KeychainError.unexpectedStatus(status).localizedDescription,
+      "macOS Keychain error: \(expectedSystemMessage) (code \(status))")
+  }
+
+  @Test func keychainErrorForAnUnknownStatusIsNotJustANumber() {
+    expectNoDifference(
+      KeychainError.unexpectedStatus(12345).localizedDescription,
+      "macOS Keychain error: an unknown Keychain problem. (code 12345)")
   }
 }

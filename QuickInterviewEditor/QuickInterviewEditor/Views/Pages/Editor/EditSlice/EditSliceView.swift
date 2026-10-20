@@ -33,6 +33,10 @@ struct EditSliceView: View {
         Text(error).foregroundStyle(.red)
       }
 
+      if let playbackError = model.playbackErrorMessage {
+        Text(playbackError).foregroundStyle(.red).textSelection(.enabled)
+      }
+
       HStack(spacing: 8) {
         Button {
           Task { await model.playPauseTapped() }

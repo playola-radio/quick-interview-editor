@@ -1,6 +1,5 @@
 import Dependencies
 import Foundation
-import IssueReporting
 import Observation
 
 /// Drives the Anthropic API-key entry surface — used both by the Settings scene (the
@@ -31,6 +30,7 @@ final class SettingsModel: ViewModel, Identifiable {
   /// Bound to the `SecureField`. Not seeded from the stored key (never show it back).
   var apiKeyDraft = ""
   private(set) var hasStoredKey = false
+  private(set) var keyReadFailure: String?
   private(set) var statusMessage: String?
   private(set) var cacheSizeBytes: Int64 = 0
 
@@ -54,7 +54,11 @@ final class SettingsModel: ViewModel, Identifiable {
   }
   var canClear: Bool { hasStoredKey }
   var storedKeyStatus: String {
-    hasStoredKey ? "A key is saved for this machine." : "No key saved yet."
+    if let keyReadFailure {
+      return "Couldn't check for a saved key: \(keyReadFailure) \(unlockKeychainHint), "
+        + "then reopen Settings."
+    }
+    return hasStoredKey ? "A key is saved for this machine." : "No key saved yet."
   }
   var canClearCache: Bool { cacheSizeBytes > 0 }
   var cacheStatus: String {
@@ -76,11 +80,12 @@ final class SettingsModel: ViewModel, Identifiable {
       try keychain.save(trimmed)
       apiKeyDraft = ""
       hasStoredKey = true
+      keyReadFailure = nil
       statusMessage = "Saved."
       onSaved?()
     } catch {
-      statusMessage = "Could not save the key. Please try again."
-      reportIssue(error)
+      statusMessage =
+        "Couldn't save the key: \(error.localizedDescription) \(unlockKeychainHint), then try again."
     }
   }
 
@@ -92,8 +97,8 @@ final class SettingsModel: ViewModel, Identifiable {
       statusMessage = "Removed."
       onSaved?()
     } catch {
-      statusMessage = "Could not remove the key. Please try again."
-      reportIssue(error)
+      statusMessage =
+        "Couldn't remove the key: \(error.localizedDescription) \(unlockKeychainHint), then try again."
     }
   }
 
@@ -103,13 +108,22 @@ final class SettingsModel: ViewModel, Identifiable {
       cacheSizeBytes = 0
       statusMessage = "Transcription cache cleared."
     } catch {
-      statusMessage = "Could not clear the cache. Please try again."
-      reportIssue(error)
+      statusMessage =
+        "Couldn't clear the transcription cache: \(error.localizedDescription) Check that the "
+        + "app is allowed to change files in your Library folder, then try again."
     }
   }
 
   // MARK: - Private Helpers
+  private let unlockKeychainHint = "Make sure your login keychain is unlocked in Keychain Access"
+
   private func refreshStoredKeyState() {
-    hasStoredKey = ((try? keychain.load()) ?? nil) != nil
+    do {
+      hasStoredKey = try keychain.load() != nil
+      keyReadFailure = nil
+    } catch {
+      hasStoredKey = false
+      keyReadFailure = error.localizedDescription
+    }
   }
 }

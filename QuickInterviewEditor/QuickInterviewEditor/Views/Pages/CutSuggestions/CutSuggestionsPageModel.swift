@@ -73,7 +73,7 @@ final class CutSuggestionsPageModel: ViewModel {
     run.currentDocument = { [weak self] in
       EditorDocumentState(cutSuggestions: self?.currentSuggestions() ?? [])
     }
-    run.resolveAPIKey = { [weak self] in self?.resolvedAPIKey() }
+    run.resolveAPIKey = { [weak self] in try self?.resolvedAPIKey() }
     run.onMissingAPIKey = { [weak self] in self?.addAPIKeyTapped() }
     run.onExplicitStart = { [weak self] in self?.onExplicitSuggest?() }
   }
@@ -103,6 +103,7 @@ final class CutSuggestionsPageModel: ViewModel {
   /// Whether a usable Anthropic key resolved (Keychain or env). Refreshed on appear and
   /// after key entry; drives onboarding vs the live suggest flow.
   private(set) var hasAPIKey = false
+  private(set) var keyReadFailure: String?
   var automaticSuggestionsEnabled: Bool {
     get { run.automaticEnabled }
     set { run.automaticEnabled = newValue }
@@ -165,10 +166,18 @@ final class CutSuggestionsPageModel: ViewModel {
       ? "No suggestions yet. Tap \u{201c}Suggest Cuts\u{201d} to find product cuts."
       : "No matching suggestions found."
   }
-  let onboardingTitle = "Add your Anthropic API key to enable cut suggestions"
-  let onboardingBody =
-    "Cut suggestions use a hosted Claude model. Add your Anthropic API key (stored in your "
-    + "Keychain, billed to your own key) to get started."
+  var onboardingTitle: String {
+    keyReadFailure == nil
+      ? "Add your Anthropic API key to enable cut suggestions"
+      : "Couldn't read your Anthropic API key"
+  }
+  var onboardingBody: String {
+    if let keyReadFailure {
+      return "\(keyReadFailure) \(unlockKeychainHint), or add your key again."
+    }
+    return "Cut suggestions use a hosted Claude model. Add your Anthropic API key (stored in "
+      + "your Keychain, billed to your own key) to get started."
+  }
   let addKeyButtonLabel = "Add API Key…"
   let acceptLabel = "Accept"
   let rejectLabel = "Reject"
@@ -591,7 +600,7 @@ final class CutSuggestionsPageModel: ViewModel {
       canonicalValues: canonical)
   }
 
-  private func refreshKeyState() { hasAPIKey = resolvedAPIKey() != nil }
+  private func refreshKeyState() { _ = try? resolvedAPIKey() }
 
   private func finishTitleEditing(_ id: CutSuggestion.ID) {
     guard editingTitleID == id else { return }
@@ -599,14 +608,35 @@ final class CutSuggestionsPageModel: ViewModel {
     onTitleEditingEnded?(id)
   }
 
-  /// Resolves the key by the fixed order (Keychain, then `ANTHROPIC_API_KEY`). A Keychain
-  /// read failure degrades to "no Keychain value" rather than throwing into the UI.
-  private func resolvedAPIKey() -> String? {
-    resolveAnthropicAPIKey(
-      keychain: (try? keychain.load()) ?? nil,
-      env: environment.value(anthropicAPIKeyEnvVar))
+  private let unlockKeychainHint = "Make sure your login keychain is unlocked in Keychain Access"
+
+  /// Resolves the key by the fixed order (Keychain, then `ANTHROPIC_API_KEY`) and keeps
+  /// `hasAPIKey` in step with every lookup. A Keychain read failure is recorded and, when no
+  /// environment key covers it, thrown — so it is never mistaken for "no key saved".
+  private func resolvedAPIKey() throws -> String? {
+    let env = environment.value(anthropicAPIKeyEnvVar)
+    do {
+      let stored = try keychain.load()
+      keyReadFailure = nil
+      let key = resolveAnthropicAPIKey(keychain: stored, env: env)
+      hasAPIKey = key != nil
+      return key
+    } catch {
+      keyReadFailure = error.localizedDescription
+      let envKey = resolveAnthropicAPIKey(keychain: nil, env: env)
+      hasAPIKey = envKey != nil
+      if let envKey { return envKey }
+      throw APIKeyReadError(
+        message: "Couldn't read your Anthropic API key from the Keychain: "
+          + "\(error.localizedDescription) \(unlockKeychainHint), then try again.")
+    }
   }
 
+}
+
+private struct APIKeyReadError: LocalizedError {
+  let message: String
+  var errorDescription: String? { message }
 }
 
 struct SuggestionOrphanRow: Identifiable {

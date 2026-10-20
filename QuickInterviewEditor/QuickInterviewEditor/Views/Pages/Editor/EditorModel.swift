@@ -89,6 +89,10 @@ final class EditorModel: ViewModel {
   /// from `fineTune`, which drives the docked pane — so the two can't fight over one session.
   var editSlice: EditSliceModel?
   var clipEditorMessage: String?
+  /// Why the last play or resume failed and what to do next; cleared when playback starts.
+  private(set) var playbackErrorMessage: String? {
+    didSet { editSlice?.playbackErrorMessage = playbackErrorMessage }
+  }
   @ObservationIgnored var committingDraftID: UUID?
   @ObservationIgnored var clipNamingQueue: [ManualClipNamingJob] = []
   @ObservationIgnored var clipNamingTask: Task<Void, Never>?
@@ -2538,6 +2542,7 @@ final class EditorModel: ViewModel {
       stopActiveTransportSnapshotting()
       editSlice = nil
     }
+    child.playbackErrorMessage = playbackErrorMessage
     editSlice = child
   }
 
@@ -3328,10 +3333,17 @@ final class EditorModel: ViewModel {
     case .playing:
       return
     case .paused(let session):
-      let resumed = await audioPlayer.resume(session)
       // Stay paused if the player couldn't actually resume (e.g. an engine restart failed) so the
       // panel doesn't claim to be playing while silent; re-guard the session after the await too.
+      let resumed: Bool
+      do {
+        resumed = try await audioPlayer.resume(session)
+      } catch {
+        if transportPhase.session == session { playbackErrorMessage = playbackFailure(error) }
+        return
+      }
       guard transportPhase.session == session, resumed else { return }
+      playbackErrorMessage = nil
       transportPhase = .playing(session)
       return
     case .stopped:
@@ -3483,10 +3495,22 @@ final class EditorModel: ViewModel {
         editedSample: result.finishedEditedSample ?? resolved.finishEditedSample,
         sourceSample: nil)
     } catch {
-      reportIssue(error)
+      if !(error is CancellationError), transportPhase.session == session {
+        playbackErrorMessage = playbackFailure(error)
+      }
       return PlayerFinish(
         end: .stopped, editedSample: resolved.finishEditedSample, sourceSample: nil)
     }
+  }
+
+  private func playbackFailure(_ error: any Error) -> String {
+    let nsError = error as NSError
+    let cause =
+      nsError.domain == NSOSStatusErrorDomain && nsError.userInfo[NSLocalizedDescriptionKey] == nil
+      ? "The Mac's audio system reported a problem (code \(nsError.code))."
+      : error.localizedDescription
+    return "Playback failed: \(cause) Check your sound output in System Settings › Sound, then "
+      + "press Play again."
   }
 
   /// The one funnel every playback flows through — plain Play (`.free`) and the slice/preview/
@@ -3510,6 +3534,7 @@ final class EditorModel: ViewModel {
       return
     }
     beginExclusivePlayback()
+    playbackErrorMessage = nil
     let session = PlaybackSessionID()
     transportContext = context
     // Armed BEFORE the play call: the player starts ticking on its slice-local axis immediately,

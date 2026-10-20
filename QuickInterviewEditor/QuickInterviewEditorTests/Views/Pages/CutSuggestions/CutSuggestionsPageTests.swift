@@ -3,6 +3,7 @@ import CustomDump
 import Dependencies
 import Foundation
 import IdentifiedCollections
+import Security
 import Testing
 
 @testable import PlayolaInterviewEditor
@@ -175,6 +176,63 @@ struct CutSuggestionsPageTests {
     }
   }
 
+  @Test func keychainReadFailureWithExistingSuggestionsIsReportedBeforeReplacement() async {
+    let fixture = SuggestionRunFixture()
+    let existing = fixture.candidate()
+    fixture.document.withValue { $0.cutSuggestions = [existing] }
+    await withDependencies {
+      fixture.install(&$0)
+      $0.keychain = .failingToRead
+    } operation: {
+      let model = CutSuggestionsPageModel(
+        editPlan: Fixtures.editPlan(), sourceFingerprint: fixture.owner.sourceFingerprint)
+      fixture.wirePage(model)
+
+      await model.suggestCutsTapped()
+
+      let expectedError =
+        "Couldn't read your Anthropic API key from the Keychain: test Keychain failure. "
+        + "Make sure your login keychain is unlocked in Keychain Access, then try again."
+      expectNoDifference(
+        model.errorMessage,
+        expectedError)
+      expectNoDifference(model.run.phase, .failed(message: expectedError))
+      expectNoDifference(fixture.document.value.cutSuggestions, [existing])
+    }
+  }
+
+  @Test func replacementKeepsExistingSuggestionsWhenTheSecondKeyReadFails() async {
+    let fixture = SuggestionRunFixture()
+    let existing = fixture.candidate()
+    let reads = LockIsolated(0)
+    fixture.document.withValue { $0.cutSuggestions = [existing] }
+    await withDependencies {
+      fixture.install(&$0)
+      $0.keychain = KeychainClient(
+        save: { _ in },
+        load: {
+          reads.withValue { $0 += 1 }
+          if reads.value == 1 { return "test-key" }
+          throw TestKeychainError()
+        },
+        delete: {})
+    } operation: {
+      let model = CutSuggestionsPageModel(
+        editPlan: Fixtures.editPlan(), sourceFingerprint: fixture.owner.sourceFingerprint)
+      fixture.wirePage(model)
+
+      await model.suggestCutsTapped()
+      expectNoDifference(model.run.phase, .confirmingReplacement)
+      await model.run.replaceConfirmed()
+
+      let expectedError =
+        "Couldn't read your Anthropic API key from the Keychain: test Keychain failure. "
+        + "Make sure your login keychain is unlocked in Keychain Access, then try again."
+      expectNoDifference(model.errorMessage, expectedError)
+      expectNoDifference(fixture.document.value.cutSuggestions, [existing])
+    }
+  }
+
   // MARK: - Helpers
 
   /// A fixture cutter: optionally captures the request + key it was handed, emits progress
@@ -342,6 +400,116 @@ struct CutSuggestionsPageTests {
 
       // The onSaved hook refreshed key state and dismissed the sheet.
       #expect(model.keyEntry == nil)
+      expectNoDifference(model.showsOnboarding, false)
+    }
+  }
+
+  @Test func keychainReadFailureShowsOnboardingThatNamesTheReadError() {
+    withDependencies {
+      $0.keychain = .failingToRead
+      $0.environment = .constant([:])
+    } operation: {
+      let model = CutSuggestionsPageModel(
+        editPlan: Fixtures.editPlan(), sourceFingerprint: "fp-read-error")
+      model.viewAppeared()
+
+      expectNoDifference(model.showsOnboarding, true)
+      expectNoDifference(model.onboardingTitle, "Couldn't read your Anthropic API key")
+      expectNoDifference(
+        model.onboardingBody,
+        "test Keychain failure. Make sure your "
+          + "login keychain is unlocked in Keychain Access, or add your key again.")
+    }
+  }
+
+  @Test func suggestWithAKeychainReadFailureSurfacesTheReadErrorInsteadOfKeyEntry() async {
+    let fixture = SuggestionRunFixture()
+    await withDependencies {
+      fixture.install(&$0)
+      $0.keychain = .failingToRead
+    } operation: {
+      let model = CutSuggestionsPageModel(
+        editPlan: Fixtures.editPlan(), sourceFingerprint: fixture.owner.sourceFingerprint)
+      fixture.wirePage(model)
+
+      await model.suggestCutsTapped()
+
+      #expect(model.keyEntry == nil)
+      expectNoDifference(fixture.state.value.requests.count, 0)
+      expectNoDifference(
+        model.errorMessage,
+        "Couldn't read your Anthropic API key from the Keychain: test Keychain failure. "
+          + "Make sure your login keychain is "
+          + "unlocked in Keychain Access, then try again.")
+    }
+  }
+
+  @Test func autoSuggestKeychainReadFailureShowsTheReadErrorInOnboarding() async {
+    let store = LockIsolated<IdentifiedArrayOf<CutSuggestion>>([])
+    let capture = LockIsolated<CutSuggestRequest?>(nil)
+    let reads = LockIsolated(0)
+    await withDependencies {
+      $0.keychain = KeychainClient(
+        save: { _ in },
+        load: {
+          reads.withValue { $0 += 1 }
+          if reads.value > 1 { throw KeychainError.unexpectedStatus(errSecInteractionNotAllowed) }
+          return "sk-keychain"
+        },
+        delete: {})
+      $0.environment = .constant([:])
+      $0.cutSuggest = fixtureClient(completed: [], capture: capture)
+    } operation: {
+      let model = CutSuggestionsPageModel(
+        editPlan: Fixtures.editPlan(), sourceFingerprint: "fp-auto-read-error")
+      wire(model, to: store)
+      model.viewAppeared()
+      await model.autoSuggestCutsIfNeeded()
+
+      expectNoDifference(model.showsOnboarding, true)
+      expectNoDifference(model.onboardingTitle, "Couldn't read your Anthropic API key")
+    }
+    #expect(capture.value == nil)
+  }
+
+  @Test func readingTheKeyAfterAnEarlierReadFailureRestoresTheSuggestButton() async {
+    let fixture = SuggestionRunFixture()
+    let unlocked = LockIsolated(false)
+    await withDependencies {
+      fixture.install(&$0)
+      $0.keychain = KeychainClient(
+        save: { _ in },
+        load: {
+          guard unlocked.value else {
+            throw KeychainError.unexpectedStatus(errSecInteractionNotAllowed)
+          }
+          return "sk-keychain"
+        },
+        delete: {})
+      $0.environment = .constant([:])
+    } operation: {
+      let model = CutSuggestionsPageModel(
+        editPlan: Fixtures.editPlan(), sourceFingerprint: fixture.owner.sourceFingerprint)
+      fixture.wirePage(model)
+      model.viewAppeared()
+      unlocked.setValue(true)
+      let task = Task { await model.suggestCutsTapped() }
+      await fixture.waitForRequests()
+      fixture.finish()
+      await task.value
+
+      expectNoDifference(model.suggestButtonLabel, "Suggest Cuts")
+    }
+  }
+
+  @Test func envVarKeyStillWorksWhenTheKeychainCannotBeRead() {
+    withDependencies {
+      $0.keychain = .failingToRead
+      $0.environment = .constant([anthropicAPIKeyEnvVar: "env-key"])
+    } operation: {
+      let model = CutSuggestionsPageModel(
+        editPlan: Fixtures.editPlan(), sourceFingerprint: "fp-env-read-error")
+      model.viewAppeared()
       expectNoDifference(model.showsOnboarding, false)
     }
   }
@@ -723,4 +891,17 @@ struct CutSuggestionsPageTests {
     wire(model, to: store)
     expectNoDifference(model.showsSuggestionsToggle, true)
   }
+}
+
+extension KeychainClient {
+  fileprivate static var failingToRead: KeychainClient {
+    KeychainClient(
+      save: { _ in },
+      load: { throw TestKeychainError() },
+      delete: {})
+  }
+}
+
+private struct TestKeychainError: LocalizedError {
+  var errorDescription: String? { "test Keychain failure." }
 }

@@ -235,18 +235,61 @@ struct EditorTransportTests {
     let model = editor()
     model.playheadEditedSample = 1000
     await withDependencies {
-      $0.audioPlayer.playEdited = { _, _, _, _, _ in
-        throw EngineClientError.engineFailed("boom")
-      }
+      $0.audioPlayer.playEdited = { _, _, _, _, _ in throw OutputUnavailable() }
     } operation: {
-      await withKnownIssue {
-        await model.transportPlayTapped()
-      }
+      await model.transportPlayTapped()
     }
     // A failed play must not jump to the range end.
     expectNoDifference(model.playheadEditedSample, 1000)
     expectNoDifference(model.transportPhase, .stopped)
     #expect(model.transportPhase.session == nil)
+  }
+
+  @Test func playFailureTellsTheUserWhyAndWhatToDo() async {
+    let model = editor()
+    model.playheadEditedSample = 1000
+    await withDependencies {
+      $0.audioPlayer.playEdited = { _, _, _, _, _ in throw OutputUnavailable() }
+    } operation: {
+      await model.transportPlayTapped()
+    }
+    expectNoDifference(
+      model.playbackErrorMessage,
+      "Playback failed: The audio output device is unavailable. Check your sound output in "
+        + "System Settings › Sound, then press Play again.")
+  }
+
+  @Test func audioSystemErrorWithOnlyACodeIsDescribedInWords() async {
+    let model = editor()
+    model.playheadEditedSample = 1000
+    await withDependencies {
+      $0.audioPlayer.playEdited = { _, _, _, _, _ in
+        throw NSError(domain: NSOSStatusErrorDomain, code: -10851)
+      }
+    } operation: {
+      await model.transportPlayTapped()
+    }
+    expectNoDifference(
+      model.playbackErrorMessage,
+      "Playback failed: The Mac's audio system reported a problem (code -10851). Check your "
+        + "sound output in System Settings › Sound, then press Play again.")
+  }
+
+  @Test func aSuccessfulPlayClearsAnEarlierPlaybackError() async {
+    let model = editor()
+    model.playheadEditedSample = 1000
+    let fails = LockIsolated(true)
+    await withDependencies {
+      $0.audioPlayer.playEdited = { _, _, _, _, _ in
+        if fails.value { throw OutputUnavailable() }
+        return EditedPlaybackEnd(end: .finished, finishedEditedSample: nil)
+      }
+    } operation: {
+      await model.transportPlayTapped()
+      fails.setValue(false)
+      await model.transportPlayTapped()
+    }
+    expectNoDifference(model.playbackErrorMessage, nil)
   }
 
   @Test func naturalCompletionLeavesCursorAtRangeEnd() async {
@@ -366,6 +409,33 @@ struct EditorTransportTests {
       await model.transportPlayTapped()  // resume attempt fails
       #expect(model.isTransportPaused)  // stays paused — the panel doesn't claim to be playing
       expectNoDifference(model.transportPhase, .paused(session!))
+      await model.transportStopTapped()
+      await task.value
+    }
+  }
+
+  @Test func resumeErrorTellsTheUserWhyAndStaysPaused() async {
+    let gate = TransportGate()
+    let model = editor()
+    model.playheadEditedSample = 1000
+    await withDependencies {
+      $0.audioPlayer.playEdited = { _, _, _, _, _ in
+        EditedPlaybackEnd(end: await gate.play(), finishedEditedSample: nil)
+      }
+      $0.audioPlayer.pause = { _ in .edited(4321) }
+      $0.audioPlayer.resume = { _ in throw OutputUnavailable() }
+      $0.audioPlayer.stop = { _ in gate.release() }
+    } operation: {
+      let task = Task { await model.transportPlayTapped() }
+      await gate.awaitStarted()
+      let session = model.transportPhase.session
+      await model.transportPauseTapped()
+      await model.transportPlayTapped()
+      expectNoDifference(model.transportPhase, .paused(session!))
+      expectNoDifference(
+        model.playbackErrorMessage,
+        "Playback failed: The audio output device is unavailable. Check your sound output in "
+          + "System Settings › Sound, then press Play again.")
       await model.transportStopTapped()
       await task.value
     }
@@ -889,3 +959,7 @@ struct EditorTransportTests {
 }
 
 // swiftlint:enable large_tuple
+
+private struct OutputUnavailable: LocalizedError {
+  var errorDescription: String? { "The audio output device is unavailable." }
+}

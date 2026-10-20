@@ -282,7 +282,10 @@ struct ProjectHydrationTests {
     }
 
     expectNoDifference(
-      model.phase, .failed("Couldn't load the project's audio: Transcription failed: disk full"))
+      model.phase,
+      .failed(
+        "Couldn't load the project's audio: Transcription failed: disk full\n\nClick Retry to try again."
+      ))
     #expect(model.showsError)
     #expect(model.editor == nil)
     expectNoDifference(record.commits, [])
@@ -314,6 +317,7 @@ struct ProjectHydrationTests {
       model.phase,
       .failed(
         "Couldn't load the project's audio: The project's bundled audio does not match the project."
+          + "\n\nClick Retry to try again."
       ))
     #expect(model.editor == nil)
     expectNoDifference(record.commits, [])
