@@ -30,25 +30,4 @@ struct LiveEngineJobLogTests {
     #expect(text.contains("STDOUT (\(stdout.count) bytes, 1 lines"))
     #expect(text.contains(stderr))
   }
-
-  @Test func jobLogNamesStdoutEventTypesButNotTheirPayloads() throws {
-    let directory = try logsDirectory()
-    defer { try? FileManager.default.removeItem(at: directory) }
-    let stdout = Data(
-      """
-      QIE_EVENT {"type":"progress","message":"secretphrase"}
-      QIE_EVENT {"type":"checkpoint","message":"secretphrase"}
-      QIE_EVENT {"type":"progress","message":"secretphrase"}
-      """.utf8)
-
-    let url = try #require(
-      LiveEngine.writeJobLog(
-        kind: "inject-markers", audio: URL(fileURLWithPath: "/tmp/a.aiff"), exitCode: 0,
-        stdout: stdout, stderr: "", logsDirectory: directory))
-
-    let text = try String(contentsOf: url, encoding: .utf8)
-    #expect(text.contains("QIE_EVENT types: checkpoint, progress"))
-    #expect(text.contains("3 lines"))
-    #expect(!text.contains("secretphrase"))
-  }
 }

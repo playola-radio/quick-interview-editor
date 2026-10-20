@@ -922,33 +922,16 @@ enum HelperLog {
   /// The log records stdout's shape only. Both helpers print results that carry transcript
   /// words or LLM output on stdout, which must never be written to disk.
   static func streams(stdout: Data, stderr: String) -> String {
-    var header =
-      "===== STDOUT (\(stdout.count) bytes, \(lineCount(stdout)) lines; content omitted) ====="
-    let events = eventTypes(stdout)
-    if !events.isEmpty { header += "\nQIE_EVENT types: \(events.joined(separator: ", "))" }
-    return """
-      \(header)
+    """
+    ===== STDOUT (\(stdout.count) bytes, \(lineCount(stdout)) lines; content omitted) =====
 
-      ===== STDERR (tail) =====
-      \(stderr)
-      """
+    ===== STDERR (tail) =====
+    \(stderr)
+    """
   }
 
   private static func lineCount(_ data: Data) -> Int {
     data.split(separator: UInt8(ascii: "\n"), omittingEmptySubsequences: true).count
-  }
-
-  private static func eventTypes(_ data: Data) -> [String] {
-    let prefix = Data("QIE_EVENT ".utf8)
-    var types = Set<String>()
-    for line in data.split(separator: UInt8(ascii: "\n")) where line.starts(with: prefix) {
-      if let object = try? JSONSerialization.jsonObject(with: Data(line.dropFirst(prefix.count)))
-        as? [String: Any], let type = object["type"] as? String
-      {
-        types.insert(type)
-      }
-    }
-    return types.sorted()
   }
 
   /// The timestamped names sort chronologically, so lexical order is chronological.

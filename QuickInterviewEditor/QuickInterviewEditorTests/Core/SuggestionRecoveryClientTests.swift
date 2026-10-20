@@ -885,7 +885,6 @@ extension SuggestionRecoveryClientTests {
     let fixture = try RecoveryFixture(documentURL: package)
     let store = SuggestionRecoveryStore(
       root: root.appending(component: "recovery"), uuid: { UUID() })
-    _ = try await store.prepare(fixture.owner, preparation: fixture.preparation)
     try writeProject(package.appending(component: "project.json"))
     do {
       try await store.confirmSaved(fixture.owner, runID: fixture.snapshot.runID)

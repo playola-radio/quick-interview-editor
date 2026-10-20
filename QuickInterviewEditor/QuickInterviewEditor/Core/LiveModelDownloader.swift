@@ -177,10 +177,8 @@ enum LiveModelDownloader {
 
   /// Swaps `source` into `destination`, replacing any prior file. Any failure keeps the
   /// real cause and destination instead of a generic error.
-  static func replaceItem(
-    at destination: URL, with source: URL, label: String,
-    fileManager fm: FileManager = .default
-  ) throws {
+  static func replaceItem(at destination: URL, with source: URL, label: String) throws {
+    let fm = FileManager.default
     do {
       if fm.fileExists(atPath: destination.path) {
         try fm.removeItem(at: destination)

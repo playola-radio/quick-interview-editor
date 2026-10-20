@@ -19,6 +19,12 @@ focus on changes that affect editing work rather than internal implementation.
   tells you what went wrong and what to try next instead of failing silently or
   showing a generic message. A locked Keychain is no longer mistaken for a
   missing API key.
+- Error messages for a failed export, Prepare for Mastering, model download,
+  damaged project file, or saved suggestion now say which clip, file, or step
+  failed and why. The app no longer just reports that something went wrong.
+  Behind-the-scenes cleanup that can fail harmlessly still stays quiet, but it
+  now leaves a note in the system log. Diagnostic logs no longer keep any
+  transcript text.
 
 ## [2.5.0] - 2026-10-16
 

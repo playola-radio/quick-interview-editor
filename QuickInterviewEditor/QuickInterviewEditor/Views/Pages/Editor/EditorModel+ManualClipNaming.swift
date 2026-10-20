@@ -167,8 +167,10 @@ extension EditorModel {
       named = try await cutSuggest.nameClip(request, job.apiKey)
     } catch {
       if !(error is CancellationError) {
+        let kind = String(reflecting: type(of: error))
         AppLog.suggestions.error(
-          "Auto-naming request failed: \(error.localizedDescription, privacy: .public)")
+          "Auto-naming request failed (\(kind, privacy: .public)): \(error.localizedDescription, privacy: .private)"
+        )
       }
       return
     }
@@ -190,8 +192,10 @@ extension EditorModel {
         for: job, result: result, snapshot: clipNamingSnapshot(configuration),
         starts: suggestionStarts, issued: issuedSuggestionNumbers)
     } catch {
+      let kind = String(reflecting: type(of: error))
       AppLog.suggestions.error(
-        "Auto-naming result could not be applied: \(String(describing: error), privacy: .public)")
+        "Auto-naming result not applied (\(kind, privacy: .public)): \(String(describing: error), privacy: .private)"
+      )
       return
     }
     let reservations = named.naming.reservation.map { [$0] } ?? []
