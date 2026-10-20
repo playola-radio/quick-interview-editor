@@ -12,7 +12,10 @@ enum MasteringGain {
   static func decibels(integratedLUFS: Double, truePeakDBTP: Double) throws -> Double {
     guard !truePeakDBTP.isNaN && truePeakDBTP != .infinity,
       !integratedLUFS.isNaN && integratedLUFS != .infinity
-    else { throw MasteringPreparationError.invalidLoudnessMeasurement }
+    else {
+      throw MasteringPreparationError.invalidLoudnessMeasurement(
+        "integrated loudness \(integratedLUFS) LUFS, true peak \(truePeakDBTP) dBTP")
+    }
     let loudnessGain = integratedLUFS.isFinite ? MasteringFormat.targetLUFS - integratedLUFS : 0
     let peakGain =
       truePeakDBTP.isFinite
@@ -35,7 +38,8 @@ extension LoudnessClient: TestDependencyKey {
   static var testValue: LoudnessClient {
     LoudnessClient(measure: { _ in
       reportIssue("LoudnessClient.measure called without a test override")
-      throw MasteringPreparationError.meterUnavailable
+      throw MasteringPreparationError.meterUnavailable(
+        "LoudnessClient.measure has no test override")
     })
   }
 }

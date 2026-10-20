@@ -112,4 +112,36 @@ struct MasteringConformerTests {
       try MasteringConformer(inputFormat: format)
     }
   }
+
+  @Test func nonFiniteConvertedSampleNamesItsOutputFrameAndChannel() throws {
+    let format = try #require(AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 2))
+    let converter = try MasteringConformer(inputFormat: format)
+    let input = try #require(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 8))
+    input.frameLength = 8
+    let channels = try #require(input.floatChannelData)
+    for frame in 0..<8 {
+      channels[0][frame] = 0
+      channels[1][frame] = 0
+    }
+    channels[1][5] = .infinity
+    #expect(
+      throws: MasteringPreparationError.invalidLoudnessMeasurement(
+        "converted sample inf at output frame 5, channel 1")
+    ) {
+      try converter.push(input) { _ in }
+    }
+  }
+
+  @Test func contextPrefixesEveryDetailCarryingCaseAndLeavesTheRestAlone() {
+    expectNoDifference(
+      MasteringPreparationError.conversionFailed("x").within("part 2"),
+      .conversionFailed("part 2: x"))
+    expectNoDifference(
+      MasteringPreparationError.meterUnavailable("x").within("part 2"),
+      .meterUnavailable("part 2: x"))
+    expectNoDifference(
+      MasteringPreparationError.invalidLoudnessMeasurement("x").within("part 2"),
+      .invalidLoudnessMeasurement("part 2: x"))
+    expectNoDifference(MasteringPreparationError.noPieces.within("part 2"), .noPieces)
+  }
 }

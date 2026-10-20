@@ -15,14 +15,20 @@ final class LoudnessMeter {
   private let channelCount: Int
 
   init(channels: Int, sampleRate: Int, mode: Mode) throws {
-    guard channels > 0 && sampleRate > 0 else { throw MasteringPreparationError.meterUnavailable }
+    guard channels > 0 && sampleRate > 0 else {
+      throw MasteringPreparationError.meterUnavailable(
+        "invalid meter format (\(channels) channels, \(sampleRate) Hz)")
+    }
     let flags =
       Int32(EBUR128_MODE_TRUE_PEAK.rawValue)
       | (mode == .integratedAndTruePeak ? Int32(EBUR128_MODE_I.rawValue) : 0)
     ebur128Lock.lock()
     let state = ebur128_init(UInt32(channels), UInt(sampleRate), flags)
     ebur128Lock.unlock()
-    guard let state else { throw MasteringPreparationError.meterUnavailable }
+    guard let state else {
+      throw MasteringPreparationError.meterUnavailable(
+        "libebur128 could not allocate a meter (\(channels) channels, \(sampleRate) Hz)")
+    }
     self.state = state
     self.channelCount = channels
   }
@@ -34,16 +40,25 @@ final class LoudnessMeter {
   }
 
   func add(_ buffer: AVAudioPCMBuffer) throws {
-    guard Int(buffer.format.channelCount) == channelCount,
-      let channels = buffer.floatChannelData,
-      let state
-    else { throw MasteringPreparationError.meterUnavailable }
+    guard Int(buffer.format.channelCount) == channelCount else {
+      throw MasteringPreparationError.meterUnavailable(
+        "buffer has \(buffer.format.channelCount) channels; the meter expects \(channelCount)")
+    }
+    guard let channels = buffer.floatChannelData else {
+      throw MasteringPreparationError.meterUnavailable("buffer is not float PCM")
+    }
+    guard let state else {
+      throw MasteringPreparationError.meterUnavailable("the meter was already released")
+    }
     let count = Int(buffer.frameLength)
     var interleaved = [Float](repeating: 0, count: count * channelCount)
     for frame in 0..<count {
       for channel in 0..<channelCount {
         let value = channels[channel][frame]
-        guard value.isFinite else { throw MasteringPreparationError.invalidLoudnessMeasurement }
+        guard value.isFinite else {
+          throw MasteringPreparationError.invalidLoudnessMeasurement(
+            "sample \(value) at frame \(frame), channel \(channel)")
+        }
         interleaved[frame * channelCount + channel] = value
       }
     }
@@ -51,35 +66,53 @@ final class LoudnessMeter {
     let result = ebur128_add_frames_float(state, &interleaved, count)
     ebur128Lock.unlock()
     guard result == EBUR128_SUCCESS.rawValue else {
-      throw MasteringPreparationError.meterUnavailable
+      throw MasteringPreparationError.meterUnavailable(
+        "ebur128_add_frames_float failed: \(Self.describe(result))")
     }
   }
 
   func integratedLUFS() throws -> Double {
-    guard let state else { throw MasteringPreparationError.meterUnavailable }
+    guard let state else {
+      throw MasteringPreparationError.meterUnavailable("the meter was already released")
+    }
     var value = 0.0
     ebur128Lock.lock()
     let result = ebur128_loudness_global(state, &value)
     ebur128Lock.unlock()
     guard result == EBUR128_SUCCESS.rawValue else {
-      throw MasteringPreparationError.meterUnavailable
+      throw MasteringPreparationError.meterUnavailable(
+        "ebur128_loudness_global failed: \(Self.describe(result))")
     }
     return value
   }
 
   func truePeakDBTP() throws -> Double {
-    guard let state else { throw MasteringPreparationError.meterUnavailable }
+    guard let state else {
+      throw MasteringPreparationError.meterUnavailable("the meter was already released")
+    }
     var peak = 0.0
     ebur128Lock.lock()
     defer { ebur128Lock.unlock() }
     for channel in 0..<channelCount {
       var value = 0.0
-      guard ebur128_true_peak(state, UInt32(channel), &value) == EBUR128_SUCCESS.rawValue else {
-        throw MasteringPreparationError.meterUnavailable
+      let result = ebur128_true_peak(state, UInt32(channel), &value)
+      guard result == EBUR128_SUCCESS.rawValue else {
+        throw MasteringPreparationError.meterUnavailable(
+          "ebur128_true_peak failed for channel \(channel): \(Self.describe(result))")
       }
       peak = max(peak, value)
     }
     return peak > 0 ? 20 * log10(peak) : -.infinity
+  }
+
+  private static func describe(_ code: Int32) -> String {
+    switch code {
+    case Int32(EBUR128_ERROR_NOMEM.rawValue): "out of memory (code \(code))"
+    case Int32(EBUR128_ERROR_INVALID_MODE.rawValue): "invalid mode (code \(code))"
+    case Int32(EBUR128_ERROR_INVALID_CHANNEL_INDEX.rawValue): "invalid channel index (code \(code))"
+    case Int32(EBUR128_ERROR_NO_CHANGE.rawValue): "no change (code \(code))"
+    default: "code \(code)"
+    }
   }
 
   static func measure(url: URL, mode: Mode = .integratedAndTruePeak) throws

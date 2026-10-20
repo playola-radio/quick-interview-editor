@@ -24,7 +24,12 @@ final class MasteringConformer {
       guard
         let converter = AVAudioConverter(
           from: inputFormat, to: MasteringFormat.processingFormat)
-      else { throw MasteringPreparationError.conversionFailed("Could not initialize converter") }
+      else {
+        throw MasteringPreparationError.conversionFailed(
+          "Could not initialize converter from \(inputFormat.sampleRate) Hz, "
+            + "\(channels) channel(s), \(inputFormat.commonFormat.rawValue) format code "
+            + "(interleaved: \(inputFormat.isInterleaved))")
+      }
       if channels == 1 { converter.channelMap = [0, 0] }
       path = .converted(converter)
     }
@@ -85,12 +90,14 @@ final class MasteringConformer {
         }
         if status == .error || stalled > 2 {
           throw MasteringPreparationError.conversionFailed(
-            "Converter stopped before consuming input")
+            "Converter stopped before consuming input (status \(status.description), "
+              + "\(stalled) consecutive empty passes)")
         }
         if status == .inputRanDry { break }
       } while true
       guard supplied else {
-        throw MasteringPreparationError.conversionFailed("Converter did not consume input")
+        throw MasteringPreparationError.conversionFailed(
+          "Converter did not consume input (\(input.frameLength) frames offered)")
       }
     }
   }
@@ -121,7 +128,9 @@ final class MasteringConformer {
       }
       if status == .endOfStream { return }
       if status == .error || stalled > 2 {
-        throw MasteringPreparationError.conversionFailed("Converter failed to finish")
+        throw MasteringPreparationError.conversionFailed(
+          "Converter failed to finish (status \(status.description), "
+            + "\(stalled) consecutive empty passes)")
       }
     }
   }
@@ -134,11 +143,25 @@ final class MasteringConformer {
     for channel in 0..<Int(buffer.format.channelCount) {
       for frame in 0..<Int(buffer.frameLength) {
         guard channels[channel][frame].isFinite else {
-          throw MasteringPreparationError.invalidLoudnessMeasurement
+          throw MasteringPreparationError.invalidLoudnessMeasurement(
+            "converted sample \(channels[channel][frame]) at output frame "
+              + "\(outputFrameCount + frame), channel \(channel)")
         }
       }
     }
     try sink(buffer)
     outputFrameCount += Int(buffer.frameLength)
+  }
+}
+
+extension AVAudioConverterOutputStatus {
+  fileprivate var description: String {
+    switch self {
+    case .haveData: "haveData (\(rawValue))"
+    case .inputRanDry: "inputRanDry (\(rawValue))"
+    case .endOfStream: "endOfStream (\(rawValue))"
+    case .error: "error (\(rawValue))"
+    @unknown default: "unknown (\(rawValue))"
+    }
   }
 }
