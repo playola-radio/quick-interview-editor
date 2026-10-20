@@ -85,8 +85,12 @@ struct MasteringReturnTests {
     }
     let unreadable = work.appendingPathComponent("broken.wav")
     try Data([1, 2, 3, 4]).write(to: unreadable)
-    await #expect(throws: MasteringReturnError.unreadable(fileName: "broken.wav")) {
-      try await MasteringReturnClient.liveValue.inspect(unreadable)
+    do {
+      _ = try await MasteringReturnClient.liveValue.inspect(unreadable)
+      Issue.record("Expected inspect to throw")
+    } catch let MasteringReturnError.unreadable(fileName, cause) {
+      expectNoDifference(fileName, "broken.wav")
+      #expect(!cause.isEmpty)
     }
     let surround = work.appendingPathComponent("surround.wav")
     try pcm(surround, channels: 6)
