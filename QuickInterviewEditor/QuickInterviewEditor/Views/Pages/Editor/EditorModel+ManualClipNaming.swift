@@ -151,8 +151,10 @@ extension EditorModel {
     do {
       configuration = try await suggestionConfiguration.load()
     } catch {
+      let kind = String(reflecting: type(of: error))
       AppLog.suggestions.error(
-        "Auto-naming could not load the suggestion configuration: \(error.localizedDescription, privacy: .public)"
+        // swiftlint:disable:next line_length
+        "Auto-naming could not load the suggestion configuration (\(kind, privacy: .public)): \(error.localizedDescription, privacy: .private)"
       )
       return
     }
@@ -167,9 +169,12 @@ extension EditorModel {
       named = try await cutSuggest.nameClip(request, job.apiKey)
     } catch {
       if !(error is CancellationError) {
-        let kind = String(reflecting: type(of: error))
+        let diagnostic =
+          (error as? CutSuggestClientError)?.diagnosticLabel
+          ?? String(reflecting: type(of: error))
         AppLog.suggestions.error(
-          "Auto-naming request failed (\(kind, privacy: .public)): \(error.localizedDescription, privacy: .private)"
+          // swiftlint:disable:next line_length
+          "Auto-naming request failed (\(diagnostic, privacy: .public)): \(error.localizedDescription, privacy: .private)"
         )
       }
       return

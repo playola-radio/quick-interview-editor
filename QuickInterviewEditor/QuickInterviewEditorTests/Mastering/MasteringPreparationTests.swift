@@ -200,6 +200,27 @@ struct MasteringPreparationTests {
     }
   }
 
+  @Test func unexpectedMeterFailureNamesTheIntroAndKeepsTheCause() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let request = try fixture(directory: directory)
+    await #expect(
+      throws: MasteringPreparationError.conversionFailed(
+        "intro \"First\": temporary meter input could not be read")
+    ) {
+      try await withDependencies {
+        $0.loudness = LoudnessClient(measure: { _ in
+          throw NSError(
+            domain: "MasteringPreparationTests", code: 1,
+            userInfo: [NSLocalizedDescriptionKey: "temporary meter input could not be read"])
+        })
+      } operation: {
+        try await MasteringAudioClient.liveValue.prepare(request) { _ in }
+      }
+    }
+  }
+
   @Test func invalidMeasurementNamesTheIntroAndTheBadValue() async throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

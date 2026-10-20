@@ -139,6 +139,21 @@ enum CutSuggestClientError: Error, Equatable, LocalizedError {
     default: nil
     }
   }
+
+  var diagnosticLabel: String {
+    switch self {
+    case .unimplemented: "unimplemented"
+    case .helperNotFound: "helperNotFound"
+    case .authMissing: "authMissing"
+    case .helperFailed(let failure): "helperFailed (exit code \(failure.exitCode))"
+    case .exitMismatch(let status, let failure):
+      "exitMismatch (status \(status), exit code \(failure.exitCode))"
+    case .unreadableOutput(_, let failure): "unreadableOutput (exit code \(failure.exitCode))"
+    case .endedWithoutResult: "endedWithoutResult"
+    case .noSuggestions: "noSuggestions"
+    case .decodeFailed: "decodeFailed"
+    }
+  }
 }
 
 extension CutSuggestClient: DependencyKey {

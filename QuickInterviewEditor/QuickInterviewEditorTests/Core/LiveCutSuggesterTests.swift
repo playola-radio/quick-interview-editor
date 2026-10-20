@@ -683,6 +683,15 @@ extension LiveCutSuggesterTests {
     }
   }
 
+  @Test func clipNamingDiagnosticLabelKeepsOnlySafeErrorMetadata() {
+    expectNoDifference(
+      CutSuggestClientError.helperFailed(
+        HelperFailure(exitCode: 1, stderr: "secret provider response", logURL: nil)
+      ).diagnosticLabel,
+      "helperFailed (exit code 1)"
+    )
+  }
+
   @Test func nameClipMalformedStdoutIsUnreadableWithTheDecodingDetail() async throws {
     do {
       _ = try await Self.nameClip(output: "not json")

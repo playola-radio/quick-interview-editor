@@ -931,7 +931,9 @@ enum HelperLog {
   }
 
   private static func lineCount(_ data: Data) -> Int {
-    data.split(separator: UInt8(ascii: "\n"), omittingEmptySubsequences: true).count
+    guard !data.isEmpty else { return 0 }
+    let newlineCount = data.lazy.filter { $0 == UInt8(ascii: "\n") }.count
+    return newlineCount + (data.last == UInt8(ascii: "\n") ? 0 : 1)
   }
 
   /// The timestamped names sort chronologically, so lexical order is chronological.

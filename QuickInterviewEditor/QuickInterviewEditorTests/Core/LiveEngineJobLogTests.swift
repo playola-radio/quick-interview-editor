@@ -30,4 +30,26 @@ struct LiveEngineJobLogTests {
     #expect(text.contains("STDOUT (\(stdout.count) bytes, 1 lines"))
     #expect(text.contains(stderr))
   }
+
+  @Test func jobLogCountsBlankLinesAndTrailingNewlinesInStdout() throws {
+    let directory = try logsDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let cases: [(Data, Int)] = [
+      (Data(), 0),
+      (Data("\n".utf8), 1),
+      (Data("a\n\nb".utf8), 3),
+      (Data("a\n".utf8), 1),
+    ]
+
+    for item in cases {
+      let url = try #require(
+        LiveEngine.writeJobLog(
+          kind: "transcribe", audio: URL(fileURLWithPath: "/tmp/interview.wav"), exitCode: 3,
+          stdout: item.0, stderr: "", logsDirectory: directory))
+
+      let text = try String(contentsOf: url, encoding: .utf8)
+      #expect(text.contains("STDOUT (\(item.0.count) bytes, \(item.1) lines"))
+      try FileManager.default.removeItem(at: url)
+    }
+  }
 }
