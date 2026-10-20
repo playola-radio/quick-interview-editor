@@ -10,6 +10,7 @@ enum AppLog {
   static let project = Logger(subsystem: subsystem, category: "project")
   static let cache = Logger(subsystem: subsystem, category: "cache")
   static let modelDownload = Logger(subsystem: subsystem, category: "model-download")
+  // swiftlint:disable:next inclusive_language
   static let mastering = Logger(subsystem: subsystem, category: "mastering")
   static let document = Logger(subsystem: subsystem, category: "document")
   static let suggestions = Logger(subsystem: subsystem, category: "suggestions")
