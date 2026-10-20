@@ -145,4 +145,20 @@ struct CutSuggestionPresentationTests {
     let row = suggestionRow(spotlight, currentTranscriptHash: "h", currentFingerprint: "fp")
     expectNoDifference(row.typeLabel, "Artist Spotlight")
   }
+
+  @Test func invalidMessageNamesTheSpecificReasonForEveryCase() {
+    let reasons: [InvalidReason] = [
+      .unknownSuggestion, .noWords, .duplicateWords([1]), .wordsNotContiguous,
+      .ambiguousPlanWords([2, 3]), .wordsMissingSampleBounds([4]), .wordsOutOfOrder,
+      .samplesOutOfBounds, .wordMembershipMismatch,
+    ]
+    let messages = reasons.map(cutSuggestionInvalidMessage)
+    expectNoDifference(Set(messages).count, reasons.count)
+    #expect(messages.dropFirst().allSatisfy { $0.contains("Try regenerating") })
+  }
+
+  @Test func invalidMessageCountsTheOffendingWords() {
+    #expect(cutSuggestionInvalidMessage(.ambiguousPlanWords([2, 3])).contains("2 of"))
+    #expect(cutSuggestionInvalidMessage(.wordsMissingSampleBounds([4])).contains("1 of"))
+  }
 }

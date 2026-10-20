@@ -234,7 +234,8 @@ struct EditorSuggestionFlowTests {
     #expect(!model.canRedo)
     expectNoDifference(
       model.cutSuggestions.actionMessage,
-      "This suggestion's saved naming details are invalid. Review its fields or suggest cuts again."
+      "This suggestion's saved naming details are invalid (suggestion \(candidate.id.uuidString)). "
+        + "Review its fields or suggest cuts again."
     )
   }
 
@@ -263,9 +264,12 @@ struct EditorSuggestionFlowTests {
     let before = model.documentState
     model.cutSuggestions.acceptTapped(candidate.id)
     expectNoDifference(model.documentState, before)
+    let runID = try #require(candidate.naming?.runID)
     expectNoDifference(
       model.cutSuggestions.actionMessage,
-      "This suggestion's saved naming rules are missing. Suggest cuts again before accepting.")
+      "This suggestion's saved naming rules are missing (search \(runID.uuidString)). "
+        + "Suggest cuts again before accepting."
+    )
   }
 
   @Test func unissuedPendingReservationDoesNotConflictWithPermanentNumbers() throws {

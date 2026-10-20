@@ -104,10 +104,12 @@ enum SuggestionRunValidationError: Error, Equatable, LocalizedError {
 
   var errorDescription: String? {
     switch self {
-    case .missingOwningSnapshot:
-      "This suggestion's saved naming rules are missing. Suggest cuts again before accepting."
-    case .invalidNaming:
-      "This suggestion's saved naming details are invalid. Review its fields or suggest cuts again."
+    case .missingOwningSnapshot(let runID):
+      "This suggestion's saved naming rules are missing (search \(runID.uuidString)). "
+        + "Suggest cuts again before accepting."
+    case .invalidNaming(let candidateID):
+      "This suggestion's saved naming details are invalid (suggestion \(candidateID.uuidString)). "
+        + "Review its fields or suggest cuts again."
     }
   }
 }
