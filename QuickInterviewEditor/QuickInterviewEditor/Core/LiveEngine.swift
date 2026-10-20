@@ -35,9 +35,11 @@ enum LiveEngine {
     // transcription reaches this path. Dev (not bundled) keeps its download-on-
     // demand behavior with no env injected.
     if launch.isBundled {
-      if let installation = try? ModelLocations.installation() {
-        launch.environment = installation.engineEnvironment
-      } else {
+      do {
+        launch.environment = try ModelLocations.installation().engineEnvironment
+      } catch {
+        AppLog.modelDownload.error(
+          "Could not resolve model folders: \(String(describing: error), privacy: .public)")
         // Even if the model dirs can't be resolved (Application Support
         // unavailable), never let the packaged engine fall open to an online
         // download — force offline so it fails clearly instead.

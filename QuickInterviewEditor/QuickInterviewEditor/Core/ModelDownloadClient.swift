@@ -67,7 +67,8 @@ extension DependencyValues {
 
 enum ModelDownloadError: Error, Equatable, LocalizedError {
   case unimplemented
-  case checksumMismatch(file: String, expected: String, actual: String)
+  case checksumMismatch(file: String, url: String, expected: String, actual: String)
+  case couldNotStoreDownload(file: String, destination: String, reason: String)
   case httpError(file: String, status: Int)
   case incompleteDownload(file: String, expected: Int64, actual: Int64)
 
@@ -77,8 +78,14 @@ enum ModelDownloadError: Error, Equatable, LocalizedError {
     switch self {
     case .unimplemented:
       return "The model downloader was used without a live implementation."
-    case .checksumMismatch(let file, _, _):
-      return "\(file) failed its checksum after downloading. It may be corrupted; try again."
+    case .checksumMismatch(let file, let url, let expected, let actual):
+      return
+        "\(file) failed its checksum after downloading from \(url): expected SHA-256 "
+        + "\(expected) but got \(actual). The download may be corrupted; try again."
+    case .couldNotStoreDownload(let file, let destination, let reason):
+      return
+        "Downloaded \(file) but could not save it to \(destination): \(reason). "
+        + "Check that your disk has free space and try again."
     case .httpError(let file, let status):
       return "Downloading \(file) failed (HTTP \(status)). Check your connection and try again."
     case .incompleteDownload(let file, let expected, let actual):

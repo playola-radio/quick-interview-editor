@@ -100,7 +100,7 @@ struct ModelSetupTests {
         stream(
           [],
           throwing: ModelDownloadError.checksumMismatch(
-            file: "a.bin", expected: "aa", actual: "zz"))
+            file: "a.bin", url: "https://example.com/a.bin", expected: "aa", actual: "zz"))
       }
     } operation: {
       await model.viewAppeared()
@@ -110,6 +110,49 @@ struct ModelSetupTests {
     #expect(model.errorMessage != nil)
     #expect(model.showsRetry)
     #expect(!model.showsProgressBar)
+  }
+
+  @Test func failureMessageKeepsCauseAndSaysWhatToDo() async {
+    let model = ModelSetupModel(manifest: smallManifest)
+
+    await withDependencies {
+      $0.modelDownloader.installedLocation = { _ in nil }
+      $0.modelDownloader.download = { _ in
+        stream(
+          [],
+          throwing: ModelDownloadError.checksumMismatch(
+            file: "a.bin", url: "https://example.com/a.bin", expected: "aa", actual: "zz"))
+      }
+    } operation: {
+      await model.viewAppeared()
+    }
+
+    let message = model.errorMessage ?? ""
+    #expect(message.contains("https://example.com/a.bin"))
+    #expect(message.contains("expected SHA-256 aa but got zz"))
+    #expect(message.contains(model.retryButtonLabel))
+    #expect(message.contains("internet connection"))
+    #expect(message.contains("disk space"))
+  }
+
+  @Test func saveFailureMessageKeepsDestinationAndCause() async {
+    let model = ModelSetupModel(manifest: smallManifest)
+
+    await withDependencies {
+      $0.modelDownloader.installedLocation = { _ in nil }
+      $0.modelDownloader.download = { _ in
+        stream(
+          [],
+          throwing: ModelDownloadError.couldNotStoreDownload(
+            file: "a.bin", destination: "/Models/a.bin", reason: "No space left on device"))
+      }
+    } operation: {
+      await model.viewAppeared()
+    }
+
+    let message = model.errorMessage ?? ""
+    #expect(message.contains("/Models/a.bin"))
+    #expect(message.contains("No space left on device"))
   }
 
   @Test func cancelSetsFailedPhaseWithRetryHint() {
