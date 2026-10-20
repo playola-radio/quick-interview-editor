@@ -115,10 +115,12 @@ enum LiveEngine {
     return dir
   }
 
-  /// Writes a per-run log (command, exit code, full stdout, stderr tail) and
-  /// returns its URL so error messages can point the user at it.
-  private static func writeJobLog(
-    kind: String, audio: URL, exitCode: Int32, stdout: Data, stderr: String
+  /// Writes a per-run log (audio path, exit code, stdout shape, stderr tail) and
+  /// returns its URL so error messages can point the user at it. Stdout content is
+  /// never logged: it is the transcript.
+  static func writeJobLog(
+    kind: String, audio: URL, exitCode: Int32, stdout: Data, stderr: String,
+    logsDirectory: URL? = LiveEngine.logsDirectory
   ) -> URL? {
     HelperLog.write(
       """
@@ -183,7 +185,7 @@ enum LiveEngine {
           let out = await stdoutData
           let exit = await exitCode
 
-          // Persist a per-run log (command, exit, full stdout, stderr tail) so any
+          // Persist a per-run log (command, exit, stdout shape, stderr tail) so any
           // transcription is inspectable after the fact.
           let logURL = writeJobLog(
             kind: "transcribe", audio: audio, exitCode: exit.exitCode, stdout: out,
@@ -915,18 +917,36 @@ enum HelperLog {
     return file
   }
 
+  /// The log records stdout's shape only. Both helpers print results that carry transcript
+  /// words or LLM output on stdout, which must never be written to disk.
   static func streams(stdout: Data, stderr: String) -> String {
-    // `String(decoding:as:)` substitutes U+FFFD for any invalid byte rather than
-    // yielding nil, so a stray non-UTF-8 byte can't blank the whole log body.
-    // swiftlint:disable:next optional_data_string_conversion
-    let stdoutText = String(decoding: stdout, as: UTF8.self)
+    var header =
+      "===== STDOUT (\(stdout.count) bytes, \(lineCount(stdout)) lines; content omitted) ====="
+    let events = eventTypes(stdout)
+    if !events.isEmpty { header += "\nQIE_EVENT types: \(events.joined(separator: ", "))" }
     return """
-      ===== STDOUT (\(stdout.count) bytes) =====
-      \(stdoutText)
+      \(header)
 
       ===== STDERR (tail) =====
       \(stderr)
       """
+  }
+
+  private static func lineCount(_ data: Data) -> Int {
+    data.split(separator: UInt8(ascii: "\n"), omittingEmptySubsequences: true).count
+  }
+
+  private static func eventTypes(_ data: Data) -> [String] {
+    let prefix = Data("QIE_EVENT ".utf8)
+    var types = Set<String>()
+    for line in data.split(separator: UInt8(ascii: "\n")) where line.starts(with: prefix) {
+      if let object = try? JSONSerialization.jsonObject(with: Data(line.dropFirst(prefix.count)))
+        as? [String: Any], let type = object["type"] as? String
+      {
+        types.insert(type)
+      }
+    }
+    return types.sorted()
   }
 
   /// The timestamped names sort chronologically, so lexical order is chronological.
