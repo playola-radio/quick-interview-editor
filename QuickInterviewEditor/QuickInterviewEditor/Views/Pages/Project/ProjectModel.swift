@@ -623,7 +623,11 @@ final class ProjectModel: ViewModel {
         sink.commitRecovery(file, nil)
         sink.registerChange()
       }
-    } catch { return }
+    } catch {
+      AppLog.suggestions.info(
+        "Applied suggestions not confirmed on disk: \(error.localizedDescription, privacy: .public)"
+      )
+    }
   }
 
   func prepareSuggestionRecovery(_ preparation: SuggestionRecoveryPreparation) async throws -> URL {

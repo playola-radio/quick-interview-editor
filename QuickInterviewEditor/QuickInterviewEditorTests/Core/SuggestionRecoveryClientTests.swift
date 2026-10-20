@@ -331,7 +331,10 @@ extension SuggestionRecoveryClientTests {
     file.content.lastAppliedSuggestionRunID = Fixtures.uuid(99)
     try ProjectPackage.projectEncoder().encode(file).write(
       to: package.appending(component: "project.json"))
-    await #expect(throws: SuggestionRecoveryError.notSaved) {
+    await #expect(
+      throws: SuggestionRecoveryError.savedRunMismatch(
+        expected: fixture.snapshot.runID, found: Fixtures.uuid(99))
+    ) {
       try await store.confirmSaved(fixture.owner, runID: fixture.snapshot.runID)
     }
     file.content.lastAppliedSuggestionRunID = fixture.snapshot.runID
@@ -868,5 +871,134 @@ extension SuggestionRecoveryClientTests {
     request["interview_artist"] = "Other Artist"
     archive.manifest.originalRequest = try JSONSerialization.data(withJSONObject: request)
     #expect(throws: SuggestionRecoveryError.self) { try archive.validateManifest() }
+  }
+}
+
+extension SuggestionRecoveryClientTests {
+  private func confirmSavedError(
+    writeProject: (URL) throws -> Void
+  ) async throws -> SuggestionRecoveryError? {
+    let root = FileManager.default.temporaryDirectory.appending(component: UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let package = root.appending(component: "project.pie")
+    try FileManager.default.createDirectory(at: package, withIntermediateDirectories: true)
+    let fixture = try RecoveryFixture(documentURL: package)
+    let store = SuggestionRecoveryStore(
+      root: root.appending(component: "recovery"), uuid: { UUID() })
+    _ = try await store.prepare(fixture.owner, preparation: fixture.preparation)
+    try writeProject(package.appending(component: "project.json"))
+    do {
+      try await store.confirmSaved(fixture.owner, runID: fixture.snapshot.runID)
+      return nil
+    } catch let error as SuggestionRecoveryError {
+      return error
+    }
+  }
+
+  @Test func confirmSavedReportsUnreadableProjectFileWithItsCause() async throws {
+    let error = try await confirmSavedError { url in
+      try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+    }
+    guard case .projectUnreadable(let file, let cause)? = error else {
+      Issue.record("Expected projectUnreadable, got \(String(describing: error))")
+      return
+    }
+    expectNoDifference(file, "project.json")
+    #expect(!cause.isEmpty)
+    #expect(error?.errorDescription?.contains("project.json") == true)
+  }
+
+  @Test func confirmSavedReportsUndecodableProjectFileWithItsCause() async throws {
+    let error = try await confirmSavedError { url in
+      try Data("not json".utf8).write(to: url)
+    }
+    guard case .projectUndecodable(let file, let cause)? = error else {
+      Issue.record("Expected projectUndecodable, got \(String(describing: error))")
+      return
+    }
+    expectNoDifference(file, "project.json")
+    #expect(!cause.isEmpty)
+  }
+
+  @Test func confirmSavedReportsOwnerMismatchDistinctlyFromRunMismatch() async throws {
+    let other = Fixtures.uuid(77)
+    let error = try await confirmSavedError { url in
+      var file = Fixtures.projectFile()
+      file.content.suggestionRecoveryOwnerID = other
+      try ProjectPackage.projectEncoder().encode(file).write(to: url)
+    }
+    expectNoDifference(error, .savedOwnerMismatch(expected: Fixtures.uuid(51), found: other))
+  }
+
+  @Test func confirmSavedStaysNotSavedWhenProjectFileIsAbsent() async throws {
+    let error = try await confirmSavedError { _ in }
+    expectNoDifference(error, .notSaved)
+  }
+}
+
+extension SuggestionRecoveryClientTests {
+  @Test func archiveFieldErrorsNameTheOffendingField() throws {
+    let json = try RecoveryJSON.read(Data(#"{"a":1,"extra":2}"#.utf8))
+    do {
+      try json.keys(allowed: ["a", "b"], in: "widget")
+      Issue.record("Expected keys to throw")
+    } catch SuggestionRecoveryError.invalid(let detail) {
+      #expect(detail.contains("widget"))
+      #expect(detail.contains("unexpected fields: extra"))
+      #expect(detail.contains("missing fields: b"))
+    }
+  }
+
+  @Test func providerRecordErrorsNameTheRequestKey() throws {
+    let (_, python) = try RecoveryFixture.python()
+    let (key, record) = try #require(python.records.first)
+    do {
+      _ = try SuggestionRecoveryArchive.validateRecord(
+        record, key: key, identity: String(repeating: "0", count: 64))
+      Issue.record("Expected validateRecord to throw")
+    } catch SuggestionRecoveryError.invalid(let detail) {
+      #expect(detail.contains(key))
+    }
+    do {
+      _ = try SuggestionRecoveryArchive.validateRecord(record, key: "not-a-digest", identity: "x")
+      Issue.record("Expected validateRecord to throw")
+    } catch SuggestionRecoveryError.invalid(let detail) {
+      #expect(detail.contains("not-a-digest"))
+    }
+  }
+
+  @Test func manifestErrorsSayWhichOwnerFieldDisagrees() throws {
+    let fixture = try RecoveryFixture()
+    var owner = fixture.owner
+    owner.transcriptHash = "different"
+    let archive = SuggestionRecoveryArchive(
+      manifest: .init(
+        owner: owner, snapshot: fixture.snapshot,
+        originalRequest: fixture.preparation.originalRequest,
+        control: fixture.preparation.control), records: [:])
+    do {
+      try archive.validateManifest()
+      Issue.record("Expected validateManifest to throw")
+    } catch SuggestionRecoveryError.invalid(let detail) {
+      #expect(detail.contains("transcript hash"))
+    }
+  }
+
+  @Test func manifestErrorsNameTheMismatchedRequestField() throws {
+    let fixture = try RecoveryFixture()
+    var request = try #require(
+      JSONSerialization.jsonObject(with: fixture.preparation.originalRequest) as? [String: Any])
+    request["transcript_hash"] = "tampered"
+    let archive = SuggestionRecoveryArchive(
+      manifest: .init(
+        owner: fixture.owner, snapshot: fixture.snapshot,
+        originalRequest: try JSONSerialization.data(withJSONObject: request),
+        control: fixture.preparation.control), records: [:])
+    do {
+      try archive.validateManifest()
+      Issue.record("Expected validateManifest to throw")
+    } catch SuggestionRecoveryError.invalid(let detail) {
+      #expect(detail.contains("transcript_hash"))
+    }
   }
 }
