@@ -30,7 +30,30 @@ struct ProjectModelTests {
     let model = ProjectModel(
       file: Fixtures.projectFile(), plan: Fixtures.editPlan(),
       audio: .sessionFile(Fixtures.canonicalAudioURL), sink: sink)
-    expectNoDifference(model.commitMastering(run, staged: [:], expectedRunID: nil), false)
+    expectNoDifference(
+      commitFailure(model.commitMastering(run, staged: [:], expectedRunID: nil)), .runMalformed)
+    expectNoDifference(record.masteringCommits.count, 0)
+  }
+  @Test func runReferencingAnUnstagedFileCannotBeCommitted() {
+    let ref = MasteringArtifactRef(
+      fileName: Fixtures.uuid(133).uuidString.lowercased() + ".wav", byteCount: 4)
+    let run = MasteringRun(
+      id: Fixtures.uuid(134), artist: "Artist", inputsDigest: "v1:x",
+      parts: [
+        MasteringPart(
+          id: Fixtures.uuid(135), frameCount: 4, prepared: ref,
+          pieces: [
+            MasteringPiece(
+              id: Fixtures.uuid(136), sliceID: Fixtures.uuid(137), title: "Intro",
+              startFrame: 0, frameCount: 4, lrc: "", finished: nil)
+          ])
+      ])
+    let (sink, record) = ProjectDocumentSink.recorder()
+    let model = ProjectModel(
+      file: Fixtures.projectFile(), plan: Fixtures.editPlan(),
+      audio: .sessionFile(Fixtures.canonicalAudioURL), sink: sink)
+    expectNoDifference(
+      commitFailure(model.commitMastering(run, staged: [:], expectedRunID: nil)), .artifactsMissing)
     expectNoDifference(record.masteringCommits.count, 0)
   }
   @Test func updatedRunKeepsExistingPackageArtifactWhenItsStagingFailed() throws {
@@ -65,9 +88,10 @@ struct ProjectModelTests {
       file: file, plan: Fixtures.editPlan(),
       audio: .packageChild(sessionCopy: nil), sink: sink)
     expectNoDifference(
-      model.commitMastering(
-        updated, staged: [finished.fileName: owner],
-        expectedRunID: run.id), true)
+      commitFailure(
+        model.commitMastering(
+          updated, staged: [finished.fileName: owner],
+          expectedRunID: run.id)), nil)
     expectNoDifference(record.masteringCommits.last?.file.masteringRun, updated)
     expectNoDifference(record.masteringCommits.last?.staged[prepared.fileName], nil)
   }
@@ -104,7 +128,8 @@ struct ProjectModelTests {
       file: file, plan: Fixtures.editPlan(), audio: .packageChild(sessionCopy: nil),
       sink: sink, masteringStaged: [name: current])
     expectNoDifference(
-      model.commitMastering(run, staged: [name: replacement], expectedRunID: run.id), false)
+      commitFailure(model.commitMastering(run, staged: [name: replacement], expectedRunID: run.id)),
+      .stagedFileReplaced(fileName: name))
     expectNoDifference(model.masteringArtifact(ref) === current, true)
     expectNoDifference(record.masteringCommits.count, 0)
   }
@@ -173,9 +198,11 @@ struct ProjectModelTests {
     await model.viewAppeared()
     let run = MasteringRun(id: Fixtures.uuid(92), artist: "Artist", inputsDigest: "v1:x", parts: [])
     expectNoDifference(
-      model.commitMastering(run, staged: [:], expectedRunID: Fixtures.uuid(93)), false)
+      commitFailure(model.commitMastering(run, staged: [:], expectedRunID: Fixtures.uuid(93))),
+      .runReplaced)
     expectNoDifference(record.masteringCommits.count, 0)
-    expectNoDifference(model.commitMastering(run, staged: [:], expectedRunID: nil), true)
+    expectNoDifference(
+      commitFailure(model.commitMastering(run, staged: [:], expectedRunID: nil)), nil)
     expectNoDifference(record.masteringCommits.count, 1)
     expectNoDifference(record.registerChangeCount, 1)
     let editor = try #require(model.editor)
@@ -1050,7 +1077,7 @@ struct ProjectModelTests {
                 canonicalFingerprint: "sha256:test", sourceSampleRate: 44_100,
                 sourceDurationSamples: 44_100, pieces: [], inputsDigest: "new"))
           }, eligibility: { nil }, run: { nil }, packageURL: { nil },
-          artifact: { _ in nil }, commit: { _, _, _ in false }))
+          artifact: { _ in nil }, commit: { _, _, _ in .failure(.runReplaced) }))
       model.mastering = page
       return (model, page)
     }
@@ -1333,4 +1360,10 @@ func readErrorDescription(_ read: () throws -> Void) -> String {
   } catch {
     return error.localizedDescription
   }
+}
+
+private func commitFailure(_ result: Result<Void, MasteringCommitFailure>)
+  -> MasteringCommitFailure?
+{
+  if case .failure(let failure) = result { failure } else { nil }
 }

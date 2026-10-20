@@ -105,15 +105,16 @@ final class ProjectModel: ViewModel {
   func commitMastering(
     _ run: MasteringRun, staged: [String: StagedMasteringArtifact],
     expectedRunID: UUID?
-  ) -> Bool {
-    guard var file, file.masteringRun?.id == expectedRunID else { return false }
+  ) -> Result<Void, MasteringCommitFailure> {
+    guard var file else { return .failure(.projectNotLoaded) }
+    guard file.masteringRun?.id == expectedRunID else { return .failure(.runReplaced) }
     let names = Set(run.referencedArtifacts.map(\.fileName))
     let incoming = staged.filter { names.contains($0.key) }
-    guard
-      incoming.allSatisfy({ name, owner in
-        masteringStaged[name].map { $0 === owner } ?? true
-      })
-    else { return false }
+    if let conflict = incoming.first(where: { name, owner in
+      masteringStaged[name].map { $0 !== owner } ?? false
+    }) {
+      return .failure(.stagedFileReplaced(fileName: conflict.key))
+    }
     let retained = masteringStaged.filter { names.contains($0.key) }
       .merging(incoming) { existing, _ in existing }
     var available = retained.compactMapValues {
@@ -122,7 +123,8 @@ final class ProjectModel: ViewModel {
     for ref in file.masteringRun?.referencedArtifacts ?? [] where available[ref.fileName] == nil {
       available[ref.fileName] = ref.byteCount
     }
-    guard run.isStructurallyValid, run.healed(available: available) == run else { return false }
+    guard run.isStructurallyValid else { return .failure(.runMalformed) }
+    guard run.healed(available: available) == run else { return .failure(.artifactsMissing) }
     file.masteringRun = run
     file.schemaVersion = ProjectFile.writtenSchemaVersion(for: file)
     self.file = file
@@ -132,7 +134,7 @@ final class ProjectModel: ViewModel {
     }
     sink.commitMastering(file, retained)
     sink.registerChange()
-    return true
+    return .success(())
   }
   var editor: EditorModel?
   // swiftlint:disable inclusive_language
@@ -1137,7 +1139,8 @@ final class ProjectModel: ViewModel {
           packageURL: { [weak self] in self?.packageURL },
           artifact: { [weak self] ref in self?.masteringArtifact(ref) },
           commit: { [weak self] run, staged, expectedID in
-            self?.commitMastering(run, staged: staged, expectedRunID: expectedID) ?? false
+            self?.commitMastering(run, staged: staged, expectedRunID: expectedID)
+              ?? .failure(.projectNotLoaded)
           },
           stagingError: { [weak self] in self?.masteringStagingError },
           dismiss: { [weak self] in self?.isMasteringSheetPresented = false }))

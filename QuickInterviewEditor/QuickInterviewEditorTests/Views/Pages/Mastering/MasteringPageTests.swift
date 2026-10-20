@@ -1,3 +1,4 @@
+import AVFoundation
 import ConcurrencyExtras
 import CustomDump
 import Dependencies
@@ -106,7 +107,7 @@ struct MasteringPageTests {
         eligibility: { nil }, run: { current }, packageURL: { nil }, artifact: { _ in nil },
         commit: { _, _, _ in
           Issue.record("Committed before confirmation")
-          return false
+          return .failure(.runReplaced)
         }))
     await model.prepareTapped()
     #expect(model.confirmingPrepareAgain)
@@ -128,7 +129,7 @@ struct MasteringPageTests {
           finishTitleEdit: {}, inputs: { .failure(.notLoaded) },
           eligibility: { nil }, run: { current },
           packageURL: { URL(fileURLWithPath: "/tmp/interview.pie") },
-          artifact: { _ in owner }, commit: { _, _, _ in false }))
+          artifact: { _ in owner }, commit: { _, _, _ in .failure(.runReplaced) }))
     }
     model.saveFinalsTapped()
     expectNoDifference(model.destinationPrompt?.suggested.path, "/tmp/mastered")
@@ -143,7 +144,7 @@ struct MasteringPageTests {
       host: .init(
         finishTitleEdit: { edits += 1 }, inputs: { .failure(.pendingEdit) },
         eligibility: { nil }, run: { current }, packageURL: { nil }, artifact: { _ in nil },
-        commit: { _, _, _ in false }))
+        commit: { _, _, _ in .failure(.runReplaced) }))
     #expect(model.showsStaleNotice)
     expectNoDifference(edits, 0)
   }
@@ -154,7 +155,7 @@ struct MasteringPageTests {
       host: .init(
         finishTitleEdit: {}, inputs: { .failure(.notLoaded) }, eligibility: { nil },
         run: { current }, packageURL: { URL(fileURLWithPath: "/tmp/interview.pie") },
-        artifact: { _ in nil }, commit: { _, _, _ in false },
+        artifact: { _ in nil }, commit: { _, _, _ in .failure(.runReplaced) },
         stagingError: { "Disk was full while staging." }))
     expectNoDifference(model.rows[0].status, "0:01 · unavailable")
     #expect(!model.canSave)
@@ -167,7 +168,7 @@ struct MasteringPageTests {
       host: .init(
         finishTitleEdit: { Issue.record("Preparation started during filename review") },
         inputs: { .failure(.notLoaded) }, eligibility: { nil }, run: { nil },
-        packageURL: { nil }, artifact: { _ in nil }, commit: { _, _, _ in false }))
+        packageURL: { nil }, artifact: { _ in nil }, commit: { _, _, _ in .failure(.runReplaced) }))
     model.exportReview = ExportReviewModel(
       request: .init(
         targets: [], sourceStem: "",
@@ -193,11 +194,156 @@ struct MasteringPageTests {
         host: .init(
           finishTitleEdit: {}, inputs: { .failure(.notLoaded) }, eligibility: { nil },
           run: { current }, packageURL: { URL(fileURLWithPath: "/tmp/interview.pie") },
-          artifact: { _ in owner }, commit: { _, _, _ in false }))
+          artifact: { _ in owner }, commit: { _, _, _ in .failure(.runReplaced) }))
     }
     let url = await model.dragURL(for: current.parts[0].id)
     #expect(url == nil)
-    expectNoDifference(model.message, model.corruptMessage)
+    let cause = readErrorDescription(source)
+    expectNoDifference(
+      model.message,
+      "Part 1 of 1 is damaged or has the wrong audio format: "
+        + "the file could not be read (\(cause)). Prepare or return that part again.")
+  }
+
+  private func readErrorDescription(_ url: URL) -> String {
+    do {
+      _ = try AVAudioFile(forReading: url)
+      return "no error"
+    } catch { return error.localizedDescription }
+  }
+
+  private func wav(
+    channels: Int = 2, sampleRate: Double = 44_100, frames: Int = 100, bitDepth: Int = 24
+  ) throws -> URL {
+    let url = FileManager.default.temporaryDirectory.appendingPathComponent(
+      UUID().uuidString + ".wav")
+    let file = try AVAudioFile(
+      forWriting: url,
+      settings: [
+        AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: sampleRate,
+        AVNumberOfChannelsKey: channels, AVLinearPCMBitDepthKey: bitDepth,
+        AVLinearPCMIsFloatKey: false,
+      ])
+    let buffer = try #require(
+      AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(frames)))
+    buffer.frameLength = AVAudioFrameCount(frames)
+    try file.write(from: buffer)
+    return url
+  }
+
+  private func corruption(_ url: URL, ext: String = "wav", frames: Int)
+    -> MasteringArtifactCorruption?
+  {
+    do {
+      try MasteringArtifactValidationClient.liveValue.validate(url, ext, frames)
+      return nil
+    } catch let MasteringArtifactError.corrupt(corruption) {
+      return corruption
+    } catch { return .unreadable(cause: "unexpected \(error)") }
+  }
+
+  @Test func validationNamesTheWrongFrameCount() throws {
+    let url = try wav(frames: 100)
+    defer { try? FileManager.default.removeItem(at: url) }
+    expectNoDifference(
+      corruption(url, frames: 120), .frameCount(expected: 120, actual: 100))
+  }
+
+  @Test func validationNamesTheWrongSampleRate() throws {
+    let url = try wav(sampleRate: 48_000)
+    defer { try? FileManager.default.removeItem(at: url) }
+    expectNoDifference(
+      corruption(url, frames: 100), .sampleRate(expected: 44_100, actual: 48_000))
+  }
+
+  @Test func validationNamesTheWrongChannelCount() throws {
+    let url = try wav(channels: 1)
+    defer { try? FileManager.default.removeItem(at: url) }
+    expectNoDifference(
+      corruption(url, frames: 100), .channelCount(expected: 2, actual: 1))
+  }
+
+  @Test func validationNamesTheWrongEncoding() throws {
+    let url = try wav(bitDepth: 16)
+    defer { try? FileManager.default.removeItem(at: url) }
+    expectNoDifference(
+      corruption(url, frames: 100),
+      .unexpectedEncoding(expected: "24-bit PCM", actual: "format lpcm, 16 bits per channel"))
+  }
+
+  @Test func validationAcceptsAMatchingFile() throws {
+    let url = try wav()
+    defer { try? FileManager.default.removeItem(at: url) }
+    expectNoDifference(corruption(url, frames: 100), nil)
+  }
+
+  @Test func validationKeepsTheCauseOfAnUnreadableFile() throws {
+    let url = FileManager.default.temporaryDirectory.appendingPathComponent(
+      UUID().uuidString + ".wav")
+    try Data([1, 2, 3, 4]).write(to: url)
+    defer { try? FileManager.default.removeItem(at: url) }
+    expectNoDifference(corruption(url, frames: 100), .unreadable(cause: readErrorDescription(url)))
+  }
+
+  @Test func corruptMessageNamesThePartAndWhatIsWrong() {
+    let model = MasteringPageModel(
+      host: .init(
+        finishTitleEdit: {}, inputs: { .failure(.notLoaded) }, eligibility: { nil },
+        run: { nil }, packageURL: { nil }, artifact: { _ in nil },
+        commit: { _, _, _ in .failure(.runReplaced) }))
+    expectNoDifference(
+      model.corruptMessage(
+        subject: "Part 2 of 3", corruption: .sampleRate(expected: 44_100, actual: 48_000)),
+      "Part 2 of 3 is damaged or has the wrong audio format: "
+        + "its sample rate is 48000 Hz but 44100 Hz was expected. Prepare or return that part again."
+    )
+  }
+
+  @Test(
+    arguments: [
+      (
+        MasteringCommitFailure.projectNotLoaded,
+        "The project was closed or not loaded while preparing. Prepare again."
+      ),
+      (
+        .runReplaced,
+        "The project's mastering run was replaced while preparing. Prepare again."
+      ),
+      (
+        .stagedFileReplaced(fileName: "a.wav"),
+        "A prepared file (a.wav) was replaced by a different one while preparing. Prepare again."
+      ),
+      (
+        .runMalformed,
+        "The prepared run's parts and pieces did not line up when saving. Prepare again."
+      ),
+      (
+        .artifactsMissing,
+        "A prepared file was missing or the wrong size when saving. Prepare again."
+      ),
+    ])
+  func failedCommitExplainsWhy(failure: MasteringCommitFailure, expected: String) async {
+    let model = withDependencies {
+      $0.uuid = .incrementing
+      $0.masteringStaging = .liveValue
+      $0.masteringAudio = .init(prepare: { _, _ in
+        .init(parts: [], warnings: [], inputsDigest: "new")
+      })
+    } operation: {
+      MasteringPageModel(
+        host: .init(
+          finishTitleEdit: {},
+          inputs: {
+            .success(
+              .init(
+                artist: "Artist", canonicalAudioURL: URL(fileURLWithPath: "/tmp/audio"),
+                canonicalFingerprint: "sha256:test", sourceSampleRate: 44_100,
+                sourceDurationSamples: 44_100, pieces: [], inputsDigest: "new"))
+          }, eligibility: { nil }, run: { nil }, packageURL: { nil },
+          artifact: { _ in nil }, commit: { _, _, _ in .failure(failure) }))
+    }
+    await model.prepareTapped()
+    expectNoDifference(model.message, expected)
   }
 
   @Test func failedReturnDoesNotCommitPart() async throws {
@@ -227,7 +373,7 @@ struct MasteringPageTests {
           eligibility: { nil }, run: { current }, packageURL: { nil }, artifact: { _ in nil },
           commit: { _, _, _ in
             commits += 1
-            return true
+            return .success(())
           }))
     }
     try await drop([source], onto: model)
@@ -267,7 +413,7 @@ struct MasteringPageTests {
           commit: { next, _, expected in
             #expect(expected == current.id)
             current = next
-            return true
+            return .success(())
           }))
     }
     try await drop([source], onto: model)
@@ -312,7 +458,7 @@ struct MasteringPageTests {
           run: { current }, packageURL: { nil }, artifact: { _ in nil },
           commit: { _, _, _ in
             commits.withValue { $0 += 1 }
-            return true
+            return .success(())
           }))
     }
     let dropping = Task { try await drop([source], onto: model) }
@@ -352,7 +498,7 @@ struct MasteringPageTests {
         host: .init(
           finishTitleEdit: {}, inputs: { .failure(.notLoaded) },
           eligibility: { nil }, run: { current }, packageURL: { nil }, artifact: { _ in nil },
-          commit: { _, _, _ in false }))
+          commit: { _, _, _ in .failure(.runReplaced) }))
     }
     try await drop([source], onto: model)
     expectNoDifference(
@@ -373,7 +519,7 @@ struct MasteringPageTests {
       host: .init(
         finishTitleEdit: {}, inputs: { .failure(.notLoaded) },
         eligibility: { nil }, run: { current }, packageURL: { nil }, artifact: { _ in nil },
-        commit: { _, _, _ in false }))
+        commit: { _, _, _ in .failure(.runReplaced) }))
     model.ambiguousReturn = .init(candidatePartIDs: [Fixtures.uuid(71), Fixtures.uuid(81)])
     expectNoDifference(
       model.ambiguityChoices.map(\.title), ["Part 1 (0:01)", "Part 2 (1:05)"])
@@ -413,7 +559,7 @@ struct MasteringPageTests {
           run: { current }, packageURL: { nil }, artifact: { _ in nil },
           commit: { next, _, _ in
             current = next
-            return true
+            return .success(())
           }))
     }
     try await drop(sources, onto: model)
@@ -446,7 +592,7 @@ struct MasteringPageTests {
         host: .init(
           finishTitleEdit: {}, inputs: { .failure(.notLoaded) }, eligibility: { nil },
           run: { current }, packageURL: { directory.appendingPathComponent("interview.pie") },
-          artifact: { _ in owner }, commit: { _, _, _ in false }))
+          artifact: { _ in owner }, commit: { _, _, _ in .failure(.runReplaced) }))
     }
     model.saveFinalsTapped()
     await model.destinationSaveSelected()
@@ -495,7 +641,7 @@ struct MasteringPageTests {
         host: .init(
           finishTitleEdit: {}, inputs: { .failure(.notLoaded) }, eligibility: { nil },
           run: { current }, packageURL: { directory.appendingPathComponent("interview.pie") },
-          artifact: { refs[$0.fileName] }, commit: { _, _, _ in false }))
+          artifact: { refs[$0.fileName] }, commit: { _, _, _ in .failure(.runReplaced) }))
     }
     model.saveFinalsTapped()
     await model.destinationSaveSelected()
@@ -557,7 +703,7 @@ struct MasteringPageTests {
         host: .init(
           finishTitleEdit: {}, inputs: { .failure(.notLoaded) }, eligibility: { nil },
           run: { current }, packageURL: { directory.appendingPathComponent("interview.pie") },
-          artifact: { refs[$0.fileName] }, commit: { _, _, _ in false }))
+          artifact: { refs[$0.fileName] }, commit: { _, _, _ in .failure(.runReplaced) }))
     }
     model.saveFinalsTapped()
     let save = Task { await model.destinationSaveSelected() }
@@ -599,7 +745,7 @@ struct MasteringPageTests {
         host: .init(
           finishTitleEdit: {}, inputs: { .failure(.notLoaded) }, eligibility: { nil },
           run: { current }, packageURL: { directory.appendingPathComponent("interview.pie") },
-          artifact: { _ in owner }, commit: { _, _, _ in false }))
+          artifact: { _ in owner }, commit: { _, _, _ in .failure(.runReplaced) }))
     }
     model.saveFinalsTapped()
     await model.destinationSaveSelected()
@@ -653,7 +799,7 @@ struct MasteringPageTests {
         host: .init(
           finishTitleEdit: {}, inputs: { .failure(.notLoaded) }, eligibility: { nil },
           run: { current }, packageURL: { directory.appendingPathComponent("interview.pie") },
-          artifact: { refs[$0.fileName] }, commit: { _, _, _ in false }))
+          artifact: { refs[$0.fileName] }, commit: { _, _, _ in .failure(.runReplaced) }))
     }
     model.saveFinalsTapped()
     await model.destinationSaveSelected()
@@ -705,7 +851,7 @@ struct MasteringPageTests {
           run: { current }, packageURL: { nil }, artifact: { _ in nil },
           commit: { next, _, _ in
             current = next
-            return true
+            return .success(())
           }))
     }
     model.replacePartTapped(current.parts[0].id)
@@ -746,7 +892,7 @@ struct MasteringPageTests {
           artifact: { _ in nil },
           commit: { _, _, _ in
             Issue.record("Failed preparation committed")
-            return false
+            return .failure(.runReplaced)
           }))
     }
     await model.prepareTapped()
@@ -793,7 +939,7 @@ struct MasteringPageTests {
           artifact: { _ in nil },
           commit: { _, _, _ in
             Issue.record("Cancelled preparation committed")
-            return false
+            return .failure(.runReplaced)
           }))
     }
     let preparation = Task { await model.prepareAgainConfirmed() }
@@ -840,7 +986,7 @@ struct MasteringPageTests {
           artifact: { _ in owner },
           commit: { next, _, _ in
             current = next
-            return true
+            return .success(())
           }))
     }
     let draggedURL = try #require(await model.dragURL(for: current.parts[0].id))
@@ -880,7 +1026,7 @@ struct MasteringPageTests {
           artifact: { _ in owner },
           commit: { next, _, _ in
             current = next
-            return true
+            return .success(())
           }))
     }
     let firstDragURL = try #require(await model.dragURL(for: current.parts[0].id))
@@ -899,7 +1045,7 @@ struct MasteringPageTests {
       run: { nil }, packageURL: { nil }, artifact: { _ in nil },
       commit: { _, _, _ in
         commits += 1
-        return true
+        return .success(())
       })
     let model = MasteringPageModel(host: host)
     await model.prepareTapped()
@@ -917,7 +1063,7 @@ struct MasteringPageTests {
         host: .init(
           finishTitleEdit: {}, inputs: { .failure(blocker) }, eligibility: { nil },
           run: { nil }, packageURL: { nil }, artifact: { _ in nil },
-          commit: { _, _, _ in false }))
+          commit: { _, _, _ in .failure(.runReplaced) }))
       await model.prepareTapped()
       expectNoDifference(model.message, expected)
     }
@@ -933,7 +1079,7 @@ struct MasteringPageTests {
           return .failure(.missingArtist)
         },
         eligibility: { nil }, run: { nil }, packageURL: { nil },
-        artifact: { _ in nil }, commit: { _, _, _ in false }))
+        artifact: { _ in nil }, commit: { _, _, _ in .failure(.runReplaced) }))
     await model.prepareTapped()
     expectNoDifference(events, ["finish", "read"])
   }
@@ -963,7 +1109,7 @@ struct MasteringPageTests {
           run: { current }, packageURL: { nil }, artifact: { _ in nil },
           commit: { _, _, _ in
             Issue.record("Committed completed part")
-            return false
+            return .failure(.runReplaced)
           }))
     }
     try await drop([source], onto: model)
@@ -985,7 +1131,7 @@ struct MasteringPageTests {
               .init(sliceID: Fixtures.uuid(3), name: "Removed", reason: .fullyRemoved),
             ])
         }, run: { nil }, packageURL: { nil }, artifact: { _ in nil },
-        commit: { _, _, _ in false }))
+        commit: { _, _, _ in .failure(.runReplaced) }))
     expectNoDifference(
       model.eligibilitySummary,
       "1 intro included · 1 other clip excluded · 1 fully removed intro excluded")
