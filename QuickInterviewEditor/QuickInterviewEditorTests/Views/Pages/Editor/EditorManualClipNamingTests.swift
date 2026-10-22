@@ -240,6 +240,42 @@ struct EditorManualClipNamingTests {
     }
   }
 
+  @Test func unreadableKeychainNeverCallsTheHelperAndLeavesTheClipUnchanged() async {
+    struct KeychainFailure: Error {}
+    let gate = ClipNamingGate()
+    await run(gate: gate, key: nil) {
+      await withDependencies {
+        $0.keychain = KeychainClient(
+          save: { _ in }, load: { throw KeychainFailure() }, delete: {})
+      } operation: {
+        let model = editor()
+        let clip = markClip(model, 0, 3)
+        await model.awaitClipNaming()
+
+        expectNoDifference(gate.requests, [])
+        expectNoDifference(model.slices[id: clip.id]?.name, "Slice 1")
+      }
+    }
+  }
+
+  @Test func unloadableConfigurationNeverCallsTheHelperAndLeavesTheClipUnchanged() async {
+    struct ConfigurationFailure: Error {}
+    let gate = ClipNamingGate()
+    await run(gate: gate) {
+      await withDependencies {
+        $0.suggestionConfiguration = SuggestionConfigurationClient(
+          load: { throw ConfigurationFailure() }, save: { draft, _ in draft })
+      } operation: {
+        let model = editor()
+        let clip = markClip(model, 0, 3)
+        await model.awaitClipNaming()
+
+        expectNoDifference(gate.requests, [])
+        expectNoDifference(model.slices[id: clip.id]?.name, "Slice 1")
+      }
+    }
+  }
+
   @Test func noMatchLeavesTheClipUnchanged() async {
     let gate = ClipNamingGate()
     await run(gate: gate) {

@@ -356,6 +356,20 @@ extension LiveCutSuggesterTests {
     #expect(!names.contains("cut-suggester-0000-05.log"))
   }
 
+  @Test func failureLogOmitsStdoutContent() async throws {
+    let logs = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: logs) }
+    let output = Data(#"{"title":"confidential harbour"}"#.utf8)
+    let error = await Self.configuredFailure(
+      output: output, exitCode: 1, stderr: "", logsDirectory: logs, apiKey: nil)
+
+    let logURL = try #require(error?.helperFailure?.logURL)
+    let text = try String(contentsOf: logURL, encoding: .utf8)
+    #expect(!text.contains("confidential"))
+    #expect(text.contains("STDOUT (\(output.count) bytes, 1 lines"))
+  }
+
   @Test func successWritesNoLog() async throws {
     let logs = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
@@ -667,6 +681,15 @@ extension LiveCutSuggesterTests {
     ) {
       _ = try await Self.nameClip(output: "", exitCode: 1, stderr: "401 unauthorized")
     }
+  }
+
+  @Test func clipNamingDiagnosticLabelKeepsOnlySafeErrorMetadata() {
+    expectNoDifference(
+      CutSuggestClientError.helperFailed(
+        HelperFailure(exitCode: 1, stderr: "secret provider response", logURL: nil)
+      ).diagnosticLabel,
+      "helperFailed (exit code 1)"
+    )
   }
 
   @Test func nameClipMalformedStdoutIsUnreadableWithTheDecodingDetail() async throws {

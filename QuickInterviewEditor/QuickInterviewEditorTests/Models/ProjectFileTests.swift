@@ -30,6 +30,38 @@ struct ProjectFileTests {
         from: malformed
       ).masteringRun, nil)
   }
+
+  // swiftlint:disable:next inclusive_language
+  @Test func corruptMasteringManifestKeepsTheRestOfTheProjectAndDescribesTheCauseWithoutValues()
+    throws
+  {
+    var file = Fixtures.projectFile()
+    file.masteringRun = MasteringRun(
+      id: Fixtures.uuid(1), artist: "Artist", inputsDigest: "v1:abc", parts: [])
+    var object = try #require(
+      JSONSerialization.jsonObject(with: ProjectPackage.projectEncoder().encode(file))
+        as? [String: Any])
+    var manifest = try #require(object["masteringRun"] as? [String: Any])
+    manifest["parts"] = "secret-value"
+    object["masteringRun"] = manifest
+    let malformed = try JSONSerialization.data(withJSONObject: object)
+
+    var expected = file
+    expected.masteringRun = nil
+    expectNoDifference(
+      try ProjectPackage.projectDecoder().decode(ProjectFile.self, from: malformed), expected)
+
+    let error = try #require(
+      #expect(throws: DecodingError.self) {
+        try ProjectPackage.projectDecoder().decode(
+          MasteringRun.self, from: JSONSerialization.data(withJSONObject: manifest))
+      })
+    let detail = ProjectPackage.decodeFailureDetail(error)
+    #expect(detail.hasPrefix("expected "))
+    #expect(detail.hasSuffix(" at parts"))
+    #expect(!detail.contains("secret-value"))
+  }
+
   @Test func interviewArtistPersistsAndOldDocumentsDefaultToAbsent() throws {
     var file = Fixtures.projectFile()
     file.content.interviewArtist = "Björk"

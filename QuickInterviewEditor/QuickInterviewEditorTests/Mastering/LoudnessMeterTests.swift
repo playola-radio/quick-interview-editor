@@ -16,8 +16,52 @@ struct LoudnessMeterTests {
   }
 
   @Test func rejectsInvalidPeak() {
-    #expect(throws: MasteringPreparationError.invalidLoudnessMeasurement) {
+    #expect(
+      throws: MasteringPreparationError.invalidLoudnessMeasurement(
+        "integrated loudness -20.0 LUFS, true peak nan dBTP")
+    ) {
       try MasteringGain.decibels(integratedLUFS: -20, truePeakDBTP: .nan)
+    }
+  }
+
+  @Test func meterRejectsAnInvalidFormatNamingIt() {
+    #expect(
+      throws: MasteringPreparationError.meterUnavailable(
+        "invalid meter format (0 channels, 48000 Hz)")
+    ) {
+      try LoudnessMeter(channels: 0, sampleRate: 48_000, mode: .integratedAndTruePeak)
+    }
+  }
+
+  @Test func meterRejectsAMismatchedBufferNamingBothChannelCounts() throws {
+    let format = try #require(AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 1))
+    let buffer = try #require(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 16))
+    buffer.frameLength = 16
+    let meter = try LoudnessMeter(channels: 2, sampleRate: 48_000, mode: .integratedAndTruePeak)
+    #expect(
+      throws: MasteringPreparationError.meterUnavailable(
+        "buffer has 1 channels; the meter expects 2")
+    ) {
+      try meter.add(buffer)
+    }
+  }
+
+  @Test func nonFiniteSampleNamesItsFrameAndChannel() throws {
+    let format = try #require(AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 2))
+    let buffer = try #require(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 16))
+    buffer.frameLength = 16
+    let channels = try #require(buffer.floatChannelData)
+    for frame in 0..<16 {
+      channels[0][frame] = 0
+      channels[1][frame] = 0
+    }
+    channels[1][3] = .nan
+    let meter = try LoudnessMeter(channels: 2, sampleRate: 48_000, mode: .integratedAndTruePeak)
+    #expect(
+      throws: MasteringPreparationError.invalidLoudnessMeasurement(
+        "sample nan at frame 3, channel 1")
+    ) {
+      try meter.add(buffer)
     }
   }
 

@@ -35,7 +35,7 @@ struct EncodedPiece: Equatable, Sendable {
 }
 
 enum MasteringReturnError: Error, Equatable, LocalizedError {
-  case unreadable(fileName: String)
+  case unreadable(fileName: String, cause: String)
   case unsupportedContainer(fileName: String)
   case unsupportedCodec(fileName: String)
   case unsupportedChannelCount(fileName: String, count: Int)
@@ -45,7 +45,7 @@ enum MasteringReturnError: Error, Equatable, LocalizedError {
 
   var errorDescription: String? {
     switch self {
-    case .unreadable(let fileName): "\(fileName) is not readable audio."
+    case .unreadable(let fileName, let cause): "\(fileName) is not readable audio: \(cause)"
     case .unsupportedContainer(let fileName):
       "\(fileName) must contain WAV, RF64, AIFF, AIFC, or FLAC audio."
     case .unsupportedCodec(let fileName):
@@ -95,11 +95,11 @@ extension MasteringReturnClient: TestDependencyKey {
     MasteringReturnClient(
       inspect: { _ in
         reportIssue("MasteringReturnClient.inspect called without a test override")
-        throw MasteringReturnError.unreadable(fileName: "")
+        throw MasteringReturnError.unreadable(fileName: "", cause: "no test override")
       },
       encodePart: { _, _, _ in
         reportIssue("MasteringReturnClient.encodePart called without a test override")
-        throw MasteringReturnError.unreadable(fileName: "")
+        throw MasteringReturnError.unreadable(fileName: "", cause: "no test override")
       })
   }
 }
@@ -117,13 +117,16 @@ private enum MasteringReturnInspector {
     var fileID: AudioFileID?
     let status = AudioFileOpenURL(url as CFURL, .readPermission, 0, &fileID)
     guard status == noErr, let fileID else {
-      throw MasteringReturnError.unreadable(fileName: name)
+      throw MasteringReturnError.unreadable(
+        fileName: name, cause: "AudioFileOpenURL failed (OSStatus \(status))")
     }
     defer { AudioFileClose(fileID) }
     var type: AudioFileTypeID = 0
     var size = UInt32(MemoryLayout<AudioFileTypeID>.size)
-    guard AudioFileGetProperty(fileID, kAudioFilePropertyFileFormat, &size, &type) == noErr else {
-      throw MasteringReturnError.unreadable(fileName: name)
+    let typeStatus = AudioFileGetProperty(fileID, kAudioFilePropertyFileFormat, &size, &type)
+    guard typeStatus == noErr else {
+      throw MasteringReturnError.unreadable(
+        fileName: name, cause: "could not read the file format (OSStatus \(typeStatus))")
     }
     guard
       [
@@ -133,15 +136,23 @@ private enum MasteringReturnInspector {
     else { throw MasteringReturnError.unsupportedContainer(fileName: name) }
     var streamDescription = AudioStreamBasicDescription()
     var streamDescriptionSize = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
-    guard
-      AudioFileGetProperty(
-        fileID, kAudioFilePropertyDataFormat, &streamDescriptionSize, &streamDescription) == noErr
-    else { throw MasteringReturnError.unreadable(fileName: name) }
+    let formatStatus = AudioFileGetProperty(
+      fileID, kAudioFilePropertyDataFormat, &streamDescriptionSize, &streamDescription)
+    guard formatStatus == noErr else {
+      throw MasteringReturnError.unreadable(
+        fileName: name, cause: "could not read the audio data format (OSStatus \(formatStatus))")
+    }
     guard [kAudioFormatLinearPCM, kAudioFormatFLAC].contains(streamDescription.mFormatID) else {
       throw MasteringReturnError.unsupportedCodec(fileName: name)
     }
-    guard let file = try? AVAudioFile(forReading: url), file.fileFormat.sampleRate > 0 else {
-      throw MasteringReturnError.unreadable(fileName: name)
+    let file: AVAudioFile
+    do { file = try AVAudioFile(forReading: url) } catch {
+      throw MasteringReturnError.unreadable(
+        fileName: name, cause: error.localizedDescription)
+    }
+    guard file.fileFormat.sampleRate > 0 else {
+      throw MasteringReturnError.unreadable(
+        fileName: name, cause: "the sample rate is \(file.fileFormat.sampleRate)")
     }
     let channels = Int(file.fileFormat.channelCount)
     guard channels == 1 || channels == 2 else {
@@ -214,10 +225,22 @@ private enum MasteringReturnWorker {
       reason: "Saved piece ranges are invalid")
   }
 
+  private static func encodeFailure(
+    _ error: MasteringPreparationError, master: URL
+  ) -> MasteringReturnError {
+    if case .invalidLoudnessMeasurement(let detail) = error {
+      return .encodeFailed(
+        title: master.lastPathComponent,
+        reason: "Returned audio contains invalid samples (\(detail))")
+    }
+    return .encodeFailed(title: master.lastPathComponent, reason: error.localizedDescription)
+  }
+
   private static func conform(_ master: URL, to caf: URL) throws -> Int {
     let source: AVAudioFile
     do { source = try AVAudioFile(forReading: master) } catch {
-      throw MasteringReturnError.unreadable(fileName: master.lastPathComponent)
+      throw MasteringReturnError.unreadable(
+        fileName: master.lastPathComponent, cause: error.localizedDescription)
     }
     var frames = 0
     do {
@@ -234,13 +257,15 @@ private enum MasteringReturnWorker {
       let conformer = try MasteringConformer(inputFormat: source.processingFormat)
       while source.framePosition < source.length {
         try Task.checkCancellation()
-        guard
-          let input = AVAudioPCMBuffer(
-            pcmFormat: source.processingFormat, frameCapacity: 65_536)
-        else { throw ExportRenderError.bufferAllocationFailed }
+        let format = source.processingFormat
+        guard let input = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 65_536) else {
+          throw ExportRenderError.bufferAllocationFailed(format: format, frames: 65_536)
+        }
         try source.read(into: input)
         guard input.frameLength > 0 else {
-          throw MasteringReturnError.unreadable(fileName: master.lastPathComponent)
+          throw MasteringReturnError.unreadable(
+            fileName: master.lastPathComponent,
+            cause: "no audio could be read at frame \(source.framePosition) of \(source.length)")
         }
         try conformer.push(input) { output in
           try writer.write(from: output)
@@ -252,12 +277,7 @@ private enum MasteringReturnWorker {
         frames += Int(output.frameLength)
       }
     } catch let error as MasteringPreparationError {
-      if error == .invalidLoudnessMeasurement {
-        throw MasteringReturnError.encodeFailed(
-          title: master.lastPathComponent, reason: "Returned audio contains invalid samples")
-      }
-      throw MasteringReturnError.encodeFailed(
-        title: master.lastPathComponent, reason: error.localizedDescription)
+      throw encodeFailure(error, master: master)
     }
     let readback = try AVAudioFile(forReading: caf)
     guard Int(readback.length) == frames else {

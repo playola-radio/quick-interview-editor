@@ -65,9 +65,15 @@ func copyRenderedExports(_ request: ExportCopyRequest, client: ExportCopyClient)
       if state.requiresNewApproval(mappings) {
         return .init(copied: state.copied, reviewMappings: mappings)
       }
-      guard let mapping = mappings.first, let source = request.renderedByID[mapping.id] else {
+      guard let mapping = mappings.first else {
+        return .init(copied: state.copied, errorMessage: "No rendered clips were left to copy.")
+      }
+      guard let source = request.renderedByID[mapping.id] else {
         return .init(
-          copied: state.copied, errorMessage: "A rendered clip is missing. Export again.")
+          copied: state.copied,
+          errorMessage:
+            "The rendered file for \(state.clipLabel(mapping)) is missing, so it wasn't copied. Export again."
+        )
       }
       try Task.checkCancellation()
       let destination = request.destination.appendingPathComponent(mapping.proposedName)
@@ -77,7 +83,13 @@ func copyRenderedExports(_ request: ExportCopyRequest, client: ExportCopyClient)
       } catch {
         guard (error as NSError).domain == NSCocoaErrorDomain,
           (error as NSError).code == CocoaError.fileWriteFileExists.rawValue
-        else { throw error }
+        else {
+          if error is CancellationError { throw error }
+          return .init(
+            copied: state.copied, cancelled: Task.isCancelled,
+            errorMessage: state.copyFailureMessage(mapping, error)
+          )
+        }
         state.collidedNames.insert(mapping.proposedName)
       }
     }
@@ -122,6 +134,19 @@ private struct ExportCopyState {
       slices: remaining, sourceStem: request.sourceStem,
       existing: existing.union(collidedNames).union(copied.map { $0.url.lastPathComponent }),
       originalIndexes: indexes, kind: request.kind)
+  }
+
+  /// `clip 2 of 5, "Name"` — the position is the clip's place in the whole export.
+  func clipLabel(_ mapping: ExportNameMapping) -> String {
+    let offset = request.targets.firstIndex { $0.id == mapping.id }
+    let name = offset.map { request.targets[$0].name } ?? mapping.requestedName
+    guard let offset else { return "clip \"\(name)\"" }
+    return "clip \(offset + 1) of \(request.targets.count), \"\(name)\""
+  }
+
+  func copyFailureMessage(_ mapping: ExportNameMapping, _ error: any Error) -> String {
+    "Couldn't copy \(clipLabel(mapping)) to \(request.destination.lastPathComponent) as "
+      + "\"\(mapping.proposedName)\": \(error.localizedDescription)"
   }
 
   func requiresNewApproval(_ mappings: [ExportNameMapping]) -> Bool {

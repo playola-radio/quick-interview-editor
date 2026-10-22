@@ -172,11 +172,32 @@ func cutSuggestionInvalidMessage(_ reason: InvalidReason) -> String {
   switch reason {
   case .unknownSuggestion:
     return "That suggestion is no longer available."
-  case .noWords, .wordsNotContiguous, .duplicateWords, .wordsOutOfOrder, .wordMembershipMismatch:
+  case .noWords:
+    return "This suggestion has no words, so it can't become a clip. Try regenerating."
+  case .wordsNotContiguous:
     return
-      "This suggestion couldn't be turned into a clip — its words don't form one clean range. Try regenerating."
-  case .ambiguousPlanWords, .wordsMissingSampleBounds, .samplesOutOfBounds:
+      "This suggestion's words aren't one continuous passage, so it can't become a clip. "
+      + "Try regenerating."
+  case .duplicateWords(let ids):
     return
-      "This suggestion couldn't be turned into a clip against the current audio. Try regenerating."
+      "This suggestion lists the same word more than once (\(ids.count) repeated), "
+      + "so it can't become a clip. Try regenerating."
+  case .wordsOutOfOrder:
+    return
+      "This suggestion's words run backwards in the audio, so it can't become a clip. Try regenerating."
+  case .wordMembershipMismatch:
+    return
+      "This suggestion's words don't match the audio range they cover, so it can't become a clip. Try regenerating."
+  case .ambiguousPlanWords(let ids):
+    return
+      "\(ids.count) of this suggestion's words appear more than once in the transcript, "
+      + "so its audio is ambiguous. Try regenerating."
+  case .wordsMissingSampleBounds(let ids):
+    return
+      "\(ids.count) of this suggestion's words have no usable audio position, "
+      + "so it can't become a clip. Try regenerating."
+  case .samplesOutOfBounds:
+    return
+      "This suggestion's audio range falls outside the file, so it can't become a clip. Try regenerating."
   }
 }

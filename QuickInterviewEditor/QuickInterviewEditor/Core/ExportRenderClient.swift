@@ -80,10 +80,16 @@ enum ExportRenderError: Error, Equatable, LocalizedError {
   case shortRender(written: Int, expected: Int)
   case shortRead(requested: Int, got: Int, atFrame: Int)
   case invalidSliceRange(name: String, start: Int, end: Int, duration: Int)
-  case bufferAllocationFailed
-  case invalidWordStart
-  case noConvertedAudio
-  case wavTooLarge
+  case bufferAllocationFailed(frames: Int, sampleRate: Int, channels: Int)
+  case invalidWordStart(wordIndex: Int?)
+  case noConvertedAudio(editedSamples: Int, sampleRate: Int)
+  case wavTooLarge(frames: Int)
+
+  static func bufferAllocationFailed(format: AVAudioFormat, frames: Int) -> Self {
+    .bufferAllocationFailed(
+      frames: frames, sampleRate: Int(format.sampleRate.rounded()),
+      channels: Int(format.channelCount))
+  }
 
   var errorDescription: String? {
     switch self {
@@ -98,16 +104,30 @@ enum ExportRenderError: Error, Equatable, LocalizedError {
     case .invalidSliceRange(let name, let start, let end, let duration):
       return
         "\"\(name)\" spans samples \(start)..<\(end), which is not a valid range in a \(duration)-sample recording"
-    case .bufferAllocationFailed:
-      return "Could not allocate an audio buffer for the export."
-    case .noConvertedAudio:
-      return "The clip is too short to export at 44.1 kHz."
-    case .wavTooLarge:
-      return "This clip exceeds the WAV size limit. Split it into smaller clips or export as M4A."
-    case .invalidWordStart:
-      return "A transcript word has an invalid start time."
+    case .bufferAllocationFailed(let frames, let sampleRate, let channels):
+      return
+        "Could not allocate an audio buffer of \(frames) frames "
+        + "(\(sampleRate) Hz, \(channels) channel(s)) for the export. "
+        + "The Mac may be low on memory; close other apps and export again."
+    case .noConvertedAudio(let editedSamples, let sampleRate):
+      return
+        "The clip is too short to export at 44.1 kHz: its \(editedSamples) samples "
+        + "at \(sampleRate) Hz convert to no audio. Make the clip longer."
+    case .wavTooLarge(let frames):
+      return
+        "This clip (\(frames) frames) exceeds the WAV size limit. Split it into smaller clips or export as M4A."
+    case .invalidWordStart(let wordIndex):
+      let word = wordIndex.map { "Transcript word number \($0 + 1)" } ?? "A transcript word"
+      return "\(word) has an invalid start time, so the clip markers can't be written."
     }
   }
+}
+
+/// Which export step failed, with the underlying cause as text. `EditorModel` turns these
+/// into the user-facing wording.
+enum ExportStageError: Error, Equatable, Sendable {
+  case renderSlice(name: String, number: Int, total: Int, cause: String)
+  case writeMarkers(cause: String)
 }
 
 /// Renders one slice's edited audio straight from the canonical file, using the same
@@ -132,7 +152,7 @@ enum ExportAudioRenderer {
       // Core Audio pads WAV headers (4 KiB measured); reserve 64 KiB plus conversion rounding.
       let frames = MasteringFrames.conformed(job.editedDurationSamples, fromRate: job.sampleRate)
       guard frames < (Int(UInt32.max) - 65_536) / 6 else {
-        throw ExportRenderError.wavTooLarge
+        throw ExportRenderError.wavTooLarge(frames: frames)
       }
       _ = try renderConformed(
         from: file, plan: job.plan, editedDurationSamples: job.editedDurationSamples,
@@ -167,7 +187,10 @@ enum ExportAudioRenderer {
     sampleRate: Int, to url: URL, settings: [String: Any]
   ) throws -> Int {
     let expected = MasteringFrames.conformed(editedDurationSamples, fromRate: sampleRate)
-    guard expected > 0 else { throw ExportRenderError.noConvertedAudio }
+    guard expected > 0 else {
+      throw ExportRenderError.noConvertedAudio(
+        editedSamples: editedDurationSamples, sampleRate: sampleRate)
+    }
     var frames = 0
     do {
       let conformer = try MasteringConformer(inputFormat: source.processingFormat)
@@ -186,7 +209,10 @@ enum ExportAudioRenderer {
         frames += Int(output.frameLength)
       }
     }
-    guard frames > 0 else { throw ExportRenderError.noConvertedAudio }
+    guard frames > 0 else {
+      throw ExportRenderError.noConvertedAudio(
+        editedSamples: editedDurationSamples, sampleRate: sampleRate)
+    }
     guard abs(frames - expected) <= 1 else {
       throw MasteringPreparationError.conversionFailed(
         "Conformed audio length \(frames) differs from expected \(expected)")
@@ -261,7 +287,7 @@ enum ExportAudioRenderer {
     let format = file.processingFormat
     let capacity = AVAudioFrameCount(min(source.count, chunkFrames))
     guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: capacity) else {
-      throw ExportRenderError.bufferAllocationFailed
+      throw ExportRenderError.bufferAllocationFailed(format: format, frames: Int(capacity))
     }
     file.framePosition = AVAudioFramePosition(source.lowerBound)
     var remaining = source.count
@@ -359,7 +385,7 @@ enum ExportAudioRenderer {
       guard !blended.isEmpty,
         let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: count),
         let channels = buffer.floatChannelData
-      else { throw ExportRenderError.bufferAllocationFailed }
+      else { throw ExportRenderError.bufferAllocationFailed(format: format, frames: chunkLength) }
       buffer.frameLength = count
       for channel in 0..<Int(format.channelCount) {
         let source = blended[min(channel, blended.count - 1)]
@@ -390,7 +416,7 @@ enum ExportAudioRenderer {
       let buffer = AVAudioPCMBuffer(
         pcmFormat: format, frameCapacity: AVAudioFrameCount(frameCount)),
       let channels = buffer.floatChannelData
-    else { throw ExportRenderError.bufferAllocationFailed }
+    else { throw ExportRenderError.bufferAllocationFailed(format: format, frames: frameCount) }
     file.framePosition = AVAudioFramePosition(startFrame)
     try file.read(into: buffer, frameCount: AVAudioFrameCount(frameCount))
     let read = Int(buffer.frameLength)

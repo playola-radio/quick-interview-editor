@@ -139,8 +139,14 @@ final class ModelSetupModel: ViewModel {
     } catch is CancellationError {
       // cancelTapped() already set the phase; nothing to do.
     } catch {
-      phase = .failed(error.localizedDescription)
+      phase = .failed(failureMessage(for: error))
     }
+  }
+
+  func failureMessage(for error: Error) -> String {
+    "Downloading the speech models failed: \(error.localizedDescription) "
+      + "\(retryButtonLabel) to retry. If it keeps failing, check your internet connection "
+      + "and free disk space."
   }
 
   private static let byteFormatter: ByteCountFormatter = {

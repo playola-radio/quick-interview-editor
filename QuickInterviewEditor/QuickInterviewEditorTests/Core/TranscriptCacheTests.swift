@@ -122,4 +122,43 @@ import Testing
     try Data("x".utf8).write(to: stored.canonicalAudioURL)
     #expect(cache.lookup("k") == nil)  // size mismatch ⇒ not a valid hit
   }
+
+  @Test func lookupMissesWhenManifestIsCorrupt() throws {
+    let base = makeBase()
+    defer { try? FileManager.default.removeItem(at: base) }
+    let cache = TranscriptCacheClient.onDisk(base: base)
+    _ = try cache.store("k", Fixtures.editPlan(), makeAIFF(base))
+    try Data("not json".utf8).write(
+      to: base.appendingPathComponent("k").appendingPathComponent(TranscriptCache.manifestName))
+    #expect(cache.lookup("k") == nil)
+  }
+
+  @Test func lookupMissesWhenPlanIsCorrupt() throws {
+    let base = makeBase()
+    defer { try? FileManager.default.removeItem(at: base) }
+    let cache = TranscriptCacheClient.onDisk(base: base)
+    _ = try cache.store("k", Fixtures.editPlan(), makeAIFF(base))
+    try Data("not json".utf8).write(
+      to: base.appendingPathComponent("k").appendingPathComponent(TranscriptCache.planName))
+    #expect(cache.lookup("k") == nil)
+  }
+
+  @Test func sweepOfMissingBaseIsANoOp() {
+    let base = FileManager.default.temporaryDirectory
+      .appendingPathComponent("qie-cache-tests/missing-\(UUID().uuidString)")
+    TranscriptCache.sweepStaleTempDirs(base: base)
+    #expect(!FileManager.default.fileExists(atPath: base.path))
+  }
+
+  @Test func missingFileErrorIsRecognisedAsNotFound() {
+    let missing = FileManager.default.temporaryDirectory
+      .appendingPathComponent("qie-cache-tests/nope-\(UUID().uuidString)")
+    do {
+      _ = try Data(contentsOf: missing)
+      Issue.record("expected a read failure")
+    } catch {
+      #expect(error.isFileNotFound)
+    }
+    #expect(!CocoaError(.fileWriteOutOfSpace).isFileNotFound)
+  }
 }

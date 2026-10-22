@@ -89,9 +89,9 @@ extension DependencyValues {
 // swiftlint:disable:next inclusive_language
 enum MasteringPreparationError: Error, Equatable, LocalizedError {
   case unsupportedChannelCount(Int)
-  case invalidLoudnessMeasurement
+  case invalidLoudnessMeasurement(String)
   case conversionFailed(String)
-  case meterUnavailable
+  case meterUnavailable(String)
   case truePeakCeilingExceeded(part: Int, measuredDBTP: Double)
   case partTooLarge(part: Int)
   case noPieces
@@ -100,15 +100,31 @@ enum MasteringPreparationError: Error, Equatable, LocalizedError {
   var errorDescription: String? {
     switch self {
     case .unsupportedChannelCount(let count): "Unsupported audio channel count: \(count)."
-    case .invalidLoudnessMeasurement: "The audio loudness measurement was invalid."
+    case .invalidLoudnessMeasurement(let detail):
+      "The audio loudness measurement was invalid: \(detail)."
     case .conversionFailed(let reason): "Audio conversion failed: \(reason)"
-    case .meterUnavailable: "The loudness meter could not start."
+    case .meterUnavailable(let detail): "The loudness meter failed: \(detail)."
     case .truePeakCeilingExceeded(let part, _):
       "Prepared part \(part) exceeds the true-peak ceiling."
     case .partTooLarge(let part): "Prepared part \(part) exceeds the WAV size limit."
     case .noPieces: "There are no intros to prepare."
     case .canonicalSourceMismatch: "The source audio changed after preparation was started."
     }
+  }
+
+  func within(_ context: String) -> MasteringPreparationError {
+    switch self {
+    case .invalidLoudnessMeasurement(let detail):
+      .invalidLoudnessMeasurement("\(context): \(detail)")
+    case .conversionFailed(let reason): .conversionFailed("\(context): \(reason)")
+    case .meterUnavailable(let detail): .meterUnavailable("\(context): \(detail)")
+    default: self
+    }
+  }
+
+  static func wrapping(_ error: Error, within context: String) -> MasteringPreparationError {
+    if let error = error as? MasteringPreparationError { return error.within(context) }
+    return .conversionFailed("\(context): \(error.localizedDescription)")
   }
 }
 
@@ -129,7 +145,8 @@ private enum MasteringPreparer {
     let snapshot = request.snapshot
     guard !snapshot.pieces.isEmpty else { throw MasteringPreparationError.noPieces }
     guard request.partLimitFrames > 0 else {
-      throw MasteringPreparationError.conversionFailed("Part length must be positive")
+      throw MasteringPreparationError.conversionFailed(
+        "Part length must be positive (got \(request.partLimitFrames) frames)")
     }
     try Task.checkCancellation()
     guard
@@ -145,17 +162,27 @@ private enum MasteringPreparer {
     for (index, piece) in snapshot.pieces.enumerated() {
       try Task.checkCancellation()
       guard piece.editedDurationSamples > 0 else {
-        throw MasteringPreparationError.conversionFailed("Intro has no rendered audio")
+        throw MasteringPreparationError.conversionFailed(
+          "Intro \"\(piece.title)\" has no rendered audio")
       }
       let cafURL = request.workDirectory.appendingPathComponent("piece-\(index).caf")
-      let frameCount = try ExportAudioRenderer.renderConformed(
-        from: source, plan: piece.render, editedDurationSamples: piece.editedDurationSamples,
-        sampleRate: snapshot.sourceSampleRate, to: cafURL,
-        settings: MasteringFormat.float32CAFSettings)
-      let measurement = try await loudness.measure(cafURL)
-      let gain = try MasteringGain.decibels(
-        integratedLUFS: measurement.integratedLUFS,
-        truePeakDBTP: measurement.truePeakDBTP)
+      let frameCount: Int
+      let measurement: LoudnessMeasurement
+      let gain: Double
+      do {
+        frameCount = try ExportAudioRenderer.renderConformed(
+          from: source, plan: piece.render, editedDurationSamples: piece.editedDurationSamples,
+          sampleRate: snapshot.sourceSampleRate, to: cafURL,
+          settings: MasteringFormat.float32CAFSettings)
+        measurement = try await loudness.measure(cafURL)
+        gain = try MasteringGain.decibels(
+          integratedLUFS: measurement.integratedLUFS,
+          truePeakDBTP: measurement.truePeakDBTP)
+      } catch is CancellationError {
+        throw CancellationError()
+      } catch {
+        throw MasteringPreparationError.wrapping(error, within: "intro \"\(piece.title)\"")
+      }
       if measurement.integratedLUFS.isFinite {
         let loudnessGain = MasteringFormat.targetLUFS - measurement.integratedLUFS
         if gain < loudnessGain - 0.001 {
@@ -188,73 +215,91 @@ private enum MasteringPreparer {
         throw MasteringPreparationError.partTooLarge(part: partNumber)
       }
       let wavURL = request.workDirectory.appendingPathComponent("part-\(partNumber).wav")
-      var prepared: [PreparedPiece] = []
-      var frameCount = 0
       do {
-        let writer = try AVAudioFile(forWriting: wavURL, settings: MasteringFormat.pcm24WAVSettings)
-        for index in group {
-          try Task.checkCancellation()
-          let piece = staged[index]
-          let start = frameCount
-          let input = try AVAudioFile(forReading: piece.cafURL)
-          let linearGain = Float(pow(10, piece.gainDB / 20))
-          while input.framePosition < input.length {
+        var prepared: [PreparedPiece] = []
+        var frameCount = 0
+        do {
+          let writer = try AVAudioFile(
+            forWriting: wavURL, settings: MasteringFormat.pcm24WAVSettings)
+          for index in group {
             try Task.checkCancellation()
-            guard
-              let buffer = AVAudioPCMBuffer(
-                pcmFormat: input.processingFormat, frameCapacity: 65_536)
-            else { throw ExportRenderError.bufferAllocationFailed }
-            try input.read(into: buffer)
-            guard buffer.frameLength > 0, let channels = buffer.floatChannelData else {
-              throw ExportRenderError.shortRead(
-                requested: 1, got: 0, atFrame: Int(input.framePosition))
-            }
-            for channel in 0..<2 {
-              for frame in 0..<Int(buffer.frameLength) {
-                channels[channel][frame] *= linearGain
+            let piece = staged[index]
+            let start = frameCount
+            let input = try AVAudioFile(forReading: piece.cafURL)
+            let linearGain = Float(pow(10, piece.gainDB / 20))
+            while input.framePosition < input.length {
+              try Task.checkCancellation()
+              guard
+                let buffer = AVAudioPCMBuffer(
+                  pcmFormat: input.processingFormat, frameCapacity: 65_536)
+              else {
+                throw ExportRenderError.bufferAllocationFailed(
+                  format: input.processingFormat, frames: 65_536)
               }
+              try input.read(into: buffer)
+              guard buffer.frameLength > 0, let channels = buffer.floatChannelData else {
+                throw ExportRenderError.shortRead(
+                  requested: 1, got: 0, atFrame: Int(input.framePosition))
+              }
+              for channel in 0..<2 {
+                for frame in 0..<Int(buffer.frameLength) {
+                  channels[channel][frame] *= linearGain
+                }
+              }
+              try writer.write(from: buffer)
+              frameCount += Int(buffer.frameLength)
             }
-            try writer.write(from: buffer)
-            frameCount += Int(buffer.frameLength)
+            guard frameCount - start == piece.frameCount else {
+              throw ExportRenderError.shortRender(
+                written: frameCount - start, expected: piece.frameCount)
+            }
+            let words = piece.input.wordStarts.compactMap { marker -> (frame: Int, text: String)? in
+              let position = MasteringFrames.conformed(
+                marker.position, fromRate: snapshot.sourceSampleRate)
+              guard position >= 0 && position < piece.frameCount else { return nil }
+              return (position, marker.name)
+            }
+            prepared.append(
+              PreparedPiece(
+                sliceID: piece.input.sliceID, title: piece.input.title, startFrame: start,
+                frameCount: piece.frameCount, lrc: MasteringLRC.text(wordStarts: words)))
+            try FileManager.default.removeItem(at: piece.cafURL)
           }
-          guard frameCount - start == piece.frameCount else {
-            throw ExportRenderError.shortRender(
-              written: frameCount - start, expected: piece.frameCount)
-          }
-          let words = piece.input.wordStarts.compactMap { marker -> (frame: Int, text: String)? in
-            let position = MasteringFrames.conformed(
-              marker.position, fromRate: snapshot.sourceSampleRate)
-            guard position >= 0 && position < piece.frameCount else { return nil }
-            return (position, marker.name)
-          }
-          prepared.append(
-            PreparedPiece(
-              sliceID: piece.input.sliceID, title: piece.input.title, startFrame: start,
-              frameCount: piece.frameCount, lrc: MasteringLRC.text(wordStarts: words)))
-          try FileManager.default.removeItem(at: piece.cafURL)
         }
+        let readback = try AVAudioFile(forReading: wavURL)
+        let bits = Int(readback.fileFormat.streamDescription.pointee.mBitsPerChannel)
+        guard Int(readback.length) == totalFrames,
+          Int(readback.fileFormat.sampleRate) == 44_100,
+          Int(readback.fileFormat.channelCount) == 2,
+          bits == 24
+        else {
+          throw MasteringPreparationError.conversionFailed(
+            "Prepared WAV for part \(partNumber) does not match: expected \(totalFrames) frames, "
+              + "44100 Hz, 2 channels, 24 bits; got \(readback.length) frames, "
+              + "\(Int(readback.fileFormat.sampleRate)) Hz, "
+              + "\(readback.fileFormat.channelCount) channels, \(bits) bits")
+        }
+        let peak = try LoudnessMeter.measure(url: wavURL, mode: .truePeakOnly).truePeakDBTP
+        guard
+          peak <= MasteringFormat.truePeakCeilingDBTP + MasteringFormat.truePeakToleranceDB
+        else {
+          throw MasteringPreparationError.truePeakCeilingExceeded(
+            part: partNumber, measuredDBTP: peak)
+        }
+        let attributes = try FileManager.default.attributesOfItem(atPath: wavURL.path)
+        guard let size = attributes[.size] as? NSNumber, size.intValue > 0 else {
+          throw MasteringPreparationError.conversionFailed(
+            "Prepared WAV for part \(partNumber) is empty")
+        }
+        parts.append(
+          PreparedPart(
+            wavURL: wavURL, frameCount: totalFrames,
+            byteCount: size.intValue, pieces: prepared))
+      } catch is CancellationError {
+        throw CancellationError()
+      } catch {
+        throw MasteringPreparationError.wrapping(error, within: "part \(partNumber)")
       }
-      let readback = try AVAudioFile(forReading: wavURL)
-      guard Int(readback.length) == totalFrames,
-        Int(readback.fileFormat.sampleRate) == 44_100,
-        Int(readback.fileFormat.channelCount) == 2,
-        Int(readback.fileFormat.streamDescription.pointee.mBitsPerChannel) == 24
-      else {
-        throw MasteringPreparationError.conversionFailed("Prepared WAV properties do not match")
-      }
-      let peak = try LoudnessMeter.measure(url: wavURL, mode: .truePeakOnly).truePeakDBTP
-      guard peak <= MasteringFormat.truePeakCeilingDBTP + MasteringFormat.truePeakToleranceDB else {
-        throw MasteringPreparationError.truePeakCeilingExceeded(
-          part: partNumber, measuredDBTP: peak)
-      }
-      let attributes = try FileManager.default.attributesOfItem(atPath: wavURL.path)
-      guard let size = attributes[.size] as? NSNumber, size.intValue > 0 else {
-        throw MasteringPreparationError.conversionFailed("Prepared WAV is empty")
-      }
-      parts.append(
-        PreparedPart(
-          wavURL: wavURL, frameCount: totalFrames,
-          byteCount: size.intValue, pieces: prepared))
     }
     try Task.checkCancellation()
     return MasteringPreparationResult(

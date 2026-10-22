@@ -12,29 +12,79 @@ struct MasteringArtifactValidationClient: Sendable {
   var validate: @Sendable (URL, String, Int) throws -> Void
 }
 
-enum MasteringArtifactError: Error { case corrupt, unavailable }
+enum MasteringArtifactCorruption: Equatable, Sendable {
+  case unreadable(cause: String)
+  case frameCount(expected: Int, actual: Int)
+  case sampleRate(expected: Int, actual: Int)
+  case channelCount(expected: Int, actual: Int)
+  case audioFileUnopenable(status: Int32)
+  case dataFormatUnreadable(status: Int32)
+  case unexpectedEncoding(expected: String, actual: String)
+  case missingFinishedFile
+}
+
+enum MasteringArtifactError: Error, Equatable {
+  case corrupt(MasteringArtifactCorruption)
+  case unavailable
+}
+
+enum MasteringCommitFailure: Error, Equatable, Sendable {
+  case projectNotLoaded
+  case runReplaced
+  case stagedFileReplaced(fileName: String)
+  case runMalformed
+  case artifactsMissing
+}
+
+private func fourCharacterCode(_ value: UInt32) -> String {
+  let bytes = [24, 16, 8, 0].map { UInt8((value >> UInt32($0)) & 0xFF) }
+  guard bytes.allSatisfy({ $0 >= 0x20 && $0 < 0x7F }) else { return "\(value)" }
+  return String(bytes: bytes, encoding: .ascii) ?? "\(value)"
+}
 
 extension MasteringArtifactValidationClient: DependencyKey {
   static var liveValue: Self {
     Self(validate: { url, ext, frames in
-      guard let file = try? AVAudioFile(forReading: url), Int(file.length) == frames,
-        Int(file.fileFormat.sampleRate) == MasteringFormat.sampleRate,
-        Int(file.fileFormat.channelCount) == MasteringFormat.channels
-      else {
-        throw MasteringArtifactError.corrupt
+      let file: AVAudioFile
+      do { file = try AVAudioFile(forReading: url) } catch {
+        throw MasteringArtifactError.corrupt(.unreadable(cause: error.localizedDescription))
+      }
+      guard Int(file.length) == frames else {
+        throw MasteringArtifactError.corrupt(
+          .frameCount(expected: frames, actual: Int(file.length)))
+      }
+      guard Int(file.fileFormat.sampleRate) == MasteringFormat.sampleRate else {
+        throw MasteringArtifactError.corrupt(
+          .sampleRate(
+            expected: MasteringFormat.sampleRate, actual: Int(file.fileFormat.sampleRate)))
+      }
+      guard Int(file.fileFormat.channelCount) == MasteringFormat.channels else {
+        throw MasteringArtifactError.corrupt(
+          .channelCount(
+            expected: MasteringFormat.channels, actual: Int(file.fileFormat.channelCount)))
       }
       var audioFile: AudioFileID?
-      guard AudioFileOpenURL(url as CFURL, .readPermission, 0, &audioFile) == noErr,
-        let audioFile
-      else { throw MasteringArtifactError.corrupt }
+      let openStatus = AudioFileOpenURL(url as CFURL, .readPermission, 0, &audioFile)
+      guard openStatus == noErr, let audioFile else {
+        throw MasteringArtifactError.corrupt(.audioFileUnopenable(status: openStatus))
+      }
       defer { AudioFileClose(audioFile) }
       var format = AudioStreamBasicDescription()
       var size = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
-      guard AudioFileGetProperty(audioFile, kAudioFilePropertyDataFormat, &size, &format) == noErr,
+      let formatStatus = AudioFileGetProperty(
+        audioFile, kAudioFilePropertyDataFormat, &size, &format)
+      guard formatStatus == noErr else {
+        throw MasteringArtifactError.corrupt(.dataFormatUnreadable(status: formatStatus))
+      }
+      guard
         (ext == "wav" && format.mFormatID == kAudioFormatLinearPCM && format.mBitsPerChannel == 24)
           || (ext == "m4a" && format.mFormatID == kAudioFormatMPEG4AAC)
       else {
-        throw MasteringArtifactError.corrupt
+        throw MasteringArtifactError.corrupt(
+          .unexpectedEncoding(
+            expected: ext == "wav" ? "24-bit PCM" : "AAC",
+            actual: "format \(fourCharacterCode(format.mFormatID)), "
+              + "\(format.mBitsPerChannel) bits per channel"))
       }
     })
   }
@@ -58,7 +108,9 @@ final class MasteringPageModel: ViewModel {
     var run: @MainActor () -> MasteringRun?
     var packageURL: @MainActor () -> URL?
     var artifact: @MainActor (MasteringArtifactRef) -> StagedMasteringArtifact?
-    var commit: @MainActor (MasteringRun, [String: StagedMasteringArtifact], UUID?) -> Bool
+    var commit:
+      @MainActor (MasteringRun, [String: StagedMasteringArtifact], UUID?) ->
+        Result<Void, MasteringCommitFailure>
     var stagingError: @MainActor () -> String? = { nil }
     var dismiss: @MainActor () -> Void = {}
   }
@@ -147,8 +199,10 @@ final class MasteringPageModel: ViewModel {
     return
       "A saved mastering file is unavailable. Reopen the project or prepare that part again.\(detail)"
   }
-  let corruptMessage =
-    "A saved mastering file is damaged or has the wrong audio format. Prepare or return that part again."
+  let corruptAdvice = "Prepare or return that part again."
+  func corruptMessage(subject: String, corruption: MasteringArtifactCorruption) -> String {
+    "\(subject) is damaged or has the wrong audio format: \(Self.text(for: corruption)). \(corruptAdvice)"
+  }
 
   var run: MasteringRun? { host.run() }
   var dragReloadKey: String { "\(run?.id.uuidString ?? "none"):\(dragRevision)" }
@@ -302,8 +356,8 @@ final class MasteringPageModel: ViewModel {
       let newRun = MasteringRun(
         id: uuid(), artist: snapshot.artist, inputsDigest: result.inputsDigest, parts: parts)
       try current(token, runID: expectedID)
-      guard host.commit(newRun, staged, expectedID) else {
-        message = "The project changed while preparing; prepare again."
+      if case .failure(let failure) = host.commit(newRun, staged, expectedID) {
+        message = Self.text(for: failure, during: "preparing", advice: "Prepare again.")
         return
       }
       retiredDragOwners = dragOwners
@@ -349,9 +403,9 @@ final class MasteringPageModel: ViewModel {
       message = unavailableMessage
       return nil
     }
+    let partName = rows.first(where: { $0.id == partID })?.title ?? "Part"
     do {
       try validation.validate(source.url, "wav", part.frameCount)
-      let partName = rows.first(where: { $0.id == partID })?.title ?? "Part"
       let projectName = host.packageURL()?.deletingPathExtension().lastPathComponent ?? "Interview"
       let copy = try await staging.sessionCopy(source.url, "\(projectName) – \(partName).wav")
       guard !Task.isCancelled, generation == token,
@@ -361,7 +415,9 @@ final class MasteringPageModel: ViewModel {
       }
       dragOwners[partID] = copy
       return copy.url
-    } catch MasteringArtifactError.corrupt { message = corruptMessage } catch {
+    } catch MasteringArtifactError.corrupt(let corruption) {
+      message = corruptMessage(subject: partName, corruption: corruption)
+    } catch {
       message = "Could not stage the prepared file: \(error.localizedDescription)"
     }
     return nil
@@ -533,8 +589,8 @@ final class MasteringPageModel: ViewModel {
           fileName: name, byteCount: piece.byteCount)
       }
       try current(token, runID: currentRun.id)
-      guard host.commit(updated, staged, currentRun.id) else {
-        message = "The project changed while returning this master. Drop it again."
+      if case .failure(let failure) = host.commit(updated, staged, currentRun.id) {
+        message = Self.returnFailureText(failure)
         return
       }
       copied = []
@@ -609,6 +665,7 @@ final class MasteringPageModel: ViewModel {
     }
     let token = generation
     activity = .copying
+    var subject = "A saved mastering file"
     do {
       if destination?.standardizedFileURL.path != url.standardizedFileURL.path {
         copied = []
@@ -619,9 +676,12 @@ final class MasteringPageModel: ViewModel {
       let alreadyCopied = Set(copied.map(\.id))
       var rendered: [UUID: URL] = [:]
       var targets: [Slice] = []
-      for part in run.parts {
+      for (partIndex, part) in run.parts.enumerated() {
         for piece in part.pieces {
-          guard let ref = piece.finished else { throw MasteringArtifactError.corrupt }
+          subject = "Part \(partIndex + 1) of \(run.parts.count) (\(piece.title))"
+          guard let ref = piece.finished else {
+            throw MasteringArtifactError.corrupt(.missingFinishedFile)
+          }
           if !alreadyCopied.contains(piece.id) {
             guard let owner = host.artifact(ref) else { throw MasteringArtifactError.unavailable }
             try validation.validate(owner.url, "m4a", piece.frameCount)
@@ -659,9 +719,11 @@ final class MasteringPageModel: ViewModel {
         }
       }
       await finishCopy(review, approved: nil, token: token, runID: run.id)
-    } catch MasteringArtifactError.corrupt { message = corruptMessage } catch MasteringArtifactError
-      .unavailable
-    { message = unavailableMessage } catch is CancellationError {
+    } catch MasteringArtifactError.corrupt(let corruption) {
+      message = corruptMessage(subject: subject, corruption: corruption)
+    } catch MasteringArtifactError.unavailable {
+      message = unavailableMessage
+    } catch is CancellationError {
       message = "Save cancelled. Files already copied remain."
     } catch { message = "Could not stage the final files: \(error.localizedDescription)" }
     if exportReview == nil { saveOwners = [] }
@@ -716,6 +778,44 @@ final class MasteringPageModel: ViewModel {
   private func current(_ token: Int, runID: UUID?) throws {
     try Task.checkCancellation()
     guard generation == token, host.run()?.id == runID else { throw CancellationError() }
+  }
+  private static func text(for corruption: MasteringArtifactCorruption) -> String {
+    switch corruption {
+    case .unreadable(let cause): "the file could not be read (\(cause))"
+    case .frameCount(let expected, let actual):
+      "it has \(actual) frames but \(expected) were expected"
+    case .sampleRate(let expected, let actual):
+      "its sample rate is \(actual) Hz but \(expected) Hz was expected"
+    case .channelCount(let expected, let actual):
+      "it has \(actual) channels but \(expected) were expected"
+    case .audioFileUnopenable(let status):
+      "the system audio library could not open it (OSStatus \(status))"
+    case .dataFormatUnreadable(let status):
+      "its audio format could not be read (OSStatus \(status))"
+    case .unexpectedEncoding(let expected, let actual):
+      "its encoding is \(actual) but \(expected) was expected"
+    case .missingFinishedFile: "its finished file was never saved"
+    }
+  }
+  private static func returnFailureText(_ failure: MasteringCommitFailure) -> String {
+    text(for: failure, during: "returning this master", advice: "Drop it again.")
+  }
+  private static func text(
+    for failure: MasteringCommitFailure, during activity: String, advice: String
+  ) -> String {
+    switch failure {
+    case .projectNotLoaded:
+      return "The project was closed or not loaded while \(activity). \(advice)"
+    case .runReplaced:
+      return "The project's mastering run was replaced while \(activity). \(advice)"
+    case .stagedFileReplaced(let fileName):
+      return
+        "A prepared file (\(fileName)) was replaced by a different one while \(activity). \(advice)"
+    case .runMalformed:
+      return "The prepared run's parts and pieces did not line up when saving. \(advice)"
+    case .artifactsMissing:
+      return "A prepared file was missing or the wrong size when saving. \(advice)"
+    }
   }
   private func busyMessage() { message = "Wait for the current step to finish." }
   private static func warningText(_ warning: MasteringPreparationWarning) -> String {

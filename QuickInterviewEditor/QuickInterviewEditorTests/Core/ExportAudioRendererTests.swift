@@ -767,7 +767,8 @@ extension ExportAudioRendererTests {
       source: source, output: directory.appendingPathComponent("clip.\(format.rawValue)"),
       plan: plan.plan, editedDuration: 1, sampleRate: 192_000, sourceDuration: 1)
     request.format = format
-    await #expect(throws: ExportRenderError.noConvertedAudio) {
+    await #expect(throws: ExportRenderError.noConvertedAudio(editedSamples: 1, sampleRate: 192_000))
+    {
       try await ExportRenderClient.liveValue.renderSlice(request)
     }
     expectNoDifference(
@@ -784,10 +785,39 @@ extension ExportAudioRendererTests {
       source: source, output: directory.appendingPathComponent("clip.wav"),
       plan: plan.plan, editedDuration: 7 * 3_600 * Self.sampleRate)
     request.format = .wav
-    await #expect(throws: ExportRenderError.wavTooLarge) {
+    await #expect(
+      throws: ExportRenderError.wavTooLarge(
+        frames: MasteringFrames.conformed(7 * 3_600 * Self.sampleRate, fromRate: Self.sampleRate))
+    ) {
       try await ExportRenderClient.liveValue.renderSlice(request)
     }
     expectNoDifference(
       try FileManager.default.contentsOfDirectory(atPath: directory.path), ["source.aiff"])
+  }
+
+  @Test func bufferAllocationFailureNamesTheBufferSizeAndFormat() {
+    let message = ExportRenderError.bufferAllocationFailed(
+      frames: 65_536, sampleRate: 48_000, channels: 2
+    ).localizedDescription
+    #expect(message.contains("65536 frames"))
+    #expect(message.contains("48000 Hz"))
+    #expect(message.contains("2 channel"))
+  }
+
+  @Test func bufferAllocationFailureBuildsContextFromAnAudioFormat() throws {
+    let format = try #require(AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 1))
+    expectNoDifference(
+      ExportRenderError.bufferAllocationFailed(format: format, frames: 512),
+      .bufferAllocationFailed(frames: 512, sampleRate: 44_100, channels: 1))
+  }
+
+  @Test func genericRenderErrorsNameTheirContext() {
+    let tooShort = ExportRenderError.noConvertedAudio(editedSamples: 1, sampleRate: 192_000)
+    #expect(tooShort.localizedDescription.contains("1 samples at 192000 Hz"))
+    #expect(ExportRenderError.wavTooLarge(frames: 123).localizedDescription.contains("123 frames"))
+    #expect(
+      ExportRenderError.invalidWordStart(wordIndex: 41).localizedDescription.contains("number 42"))
+    #expect(
+      !ExportRenderError.invalidWordStart(wordIndex: nil).localizedDescription.contains("number"))
   }
 }

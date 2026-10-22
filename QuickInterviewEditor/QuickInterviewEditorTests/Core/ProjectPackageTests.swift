@@ -367,7 +367,10 @@ struct ProjectPackageTests {
     let wrapper = try FileWrapper(url: url, options: [])
     #expect((wrapper.fileAttributes[FileAttributeKey.size.rawValue] as? NSNumber)?.intValue == 13)
     try ProjectPackage.verifyAudio(wrapper, against: Fixtures.projectSource(canonicalByteCount: 13))
-    #expect(throws: ProjectPackageError.audioMismatch) {
+    #expect(
+      throws: ProjectPackageError.audioMismatch(
+        expectedByteCount: 12, actualByteCount: 13, readError: nil)
+    ) {
       try ProjectPackage.verifyAudio(
         wrapper, against: Fixtures.projectSource(canonicalByteCount: 12))
     }
@@ -382,16 +385,200 @@ struct ProjectPackageTests {
       ProjectPackageError.unsupportedSchema(0).errorDescription,
       "This project uses an unsupported format version (0).")
     expectNoDifference(
-      ProjectPackageError.audioMismatch.errorDescription,
-      "The project's bundled audio does not match the project.")
+      ProjectPackageError.audioMismatch(expectedByteCount: 10, actualByteCount: 6, readError: nil)
+        .errorDescription,
+      "The project's bundled audio does not match the project: it is 6 bytes, but the project "
+        + "expects 10.")
+    expectNoDifference(
+      ProjectPackageError.audioMismatch(
+        expectedByteCount: 10, actualByteCount: nil, readError: "Disk unreadable."
+      ).errorDescription,
+      "The project's bundled audio does not match the project: its size couldn't be read. "
+        + "Disk unreadable.")
+    expectNoDifference(
+      ProjectPackageError.unreadableFile(name: "plan.json", detail: "not valid JSON")
+        .errorDescription,
+      "The project's plan.json couldn't be read: not valid JSON.")
+  }
+
+  @Test func unreadableFileTellsTheUserWhatToDoInTheOpenAlert() {
+    let error =
+      ProjectPackageError.unreadableFile(name: "plan.json", detail: "not valid JSON") as NSError
+    expectNoDifference(
+      error.localizedFailureReason, "The project's plan.json couldn't be read: not valid JSON.")
+    expectNoDifference(
+      error.localizedRecoverySuggestion,
+      "The project may have been changed or damaged outside the app. Restore it from a backup, "
+        + "or import the original audio into a new project.")
   }
 
   @Test func verifyAudioThrowsWhenByteCountMismatches() {
     let audioData = Data("canonical-audio-bytes".utf8)
     let source = Fixtures.projectSource(canonicalByteCount: audioData.count + 1)
-    #expect(throws: ProjectPackageError.audioMismatch) {
+    #expect(
+      throws: ProjectPackageError.audioMismatch(
+        expectedByteCount: audioData.count + 1, actualByteCount: audioData.count, readError: nil)
+    ) {
       try ProjectPackage.verifyAudio(
         FileWrapper(regularFileWithContents: audioData), against: source)
+    }
+  }
+
+  // MARK: - Unreadable JSON
+
+  @Test func projectJSONWithAWrongTypedFieldNamesTheFileAndKeyPath() throws {
+    var json = try projectJSONObject(Fixtures.projectFile())
+    var source = try #require(json["source"] as? [String: Any])
+    source["canonicalByteCount"] = "not a number"
+    json["source"] = source
+    let root = tree(
+      projectJSON: try JSONSerialization.data(withJSONObject: json),
+      planJSON: encodedPlan(Fixtures.editPlan()), audio: Data("audio".utf8))
+    #expect(
+      throws: ProjectPackageError.unreadableFile(
+        name: "project.json", detail: "expected Int at source.canonicalByteCount")
+    ) {
+      try ProjectPackage.decode(root)
+    }
+  }
+
+  @Test func projectJSONMissingAKeyNamesTheKey() throws {
+    var json = try projectJSONObject(Fixtures.projectFile())
+    json["engine"] = nil
+    let root = tree(
+      projectJSON: try JSONSerialization.data(withJSONObject: json),
+      planJSON: encodedPlan(Fixtures.editPlan()), audio: Data("audio".utf8))
+    #expect(
+      throws: ProjectPackageError.unreadableFile(name: "project.json", detail: "missing \"engine\"")
+    ) {
+      try ProjectPackage.decode(root)
+    }
+  }
+
+  @Test func projectJSONThatIsNotJSONNamesTheFile() {
+    let root = tree(
+      projectJSON: Data("not json".utf8), planJSON: encodedPlan(Fixtures.editPlan()),
+      audio: Data("audio".utf8))
+    #expect(
+      throws: ProjectPackageError.unreadableFile(name: "project.json", detail: "not valid JSON")
+    ) {
+      try ProjectPackage.decode(root)
+    }
+  }
+
+  @Test func planJSONWithAWrongTypedWordNamesTheFileAndPathButNotTheText() throws {
+    let planData = encodedPlan(Fixtures.editPlan())
+    var plan = try #require(
+      try JSONSerialization.jsonObject(with: planData) as? [String: Any])
+    var words = try #require(plan["words"] as? [[String: Any]])
+    try #require(!words.isEmpty)
+    words[0]["text"] = ["secret transcript words"]
+    plan["words"] = words
+    let root = tree(
+      projectJSON: encodedProjectFile(Fixtures.projectFile()),
+      planJSON: try JSONSerialization.data(withJSONObject: plan), audio: Data("audio".utf8))
+    #expect(
+      throws: ProjectPackageError.unreadableFile(
+        name: "plan.json", detail: "expected String at words[0].text")
+    ) {
+      try ProjectPackage.decode(root)
+    }
+  }
+
+  private func projectJSONObject(_ file: ProjectFile) throws -> [String: Any] {
+    try #require(
+      try JSONSerialization.jsonObject(with: encodedProjectFile(file)) as? [String: Any])
+  }
+
+  // MARK: - Mastering reconcile causes
+
+  @Test func corruptManifestSaveNamesAStagedCopyThatNoLongerExists() throws {
+    let name = Fixtures.uuid(70).uuidString.lowercased() + ".wav"
+    let owner = try MasteringStagingStore.adopt(
+      Self.makeStagingSource(named: name, contents: Data("file".utf8)), as: name)
+    try FileManager.default.removeItem(at: owner.url)
+
+    let cause = try reconcileCause {
+      try ProjectPackage.encode(
+        file: Fixtures.projectFile(), plan: Fixtures.editPlan(),
+        audio: FileWrapper(regularFileWithContents: Data("audio".utf8)),
+        masteringStaged: [name: owner], strictMissing: true, preserveMasteringWhenAbsent: true,
+        corruptExpectedNames: [name])
+    }
+    expectNoDifference(cause.name, name)
+    #expect(cause.text.hasPrefix("Its copy no longer exists. "))
+  }
+
+  @Test func corruptManifestSaveNamesAStagedCopyItCannotRead() throws {
+    let name = Fixtures.uuid(71).uuidString.lowercased() + ".wav"
+    let owner = try MasteringStagingStore.adopt(
+      Self.makeStagingSource(named: name, contents: Data("file".utf8)), as: name)
+    try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: owner.url.path)
+    defer {
+      try? FileManager.default.setAttributes(
+        [.posixPermissions: 0o644], ofItemAtPath: owner.url.path)
+    }
+
+    let cause = try reconcileCause {
+      try ProjectPackage.encode(
+        file: Fixtures.projectFile(), plan: Fixtures.editPlan(),
+        audio: FileWrapper(regularFileWithContents: Data("audio".utf8)),
+        masteringStaged: [name: owner], strictMissing: true, preserveMasteringWhenAbsent: true,
+        corruptExpectedNames: [name])
+    }
+    expectNoDifference(cause.name, name)
+    #expect(cause.text.hasPrefix("The app doesn't have permission to read it. "))
+  }
+
+  @Test func referencedArtifactSaveCarriesTheStagingFailureCause() throws {
+    let name = Fixtures.uuid(76).uuidString.lowercased() + ".wav"
+    var file = Fixtures.projectFile()
+    file.masteringRun = masteringRun(preparedName: name, byteCount: 4)
+    #expect(
+      throws: ProjectPackage.MasteringReconcileError.missingArtifact(
+        name, cause: "It couldn't be prepared for saving: The disk is full.")
+    ) {
+      try ProjectPackage.encode(
+        file: file, plan: Fixtures.editPlan(),
+        audio: FileWrapper(regularFileWithContents: Data("audio".utf8)), strictMissing: true,
+        stagingFailures: [name: "The disk is full."])
+    }
+  }
+
+  @Test func referencedArtifactSaveNamesAWrongSizedStagedCopy() throws {
+    let name = Fixtures.uuid(77).uuidString.lowercased() + ".wav"
+    var file = Fixtures.projectFile()
+    file.masteringRun = masteringRun(preparedName: name, byteCount: 4)
+    let owner = try MasteringStagingStore.adopt(
+      Self.makeStagingSource(named: name, contents: Data("too long".utf8)), as: name)
+    #expect(
+      throws: ProjectPackage.MasteringReconcileError.missingArtifact(
+        name, cause: "Its copy is 8 bytes, but 4 were expected.")
+    ) {
+      try ProjectPackage.encode(
+        file: file, plan: Fixtures.editPlan(),
+        audio: FileWrapper(regularFileWithContents: Data("audio".utf8)),
+        masteringStaged: [name: owner], strictMissing: true)
+    }
+  }
+
+  @Test func missingArtifactDescriptionKeepsTheCauseAndSaysWhatToDo() {
+    expectNoDifference(
+      ProjectPackage.MasteringReconcileError.missingArtifact(
+        "intro.wav", cause: "It couldn't be prepared for saving: The disk is full."
+      ).errorDescription,
+      "Couldn't copy the mastering file intro.wav into this project. It couldn't be prepared for "
+        + "saving: The disk is full. The original project is unchanged. Reopen the project or "
+        + "prepare that part again.")
+  }
+
+  private func reconcileCause(_ body: () throws -> FileWrapper) throws -> (
+    name: String, text: String
+  ) {
+    let error = try #require(
+      #expect(throws: ProjectPackage.MasteringReconcileError.self) { try body() })
+    switch error {
+    case .missingArtifact(let name, let cause): return (name, cause)
     }
   }
 

@@ -671,4 +671,15 @@ extension SuggestionRunTests {
     expectNoDifference(decoded, legacy)
     #expect(decoded.failures == nil)
   }
+
+  @Test func validationErrorDescriptionsCarryTheirIDs() {
+    let runID = Fixtures.uuid(7)
+    let candidateID = Fixtures.uuid(8)
+    #expect(
+      SuggestionRunValidationError.missingOwningSnapshot(runID).errorDescription?
+        .contains(runID.uuidString) == true)
+    #expect(
+      SuggestionRunValidationError.invalidNaming(candidateID: candidateID).errorDescription?
+        .contains(candidateID.uuidString) == true)
+  }
 }

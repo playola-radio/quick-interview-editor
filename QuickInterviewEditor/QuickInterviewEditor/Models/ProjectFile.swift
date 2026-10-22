@@ -30,7 +30,18 @@ extension ProjectFile {
     source = try container.decode(ProjectSource.self, forKey: .source)
     engine = try container.decode(ProjectEngineInfo.self, forKey: .engine)
     content = try container.decode(EditorDocumentState.self, forKey: .content)
-    masteringRun = (try? container.decodeIfPresent(MasteringRun.self, forKey: .masteringRun)) ?? nil
+    // A damaged mastering manifest must not make the interview unopenable: it reads as `nil`
+    // (`ProjectPackage.decode` then flags it as corrupt) and only the cause is logged.
+    do {
+      masteringRun = try container.decodeIfPresent(MasteringRun.self, forKey: .masteringRun)
+    } catch {
+      AppLog.document.error(
+        """
+        Couldn't read the project's mastering manifest: \
+        \(ProjectPackage.decodeFailureDetail(error), privacy: .public)
+        """)
+      masteringRun = nil
+    }
   }
 }
 

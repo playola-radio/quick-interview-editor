@@ -7,7 +7,8 @@ enum ProjectPackageError: Error, Equatable, LocalizedError {
   case missingPlanJSON
   case missingAudio
   case unsupportedSchema(Int)
-  case audioMismatch
+  case unreadableFile(name: String, detail: String)
+  case audioMismatch(expectedByteCount: Int, actualByteCount: Int?, readError: String?)
   case malformedRecoveryArchive
 
   var errorDescription: String? {
@@ -20,7 +21,18 @@ enum ProjectPackageError: Error, Equatable, LocalizedError {
         return "This project (format \(version)) was saved by a newer version of the app."
       }
       return "This project uses an unsupported format version (\(version))."
-    case .audioMismatch: return "The project's bundled audio does not match the project."
+    case .unreadableFile(let name, let detail):
+      return "The project's \(name) couldn't be read: \(detail)."
+    case .audioMismatch(let expected, let actual?, _):
+      return
+        "The project's bundled audio does not match the project: it is \(actual) bytes, but the "
+        + "project expects \(expected)."
+    case .audioMismatch(_, nil, let readError?):
+      return
+        "The project's bundled audio does not match the project: its size couldn't be read. "
+        + readError
+    case .audioMismatch(_, nil, nil):
+      return "The project's bundled audio does not match the project: its size couldn't be read."
     case .malformedRecoveryArchive:
       return "The project's suggestion recovery archive is not a regular file."
     }
@@ -31,10 +43,17 @@ enum ProjectPackageError: Error, Equatable, LocalizedError {
   var failureReason: String? { errorDescription }
 
   var recoverySuggestion: String? {
-    guard case .unsupportedSchema(let version) = self,
-      version > ProjectFile.maximumReadableSchemaVersion
-    else { return nil }
-    return "Open this project with the version of the app that last saved it, or a newer version."
+    switch self {
+    case .unsupportedSchema(let version) where version > ProjectFile.maximumReadableSchemaVersion:
+      return
+        "Open this project with the version of the app that last saved it, or a newer version."
+    case .unreadableFile:
+      return
+        "The project may have been changed or damaged outside the app. Restore it from a backup, "
+        + "or import the original audio into a new project."
+    default:
+      return nil
+    }
   }
 
 }
@@ -99,11 +118,12 @@ enum ProjectPackage {
     // longer match the v1 shape fails with a clear `unsupportedSchema` instead of an
     // opaque `DecodingError`. Only versions in `1...current` are accepted; 0, negative,
     // and future versions are all refused (spec A8).
-    let probe = try JSONDecoder().decode(SchemaProbe.self, from: projectData)
+    let probe = try decodeJSON(SchemaProbe.self, from: projectData, file: "project.json")
     guard (1...ProjectFile.maximumReadableSchemaVersion).contains(probe.schemaVersion) else {
       throw ProjectPackageError.unsupportedSchema(probe.schemaVersion)
     }
-    var file = try projectDecoder().decode(ProjectFile.self, from: projectData)
+    var file = try decodeJSON(
+      ProjectFile.self, from: projectData, file: "project.json", using: projectDecoder())
     var manifestCorrupt = false
     if probe.schemaVersion < 3 {
       file.masteringRun = nil
@@ -119,7 +139,7 @@ enum ProjectPackage {
     guard let planData = root.fileWrappers?["plan.json"]?.regularFileContents else {
       throw ProjectPackageError.missingPlanJSON
     }
-    let plan = try JSONDecoder().decode(EditPlan.self, from: planData)
+    let plan = try decodeJSON(EditPlan.self, from: planData, file: "plan.json")
 
     guard let audioWrapper = root.fileWrappers?["audio"]?.fileWrappers?["canonical.aiff"],
       audioWrapper.isRegularFile
@@ -136,12 +156,56 @@ enum ProjectPackage {
       masteringManifestCorrupt: manifestCorrupt)
   }
 
+  private static func decodeJSON<T: Decodable>(
+    _ type: T.Type, from data: Data, file name: String, using decoder: JSONDecoder = JSONDecoder()
+  ) throws -> T {
+    do {
+      return try decoder.decode(type, from: data)
+    } catch {
+      throw ProjectPackageError.unreadableFile(name: name, detail: decodeFailureDetail(error))
+    }
+  }
+
+  /// Where and how a JSON decode failed — the coding path and the kind of problem — without
+  /// echoing any decoded value, since those can carry transcript text.
+  static func decodeFailureDetail(_ error: any Error) -> String {
+    guard let error = error as? DecodingError else { return error.localizedDescription }
+    switch error {
+    case .keyNotFound(let key, let context):
+      return "missing \"\(key.stringValue)\"" + location(context.codingPath)
+    case .valueNotFound(_, let context):
+      return "missing value" + location(context.codingPath)
+    case .typeMismatch(let type, let context):
+      return "expected \(type)" + location(context.codingPath)
+    case .dataCorrupted(let context) where context.codingPath.isEmpty:
+      return "not valid JSON"
+    case .dataCorrupted(let context):
+      return "invalid value" + location(context.codingPath)
+    @unknown default:
+      return "unreadable data"
+    }
+  }
+
+  private static func location(_ path: [any CodingKey]) -> String {
+    guard !path.isEmpty else { return "" }
+    var text = ""
+    for key in path {
+      if let index = key.intValue {
+        text += "[\(index)]"
+      } else {
+        text += text.isEmpty ? key.stringValue : ".\(key.stringValue)"
+      }
+    }
+    return " at \(text)"
+  }
+
   static func encode(
     file: ProjectFile, plan: EditPlan, audio: FileWrapper, recoveryArchive: Data? = nil,
     // swiftlint:disable:next inclusive_language
     masteringStaged: [String: StagedMasteringArtifact] = [:], strictMissing: Bool = false,
     // swiftlint:disable:next inclusive_language
-    preserveMasteringWhenAbsent: Bool = false, corruptExpectedNames: Set<String> = []
+    preserveMasteringWhenAbsent: Bool = false, corruptExpectedNames: Set<String> = [],
+    stagingFailures: [String: String] = [:]
   ) throws -> FileWrapper {
     audio.preferredFilename = "canonical.aiff"
     let audioDirWrapper = FileWrapper(directoryWithFileWrappers: ["canonical.aiff": audio])
@@ -161,7 +225,7 @@ enum ProjectPackage {
       in: root, run: file.masteringRun,
       staged: masteringStaged, strictMissing: strictMissing,
       preserveExistingWhenAbsent: preserveMasteringWhenAbsent,
-      corruptExpectedNames: corruptExpectedNames)
+      corruptExpectedNames: corruptExpectedNames, stagingFailures: stagingFailures)
     // A preserved-but-still-undecodable run keeps schema 3, matching `rewriteMetadata`, so a
     // later open still knows to treat the carried-over `mastering/` directory as belonging to a
     // corrupt manifest rather than as orphaned schema-2 leftovers to discard.
@@ -197,7 +261,7 @@ enum ProjectPackage {
     // swiftlint:disable:next inclusive_language
     masteringStaged: [String: StagedMasteringArtifact] = [:], strictMissing: Bool = false,
     // swiftlint:disable:next inclusive_language
-    preserveMasteringWhenAbsent: Bool = false
+    preserveMasteringWhenAbsent: Bool = false, stagingFailures: [String: String] = [:]
   ) throws
     -> FileWrapper
   {
@@ -206,7 +270,7 @@ enum ProjectPackage {
     file.masteringRun = try reconcileMastering(
       in: root, run: file.masteringRun,
       staged: masteringStaged, strictMissing: strictMissing,
-      preserveExistingWhenAbsent: preserveMasteringWhenAbsent)
+      preserveExistingWhenAbsent: preserveMasteringWhenAbsent, stagingFailures: stagingFailures)
     // A preserved-but-still-undecodable run keeps schema 3, so a later open still knows to
     // treat the untouched `mastering/` directory as belonging to a corrupt manifest rather
     // than as orphaned schema-2 leftovers to discard.
@@ -232,13 +296,15 @@ enum ProjectPackage {
 
   // swiftlint:disable:next inclusive_language
   enum MasteringReconcileError: Error, Equatable, LocalizedError {
-    case missingArtifact(String)
+    case missingArtifact(String, cause: String)
 
     var errorDescription: String? {
       switch self {
-      case .missingArtifact(let name):
+      case .missingArtifact(let name, let cause):
+        let cause = cause.hasSuffix(".") ? cause : cause + "."
         return
-          "Couldn't copy the mastering file \(name) into this project. The original project is unchanged."
+          "Couldn't copy the mastering file \(name) into this project. \(cause) The original "
+          + "project is unchanged. Reopen the project or prepare that part again."
       }
     }
   }
@@ -247,7 +313,8 @@ enum ProjectPackage {
   static func reconcileMastering(
     in root: FileWrapper, run: MasteringRun?, staged: [String: StagedMasteringArtifact],
     strictMissing: Bool = false,
-    preserveExistingWhenAbsent: Bool = false, corruptExpectedNames: Set<String> = []
+    preserveExistingWhenAbsent: Bool = false, corruptExpectedNames: Set<String> = [],
+    stagingFailures: [String: String] = [:]
   ) throws -> MasteringRun? {
     // A corrupt manifest decodes as `run == nil` indistinguishably from "never had a run."
     // When the caller knows this save follows a corrupt-manifest open, leave any on-disk
@@ -255,7 +322,8 @@ enum ProjectPackage {
     if run == nil, preserveExistingWhenAbsent {
       if root.fileWrappers?["mastering"] == nil {
         try addStagedMasteringDirectory(
-          staged, to: root, expectedNames: strictMissing ? corruptExpectedNames : [])
+          staged, to: root, expectedNames: strictMissing ? corruptExpectedNames : [],
+          stagingFailures: stagingFailures)
       }
       return nil
     }
@@ -263,7 +331,8 @@ enum ProjectPackage {
     let existing =
       existingDirectory?.isDirectory == true ? existingDirectory?.fileWrappers ?? [:] : [:]
     let available = try availableMasteringArtifacts(
-      for: run, existing: existing, staged: staged, strictMissing: strictMissing)
+      for: run, existing: existing, staged: staged, strictMissing: strictMissing,
+      stagingFailures: stagingFailures)
     let healed = run?.healed(available: available.compactMapValues(masteringSize))
     let retainedNames = Set(healed?.referencedArtifacts.map(\.fileName) ?? [])
     if retainedNames.isEmpty {
@@ -304,14 +373,22 @@ enum ProjectPackage {
   /// make this save silently write through fewer files than the original had (Codex PR #105
   /// follow-up: both gaps bypassed `strictMissing` entirely).
   private static func addStagedMasteringDirectory(
-    _ staged: [String: StagedMasteringArtifact], to root: FileWrapper, expectedNames: Set<String>
+    _ staged: [String: StagedMasteringArtifact], to root: FileWrapper, expectedNames: Set<String>,
+    stagingFailures: [String: String]
   ) throws {
     // swiftlint:enable inclusive_language
     var wrappers: [String: FileWrapper] = [:]
     for name in expectedNames.union(staged.keys) {
-      guard let artifact = staged[name],
-        let wrapper = try? FileWrapper(url: artifact.url, options: [])
-      else { throw MasteringReconcileError.missingArtifact(name) }
+      guard let artifact = staged[name] else {
+        throw MasteringReconcileError.missingArtifact(
+          name, cause: unstagedCause(stagingFailures[name], existing: nil, expectedByteCount: nil))
+      }
+      let wrapper: FileWrapper
+      do {
+        wrapper = try FileWrapper(url: artifact.url, options: [])
+      } catch {
+        throw MasteringReconcileError.missingArtifact(name, cause: readFailureCause(error))
+      }
       wrapper.preferredFilename = name
       wrappers[name] = wrapper
     }
@@ -324,7 +401,8 @@ enum ProjectPackage {
   // swiftlint:disable:next inclusive_language
   private static func availableMasteringArtifacts(
     for run: MasteringRun?, existing: [String: FileWrapper],
-    staged: [String: StagedMasteringArtifact], strictMissing: Bool
+    staged: [String: StagedMasteringArtifact], strictMissing: Bool,
+    stagingFailures: [String: String]
   ) throws -> [String: FileWrapper] {
     var available: [String: FileWrapper] = [:]
     for ref in run?.referencedArtifacts ?? [] where ref.isWellFormed {
@@ -337,10 +415,55 @@ enum ProjectPackage {
         wrapper.preferredFilename = ref.fileName
         available[ref.fileName] = wrapper
       } else if strictMissing {
-        throw MasteringReconcileError.missingArtifact(ref.fileName)
+        throw MasteringReconcileError.missingArtifact(
+          ref.fileName,
+          cause: missingArtifactCause(
+            ref, existing: existing[ref.fileName], staged: staged[ref.fileName],
+            stagingFailure: stagingFailures[ref.fileName]))
       }
     }
     return available
+  }
+
+  private static func missingArtifactCause(
+    _ ref: MasteringArtifactRef, existing: FileWrapper?, staged: StagedMasteringArtifact?,
+    stagingFailure: String?
+  ) -> String {
+    guard let staged else {
+      return unstagedCause(stagingFailure, existing: existing, expectedByteCount: ref.byteCount)
+    }
+    do {
+      guard let size = try staged.url.resourceValues(forKeys: [.fileSizeKey]).fileSize else {
+        return "Its size couldn't be read."
+      }
+      return "Its copy is \(size) bytes, but \(ref.byteCount) were expected."
+    } catch {
+      return readFailureCause(error)
+    }
+  }
+
+  private static func unstagedCause(
+    _ stagingFailure: String?, existing: FileWrapper?, expectedByteCount: Int?
+  ) -> String {
+    if let stagingFailure { return "It couldn't be prepared for saving: \(stagingFailure)" }
+    if let existing, let expectedByteCount, let size = masteringSize(existing) {
+      return "The project's copy is \(size) bytes, but \(expectedByteCount) were expected."
+    }
+    return "No copy of it was available to save from."
+  }
+
+  /// Tells a missing file apart from a permission problem or other I/O failure, keeping the
+  /// system's own description.
+  private static func readFailureCause(_ error: any Error) -> String {
+    let description = error.localizedDescription
+    switch (error as? CocoaError)?.code {
+    case .fileReadNoSuchFile?, .fileNoSuchFile?:
+      return "Its copy no longer exists. \(description)"
+    case .fileReadNoPermission?:
+      return "The app doesn't have permission to read it. \(description)"
+    default:
+      return "It couldn't be read. \(description)"
+    }
   }
 
   // swiftlint:disable:next inclusive_language
@@ -371,7 +494,8 @@ enum ProjectPackage {
       (wrapper.fileAttributes[FileAttributeKey.size.rawValue] as? NSNumber)?.intValue
       ?? wrapper.regularFileContents?.count
     guard byteCount == source.canonicalByteCount else {
-      throw ProjectPackageError.audioMismatch
+      throw ProjectPackageError.audioMismatch(
+        expectedByteCount: source.canonicalByteCount, actualByteCount: byteCount, readError: nil)
     }
   }
 }

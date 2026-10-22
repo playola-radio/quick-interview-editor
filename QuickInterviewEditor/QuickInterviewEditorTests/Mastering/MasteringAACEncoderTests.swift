@@ -117,6 +117,41 @@ struct MasteringAACEncoderTests {
     await #expect(throws: CancellationError.self) { try await task.value }
     #expect(!FileManager.default.fileExists(atPath: output.path))
   }
+
+  @Test func shortSourceReportsHowManyFramesWereMissingAndWhere() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let source = try pcm(frames: 1_024, in: directory)
+    let target = MasteredPieceTarget(
+      pieceID: UUID(), startFrame: 1_000, frameCount: 100, artist: "A", title: "Short", lrc: "")
+    await #expect(
+      throws: MasteringReturnError.encodeFailed(
+        title: "Short",
+        reason: "Conformed source ended during encoding (read 24 of 100 frames at frame 1000)")
+    ) {
+      try await MasteringAACEncoder.encode(
+        source, target: target, outputURL: directory.appendingPathComponent("short.m4a"))
+    }
+  }
+
+  @Test func writerFailureKeepsTheWriterStatusAndUnderlyingError() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let source = try pcm(frames: 1_024, in: directory)
+    let target = MasteredPieceTarget(
+      pieceID: UUID(), startFrame: 0, frameCount: 1_024, artist: "A", title: "Nowhere", lrc: "")
+    let missing = directory.appendingPathComponent("no-such-folder/out.m4a")
+    do {
+      _ = try await MasteringAACEncoder.encode(source, target: target, outputURL: missing)
+      Issue.record("Expected encode to throw")
+    } catch MasteringReturnError.encodeFailed(let title, let reason) {
+      expectNoDifference(title, "Nowhere")
+      #expect(reason.contains("writer status"))
+      #expect(reason.contains("Domain"))
+    }
+  }
 }
 
 // swiftlint:enable inclusive_language

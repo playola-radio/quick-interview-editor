@@ -23,7 +23,12 @@ enum MasteringAACEncoder {
       ]
       let input = AVAssetWriterInput(
         mediaType: .audio, outputSettings: settings, sourceFormatHint: format)
-      guard writer.canAdd(input) else { throw failed(target, "AAC writer rejected its input") }
+      guard writer.canAdd(input) else {
+        throw failed(
+          target,
+          "AAC writer rejected its input (\(MasteringFormat.sampleRate) Hz, "
+            + "\(MasteringFormat.channels) channels, \(MasteringFormat.aacBitRate) bps)")
+      }
       writer.add(input)
       var items: [AVMetadataItem] = []
       if !target.artist.isEmpty { items.append(metadata(.iTunesMetadataArtist, target.artist)) }
@@ -31,7 +36,7 @@ enum MasteringAACEncoder {
       if !target.lrc.isEmpty { items.append(metadata(.iTunesMetadataLyrics, target.lrc)) }
       writer.metadata = items
       guard writer.startWriting() else {
-        throw failed(target, writer.error?.localizedDescription ?? "Could not start AAC writer")
+        throw failed(target, writerFailure(writer, fallback: "Could not start AAC writer"))
       }
       writer.startSession(atSourceTime: .zero)
       source.framePosition = AVAudioFramePosition(target.startFrame)
@@ -42,22 +47,25 @@ enum MasteringAACEncoder {
         guard
           let buffer = AVAudioPCMBuffer(
             pcmFormat: source.processingFormat, frameCapacity: AVAudioFrameCount(count))
-        else { throw failed(target, "Could not allocate audio buffer") }
+        else { throw failed(target, "Could not allocate audio buffer (\(count) frames)") }
         try source.read(into: buffer, frameCount: AVAudioFrameCount(count))
         guard Int(buffer.frameLength) == count else {
-          throw failed(target, "Conformed source ended during encoding")
+          throw failed(
+            target,
+            "Conformed source ended during encoding (read \(buffer.frameLength) of \(count) "
+              + "frames at frame \(target.startFrame + written))")
         }
         let sample = try sampleBuffer(
           buffer, format: format, presentationFrame: written, target: target)
         while !input.isReadyForMoreMediaData {
           try Task.checkCancellation()
           guard writer.status == .writing else {
-            throw failed(target, writer.error?.localizedDescription ?? "AAC writer stopped")
+            throw failed(target, writerFailure(writer, fallback: "AAC writer stopped"))
           }
           try await Task.sleep(for: .milliseconds(1))
         }
         guard input.append(sample) else {
-          throw failed(target, writer.error?.localizedDescription ?? "AAC writer rejected samples")
+          throw failed(target, writerFailure(writer, fallback: "AAC writer rejected samples"))
         }
         written += count
       }
@@ -68,7 +76,7 @@ enum MasteringAACEncoder {
       await writer.finishWriting()
       try Task.checkCancellation()
       guard writer.status == .completed else {
-        throw failed(target, writer.error?.localizedDescription ?? "AAC writer did not finish")
+        throw failed(target, writerFailure(writer, fallback: "AAC writer did not finish"))
       }
       let decoded = try AVAudioFile(forReading: outputURL)
       guard Int(decoded.length) == target.frameCount else {
@@ -77,7 +85,8 @@ enum MasteringAACEncoder {
       }
       let attributes = try FileManager.default.attributesOfItem(atPath: outputURL.path)
       guard let byteCount = (attributes[.size] as? NSNumber)?.intValue else {
-        throw failed(target, "Could not read AAC output size")
+        throw failed(
+          target, "Could not read AAC output size of \(outputURL.lastPathComponent)")
       }
       return EncodedPiece(pieceID: target.pieceID, url: outputURL, byteCount: byteCount)
     } catch {
@@ -132,6 +141,13 @@ enum MasteringAACEncoder {
       throw failed(target, "Could not copy PCM sample (\(copyStatus))")
     }
     return sample
+  }
+
+  private static func writerFailure(_ writer: AVAssetWriter, fallback: String) -> String {
+    let status = "writer status \(writer.status.rawValue)"
+    guard let error = writer.error else { return "\(fallback) (\(status))" }
+    let nsError = error as NSError
+    return "\(error.localizedDescription) (\(status), \(nsError.domain) \(nsError.code))"
   }
 
   private static func failed(_ target: MasteredPieceTarget, _ reason: String)

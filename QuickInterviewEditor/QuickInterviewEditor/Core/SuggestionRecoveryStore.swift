@@ -149,12 +149,34 @@ actor SuggestionRecoveryStore {
   }
 
   func confirmSaved(_ owner: SuggestionRecoveryOwner, runID: UUID) throws {
-    guard let url = owner.documentURL,
-      let data = try? Data(contentsOf: url.appending(component: "project.json")),
-      let project = try? ProjectPackage.projectDecoder().decode(ProjectFile.self, from: data),
-      project.content.suggestionRecoveryOwnerID == owner.id,
-      project.content.lastAppliedSuggestionRunID == runID
-    else { throw SuggestionRecoveryError.notSaved }
+    guard let url = owner.documentURL else { throw SuggestionRecoveryError.notSaved }
+    let projectURL = url.appending(component: "project.json")
+    let data: Data
+    do {
+      data = try Data(contentsOf: projectURL)
+    } catch let error as CocoaError
+      where error.code == .fileReadNoSuchFile || error.code == .fileNoSuchFile
+    {
+      throw SuggestionRecoveryError.notSaved
+    } catch {
+      throw SuggestionRecoveryError.projectUnreadable(
+        file: projectURL.lastPathComponent, cause: error.localizedDescription)
+    }
+    let project: ProjectFile
+    do {
+      project = try ProjectPackage.projectDecoder().decode(ProjectFile.self, from: data)
+    } catch {
+      throw SuggestionRecoveryError.projectUndecodable(
+        file: projectURL.lastPathComponent, cause: ProjectPackage.decodeFailureDetail(error))
+    }
+    guard project.content.suggestionRecoveryOwnerID == owner.id else {
+      throw SuggestionRecoveryError.savedOwnerMismatch(
+        expected: owner.id, found: project.content.suggestionRecoveryOwnerID)
+    }
+    guard project.content.lastAppliedSuggestionRunID == runID else {
+      throw SuggestionRecoveryError.savedRunMismatch(
+        expected: runID, found: project.content.lastAppliedSuggestionRunID)
+    }
     guard let current = try manifestIfPresent(owner.id) else { return }
     let confirmed = try manifestForRun(owner.id, runID: runID)
     try removeRuns(Set(confirmed.retainedAppliedRunIDs + [runID]), from: current)

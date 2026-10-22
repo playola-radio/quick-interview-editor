@@ -4180,7 +4180,8 @@ final class EditorModel: ViewModel {
     do {
       try FileManager.default.createDirectory(at: scratchDir, withIntermediateDirectories: true)
     } catch {
-      exportPhase = .failed(error.localizedDescription)
+      exportPhase = .failed(
+        "Couldn't prepare a temporary folder for the export: \(error.localizedDescription)")
       return
     }
 
@@ -4192,7 +4193,15 @@ final class EditorModel: ViewModel {
         exportPhase = .failed(cancelMessage(copied: 0, total: targets.count))
         return
       }
-      if format == .aiff { try await engine.injectMarkers(rendered.injectionFiles) }
+      if format == .aiff {
+        do {
+          try await engine.injectMarkers(rendered.injectionFiles)
+        } catch let error as CancellationError {
+          throw error
+        } catch {
+          throw ExportStageError.writeMarkers(cause: error.localizedDescription)
+        }
+      }
       await finishExport(
         targets: targets, outputsByID: rendered.outputsByID,
         scratchDir: scratchDir, destination: destination, format: format)
@@ -4201,7 +4210,18 @@ final class EditorModel: ViewModel {
       exportPhase = .failed(cancelMessage(copied: 0, total: targets.count))
     } catch {
       await removeWorkDir(scratchDir)
-      exportPhase = .failed(error.localizedDescription)
+      exportPhase = .failed(exportFailureMessage(error))
+    }
+  }
+
+  private func exportFailureMessage(_ error: any Error) -> String {
+    switch error as? ExportStageError {
+    case .renderSlice(let name, let number, let total, let cause):
+      return "Export failed on clip \(number) of \(total), \"\(name)\": \(cause)"
+    case .writeMarkers(let cause):
+      return "Export failed while writing the clip markers into the exported files: \(cause)"
+    case nil:
+      return "Export failed: \(error.localizedDescription)"
     }
   }
 
@@ -4233,7 +4253,13 @@ final class EditorModel: ViewModel {
     } else {
       guard
         let markers = SliceRenderPlanBuilder.sourceMarkers(editPlan.words, sampleRate: sampleRate)
-      else { throw ExportRenderError.invalidWordStart }
+      else {
+        throw ExportRenderError.invalidWordStart(
+          wordIndex: sampleRate > 0
+            ? editPlan.words.firstIndex {
+              SliceRenderPlanBuilder.sourceMarkers([$0], sampleRate: sampleRate) == nil
+            } : nil)
+      }
       sourceMarkers = markers
     }
 
@@ -4262,13 +4288,26 @@ final class EditorModel: ViewModel {
         editedDurationSamples: plan.editedDurationSamples, sampleRate: sampleRate,
         sourceDurationSamples: sourceDurationSamples, outputURL: outputURL,
         format: format, tags: .init(title: slice.name, artist: artist, wordStarts: markers))
-      try await exportRender.renderSlice(job)
+      try await renderSlice(job, named: slice.name, number: offset + 1, of: targets.count)
       outputsByID[slice.id] = outputURL
       if format == .aiff {
         injectionFiles.append(MarkerInjectionFile(url: outputURL, markers: markers))
       }
     }
     return RenderedTargets(outputsByID: outputsByID, injectionFiles: injectionFiles)
+  }
+
+  private func renderSlice(_ job: ExportRenderJob, named name: String, number: Int, of total: Int)
+    async throws
+  {
+    do {
+      try await exportRender.renderSlice(job)
+    } catch let error as CancellationError {
+      throw error
+    } catch {
+      throw ExportStageError.renderSlice(
+        name: name, number: number, total: total, cause: error.localizedDescription)
+    }
   }
 
   /// Copies the rendered files to `destination` and sets the terminal `exportPhase` —
@@ -4314,7 +4353,7 @@ final class EditorModel: ViewModel {
     } else if let message = outcome.errorMessage {
       exportPhase = .failed(message)
     } else if outcome.copied.count != session.total {
-      exportPhase = .failed("Rendered \(outcome.copied.count) of \(session.total) slices.")
+      exportPhase = .failed(incompleteExportMessage(session: session, copied: outcome.copied))
     } else {
       workspace.reveal(outcome.copied.map(\.url))
       exportPhase = .done(count: outcome.copied.count)
@@ -4331,6 +4370,17 @@ final class EditorModel: ViewModel {
   private nonisolated func removeWorkDir(_ workDir: URL?) async {
     guard let workDir else { return }
     try? FileManager.default.removeItem(at: workDir)
+  }
+
+  private func incompleteExportMessage(
+    session: ExportReviewModel, copied: [ExportCopiedFile]
+  ) -> String {
+    let done = Set(copied.map(\.id))
+    let missing = session.targets.enumerated().filter { !done.contains($0.element.id) }
+      .map { "clip \($0.offset + 1), \"\($0.element.name)\"" }
+    return
+      "Exported \(copied.count) of \(session.total) clips. "
+      + "Not exported, with no error reported: \(missing.joined(separator: "; "))."
   }
 
   private func cancelMessage(copied: Int, total: Int) -> String {

@@ -179,4 +179,64 @@ struct MasteringPreparationTests {
       }
     }
   }
+
+  @Test func meterFailureNamesTheIntroAndKeepsTheCause() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let request = try fixture(directory: directory)
+    await #expect(
+      throws: MasteringPreparationError.meterUnavailable(
+        "intro \"First\": ebur128_add_frames_float failed: out of memory (code 1)")
+    ) {
+      try await withDependencies {
+        $0.loudness = LoudnessClient(measure: { _ in
+          throw MasteringPreparationError.meterUnavailable(
+            "ebur128_add_frames_float failed: out of memory (code 1)")
+        })
+      } operation: {
+        try await MasteringAudioClient.liveValue.prepare(request) { _ in }
+      }
+    }
+  }
+
+  @Test func unexpectedMeterFailureNamesTheIntroAndKeepsTheCause() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let request = try fixture(directory: directory)
+    await #expect(
+      throws: MasteringPreparationError.conversionFailed(
+        "intro \"First\": temporary meter input could not be read")
+    ) {
+      try await withDependencies {
+        $0.loudness = LoudnessClient(measure: { _ in
+          throw NSError(
+            domain: "MasteringPreparationTests", code: 1,
+            userInfo: [NSLocalizedDescriptionKey: "temporary meter input could not be read"])
+        })
+      } operation: {
+        try await MasteringAudioClient.liveValue.prepare(request) { _ in }
+      }
+    }
+  }
+
+  @Test func invalidMeasurementNamesTheIntroAndTheBadValue() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let request = try fixture(directory: directory)
+    await #expect(
+      throws: MasteringPreparationError.invalidLoudnessMeasurement(
+        "intro \"First\": integrated loudness -20.0 LUFS, true peak nan dBTP")
+    ) {
+      try await withDependencies {
+        $0.loudness = LoudnessClient(measure: { _ in
+          LoudnessMeasurement(integratedLUFS: -20, truePeakDBTP: .nan)
+        })
+      } operation: {
+        try await MasteringAudioClient.liveValue.prepare(request) { _ in }
+      }
+    }
+  }
 }

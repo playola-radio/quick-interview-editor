@@ -92,8 +92,18 @@ enum EngineFingerprint {
   }
 
   private static func sha256OfFile(_ url: URL) -> String? {
-    guard let data = try? Data(contentsOf: url, options: .mappedIfSafe) else { return nil }
-    return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    do {
+      let data = try Data(contentsOf: url, options: .mappedIfSafe)
+      return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    } catch {
+      if !error.isFileNotFound {
+        let cause = String(describing: error)
+        AppLog.cache.error(
+          "Could not hash \(url.path, privacy: .public) for engine fingerprint: \(cause, privacy: .public)"
+        )
+      }
+      return nil
+    }
   }
 
   /// Files at or below this size are content-hashed; larger ones use size alone.
@@ -101,6 +111,20 @@ enum EngineFingerprint {
   /// content edit still changes the fingerprint; multi-hundred-MB native libs and
   /// model weights stay stat-only so a launch never reads a gigabyte tree.
   static let maxContentHashByteCount: Int64 = 5_000_000
+
+  private static func resourceValue<T>(
+    of url: URL, key: URLResourceKey, _ keyPath: KeyPath<URLResourceValues, T?>
+  ) -> T? {
+    do {
+      return try url.resourceValues(forKeys: [key])[keyPath: keyPath]
+    } catch {
+      let cause = String(describing: error)
+      AppLog.cache.error(
+        "Could not stat \(url.path, privacy: .public) for engine fingerprint: \(cause, privacy: .public)"
+      )
+      return nil
+    }
+  }
 
   /// Per-file identity for every file under the packaged engine directory, relative
   /// to `dir`: `"h:<sha256>"` for small (code-sized) files, `"s:<size>"` for large
@@ -113,9 +137,9 @@ enum EngineFingerprint {
     else { return [] }
     var results: [(relativePath: String, identity: String)] = []
     for case let url as URL in enumerator {
-      guard (try? url.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true
+      guard resourceValue(of: url, key: .isRegularFileKey, \.isRegularFile) == true
       else { continue }
-      let size = Int64((try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0)
+      let size = Int64(resourceValue(of: url, key: .fileSizeKey, \.fileSize) ?? 0)
       let relativePath =
         url.path.hasPrefix(dir.path)
         ? String(url.path.dropFirst(dir.path.count + 1))

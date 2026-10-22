@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import os
 
 // swiftlint:disable:next inclusive_language
 final class StagedMasteringArtifact: Sendable, Equatable {
@@ -18,6 +19,26 @@ final class StagedMasteringArtifact: Sendable, Equatable {
 
   static func == (lhs: StagedMasteringArtifact, rhs: StagedMasteringArtifact) -> Bool {
     lhs === rhs
+  }
+}
+
+// swiftlint:disable:next inclusive_language
+enum MasteringStagingError: Error, Equatable, LocalizedError {
+  case invalidFileName(String)
+  case leaseFailed(operation: String, path: String, errnoCode: Int32, reason: String)
+
+  var errorDescription: String? {
+    switch self {
+    case .invalidFileName(let name): "\"\(name)\" is not a valid staged file name."
+    case .leaseFailed(let operation, let path, let code, let reason):
+      "Could not stage the file: \(operation) failed for \(path): \(reason) (errno \(code))"
+    }
+  }
+
+  static func lease(_ operation: String, path: String, errnoCode: Int32) -> Self {
+    .leaseFailed(
+      operation: operation, path: path, errnoCode: errnoCode,
+      reason: String(cString: strerror(errnoCode)))
   }
 }
 
@@ -55,16 +76,20 @@ enum MasteringStagingStore {
     guard !name.isEmpty, name == URL(fileURLWithPath: name).lastPathComponent,
       name != ".", name != ".."
     else {
-      throw CocoaError(.fileWriteInvalidFileName)
+      throw MasteringStagingError.invalidFileName(name)
     }
     let dir = try makeWorkDirectory(in: base)
     do {
       let lock = dir.appendingPathComponent(".lease")
       let descriptor = open(lock.path, O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
-      guard descriptor >= 0 else { throw CocoaError(.fileWriteUnknown) }
+      guard descriptor >= 0 else {
+        let code = errno
+        throw MasteringStagingError.lease("open", path: lock.path, errnoCode: code)
+      }
       guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else {
+        let code = errno
         close(descriptor)
-        throw CocoaError(.fileWriteUnknown)
+        throw MasteringStagingError.lease("flock", path: lock.path, errnoCode: code)
       }
       let target = dir.appendingPathComponent(name)
       do {
@@ -95,16 +120,32 @@ enum MasteringStagingStore {
     olderThan maxAge: TimeInterval = CanonicalAudioStore.staleAfter,
     in base: URL? = nil, now: Date = Date()
   ) {
-    guard let base = try? base ?? baseDirectory(),
-      let dirs = try? FileManager.default.contentsOfDirectory(
-        at: base, includingPropertiesForKeys: [.contentModificationDateKey],
+    let resolvedBase: URL
+    do { resolvedBase = try base ?? baseDirectory() } catch {
+      logCleanupFailure("locate", "the staging folder", error)
+      return
+    }
+    let dirs: [URL]
+    do {
+      dirs = try FileManager.default.contentsOfDirectory(
+        at: resolvedBase, includingPropertiesForKeys: [.contentModificationDateKey],
         options: [.skipsHiddenFiles])
-    else { return }
+    } catch {
+      if (error as? CocoaError)?.code != .fileReadNoSuchFile {
+        logCleanupFailure("list", resolvedBase.path, error)
+      }
+      return
+    }
     for dir in dirs {
-      guard
-        let modified = try? dir.resourceValues(forKeys: [.contentModificationDateKey])
-          .contentModificationDate, now.timeIntervalSince(modified) > maxAge
-      else { continue }
+      let modified: Date?
+      do {
+        modified = try dir.resourceValues(forKeys: [.contentModificationDateKey])
+          .contentModificationDate
+      } catch {
+        logCleanupFailure("read the age of", dir.lastPathComponent, error)
+        continue
+      }
+      guard let modified, now.timeIntervalSince(modified) > maxAge else { continue }
       let descriptor = open(dir.appendingPathComponent(".lease").path, O_RDWR)
       if descriptor >= 0 {
         guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else {
@@ -112,8 +153,17 @@ enum MasteringStagingStore {
           continue
         }
       }
-      try? FileManager.default.removeItem(at: dir)
+      do { try FileManager.default.removeItem(at: dir) } catch {
+        logCleanupFailure("remove", dir.lastPathComponent, error)
+      }
       if descriptor >= 0 { close(descriptor) }
     }
+  }
+
+  private static func logCleanupFailure(_ action: String, _ subject: String, _ error: Error) {
+    let reason = error.localizedDescription
+    AppLog.mastering.error(
+      "Staging cleanup could not \(action, privacy: .public) \(subject, privacy: .public): \(reason, privacy: .public)"
+    )
   }
 }

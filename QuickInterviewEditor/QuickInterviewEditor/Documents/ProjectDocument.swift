@@ -45,13 +45,15 @@ extension UTType {
 
 enum ProjectDocumentError: Error, Equatable, LocalizedError {
   case nothingToSave
-  case missingPackageAudio
+  case missingPackageAudio(cause: String)
 
   var errorDescription: String? {
     switch self {
     case .nothingToSave: return "Import an audio file before saving the project."
-    case .missingPackageAudio:
-      return "The project's audio could not be found. Reopen the project and try again."
+    case .missingPackageAudio(let cause):
+      return
+        "The project's audio (audio/canonical.aiff) could not be found: \(cause), and the editor "
+        + "hasn't loaded its own copy yet. Reopen the project and try again."
     }
   }
 }
@@ -86,6 +88,9 @@ final class ProjectDocument: ReferenceFileDocument {
     /// compares `masteringStaged`'s keys against this set rather than silently writing through
     /// whatever happened to stage successfully.
     var masteringCorruptExpectedNames: Set<String> = []
+    /// Why staging an artifact failed, by file name, so a save that later finds it missing can
+    /// say why instead of only that it is missing.
+    var masteringStagingFailures: [String: String] = [:]
     // swiftlint:enable inclusive_language
   }
 
@@ -146,12 +151,15 @@ final class ProjectDocument: ReferenceFileDocument {
   nonisolated convenience init(reading root: FileWrapper) throws {
     let decoded = try ProjectPackage.decode(root)
     try ProjectPackage.verifyAudio(decoded.audioWrapper, against: decoded.file.source)
+    var stagingFailures: [String: String] = [:]
     let (staged, corruptExpectedNames) = Self.stageReferencedMasteringMedia(
-      for: decoded.file.masteringRun, manifestCorrupt: decoded.masteringManifestCorrupt, from: root)
+      for: decoded.file.masteringRun, manifestCorrupt: decoded.masteringManifestCorrupt, from: root,
+      failures: &stagingFailures)
     self.init(
       file: decoded.file, plan: decoded.plan, recoveryArchive: decoded.recoveryArchive,
       masteringStaged: staged, masteringManifestCorrupt: decoded.masteringManifestCorrupt,
-      masteringCorruptExpectedNames: corruptExpectedNames)
+      masteringCorruptExpectedNames: corruptExpectedNames,
+      masteringStagingFailures: stagingFailures)
   }
 
   private nonisolated init(
@@ -161,13 +169,16 @@ final class ProjectDocument: ReferenceFileDocument {
     // swiftlint:disable:next inclusive_language
     masteringManifestCorrupt: Bool,
     // swiftlint:disable:next inclusive_language
-    masteringCorruptExpectedNames: Set<String>
+    masteringCorruptExpectedNames: Set<String>,
+    // swiftlint:disable:next inclusive_language
+    masteringStagingFailures: [String: String]
   ) {
     content = Content(
       file: file, plan: plan, audio: .packageChild(sessionCopy: nil),
       recoveryArchive: recoveryArchive, masteringStaged: masteringStaged,
       masteringManifestCorrupt: masteringManifestCorrupt,
-      masteringCorruptExpectedNames: masteringCorruptExpectedNames)
+      masteringCorruptExpectedNames: masteringCorruptExpectedNames,
+      masteringStagingFailures: masteringStagingFailures)
   }
 
   // swiftlint:disable inclusive_language
@@ -181,7 +192,8 @@ final class ProjectDocument: ReferenceFileDocument {
   /// can tell a dropped staging attempt (Codex PR #105 follow-up) from "there was only ever one
   /// file" — `staged`'s keys alone can't distinguish those.
   private nonisolated static func stageReferencedMasteringMedia(
-    for run: MasteringRun?, manifestCorrupt: Bool, from root: FileWrapper
+    for run: MasteringRun?, manifestCorrupt: Bool, from root: FileWrapper,
+    failures: inout [String: String]
   ) -> (staged: [String: StagedMasteringArtifact], corruptExpectedNames: Set<String>) {
     // swiftlint:enable inclusive_language
     // swiftlint:disable:next inclusive_language
@@ -191,13 +203,13 @@ final class ProjectDocument: ReferenceFileDocument {
       var expected: Set<String> = []
       for (name, wrapper) in masteringChildren where wrapper.isRegularFile {
         expected.insert(name)
-        staged[name] = try? stageMasteringWrapper(wrapper, name)
+        staged[name] = stageRecordingFailure(wrapper, name, failures: &failures)
       }
       return (staged, expected)
     }
     for ref in run?.referencedArtifacts ?? [] {
       guard let wrapper = masteringChildren[ref.fileName] else { continue }
-      staged[ref.fileName] = try? stageMasteringWrapper(wrapper, ref.fileName)
+      staged[ref.fileName] = stageRecordingFailure(wrapper, ref.fileName, failures: &failures)
     }
     return (staged, [])
   }
@@ -210,7 +222,7 @@ final class ProjectDocument: ReferenceFileDocument {
   /// is left for `reconcileMastering`'s own `strictMissing` check to report.
   private nonisolated static func stagingMasteringMedia(
     _ staged: [String: StagedMasteringArtifact], for run: MasteringRun?,
-    from existingFile: FileWrapper?
+    from existingFile: FileWrapper?, failures: inout [String: String]
   ) throws -> [String: StagedMasteringArtifact] {
     // swiftlint:enable inclusive_language
     guard let existingFile else { return staged }
@@ -219,9 +231,27 @@ final class ProjectDocument: ReferenceFileDocument {
     let masteringChildren = existingFile.fileWrappers?["mastering"]?.fileWrappers ?? [:]
     for ref in run?.referencedArtifacts ?? [] where staged[ref.fileName] == nil {
       guard let wrapper = masteringChildren[ref.fileName] else { continue }
-      staged[ref.fileName] = try? stageMasteringWrapper(wrapper, ref.fileName)
+      staged[ref.fileName] = stageRecordingFailure(wrapper, ref.fileName, failures: &failures)
     }
     return staged
+  }
+
+  /// Best-effort staging: a failure leaves the artifact unstaged, exactly as before, but its
+  /// cause is logged and kept so a save that then can't find the file reports why.
+  private nonisolated static func stageRecordingFailure(
+    _ wrapper: FileWrapper, _ name: String, failures: inout [String: String]
+  ) -> StagedMasteringArtifact? {
+    do {
+      return try stageMasteringWrapper(wrapper, name)
+    } catch {
+      AppLog.document.error(
+        """
+        Couldn't stage mastering file \(name, privacy: .public): \
+        \(error.localizedDescription, privacy: .public)
+        """)
+      failures[name] = error.localizedDescription
+      return nil
+    }
   }
 
   // swiftlint:disable:next inclusive_language
@@ -279,11 +309,15 @@ final class ProjectDocument: ReferenceFileDocument {
         let wrapper = try ProjectPackage.rewriteMetadata(
           in: existingFile, file: snapshot.file, plan: snapshot.plan,
           recoveryArchive: snapshot.recoveryArchive, masteringStaged: snapshot.masteringStaged,
-          strictMissing: true, preserveMasteringWhenAbsent: snapshot.masteringManifestCorrupt)
+          strictMissing: true, preserveMasteringWhenAbsent: snapshot.masteringManifestCorrupt,
+          stagingFailures: snapshot.masteringStagingFailures)
         retainMasteringSources(Array(snapshot.masteringStaged.values), on: wrapper)
         return wrapper
       }
-      guard let sessionCopy else { throw ProjectDocumentError.missingPackageAudio }
+      guard let sessionCopy else {
+        throw ProjectDocumentError.missingPackageAudio(
+          cause: missingPackageAudioCause(in: existingFile))
+      }
       audio = try sessionAudioWrapper(at: sessionCopy, source: snapshot.file.source)
     case .sessionFile(let url):
       audio = try sessionAudioWrapper(at: url, source: snapshot.file.source)
@@ -291,7 +325,8 @@ final class ProjectDocument: ReferenceFileDocument {
         let wrapper = try ProjectPackage.rewriteMetadata(
           in: existingFile, file: snapshot.file, plan: snapshot.plan,
           recoveryArchive: snapshot.recoveryArchive, masteringStaged: snapshot.masteringStaged,
-          strictMissing: true, preserveMasteringWhenAbsent: snapshot.masteringManifestCorrupt)
+          strictMissing: true, preserveMasteringWhenAbsent: snapshot.masteringManifestCorrupt,
+          stagingFailures: snapshot.masteringStagingFailures)
         ProjectPackage.replaceAudio(in: wrapper, with: audio)
         retainMasteringSources(Array(snapshot.masteringStaged.values), on: wrapper)
         return wrapper
@@ -302,25 +337,44 @@ final class ProjectDocument: ReferenceFileDocument {
     // (spec/plan: opening a project must not eagerly duplicate intact on-disk media into Caches),
     // so a Save As / Duplicate of a project whose mastering media was never touched this session
     // self-heals by staging on demand from `existingFile`'s own package children.
+    var stagingFailures = snapshot.masteringStagingFailures
     // swiftlint:disable:next inclusive_language
     let masteringStaged = try Self.stagingMasteringMedia(
-      snapshot.masteringStaged, for: snapshot.file.masteringRun, from: existingFile)
+      snapshot.masteringStaged, for: snapshot.file.masteringRun, from: existingFile,
+      failures: &stagingFailures)
     let wrapper = try ProjectPackage.encode(
       file: snapshot.file, plan: snapshot.plan, audio: audio,
       recoveryArchive: snapshot.recoveryArchive, masteringStaged: masteringStaged,
       strictMissing: true, preserveMasteringWhenAbsent: snapshot.masteringManifestCorrupt,
-      corruptExpectedNames: snapshot.masteringCorruptExpectedNames)
+      corruptExpectedNames: snapshot.masteringCorruptExpectedNames,
+      stagingFailures: stagingFailures)
     retainMasteringSources(Array(masteringStaged.values), on: wrapper)
     return wrapper
+  }
+
+  private nonisolated static func missingPackageAudioCause(in existingFile: FileWrapper?) -> String
+  {
+    guard let existingFile else { return "there is no saved copy of the project to read it from" }
+    guard existingFile.fileWrappers?["audio"]?.fileWrappers?["canonical.aiff"] != nil else {
+      return "the saved project has no audio file"
+    }
+    return "the saved project's audio is not a regular file"
   }
 
   private nonisolated static func sessionAudioWrapper(at url: URL, source: ProjectSource) throws
     -> FileWrapper
   {
-    guard let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize,
-      size == source.canonicalByteCount
-    else {
-      throw ProjectPackageError.audioMismatch
+    let size: Int?
+    do {
+      size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize
+    } catch {
+      throw ProjectPackageError.audioMismatch(
+        expectedByteCount: source.canonicalByteCount, actualByteCount: nil,
+        readError: error.localizedDescription)
+    }
+    guard let size, size == source.canonicalByteCount else {
+      throw ProjectPackageError.audioMismatch(
+        expectedByteCount: source.canonicalByteCount, actualByteCount: size, readError: nil)
     }
     return try FileWrapper(url: url, options: [])
   }

@@ -53,9 +53,7 @@ enum LiveTranscription {
         // Cache hit → hand the editor a SESSION-owned copy of the cached AIFF, so
         // clearing or force-refreshing the cache can't delete the file it's using.
         if policy == .useCache, let key, let hit = cache.lookup(key) {
-          let sessionAudio =
-            (try? CanonicalAudioStore.store(planAIFF: hit.canonicalAudioURL))
-            ?? hit.canonicalAudioURL
+          let sessionAudio = sessionCopy(of: hit.canonicalAudioURL)
           continuation.yield(
             .completed(
               TranscriptionResult(editPlan: hit.editPlan, canonicalAudioURL: sessionAudio)))
@@ -73,7 +71,13 @@ enum LiveTranscription {
               continuation.yield(event)
             case .completed(let result):
               if let key {
-                _ = try? cache.store(key, result.editPlan, result.canonicalAudioURL)
+                do {
+                  _ = try cache.store(key, result.editPlan, result.canonicalAudioURL)
+                } catch {
+                  AppLog.cache.error(
+                    "Could not cache the transcription: \(String(describing: error), privacy: .public)"
+                  )
+                }
               }
               continuation.yield(.completed(result))
             }
@@ -86,6 +90,18 @@ enum LiveTranscription {
         }
       }
       continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  private static func sessionCopy(of cachedAudio: URL) -> URL {
+    do {
+      return try CanonicalAudioStore.store(planAIFF: cachedAudio)
+    } catch {
+      let cause = String(describing: error)
+      AppLog.cache.error(
+        "Could not copy cached audio to session, using cached file: \(cause, privacy: .public)"
+      )
+      return cachedAudio
     }
   }
 }

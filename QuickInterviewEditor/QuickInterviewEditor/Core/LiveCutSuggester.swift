@@ -416,10 +416,8 @@ enum LiveCutSuggester {
             + "retry_after=\(provider.retryAfter.map { "\($0)" } ?? "none") "
             + "retryable=\(provider.retryable)")
       }
-      // swiftlint:disable:next optional_data_string_conversion
-      let stdoutText = String(decoding: stdout, as: UTF8.self)
       return lines.joined(separator: "\n") + "\n\n"
-        + HelperLog.streams(stdout: Data(Self.redacting(key, in: stdoutText).utf8), stderr: stderr)
+        + HelperLog.streams(stdout: stdout, stderr: stderr)
     }
   }
 

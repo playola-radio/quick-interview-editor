@@ -15,10 +15,16 @@ enum LiveModelDownloader {
   // MARK: Installed check
 
   static func installedLocation(_ manifest: ModelManifest) -> ModelInstallation? {
-    guard
-      let root = try? ModelLocations.modelsRoot(),
-      let installation = try? ModelLocations.installation()
-    else { return nil }
+    let root: URL
+    let installation: ModelInstallation
+    do {
+      root = try ModelLocations.modelsRoot()
+      installation = try ModelLocations.installation()
+    } catch {
+      AppLog.modelDownload.error(
+        "Could not resolve the models folder: \(String(describing: error), privacy: .public)")
+      return nil
+    }
 
     // The sentinel is written only after every file passed checksum, so its
     // presence + correct file sizes is enough — no need to re-hash on launch.
@@ -45,8 +51,16 @@ enum LiveModelDownloader {
           // Clear any prior completion sentinel up front: while we're (re)downloading
           // or repairing, the install must read as incomplete, so a crash mid-repair
           // can't leave a sentinel next to a missing/half-written file.
-          try? FileManager.default.removeItem(
-            at: root.appendingPathComponent(".complete-v\(manifest.version)"))
+          let sentinel = root.appendingPathComponent(".complete-v\(manifest.version)")
+          if FileManager.default.fileExists(atPath: sentinel.path) {
+            do {
+              try FileManager.default.removeItem(at: sentinel)
+            } catch {
+              AppLog.modelDownload.error(
+                "Could not clear \(sentinel.path, privacy: .public): \(String(describing: error), privacy: .public)"
+              )
+            }
+          }
 
           for file in manifest.files {
             try Task.checkCancellation()
@@ -56,7 +70,7 @@ enum LiveModelDownloader {
             let name = (file.relativePath as NSString).lastPathComponent
 
             // Already downloaded + verified? count it and skip.
-            if fileSize(dest) == file.byteCount, (try? verify(dest, sha256: file.sha256)) == true {
+            if fileSize(dest) == file.byteCount, verifiesExisting(dest, file: file) {
               completed += file.byteCount
               continuation.yield(
                 .progress(
@@ -120,14 +134,14 @@ enum LiveModelDownloader {
         let actual = try sha256Hex(of: tempURL)
         guard actual == file.sha256 else {
           throw ModelDownloadError.checksumMismatch(
-            file: file.relativePath, expected: file.sha256, actual: actual)
+            file: file.relativePath, url: file.remoteURL.absoluteString,
+            expected: file.sha256, actual: actual)
         }
         // Atomic-ish swap into place.
-        try? FileManager.default.removeItem(at: dest)
-        try FileManager.default.moveItem(at: tempURL, to: dest)
+        try replaceItem(at: dest, with: tempURL, label: file.relativePath)
         return
       } catch let error as ModelDownloadError {
-        // A checksum/size failure won't fix itself on retry — surface it.
+        // Checksums, sizes, and local saves cannot be repaired by downloading again.
         throw error
       } catch {
         lastError = error
@@ -145,8 +159,37 @@ enum LiveModelDownloader {
     (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int64) ?? nil
   }
 
-  private static func verify(_ url: URL, sha256: String) throws -> Bool {
-    try sha256Hex(of: url) == sha256
+  /// Whether a file already on disk matches the manifest. A read failure means "not
+  /// verified" (it is re-downloaded), but the cause is logged.
+  private static func verifiesExisting(_ url: URL, file: ModelFile) -> Bool {
+    do {
+      return try sha256Hex(of: url) == file.sha256
+    } catch {
+      AppLog.modelDownload.error(
+        "Could not verify \(file.relativePath, privacy: .public): \(String(describing: error), privacy: .public)"
+      )
+      return false
+    }
+  }
+
+  /// Swaps `source` into `destination`, replacing any prior file. Any failure keeps the
+  /// real cause and destination instead of a generic error.
+  static func replaceItem(at destination: URL, with source: URL, label: String) throws {
+    let fm = FileManager.default
+    do {
+      if fm.fileExists(atPath: destination.path) {
+        try fm.removeItem(at: destination)
+      }
+      try fm.moveItem(at: source, to: destination)
+    } catch {
+      throw ModelDownloadError.couldNotStoreDownload(
+        file: label, destination: destination.path, reason: describe(error))
+    }
+  }
+
+  static func describe(_ error: Error) -> String {
+    let nsError = error as NSError
+    return "\(error.localizedDescription) (\(nsError.domain) \(nsError.code))"
   }
 
   /// Streaming SHA-256 so a 3 GB file never lands in memory at once.
@@ -173,6 +216,9 @@ private final class SingleFileDownload: NSObject, URLSessionDownloadDelegate, @u
   /// The delegate hands back a temp file that URLSession will delete when the
   /// delegate callback returns, so we copy it out synchronously and hand the copy up.
   private var deliveredURL: URL?
+  /// Why the temp-file hand-off failed, so the real cause (disk full, permissions)
+  /// reaches the user instead of a generic `URLError`.
+  private var deliveryError: ModelDownloadError?
   /// A non-2xx HTTP status seen at completion. URLSession delivers 404/403/500
   /// bodies as "successful" transfers, so we must reject them explicitly instead
   /// of letting an error page flow into the size/checksum path.
@@ -234,6 +280,8 @@ private final class SingleFileDownload: NSObject, URLSessionDownloadDelegate, @u
       deliveredURL = copy
     } catch {
       deliveredURL = nil
+      deliveryError = .couldNotStoreDownload(
+        file: label, destination: copy.path, reason: LiveModelDownloader.describe(error))
     }
   }
 
@@ -246,6 +294,8 @@ private final class SingleFileDownload: NSObject, URLSessionDownloadDelegate, @u
       continuation?.resume(throwing: error)
     } else if let url = deliveredURL {
       continuation?.resume(returning: url)
+    } else if let deliveryError {
+      continuation?.resume(throwing: deliveryError)
     } else {
       continuation?.resume(throwing: URLError(.cannotWriteToFile))
     }

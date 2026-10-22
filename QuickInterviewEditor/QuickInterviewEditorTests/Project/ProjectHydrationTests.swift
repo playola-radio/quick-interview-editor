@@ -316,8 +316,8 @@ struct ProjectHydrationTests {
     expectNoDifference(
       model.phase,
       .failed(
-        "Couldn't load the project's audio: The project's bundled audio does not match the project."
-          + "\n\nClick Retry to try again."
+        "Couldn't load the project's audio: The project's bundled audio does not match the "
+          + "project: it is 2048 bytes, but the project expects 4096.\n\nClick Retry to try again."
       ))
     #expect(model.editor == nil)
     expectNoDifference(record.commits, [])

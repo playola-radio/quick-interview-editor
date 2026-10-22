@@ -36,6 +36,10 @@ enum SuggestionRecoveryError: Error, Equatable, LocalizedError {
   case conflict(String)
   case staleIdentity(owner: SuggestionRecoveryOwner, runID: UUID)
   case notSaved
+  case projectUnreadable(file: String, cause: String)
+  case projectUndecodable(file: String, cause: String)
+  case savedOwnerMismatch(expected: UUID, found: UUID?)
+  case savedRunMismatch(expected: UUID, found: UUID?)
 
   var errorDescription: String? {
     switch self {
@@ -47,6 +51,18 @@ enum SuggestionRecoveryError: Error, Equatable, LocalizedError {
     case .staleIdentity:
       "This unfinished search belongs to an earlier transcript. Discard it before starting a new search."
     case .notSaved: "The applied suggestions have not been confirmed on disk yet."
+    case .projectUnreadable(let file, let cause):
+      "The saved project file \(file) could not be read, so the applied suggestions "
+        + "could not be confirmed on disk: \(cause)"
+    case .projectUndecodable(let file, let cause):
+      "The saved project file \(file) could not be understood, so the applied suggestions "
+        + "could not be confirmed on disk: \(cause)"
+    case .savedOwnerMismatch(let expected, let found):
+      "The saved project belongs to suggestion owner \(found?.uuidString ?? "none") "
+        + "instead of \(expected.uuidString), so the applied suggestions are not confirmed on disk."
+    case .savedRunMismatch(let expected, let found):
+      "The saved project records applied search \(found?.uuidString ?? "none") "
+        + "instead of \(expected.uuidString), so the applied suggestions are not confirmed on disk."
     }
   }
 }
