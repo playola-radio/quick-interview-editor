@@ -5,26 +5,23 @@ focus on changes that affect editing work rather than internal implementation.
 
 ## [Unreleased]
 
+## [2.6.0] - 2026-10-22
+
 - Word edges now line up with the audio in newly transcribed interviews:
   deleting a single word no longer leaves part of it behind or clips the start
   of the next word. Projects you already edited keep their existing word edges.
-- When a suggestion search stops, the app now says why — a bad API key, no
-  credits, a rate limit, a network problem — and what to do next.
-- When transcription, marker injection, or a suggestion search fails, the
-  message now names the real cause and the step that failed instead of a
-  generic error, and points to a diagnostic log you can copy and send along
-  with a bug report.
-- When opening an audio file, saving or reading your API key, playing audio,
-  drawing the waveform, or moving the app into Applications fails, the app now
-  tells you what went wrong and what to try next instead of failing silently or
-  showing a generic message. A locked Keychain is no longer mistaken for a
-  missing API key.
-- Error messages for a failed export, Prepare for Mastering, model download,
-  damaged project file, or saved suggestion now say which clip, file, or step
-  failed and why. The app no longer just reports that something went wrong.
-  Behind-the-scenes cleanup that can fail harmlessly still stays quiet, but it
-  now leaves a note in the system log. Diagnostic logs no longer keep any
-  transcript text.
+- When a suggestion search stops, the app now says why (a bad API key, no
+  credits, a rate limit, a network problem) and what to do next.
+- When transcription or a suggestion search fails, the message names the real
+  cause and the step that failed, and points to a diagnostic log you can copy
+  and send along with a bug report.
+- Opening an audio file, saving or reading your API key, playing audio,
+  drawing the waveform, and moving the app into Applications now tell you what
+  went wrong and what to try next instead of failing silently. A locked
+  Keychain is no longer mistaken for a missing API key.
+- Errors from exporting, Prepare for Mastering, model downloads, damaged
+  project files, and saved suggestions now say which clip, file, or step failed
+  and why.
 
 ## [2.5.0] - 2026-10-16
 
