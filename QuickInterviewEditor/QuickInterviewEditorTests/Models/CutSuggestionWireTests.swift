@@ -62,16 +62,22 @@ struct CutSuggestionWireTests {
       suggestions[0].id, UUID(uuidString: "00000000-0000-0000-0000-000000000000"))
   }
 
-  @Test func unknownProductTypeFailsTheWholeBatch() {
+  @Test func unknownProductTypeDoesNotExposeCandidateValues() {
     let bad = Data(
       """
-      {"suggestions": [{"product_type": "bumper", "label": "x", "song": null,
+      {"suggestions": [{"product_type": "private-bumper", "label": "confidential harbour", "song": null,
         "song_verified": false, "word_ids": [1], "start_sample": 0, "end_sample": 1,
         "start_sec": 0, "end_sec": 1, "duration_sec": 1, "rank": 1, "score": 1}]}
       """.utf8)
-    #expect(throws: CutSuggestClientError.self) {
+    do {
       _ = try CutSuggestion.decodeSuggestions(
         from: bad, provenance: Self.provenance, makeID: UUID.init)
+      Issue.record("Expected decode failure")
+    } catch {
+      expectNoDifference(
+        error.localizedDescription,
+        "The cut-suggester returned output that could not be read.\n\n"
+          + "unknown product_type in cut suggestion.")
     }
   }
 
@@ -108,6 +114,20 @@ struct CutSuggestionWireTests {
     #expect(throws: CutSuggestClientError.self) {
       _ = try CutSuggestion.decodeSuggestions(
         from: junk, provenance: Self.provenance, makeID: UUID.init)
+    }
+  }
+
+  @Test func unreadableOutputErrorNeverEchoesTheOutput() {
+    let junk = Data("confidential harbour".utf8)
+    do {
+      _ = try CutSuggestion.decodeSuggestions(
+        from: junk, provenance: Self.provenance, makeID: UUID.init)
+      Issue.record("Expected decode failure")
+    } catch {
+      expectNoDifference(
+        error.localizedDescription,
+        "The cut-suggester returned output that could not be read.\n\nnot valid JSON (20 bytes of output)"
+      )
     }
   }
 

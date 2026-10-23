@@ -11,6 +11,18 @@ struct LiveEngineJobLogTests {
     return directory
   }
 
+  @Test func unreadableTranscriptionResultErrorNeverEchoesEngineOutput() {
+    let out = Data("confidential harbour".utf8)
+    do {
+      _ = try LiveEngine.decodeTranscriptionPlan(out, logURL: nil)
+      Issue.record("Expected decode failure")
+    } catch {
+      expectNoDifference(
+        error.localizedDescription,
+        "Could not read the transcription result: not valid JSON (20 bytes of output)")
+    }
+  }
+
   @Test func jobLogNeverContainsTranscriptTextFromStdout() throws {
     let directory = try logsDirectory()
     defer { try? FileManager.default.removeItem(at: directory) }

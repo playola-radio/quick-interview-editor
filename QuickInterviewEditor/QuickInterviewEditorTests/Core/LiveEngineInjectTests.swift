@@ -141,6 +141,18 @@ struct LiveEngineInjectTests {
     }
   }
 
+  @Test func malformedResultErrorNeverEchoesEngineOutput() throws {
+    let out = Data("confidential harbour".utf8)
+    do {
+      try LiveEngine.decodeInjectResult(out, expectedMarkerCounts: ["/tmp/anything.aiff": 2])
+      Issue.record("Expected decode failure")
+    } catch {
+      expectNoDifference(
+        error.localizedDescription,
+        "Could not read the marker injection result: not valid JSON (20 bytes of output)")
+    }
+  }
+
   // MARK: - injectExited
 
   @Test func injectExitDescribesTheStructuredCauseAndLog() {

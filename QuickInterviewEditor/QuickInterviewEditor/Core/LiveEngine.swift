@@ -133,6 +133,21 @@ enum LiveEngine {
       """, prefix: kind, in: logsDirectory)
   }
 
+  static func decodeTranscriptionPlan(_ out: Data, logURL: URL?) throws -> EditPlan {
+    do {
+      return try JSONDecoder().decode(EditPlan.self, from: out)
+    } catch {
+      throw EngineClientError.decodeFailed(
+        unreadableOutputDetail(error, byteCount: out.count) + logHint(logURL))
+    }
+  }
+
+  /// Engine stdout carries transcript text, so a decode failure reports only where it
+  /// failed and how much output there was — never the output itself.
+  static func unreadableOutputDetail(_ error: any Error, byteCount: Int) -> String {
+    "\(ProjectPackage.decodeFailureDetail(error)) (\(byteCount) bytes of output)"
+  }
+
   static func logHint(_ url: URL?) -> String {
     guard let url else { return "" }
     return "\n\nFull engine log: \(url.path)"
@@ -204,18 +219,7 @@ enum LiveEngine {
                 exitCode: exit.exitCode, terminationSignal: exit.terminationSignal,
                 stderr: proc.stderrTail(), logURL: logURL))
           }
-          let plan: EditPlan
-          do {
-            plan = try JSONDecoder().decode(EditPlan.self, from: out)
-          } catch {
-            // Include a preview of what the engine actually emitted — a decode
-            // failure almost always means non-JSON leaked onto stdout.
-            // swiftlint:disable:next optional_data_string_conversion
-            let preview = String(decoding: out.prefix(500), as: UTF8.self)
-            throw EngineClientError.decodeFailed(
-              "\(error)\n\nEngine output was not valid JSON. It began with:\n\(preview)"
-                + logHint(logURL))
-          }
+          let plan = try decodeTranscriptionPlan(out, logURL: logURL)
           // Copy the engine's canonical `<stem>.plan.aiff` into an app-owned cache
           // BEFORE the `defer` above deletes the scratch dir, so the returned URL
           // never points at a file we're about to remove. One canonical file then
@@ -396,11 +400,8 @@ enum LiveEngine {
     do {
       wire = try JSONDecoder().decode(InjectWireResult.self, from: out)
     } catch {
-      // swiftlint:disable:next optional_data_string_conversion
-      let preview = String(decoding: out.prefix(500), as: UTF8.self)
       throw EngineClientError.injectDecodeFailed(
-        "\(error)\n\nEngine output was not valid JSON. It began with:\n\(preview)" + logHint(logURL)
-      )
+        unreadableOutputDetail(error, byteCount: out.count) + logHint(logURL))
     }
     let resultPaths = Set(wire.files.map(\.path))
     guard resultPaths == expectedPaths, wire.files.count == expectedPaths.count else {
