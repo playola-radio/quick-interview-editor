@@ -95,7 +95,7 @@ extension CutSuggestion {
       allowedProductTypeIDs.contains(wire.productType)
     else {
       throw CutSuggestClientError.decodeFailed(
-        "unknown product_type '\(wire.productType)' in suggestion '\(wire.title)'")
+        "unknown product_type in cut suggestion.")
     }
     self.init(
       id: id,
