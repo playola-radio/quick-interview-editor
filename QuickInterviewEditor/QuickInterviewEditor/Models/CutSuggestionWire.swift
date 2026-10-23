@@ -138,17 +138,16 @@ extension CutSuggestion {
       ProductType.intro.rawValue, ProductType.spotlight.rawValue,
     ]
   ) throws -> (suggestions: [CutSuggestion], meta: WireMeta?) {
+    guard String(data: data, encoding: .utf8) != nil else {
+      throw CutSuggestClientError.decodeFailed("Output is not UTF-8.")
+    }
     let response: WireResponse
     do {
-      guard String(data: data, encoding: .utf8) != nil else {
-        throw CutSuggestClientError.decodeFailed("Output is not UTF-8.")
-      }
       response = try JSONDecoder().decode(WireResponse.self, from: data)
     } catch {
-      // swiftlint:disable:next optional_data_string_conversion
-      let preview = String(decoding: data.prefix(500), as: UTF8.self)
+      // The output carries transcript text, so never echo it — only where decoding failed.
       throw CutSuggestClientError.decodeFailed(
-        "\(error)\n\nOutput was not valid suggestion JSON. It began with:\n\(preview)")
+        "\(ProjectPackage.decodeFailureDetail(error)) (\(data.count) bytes of output)")
     }
     let suggestions = try response.suggestions.map {
       try CutSuggestion(

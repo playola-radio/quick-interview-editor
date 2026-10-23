@@ -5,6 +5,10 @@ focus on changes that affect editing work rather than internal implementation.
 
 ## [Unreleased]
 
+- When the app can't read a transcription, marker, or suggestion result, the
+  error no longer shows the start of that result, which could contain words
+  from your interview.
+
 ## [2.6.0] - 2026-10-22
 
 - Word edges now line up with the audio in newly transcribed interviews:

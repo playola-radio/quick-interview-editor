@@ -111,6 +111,20 @@ struct CutSuggestionWireTests {
     }
   }
 
+  @Test func unreadableOutputErrorNeverEchoesTheOutput() {
+    let junk = Data("confidential harbour".utf8)
+    do {
+      _ = try CutSuggestion.decodeSuggestions(
+        from: junk, provenance: Self.provenance, makeID: UUID.init)
+      Issue.record("Expected decode failure")
+    } catch {
+      expectNoDifference(
+        error.localizedDescription,
+        "The cut-suggester returned output that could not be read.\n\nnot valid JSON (20 bytes of output)"
+      )
+    }
+  }
+
   @Test func emptySuggestionsDecodeToEmptyArray() throws {
     let empty = Data(#"{"suggestions": [], "meta": {}}"#.utf8)
     let suggestions = try CutSuggestion.decodeSuggestions(
