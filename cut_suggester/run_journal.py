@@ -195,11 +195,15 @@ class RunJournal:
             except Exception as exc:
                 raise JournalRecoveryError(f'completed request {key} no longer validates: {exc}') from exc
         record = {'schema_version': 1, 'request_identity': self.request_identity, 'key': key}
+        response = None
         try:
             response = invoke()
             result = validate(response)
         except Exception as exc:
             record.update(status='failed', error_type=type(exc).__name__)
+            if response is not None:
+                # Local-only, beside the validated responses; never put in errors or logs.
+                record['rejected_response'] = response
             self._save_record(key, record)
             raise
         record.update(status='completed', response=response, response_sha256=hashlib.sha256(response.encode('utf-8')).hexdigest())

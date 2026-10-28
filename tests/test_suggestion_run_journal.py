@@ -27,6 +27,25 @@ def test_failed_parser_is_recorded_and_retried(tmp_path):
     assert reopened.failed_request_keys == []
 
 
+def test_rejected_reply_is_kept_for_inspection(tmp_path):
+    j = RunJournal(tmp_path, request_identity='input')
+    with pytest.raises(ValueError):
+        j.request('key', lambda: '{"a":1,}', json.loads)
+    record = json.loads(next((tmp_path / 'requests').glob('*.json')).read_text())
+    assert record['rejected_response'] == '{"a":1,}'
+    assert RunJournal(tmp_path, request_identity='input').failed_request_keys == ['key']
+
+
+def test_provider_failure_records_no_rejected_reply(tmp_path):
+    j = RunJournal(tmp_path, request_identity='input')
+    def fail():
+        raise RuntimeError('overloaded')
+    with pytest.raises(RuntimeError):
+        j.request('key', fail, json.loads)
+    record = json.loads(next((tmp_path / 'requests').glob('*.json')).read_text())
+    assert 'rejected_response' not in record
+
+
 def test_corruption_never_calls_provider(tmp_path):
     j = RunJournal(tmp_path, request_identity='input')
     j.request('key', lambda: '{}', json.loads)
