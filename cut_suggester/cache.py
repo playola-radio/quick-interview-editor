@@ -60,7 +60,7 @@ class CachingLLMClient:
     def _has(self, prompt: str) -> bool:
         return os.path.exists(self._path(prompt))
 
-    def complete(self, prompt: str, *, purpose: str = "") -> LLMResponse:
+    def complete(self, prompt: str, *, purpose: str = "", schema: dict | None = None) -> LLMResponse:
         path = self._path(prompt)
         if os.path.exists(path) and not self.refresh:
             with open(path) as f:
@@ -87,7 +87,7 @@ class CachingLLMClient:
                 "run the eval in live mode to populate the cache"
             )
 
-        resp = self.inner.complete(prompt, purpose=purpose)
+        resp = self.inner.complete(prompt, purpose=purpose, schema=schema)
         if not resp.text.strip():
             raise RuntimeError(
                 f"LLM returned an empty response for {purpose or 'prompt'}; not caching it"

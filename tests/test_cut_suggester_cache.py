@@ -15,13 +15,13 @@ class _FakeLLM:
     def __init__(self):
         self.calls = []
 
-    def complete(self, prompt, *, purpose=""):
+    def complete(self, prompt, *, purpose="", schema=None):
         self.calls.append((prompt, purpose))
         return LLMResponse(text=f"answer:{len(self.calls)}", usage={}, model="fake")
 
 
 class _EmptyLLM:
-    def complete(self, prompt, *, purpose=""):
+    def complete(self, prompt, *, purpose="", schema=None):
         return LLMResponse(text="", usage={}, model="fake")
 
 

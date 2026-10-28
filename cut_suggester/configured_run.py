@@ -8,7 +8,7 @@ import uuid
 
 from .configured_discovery import _candidate_id, _overlap, _span_length, discover_configured
 from .cutter import suggest_cuts
-from .extraction import (completed_extraction_values, parse_extraction_response,
+from .extraction import (EXTRACTION_RESPONSE_SCHEMA, completed_extraction_values, parse_extraction_response,
                          plan_extraction_batches, required_field_ids)
 from .intro_refinement import IntroInputSizeError
 from .intro_qualification import QUALIFICATION_FIELD_IDS, qualify_intros
@@ -226,7 +226,8 @@ def run_configured_suggest(request: dict, llm, journal: RunJournal, emit) -> dic
             progress(phase='extracting', message=f'Naming batch {index + 1} of {len(plan.batches)}',
                      index=index + 1, total=len(plan.batches))
             try:
-                values = journal.request(key, lambda: llm.complete(batch.prompt, purpose=stage).text,
+                values = journal.request(key, lambda: llm.complete(batch.prompt, purpose=stage,
+                                                                     schema=EXTRACTION_RESPONSE_SCHEMA).text,
                                          lambda text: parse_extraction_response(text, batch.expected))
             except (JournalStorageError, JournalRecoveryError):
                 raise

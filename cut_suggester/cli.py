@@ -210,7 +210,7 @@ def run_suggest(request: dict, llm: LLMClient, *, emit=_emit_event) -> dict:
 
 
 class _JournalOnlyClient:
-    def complete(self, prompt, *, purpose=""):
+    def complete(self, prompt, *, purpose="", schema=None):
         raise CacheMiss(f"no validated journal response for {purpose}")
 
 
