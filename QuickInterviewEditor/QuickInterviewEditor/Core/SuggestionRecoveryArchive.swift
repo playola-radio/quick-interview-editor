@@ -392,7 +392,7 @@ struct SuggestionRecoveryArchive: Codable, Equatable, Sendable {
   ) throws {
     if complete {
       try record.keys(
-        allowed: common.union(["response", "response_sha256"]),
+        allowed: common.union(["response", "response_sha256", "rejected_response"]),
         required: common.union(["response", "response_sha256"]),
         in: "provider record \(key)")
     } else {
@@ -401,17 +401,21 @@ struct SuggestionRecoveryArchive: Codable, Equatable, Sendable {
         required: common.union(["error_type"]),
         in: "provider record \(key)")
     }
+    try validateRejectedResponse(record, key: key)
   }
 
   private static func failedRecordErrorType(_ record: RecoveryJSON, key: String) throws -> String {
     guard let errorType = record["error_type"]?.string else {
       throw SuggestionRecoveryError.invalid("Failed provider record \(key) has no error_type.")
     }
+    return errorType
+  }
+
+  private static func validateRejectedResponse(_ record: RecoveryJSON, key: String) throws {
     guard record["rejected_response"] == nil || record["rejected_response"]?.string != nil else {
       throw SuggestionRecoveryError.invalid(
-        "Failed provider record \(key) rejected_response is not text.")
+        "Provider record \(key) rejected_response is not text.")
     }
-    return errorType
   }
 
   static func verifyIntegrity(_ data: Data, of label: String) throws {

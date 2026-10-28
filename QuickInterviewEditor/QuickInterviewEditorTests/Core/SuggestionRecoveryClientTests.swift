@@ -983,6 +983,19 @@ extension SuggestionRecoveryClientTests {
     expectNoDifference(validated["rejected_response"], .string("not the requested JSON"))
   }
 
+  @Test func completedProviderRecordAllowsRejectedResponseFromAnEarlierAttempt() throws {
+    let (_, python) = try RecoveryFixture.python()
+    let (key, bytes) = try #require(python.records.first)
+    var record = try #require(JSONSerialization.jsonObject(with: bytes) as? [String: Any])
+    let identity = try #require(record["request_identity"] as? String)
+    record["rejected_response"] = "not the requested JSON"
+
+    let validated = try SuggestionRecoveryArchive.validateRecord(
+      try RecoveryFixture.signedObject(record), key: key, identity: identity)
+
+    expectNoDifference(validated["rejected_response"], .string("not the requested JSON"))
+  }
+
   @Test func manifestErrorsSayWhichOwnerFieldDisagrees() throws {
     let fixture = try RecoveryFixture()
     var owner = fixture.owner

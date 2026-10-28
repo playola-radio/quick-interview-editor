@@ -36,6 +36,18 @@ def test_rejected_reply_is_kept_for_inspection(tmp_path):
     assert RunJournal(tmp_path, request_identity='input').failed_request_keys == ['key']
 
 
+def test_rejected_reply_survives_successful_retry(tmp_path):
+    journal = RunJournal(tmp_path, request_identity='input')
+    with pytest.raises(ValueError):
+        journal.request('key', lambda: '{"a":1,}', json.loads)
+
+    assert journal.request('key', lambda: '{}', json.loads) == {}
+
+    record = json.loads(next((tmp_path / 'requests').glob('*.json')).read_text())
+    assert record['status'] == 'completed'
+    assert record['rejected_response'] == '{"a":1,}'
+
+
 def test_provider_failure_records_no_rejected_reply(tmp_path):
     j = RunJournal(tmp_path, request_identity='input')
     def fail():

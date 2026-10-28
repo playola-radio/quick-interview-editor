@@ -91,6 +91,8 @@ class RunJournal:
                     raise JournalRecoveryError(f'corrupt completed response: {path.name}')
             elif not isinstance(record.get('error_type'), str):
                 raise JournalRecoveryError(f'corrupt failure record: {path.name}')
+            if 'rejected_response' in record and not isinstance(record['rejected_response'], str):
+                raise JournalRecoveryError(f'corrupt rejected response: {path.name}')
             self._records[key] = record
         checkpoint_path = self.directory / 'checkpoint.json'
         if checkpoint_path.exists():
@@ -194,7 +196,10 @@ class RunJournal:
                 return validate(record['response'])
             except Exception as exc:
                 raise JournalRecoveryError(f'completed request {key} no longer validates: {exc}') from exc
+        rejected_response = record.get('rejected_response') if record is not None else None
         record = {'schema_version': 1, 'request_identity': self.request_identity, 'key': key}
+        if rejected_response is not None:
+            record['rejected_response'] = rejected_response
         response = None
         try:
             response = invoke()
