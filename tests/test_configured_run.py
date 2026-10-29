@@ -539,6 +539,7 @@ def test_transient_failure_keeps_sending_remaining_batches(tmp_path, category):
     assert provider.extractions == 5
     [failure] = result['failed_batches']
     assert (failure['category'], failure['retry_after'], failure['retryable']) == (category, 30, True)
+    assert 'rejected_response' not in failure
 
 
 def test_unparseable_extraction_response_is_a_bad_response_failure(tmp_path):
@@ -553,6 +554,26 @@ def test_unparseable_extraction_response_is_a_bad_response_failure(tmp_path):
     [failure] = result['failed_batches']
     assert (failure['category'], failure['error_type']) == ('bad_response', 'ExtractionError')
     assert 'at char' in failure['message']
+
+
+def test_unparseable_extraction_failure_carries_the_reply_and_where_it_broke(tmp_path):
+    req = request()
+    class Garbled(Provider):
+        def complete(self, prompt, *, purpose='', schema=None):
+            if purpose.startswith('extract'):
+                return LLMResponse(text='{"results": [')
+            return super().complete(prompt, purpose=purpose)
+    result = run_configured_suggest(req, Garbled(), journal(tmp_path, req), lambda e: None)
+    [failure] = result['failed_batches']
+    assert (failure['rejected_response'], failure['rejected_at']) == ('{"results": [', 13)
+
+
+def test_wrongly_shaped_discovery_reply_is_carried_without_a_break_position(tmp_path):
+    req = request(fields=False, tuned=True)
+    with pytest.raises(ValueError):
+        run_configured_suggest(req, Provider(classify_failure=True), journal(tmp_path, req), lambda e: None)
+    [failure] = json.loads((tmp_path / 'checkpoint.json').read_text())['failed_batches']
+    assert (failure['rejected_response'], failure['rejected_at']) == ('{"clips":[false]}', None)
 
 
 def test_discovery_failure_is_persisted_before_the_run_stops(tmp_path):

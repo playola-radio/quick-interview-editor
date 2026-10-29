@@ -369,6 +369,24 @@ extension CutSuggestionWireTests {
       [expected])
   }
 
+  @Test func rejectedReplyAndWhereItBrokeDecode() throws {
+    let failure = try decodeFailure([
+      "kind": "extraction", "retryable": true, "category": "bad_response",
+      "rejected_response": "{\"results\": [", "rejected_at": 13,
+    ])
+    expectNoDifference(failure.rejectedResponse, "{\"results\": [")
+    expectNoDifference(failure.rejectedAt, 13)
+  }
+
+  @Test func failureSavedBeforeRejectedRepliesStillDecodes() throws {
+    let saved = Data(
+      """
+      {"kind":"extraction","category":"bad_response","retryable":true}
+      """.utf8)
+    let failure = try JSONDecoder().decode(SuggestionRunFailure.self, from: saved)
+    expectNoDifference(failure.rejectedResponse, nil)
+  }
+
   @Test func unknownFutureCategoryDecodesWithoutThrowingAndRoundTripsItsName() throws {
     let failure = try decodeFailure([
       "kind": "extraction", "retryable": false, "category": "quota_exhausted",

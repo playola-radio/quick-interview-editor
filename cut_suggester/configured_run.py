@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+import json
 import math
 import uuid
 
@@ -94,6 +95,23 @@ def validate_request(request: object) -> None:
     canonical_json(immutable_request(request))
 
 
+def _recording_replies(call):
+    replies = []
+    def invoke():
+        replies.append(call())
+        return replies[-1]
+    return invoke, replies
+
+
+def _rejected_reply(exc: BaseException, replies: list) -> dict:
+    """The reply that failed validation, so the app can show it beside the error."""
+    if not replies:
+        return {}
+    cause = exc.__cause__
+    return {'rejected_response': replies[-1],
+            'rejected_at': cause.pos if isinstance(cause, json.JSONDecodeError) else None}
+
+
 def immutable_request(request: dict) -> dict:
     """Only protocol input: exclude execution mode, credentials and path options."""
     result = {**{name: request[name] for name in _IMMUTABLE_KEYS},
@@ -135,13 +153,14 @@ def run_configured_suggest(request: dict, llm, journal: RunJournal, emit) -> dic
 
     def validated_request(stage, prompt, validate):
         key = digest({'request_identity': journal.request_identity, 'stage': stage, 'prompt': prompt})
+        invoke, replies = _recording_replies(lambda: llm.complete(prompt, purpose=stage).text)
         try:
-            result = journal.request(key, lambda: llm.complete(prompt, purpose=stage).text, validate)
+            result = journal.request(key, invoke, validate)
         except (JournalStorageError, JournalRecoveryError):
             raise
         except Exception as exc:
             failed_batches.append({'kind': 'discovery', 'stage': stage, 'request_key': key,
-                                   **failure_record(exc)})
+                                   **failure_record(exc), **_rejected_reply(exc, replies)})
             raise
         checkpoint('discovering')
         return result
@@ -225,16 +244,17 @@ def run_configured_suggest(request: dict, llm, journal: RunJournal, emit) -> dic
             key = digest({'request_identity': journal.request_identity, 'stage': stage, 'prompt': batch.prompt})
             progress(phase='extracting', message=f'Naming batch {index + 1} of {len(plan.batches)}',
                      index=index + 1, total=len(plan.batches))
+            invoke, replies = _recording_replies(
+                lambda: llm.complete(batch.prompt, purpose=stage, schema=EXTRACTION_RESPONSE_SCHEMA).text)
             try:
-                values = journal.request(key, lambda: llm.complete(batch.prompt, purpose=stage,
-                                                                     schema=EXTRACTION_RESPONSE_SCHEMA).text,
+                values = journal.request(key, invoke,
                                          lambda text: parse_extraction_response(text, batch.expected))
             except (JournalStorageError, JournalRecoveryError):
                 raise
             except Exception as exc:
                 failed_batches.append({'kind': 'extraction', 'request_key': key,
                                        'candidate_ids': list(batch.candidate_ids),
-                                       **failure_record(exc)})
+                                       **failure_record(exc), **_rejected_reply(exc, replies)})
             else:
                 evidence.update(values)
                 for candidate_id, fields in values.items():

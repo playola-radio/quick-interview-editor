@@ -10,6 +10,7 @@ final class SuggestionRunModel: ViewModel {
   @ObservationIgnored @Dependency(\.suggestionRecovery) var recovery
   @ObservationIgnored @Dependency(\.suggestionConfiguration) var configuration
   @ObservationIgnored @Dependency(\.uuid) var uuid
+  @ObservationIgnored @Dependency(\.workspace) var workspace
 
   // MARK: - Initialization
   init(editPlan: EditPlan, sourceFingerprint: String, options: CutSuggestOptions = .freshConfigured)
@@ -93,6 +94,18 @@ final class SuggestionRunModel: ViewModel {
   let discardButtonTitle = "Discard Search"
   let applyNumberingTitle = "Apply Numbering"
   let numberingTitle = "Choose starting numbers"
+  let copyFullReplyButtonTitle = "Copy Full Reply"
+  var rejectedReplyHeading: String {
+    rejectedReplyFailure?.rejectedAt == nil
+      ? "Show the reply the app could not read"
+      : "Show the reply the app could not read (⚠️ marks where it broke)"
+  }
+  var rejectedReplyExcerpt: String? {
+    guard let failure = rejectedReplyFailure, let reply = failure.rejectedResponse else {
+      return nil
+    }
+    return Self.replyExcerpt(reply, breakingAt: failure.rejectedAt)
+  }
   let noResultsMessage = "The search completed with no suggestions."
   static let genericRetryMessage = "Some requests failed. Resume to retry the unfinished requests."
   var isRunning: Bool { activeAttemptID != nil }
@@ -115,6 +128,13 @@ final class SuggestionRunModel: ViewModel {
     !ownershipBlocked && !isRunning && stopTask == nil
       && currentDocument().unfinishedSuggestionRun != nil
       && confirmation == nil
+  }
+  private var rejectedReplyFailure: SuggestionRunFailure? {
+    guard hasActionableUnfinishedRun,
+      let failures = currentDocument().unfinishedSuggestionRun?.failures,
+      let primary = Self.primaryFailure(failures), primary.rejectedResponse != nil
+    else { return nil }
+    return primary
   }
   private var resumeCannotSucceed: Bool {
     guard let failures = currentDocument().unfinishedSuggestionRun?.failures,
@@ -147,6 +167,11 @@ final class SuggestionRunModel: ViewModel {
   }
 
   // MARK: - User Actions
+  func copyFullReplyTapped() {
+    guard let reply = rejectedReplyFailure?.rejectedResponse else { return }
+    workspace.copyToClipboard(reply)
+  }
+
   func suggestTapped() async {
     guard canStart else { return }
     let key: String
@@ -748,6 +773,24 @@ func suggestionBaselineMatches(
 extension SuggestionRunModel {
   static func primaryFailure(_ failures: [SuggestionRunFailure]) -> SuggestionRunFailure? {
     failures.min { priority($0.category) < priority($1.category) }
+  }
+
+  /// `position` is a Python string index, which counts Unicode scalars.
+  static func replyExcerpt(_ reply: String, breakingAt position: Int?) -> String {
+    let scalars = Array(reply.unicodeScalars)
+    let radius = 200
+    guard let position, (0...scalars.count).contains(position) else {
+      guard scalars.count > 2 * radius else { return reply }
+      return text(scalars[..<(2 * radius)]) + "…"
+    }
+    let start = max(0, position - radius)
+    let end = min(scalars.count, position + radius)
+    return (start > 0 ? "…" : "") + text(scalars[start..<position]) + "⚠️"
+      + text(scalars[position..<end]) + (end < scalars.count ? "…" : "")
+  }
+
+  private static func text(_ scalars: ArraySlice<Unicode.Scalar>) -> String {
+    String(String.UnicodeScalarView(scalars))
   }
 
   static func providerName(model: String) -> String {

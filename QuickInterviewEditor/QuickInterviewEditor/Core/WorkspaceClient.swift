@@ -13,6 +13,7 @@ struct WorkspaceClient: Sendable {
   var open: @Sendable (URL) -> Void
   /// Reveal (select) the given files in Finder.
   var reveal: @Sendable ([URL]) -> Void
+  var copyToClipboard: @Sendable (String) -> Void
 }
 
 extension WorkspaceClient: DependencyKey {
@@ -59,6 +60,10 @@ extension WorkspaceClient: DependencyKey {
     reveal: { urls in
       guard !urls.isEmpty else { return }
       NSWorkspace.shared.activateFileViewerSelecting(urls)
+    },
+    copyToClipboard: { text in
+      NSPasteboard.general.clearContents()
+      NSPasteboard.general.setString(text, forType: .string)
     }
   )
 }
@@ -79,6 +84,9 @@ extension WorkspaceClient: TestDependencyKey {
     open: { _ in reportIssue("WorkspaceClient.open called without a test override") },
     reveal: { _ in
       reportIssue("WorkspaceClient.reveal called without a test override")
+    },
+    copyToClipboard: { _ in
+      reportIssue("WorkspaceClient.copyToClipboard called without a test override")
     }
   )
 
@@ -87,7 +95,8 @@ extension WorkspaceClient: TestDependencyKey {
     chooseDirectoryNear: { _, _, _ in nil },
     createDirectory: { _ in },
     open: { _ in },
-    reveal: { _ in }
+    reveal: { _ in },
+    copyToClipboard: { _ in }
   )
 }
 
