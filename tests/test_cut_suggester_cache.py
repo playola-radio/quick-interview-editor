@@ -17,7 +17,7 @@ class _FakeLLM:
         self.calls = []
 
     def complete(self, prompt, *, purpose="", schema=None):
-        self.calls.append((prompt, purpose))
+        self.calls.append((prompt, purpose, schema))
         return LLMResponse(text=f"answer:{len(self.calls)}", usage={}, model="fake")
 
 
@@ -149,6 +149,10 @@ def test_key_includes_schema(tmp_path):
     assert first.text == "answer:1"
     assert second.text == "answer:2"
     assert len(inner.calls) == 2
+    assert [call[2] for call in inner.calls] == [
+        {"type": "object", "properties": {"a": {}}},
+        {"type": "object", "properties": {"b": {}}},
+    ]
 
 
 def test_missing_schema_preserves_legacy_cache_key(tmp_path):

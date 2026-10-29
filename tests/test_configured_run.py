@@ -568,6 +568,28 @@ def test_unparseable_extraction_failure_carries_the_reply_and_where_it_broke(tmp
     assert (failure['rejected_response'], failure['rejected_at']) == ('{"results": [', 13)
 
 
+def test_textless_retry_keeps_the_previously_rejected_extraction_reply(tmp_path):
+    req = request()
+
+    class Garbled(Provider):
+        def complete(self, prompt, *, purpose='', schema=None):
+            if purpose.startswith('extract'):
+                return LLMResponse(text='{"results": [')
+            return super().complete(prompt, purpose=purpose)
+
+    run_configured_suggest(req, Garbled(), journal(tmp_path, req), lambda e: None)
+    req['mode'] = 'resume'
+    result = run_configured_suggest(
+        req,
+        FailingProvider(fail_on='extract', error=credits_error()),
+        journal(tmp_path, req),
+        lambda e: None,
+    )
+
+    [failure] = result['failed_batches']
+    assert (failure['rejected_response'], failure['rejected_at']) == ('{"results": [', None)
+
+
 def test_wrongly_shaped_discovery_reply_is_carried_without_a_break_position(tmp_path):
     req = request(fields=False, tuned=True)
     with pytest.raises(ValueError):

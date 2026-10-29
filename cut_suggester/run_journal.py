@@ -188,6 +188,11 @@ class RunJournal:
     def failed_request_keys(self):
         return sorted(k for k, r in self._records.items() if r['status'] == 'failed')
 
+    def rejected_response(self, key: str) -> str | None:
+        """Return the local-only reply retained for a request, if one exists."""
+        record = self._records.get(key)
+        return record.get('rejected_response') if record is not None else None
+
     def request(self, key: str, invoke: Callable[[], str], validate: Callable[[str], T]) -> T:
         self._check_storage()
         record = self._records.get(key)

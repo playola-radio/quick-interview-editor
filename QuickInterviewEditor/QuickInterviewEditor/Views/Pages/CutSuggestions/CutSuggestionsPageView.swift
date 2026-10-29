@@ -64,16 +64,6 @@ struct CutSuggestionsPageView: View {
           }
         }
       }
-      if let excerpt = model.run.rejectedReplyExcerpt {
-        DisclosureGroup(model.run.rejectedReplyHeading) {
-          VStack(alignment: .leading) {
-            Text(excerpt)
-              .font(.system(.caption, design: .monospaced))
-              .textSelection(.enabled)
-            Button(model.run.copyFullReplyButtonTitle) { model.run.copyFullReplyTapped() }
-          }
-        }
-      }
       if model.run.showsNumbering {
         Text(model.run.numberingTitle).font(.headline)
         ForEach($run.numberingEntries) { $entry in
@@ -97,6 +87,17 @@ struct CutSuggestionsPageView: View {
         Text(actionMessage)
           .foregroundStyle(.orange)
           .textSelection(.enabled)
+      }
+
+      if let excerpt = model.run.rejectedReplyExcerpt {
+        DisclosureGroup(model.run.rejectedReplyHeading) {
+          VStack(alignment: .leading) {
+            Text(excerpt)
+              .font(.system(.caption, design: .monospaced))
+              .textSelection(.enabled)
+            Button(model.run.copyFullReplyButtonTitle) { model.run.copyFullReplyTapped() }
+          }
+        }
       }
 
       if model.showsOnboarding {

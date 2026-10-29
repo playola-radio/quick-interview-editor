@@ -103,12 +103,13 @@ def _recording_replies(call):
     return invoke, replies
 
 
-def _rejected_reply(exc: BaseException, replies: list) -> dict:
+def _rejected_reply(exc: BaseException, replies: list, retained_reply: str | None = None) -> dict:
     """The reply that failed validation, so the app can show it beside the error."""
-    if not replies:
+    reply = replies[-1] if replies else retained_reply
+    if reply is None:
         return {}
     cause = exc.__cause__
-    return {'rejected_response': replies[-1],
+    return {'rejected_response': reply,
             'rejected_at': cause.pos if isinstance(cause, json.JSONDecodeError) else None}
 
 
@@ -160,7 +161,8 @@ def run_configured_suggest(request: dict, llm, journal: RunJournal, emit) -> dic
             raise
         except Exception as exc:
             failed_batches.append({'kind': 'discovery', 'stage': stage, 'request_key': key,
-                                   **failure_record(exc), **_rejected_reply(exc, replies)})
+                                   **failure_record(exc),
+                                   **_rejected_reply(exc, replies, journal.rejected_response(key))})
             raise
         checkpoint('discovering')
         return result
@@ -254,7 +256,8 @@ def run_configured_suggest(request: dict, llm, journal: RunJournal, emit) -> dic
             except Exception as exc:
                 failed_batches.append({'kind': 'extraction', 'request_key': key,
                                        'candidate_ids': list(batch.candidate_ids),
-                                       **failure_record(exc), **_rejected_reply(exc, replies)})
+                                       **failure_record(exc),
+                                       **_rejected_reply(exc, replies, journal.rejected_response(key))})
             else:
                 evidence.update(values)
                 for candidate_id, fields in values.items():
