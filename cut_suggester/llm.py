@@ -28,7 +28,7 @@ class LLMResponse:
 
 
 class LLMClient(Protocol):
-    def complete(self, prompt: str, *, purpose: str = "") -> LLMResponse: ...
+    def complete(self, prompt: str, *, purpose: str = "", schema: dict | None = None) -> LLMResponse: ...
 
 
 _RETRYABLE_CATEGORIES = frozenset(
@@ -160,7 +160,9 @@ class OpenAIClient:
         self.model = model
         self.timeout = timeout
 
-    def complete(self, prompt: str, *, purpose: str = "") -> LLMResponse:
+    def complete(self, prompt: str, *, purpose: str = "", schema: dict | None = None) -> LLMResponse:
+        # json_object mode already guarantees syntactically valid JSON, so the
+        # schema is not sent on this eval-baseline path.
         key = os.environ.get("OPENAI_KEY") or os.environ.get("OPENAI_API_KEY")
         if not key:
             raise RuntimeError("OPENAI_KEY is not set")
@@ -234,7 +236,7 @@ class AnthropicClient:
         self.model = model
         self.max_tokens = max_tokens
 
-    def complete(self, prompt: str, *, purpose: str = "") -> LLMResponse:
+    def complete(self, prompt: str, *, purpose: str = "", schema: dict | None = None) -> LLMResponse:
         import anthropic  # lazy: only needed for the Anthropic live path
 
         client = anthropic.Anthropic()
@@ -253,6 +255,10 @@ class AnthropicClient:
         # rely on the generous max_tokens budget (and the max_tokens guard below).
         if _supports_disabled_thinking(self.model):
             create_kwargs["thinking"] = {"type": "disabled"}
+        # The system prompt alone does not stop the model from occasionally
+        # emitting malformed JSON; a schema constrains decoding so it cannot.
+        if schema is not None:
+            create_kwargs["output_config"] = {"format": {"type": "json_schema", "schema": schema}}
         try:
             msg = client.messages.create(**create_kwargs)
         except anthropic.APIConnectionError as exc:

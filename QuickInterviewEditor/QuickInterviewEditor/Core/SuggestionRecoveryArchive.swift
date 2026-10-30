@@ -349,9 +349,7 @@ struct SuggestionRecoveryArchive: Codable, Equatable, Sendable {
     let record = try RecoveryJSON.read(data)
     let common: Set<String> = ["schema_version", "request_identity", "key", "status", "integrity"]
     let complete = record["status"] == .string("completed")
-    try record.keys(
-      allowed: common.union(complete ? ["response", "response_sha256"] : ["error_type"]),
-      in: "provider record \(key)")
+    try validateRecordFields(record, key: key, common: common, complete: complete)
     guard record["schema_version"] == .integer(1) else {
       throw SuggestionRecoveryError.invalid(
         "Provider record \(key) has an unsupported schema_version.")
@@ -381,14 +379,43 @@ struct SuggestionRecoveryArchive: Codable, Equatable, Sendable {
       guard record["status"] == .string("failed") else {
         throw SuggestionRecoveryError.invalid("Provider record \(key) has an unknown status.")
       }
-      guard let errorType = record["error_type"]?.string else {
-        throw SuggestionRecoveryError.invalid("Failed provider record \(key) has no error_type.")
-      }
+      let errorType = try failedRecordErrorType(record, key: key)
       AppLog.suggestions.info(
         "Provider request \(key, privacy: .public) previously failed with \(errorType, privacy: .public)"
       )
     }
     return record
+  }
+
+  private static func validateRecordFields(
+    _ record: RecoveryJSON, key: String, common: Set<String>, complete: Bool
+  ) throws {
+    if complete {
+      try record.keys(
+        allowed: common.union(["response", "response_sha256", "rejected_response"]),
+        required: common.union(["response", "response_sha256"]),
+        in: "provider record \(key)")
+    } else {
+      try record.keys(
+        allowed: common.union(["error_type", "rejected_response"]),
+        required: common.union(["error_type"]),
+        in: "provider record \(key)")
+    }
+    try validateRejectedResponse(record, key: key)
+  }
+
+  private static func failedRecordErrorType(_ record: RecoveryJSON, key: String) throws -> String {
+    guard let errorType = record["error_type"]?.string else {
+      throw SuggestionRecoveryError.invalid("Failed provider record \(key) has no error_type.")
+    }
+    return errorType
+  }
+
+  private static func validateRejectedResponse(_ record: RecoveryJSON, key: String) throws {
+    guard record["rejected_response"] == nil || record["rejected_response"]?.string != nil else {
+      throw SuggestionRecoveryError.invalid(
+        "Provider record \(key) rejected_response is not text.")
+    }
   }
 
   static func verifyIntegrity(_ data: Data, of label: String) throws {

@@ -42,7 +42,7 @@ class _FakeLLM:
         self.partitions_json = partitions_json
         self.clips_json = clips_json
 
-    def complete(self, prompt, *, purpose=""):
+    def complete(self, prompt, *, purpose="", schema=None):
         text = self.partitions_json if purpose.startswith("partition") else self.clips_json
         return LLMResponse(text=text)
 
@@ -252,7 +252,7 @@ import sys
 from cut_suggester import cli
 from cut_suggester.llm import LLMResponse
 class Provider:
-    def complete(self, prompt, *, purpose=''):
+    def complete(self, prompt, *, purpose='', schema=None):
         print('provider output')
         return LLMResponse(text='{"clips":[]}')
 def live(model):

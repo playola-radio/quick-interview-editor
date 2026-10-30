@@ -27,7 +27,7 @@ class ArtistProvider(BroadIntroProvider):
         self.values = values or {}
         self.fail = fail
 
-    def complete(self, prompt, *, purpose=''):
+    def complete(self, prompt, *, purpose='', schema=None):
         if purpose.startswith('extract:'):
             self.calls.append((purpose, prompt))
             self.extractions += 1
@@ -246,7 +246,7 @@ def test_custom_type_with_null_fields_is_not_qualified(tmp_path, versions):
     intro = req['configuration']['types'][0]
     intro['id'] = 'custom-commentary'
     class CustomProvider(ArtistProvider):
-        def complete(self, prompt, *, purpose=''):
+        def complete(self, prompt, *, purpose='', schema=None):
             if purpose == 'configured-discovery':
                 self.calls.append((purpose, prompt))
                 return LLMResponse(json.dumps({'clips': [dict(type='custom-commentary', start=0, end=9,

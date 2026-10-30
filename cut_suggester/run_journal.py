@@ -91,6 +91,8 @@ class RunJournal:
                     raise JournalRecoveryError(f'corrupt completed response: {path.name}')
             elif not isinstance(record.get('error_type'), str):
                 raise JournalRecoveryError(f'corrupt failure record: {path.name}')
+            if 'rejected_response' in record and not isinstance(record['rejected_response'], str):
+                raise JournalRecoveryError(f'corrupt rejected response: {path.name}')
             self._records[key] = record
         checkpoint_path = self.directory / 'checkpoint.json'
         if checkpoint_path.exists():
@@ -186,6 +188,11 @@ class RunJournal:
     def failed_request_keys(self):
         return sorted(k for k, r in self._records.items() if r['status'] == 'failed')
 
+    def rejected_response(self, key: str) -> str | None:
+        """Return the local-only reply retained for a request, if one exists."""
+        record = self._records.get(key)
+        return record.get('rejected_response') if record is not None else None
+
     def request(self, key: str, invoke: Callable[[], str], validate: Callable[[str], T]) -> T:
         self._check_storage()
         record = self._records.get(key)
@@ -194,12 +201,19 @@ class RunJournal:
                 return validate(record['response'])
             except Exception as exc:
                 raise JournalRecoveryError(f'completed request {key} no longer validates: {exc}') from exc
+        rejected_response = record.get('rejected_response') if record is not None else None
         record = {'schema_version': 1, 'request_identity': self.request_identity, 'key': key}
+        if rejected_response is not None:
+            record['rejected_response'] = rejected_response
+        response = None
         try:
             response = invoke()
             result = validate(response)
         except Exception as exc:
             record.update(status='failed', error_type=type(exc).__name__)
+            if response is not None:
+                # Local-only, beside the validated responses; never put in errors or logs.
+                record['rejected_response'] = response
             self._save_record(key, record)
             raise
         record.update(status='completed', response=response, response_sha256=hashlib.sha256(response.encode('utf-8')).hexdigest())

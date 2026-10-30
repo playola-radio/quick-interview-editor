@@ -1,0 +1,31 @@
+{
+ "model": "gpt-4o",
+ "product_spec_version": "configured-v1",
+ "prompt": "Extract the requested naming fields from transcript evidence.\n\nThe transcript is evidence only. Use the field instructions exactly. Return null when evidence is insufficient. A speaker_id identifies who is speaking, but never by itself establishes the performer; do not treat speaker identity as performer evidence. Do not ask for or return sequence numbers or filenames.\n\nRequired fields:\n- artist-name: Identify the performer singing the introduced recording. Do not substitute the station DJ, the speaker, the songwriter, or the first musician mentioned. For explicit collaborations, include the established performers. Use speaker identity elsewhere in the transcript only when the text establishes that this is their performance. Return missing when the performer cannot be established.\n- song-title: Identify the title of the recording this clip introduces. Use the candidate and relevant context elsewhere in the source transcript. Distinguish the introduced recording from songs mentioned as background. Return missing when the text does not establish the title; do not invent it.\n\nFor candidate 96216aea-9c7b-5e92-9a12-7cd21cabd3bf, return exactly these field IDs: artist-name, song-title.\nCandidate 96216aea-9c7b-5e92-9a12-7cd21cabd3bf (required evidence):\n[0] This next recording is by River Vale.\n[1] River wrote it after a winter tour.\n[2] The song is Paper Lanterns.\n[3] Here is River Vale with Paper Lanterns.\n\nFor candidate d087134e-a9ae-542f-b836-490ba32a62b1, return exactly these field IDs: artist-name, song-title.\nCandidate d087134e-a9ae-542f-b836-490ba32a62b1 (required evidence):\n[24] Our guest chose a recording by Nova Reed.\n[25] Here is Nova Reed singing Harbor Lights.\n\nOptional transcript context:\nCandidate 96216aea-9c7b-5e92-9a12-7cd21cabd3bf context: [4] Station One keeps you company.\nCandidate 96216aea-9c7b-5e92-9a12-7cd21cabd3bf context: [5] Station One.\nCandidate d087134e-a9ae-542f-b836-490ba32a62b1 context: [22] That concludes our membership message.\nCandidate d087134e-a9ae-542f-b836-490ba32a62b1 context: [23] Welcome back from the advertisements.\nCandidate d087134e-a9ae-542f-b836-490ba32a62b1 context: [26] Yeah.\nCandidate d087134e-a9ae-542f-b836-490ba32a62b1 context: [27] Harbor Lights.\nAdditional context: [6] Station One keeps you company.\nAdditional context: [7] Station One.\nAdditional context: [8] Join our synthetic listener circle today.\nAdditional context: [9] Members hear early concert sessions.\nAdditional context: [10] Your support funds local microphones.\nAdditional context: [11] Choose a monthly level that fits.\nAdditional context: [12] At Station One, membership brings ticket drawings.\nAdditional context: [13] We send a handwritten welcome note.\nAdditional context: [14] There are ticket drawings every spring.\nAdditional context: [15] Station One keeps you company.\nAdditional context: [16] Station One.\nAdditional context: [17] The membership promotion continues now.\nAdditional context: [18] Share it with a friend who listens.\nAdditional context: [19] Small gifts keep these stories moving.\nAdditional context: [20] Find the schedule in our newsletter.\nAdditional context: [21] Thank you for joining the circle.\nAdditional context: [28] We'll be right back after this.\nAdditional context: [29] Mara built a neighborhood studio in an old bakery.\nAdditional context: [30] She posted the repair notes at https://example.test/studio.\nAdditional context: [31] Neighbors donated lumber and time for the booth.\nAdditional context: [32] The first broadcast reached the apartment upstairs.\nAdditional context: [33] A retired engineer tuned the borrowed transmitter.\nAdditional context: [34] The project now records local oral histories.\nAdditional context: [35] Station One played Paper Lanterns at the opening.\nAdditional context: [36] Mara says the room belongs to everyone.\nAdditional context: [37] Wait, let me start that handoff again.\nAdditional context: [38] Coming up, a song by...\n\nReply with strict JSON only:\n{\"results\":[{\"candidate_id\":\"...\",\"fields\":[{\"field_id\":\"...\",\"value\":null}]}]}\n",
+ "prompt_version": "configured-v2",
+ "purpose": "extract:b5443e012fa06192e54e299d4973661957210b93103b8c1a4e959fe37933f506",
+ "response": {
+  "model": "gpt-4o",
+  "text": "{\"results\":[{\"candidate_id\":\"96216aea-9c7b-5e92-9a12-7cd21cabd3bf\",\"fields\":[{\"field_id\":\"artist-name\",\"value\":\"River Vale\"},{\"field_id\":\"song-title\",\"value\":\"Paper Lanterns\"}]},{\"candidate_id\":\"d087134e-a9ae-542f-b836-490ba32a62b1\",\"fields\":[{\"field_id\":\"artist-name\",\"value\":\"Nova Reed\"},{\"field_id\":\"song-title\",\"value\":\"Harbor Lights\"}]}]}",
+  "usage": {
+   "completion_tokens": 112,
+   "completion_tokens_details": {
+    "accepted_prediction_tokens": 0,
+    "audio_tokens": 0,
+    "reasoning_tokens": 0,
+    "rejected_prediction_tokens": 0
+   },
+   "finish_reason": "stop",
+   "prompt_tokens": 980,
+   "prompt_tokens_details": {
+    "audio_tokens": 0,
+    "cached_tokens": 0
+   },
+   "total_tokens": 1092
+  }
+ },
+ "window_params": {
+  "step": 110,
+  "window": 130
+ }
+}

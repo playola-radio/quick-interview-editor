@@ -8,6 +8,7 @@ import pytest
 
 from cut_suggester.configured_run import run_configured_suggest, request_identity, immutable_request, validate_request
 from cut_suggester.run_journal import RunJournal, JournalRecoveryError, JournalStorageError
+from cut_suggester.extraction import EXTRACTION_RESPONSE_SCHEMA
 from cut_suggester.llm import LLMResponse
 
 
@@ -34,7 +35,7 @@ class Provider:
         self.n, self.fail_batch, self.classify_failure, self.empty = n, fail_batch, classify_failure, empty
         self.calls = []
         self.extractions = 0
-    def complete(self,prompt,*,purpose=''):
+    def complete(self, prompt, *, purpose='', schema=None):
         self.calls.append((purpose,prompt))
         if purpose.startswith('partition'):
             return LLMResponse(text='{"paragraphs":[{"start":0,"end":0,"label":"ID"}]}')
@@ -69,6 +70,18 @@ def test_five_batches_keep_four_successes_after_reopen_and_retry_only_failure(tm
     assert len(retry.calls) == 1
     assert retry.extractions == 1
     assert all(c['fields'] == {'descriptive-title':None} for c in result['suggestions'])
+
+
+def test_extraction_requests_are_constrained_to_the_response_schema(tmp_path):
+    req = request(1)
+    schemas = []
+    class Recording(Provider):
+        def complete(self, prompt, *, purpose='', schema=None):
+            if purpose.startswith('extract'):
+                schemas.append(schema)
+            return super().complete(prompt, purpose=purpose)
+    run_configured_suggest(req, Recording(1), journal(tmp_path, req), lambda e: None)
+    assert schemas == [EXTRACTION_RESPONSE_SCHEMA]
 
 
 def test_partition_success_survives_classification_failure(tmp_path):
@@ -184,7 +197,7 @@ def test_resume_cancellation_keeps_previously_checkpointed_fields(tmp_path):
 
 
 class RefiningProvider(Provider):
-    def complete(self, prompt, *, purpose=''):
+    def complete(self, prompt, *, purpose='', schema=None):
         if purpose == 'classify':
             self.calls.append((purpose, prompt))
             return LLMResponse(json.dumps({'clips': [dict(type='intro', start=0, end=3,
@@ -264,7 +277,7 @@ def test_malformed_refinement_never_becomes_completed_paid_record(tmp_path):
     req = request(4, fields=False, tuned=True)
     req['options']['discovery_prompt_version'] = 'configured-v2'
     class Invalid(RefiningProvider):
-        def complete(self, prompt, *, purpose=''):
+        def complete(self, prompt, *, purpose='', schema=None):
             if purpose.startswith('refine-intros:'):
                 self.calls.append((purpose, prompt))
                 return LLMResponse('{"results":[]}')
@@ -306,7 +319,7 @@ class AllTypesProvider:
             cid = _candidate_id(uuid.UUID(req['run_id']), dict(product_type=kind, start_index=start, end_index=end))
             self.values[cid] = fields
 
-    def complete(self, prompt, *, purpose=''):
+    def complete(self, prompt, *, purpose='', schema=None):
         self.calls.append((purpose, prompt))
         if purpose.startswith('partition:'):
             data = {'paragraphs': [dict(start=a, end=b, label=label) for a, b, label in [
@@ -391,7 +404,7 @@ class BroadIntroProvider(Provider):
         super().__init__()
         self.intros, self.spotlights = intros, spotlights
 
-    def complete(self, prompt, *, purpose=''):
+    def complete(self, prompt, *, purpose='', schema=None):
         if purpose in ('classify', 'configured-discovery'):
             self.calls.append((purpose, prompt))
             kind, spans = ('intro', self.intros) if purpose == 'configured-discovery' else ('spotlight', self.spotlights)
@@ -481,7 +494,7 @@ class FailingProvider(Provider):
     def __init__(self, n=1, *, fail_on, error, fail_batch=None):
         super().__init__(n)
         self.fail_on, self.error, self.fail_batch_number = fail_on, error, fail_batch
-    def complete(self, prompt, *, purpose=''):
+    def complete(self, prompt, *, purpose='', schema=None):
         if purpose.startswith(self.fail_on):
             if self.fail_on != 'extract':
                 self.calls.append((purpose, prompt))
@@ -526,12 +539,13 @@ def test_transient_failure_keeps_sending_remaining_batches(tmp_path, category):
     assert provider.extractions == 5
     [failure] = result['failed_batches']
     assert (failure['category'], failure['retry_after'], failure['retryable']) == (category, 30, True)
+    assert 'rejected_response' not in failure
 
 
 def test_unparseable_extraction_response_is_a_bad_response_failure(tmp_path):
     req = request()
     class Garbled(Provider):
-        def complete(self, prompt, *, purpose=''):
+        def complete(self, prompt, *, purpose='', schema=None):
             if purpose.startswith('extract'):
                 self.extractions += 1
                 return LLMResponse(text='{"results": [')
@@ -540,6 +554,48 @@ def test_unparseable_extraction_response_is_a_bad_response_failure(tmp_path):
     [failure] = result['failed_batches']
     assert (failure['category'], failure['error_type']) == ('bad_response', 'ExtractionError')
     assert 'at char' in failure['message']
+
+
+def test_unparseable_extraction_failure_carries_the_reply_and_where_it_broke(tmp_path):
+    req = request()
+    class Garbled(Provider):
+        def complete(self, prompt, *, purpose='', schema=None):
+            if purpose.startswith('extract'):
+                return LLMResponse(text='{"results": [')
+            return super().complete(prompt, purpose=purpose)
+    result = run_configured_suggest(req, Garbled(), journal(tmp_path, req), lambda e: None)
+    [failure] = result['failed_batches']
+    assert (failure['rejected_response'], failure['rejected_at']) == ('{"results": [', 13)
+
+
+def test_textless_retry_keeps_the_previously_rejected_extraction_reply(tmp_path):
+    req = request()
+
+    class Garbled(Provider):
+        def complete(self, prompt, *, purpose='', schema=None):
+            if purpose.startswith('extract'):
+                return LLMResponse(text='{"results": [')
+            return super().complete(prompt, purpose=purpose)
+
+    run_configured_suggest(req, Garbled(), journal(tmp_path, req), lambda e: None)
+    req['mode'] = 'resume'
+    result = run_configured_suggest(
+        req,
+        FailingProvider(fail_on='extract', error=credits_error()),
+        journal(tmp_path, req),
+        lambda e: None,
+    )
+
+    [failure] = result['failed_batches']
+    assert (failure['rejected_response'], failure['rejected_at']) == ('{"results": [', None)
+
+
+def test_wrongly_shaped_discovery_reply_is_carried_without_a_break_position(tmp_path):
+    req = request(fields=False, tuned=True)
+    with pytest.raises(ValueError):
+        run_configured_suggest(req, Provider(classify_failure=True), journal(tmp_path, req), lambda e: None)
+    [failure] = json.loads((tmp_path / 'checkpoint.json').read_text())['failed_batches']
+    assert (failure['rejected_response'], failure['rejected_at']) == ('{"clips":[false]}', None)
 
 
 def test_discovery_failure_is_persisted_before_the_run_stops(tmp_path):

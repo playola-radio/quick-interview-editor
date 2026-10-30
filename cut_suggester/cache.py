@@ -43,7 +43,7 @@ class CachingLLMClient:
         # change without deleting the cache dir. Requires `inner` (a live client).
         self.refresh = refresh
 
-    def _key(self, prompt: str) -> str:
+    def _key(self, prompt: str, *, schema: dict | None = None) -> str:
         payload = {
             "model": self.model,
             "prompt_version": self.prompt_version,
@@ -51,17 +51,19 @@ class CachingLLMClient:
             "window_params": self.window_params,
             "prompt": prompt,
         }
+        if schema is not None:
+            payload["schema"] = schema
         blob = json.dumps(payload, sort_keys=True, ensure_ascii=True)
         return hashlib.sha256(blob.encode()).hexdigest()
 
-    def _path(self, prompt: str) -> str:
-        return os.path.join(self.cache_dir, f"{self._key(prompt)}.json")
+    def _path(self, prompt: str, *, schema: dict | None = None) -> str:
+        return os.path.join(self.cache_dir, f"{self._key(prompt, schema=schema)}.json")
 
-    def _has(self, prompt: str) -> bool:
-        return os.path.exists(self._path(prompt))
+    def _has(self, prompt: str, *, schema: dict | None = None) -> bool:
+        return os.path.exists(self._path(prompt, schema=schema))
 
-    def complete(self, prompt: str, *, purpose: str = "") -> LLMResponse:
-        path = self._path(prompt)
+    def complete(self, prompt: str, *, purpose: str = "", schema: dict | None = None) -> LLMResponse:
+        path = self._path(prompt, schema=schema)
         if os.path.exists(path) and not self.refresh:
             with open(path) as f:
                 entry = json.load(f)
@@ -87,7 +89,7 @@ class CachingLLMClient:
                 "run the eval in live mode to populate the cache"
             )
 
-        resp = self.inner.complete(prompt, purpose=purpose)
+        resp = self.inner.complete(prompt, purpose=purpose, schema=schema)
         if not resp.text.strip():
             raise RuntimeError(
                 f"LLM returned an empty response for {purpose or 'prompt'}; not caching it"

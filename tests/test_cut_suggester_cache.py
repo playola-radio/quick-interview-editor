@@ -1,6 +1,7 @@
 """Disk cache for LLM calls: deterministic keys, replay, no-network guarantee."""
 
 import json
+import hashlib
 import threading
 
 import pytest
@@ -15,13 +16,13 @@ class _FakeLLM:
     def __init__(self):
         self.calls = []
 
-    def complete(self, prompt, *, purpose=""):
-        self.calls.append((prompt, purpose))
+    def complete(self, prompt, *, purpose="", schema=None):
+        self.calls.append((prompt, purpose, schema))
         return LLMResponse(text=f"answer:{len(self.calls)}", usage={}, model="fake")
 
 
 class _EmptyLLM:
-    def complete(self, prompt, *, purpose=""):
+    def complete(self, prompt, *, purpose="", schema=None):
         return LLMResponse(text="", usage={}, model="fake")
 
 
@@ -136,3 +137,36 @@ def test_key_includes_model_and_pins_and_prompt(tmp_path):
         assert not _client(tmp_path, inner=None, **over)._has("same prompt")
     assert not _client(tmp_path, inner=None)._has("different prompt")
     assert _client(tmp_path, inner=None)._has("same prompt")  # unchanged -> hit
+
+
+def test_key_includes_schema(tmp_path):
+    inner = _FakeLLM()
+    client = _client(tmp_path, inner=inner)
+
+    first = client.complete("same prompt", schema={"type": "object", "properties": {"a": {}}})
+    second = client.complete("same prompt", schema={"type": "object", "properties": {"b": {}}})
+
+    assert first.text == "answer:1"
+    assert second.text == "answer:2"
+    assert len(inner.calls) == 2
+    assert [call[2] for call in inner.calls] == [
+        {"type": "object", "properties": {"a": {}}},
+        {"type": "object", "properties": {"b": {}}},
+    ]
+
+
+def test_missing_schema_preserves_legacy_cache_key(tmp_path):
+    client = _client(tmp_path, inner=None)
+    payload = {
+        "model": "gpt-4o",
+        "prompt_version": "v1",
+        "product_spec_version": "v1",
+        "window_params": {"window": 130, "step": 110},
+        "prompt": "same prompt",
+    }
+    key = hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=True).encode()).hexdigest()
+    tmp_path.mkdir(exist_ok=True)
+    with open(tmp_path / f"{key}.json", "w") as f:
+        json.dump({"response": {"text": "legacy answer", "usage": {}, "model": "fake"}}, f)
+
+    assert client.complete("same prompt").text == "legacy answer"

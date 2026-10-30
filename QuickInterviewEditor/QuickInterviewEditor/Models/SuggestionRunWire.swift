@@ -230,6 +230,8 @@ struct SuggestionRunFailure: Codable, Equatable, Sendable {
   var retryAfter: Double?
   var retryable: Bool
   var errorType: String?
+  var rejectedResponse: String?
+  var rejectedAt: Int?
 }
 
 struct SuggestionRunWireFailure: Decodable, Sendable {
@@ -242,6 +244,8 @@ struct SuggestionRunWireFailure: Decodable, Sendable {
   var retryAfter: Double?
   var retryable: Bool
   var errorType: String?
+  var rejectedResponse: String?
+  var rejectedAt: Int?
   enum CodingKeys: String, CodingKey {
     case kind, category, message, retryable
     case requestKey = "request_key"
@@ -249,6 +253,8 @@ struct SuggestionRunWireFailure: Decodable, Sendable {
     case requestID = "request_id"
     case retryAfter = "retry_after"
     case errorType = "error_type"
+    case rejectedResponse = "rejected_response"
+    case rejectedAt = "rejected_at"
   }
 
   var failure: SuggestionRunFailure {
@@ -256,6 +262,7 @@ struct SuggestionRunWireFailure: Decodable, Sendable {
       kind: kind,
       category: category ?? (kind == "input_size" ? .inputSize : .unknown(errorType ?? kind)),
       message: message, statusCode: statusCode, requestID: requestID, retryAfter: retryAfter,
-      retryable: retryable, errorType: errorType)
+      retryable: retryable, errorType: errorType, rejectedResponse: rejectedResponse,
+      rejectedAt: rejectedAt)
   }
 }

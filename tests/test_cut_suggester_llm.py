@@ -74,6 +74,22 @@ def testOmitsThinkingForFable(fake_anthropic):
     assert "thinking" not in client.messages.last_kwargs
 
 
+def testConstrainsOutputToSchemaWhenGiven(fake_anthropic):
+    """A schema-constrained request cannot come back as malformed JSON."""
+    schema = {"type": "object", "properties": {}, "additionalProperties": False}
+    client = fake_anthropic(_FakeMessage("{}"))
+    AnthropicClient("claude-sonnet-5").complete("prompt", purpose="extract:x", schema=schema)
+    assert client.messages.last_kwargs["output_config"] == {
+        "format": {"type": "json_schema", "schema": schema}
+    }
+
+
+def testOmitsOutputConfigWithoutSchema(fake_anthropic):
+    client = fake_anthropic(_FakeMessage('{"clips": []}'))
+    AnthropicClient("claude-sonnet-5").complete("prompt", purpose="classify")
+    assert "output_config" not in client.messages.last_kwargs
+
+
 def testRaisesOnMaxTokens(fake_anthropic):
     fake_anthropic(_FakeMessage("", stop_reason="max_tokens", output_tokens=4096))
     with pytest.raises(RuntimeError, match="max_tokens"):

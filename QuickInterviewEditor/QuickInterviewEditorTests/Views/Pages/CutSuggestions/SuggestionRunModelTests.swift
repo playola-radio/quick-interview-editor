@@ -801,11 +801,13 @@ extension SuggestionRunFixture {
   func failure(
     _ category: SuggestionFailureCategory, kind: String = "extraction", message: String? = nil,
     statusCode: Int? = nil, requestID: String? = nil, retryAfter: Double? = nil,
-    retryable: Bool = true, errorType: String? = nil
+    retryable: Bool = true, errorType: String? = nil, rejectedResponse: String? = nil,
+    rejectedAt: Int? = nil
   ) -> SuggestionRunFailure {
     SuggestionRunFailure(
       kind: kind, category: category, message: message, statusCode: statusCode,
-      requestID: requestID, retryAfter: retryAfter, retryable: retryable, errorType: errorType)
+      requestID: requestID, retryAfter: retryAfter, retryable: retryable, errorType: errorType,
+      rejectedResponse: rejectedResponse, rejectedAt: rejectedAt)
   }
 
   @MainActor func reopened(
@@ -947,6 +949,75 @@ extension SuggestionRunModelTests {
       model.message,
       "Your Anthropic account is out of credits. Add credits at \(anthropicBilling), then Resume."
         + " 3 requests failed. Provider message: \"Out of credits\" (HTTP 400; request req_c).")
+  }
+
+  @Test func unreadableReplyIsExcerptedAroundWhereItBroke() {
+    let fixture = SuggestionRunFixture()
+    let reply = String(repeating: "a", count: 300) + "}" + String(repeating: "b", count: 300)
+    let model = fixture.reopened(failures: [
+      fixture.failure(.badResponse, rejectedResponse: reply, rejectedAt: 300)
+    ])
+    expectNoDifference(
+      model.rejectedReplyExcerpt,
+      "…" + String(repeating: "a", count: 200) + "⚠️}" + String(repeating: "b", count: 199) + "…")
+    expectNoDifference(
+      model.rejectedReplyHeading, "Show the reply the app could not read (⚠️ marks where it broke)")
+  }
+
+  @Test func shortUnreadableReplyWithoutABreakPositionIsShownWhole() {
+    let fixture = SuggestionRunFixture()
+    let model = fixture.reopened(failures: [
+      fixture.failure(.badResponse, rejectedResponse: "{\"clips\":[false]}")
+    ])
+    expectNoDifference(model.rejectedReplyExcerpt, "{\"clips\":[false]}")
+    expectNoDifference(model.rejectedReplyHeading, "Show the reply the app could not read")
+  }
+
+  @Test func longUnreadableReplyWithoutABreakPositionShowsItsStart() {
+    let fixture = SuggestionRunFixture()
+    let model = fixture.reopened(failures: [
+      fixture.failure(.badResponse, rejectedResponse: String(repeating: "c", count: 401))
+    ])
+    expectNoDifference(model.rejectedReplyExcerpt, String(repeating: "c", count: 400) + "…")
+  }
+
+  @Test func unreadableReplyStaysOutOfTheErrorMessage() {
+    let fixture = SuggestionRunFixture()
+    let model = fixture.reopened(failures: [
+      fixture.failure(.badResponse, rejectedResponse: "interview words", rejectedAt: 3)
+    ])
+    expectNoDifference(
+      model.message,
+      "Anthropic returned a response the app could not read. Resume to try that request again.")
+  }
+
+  @Test func failureWithoutAReplyShowsNoExcerpt() {
+    let fixture = SuggestionRunFixture()
+    let model = fixture.reopened(failures: [fixture.failure(.rateLimit)])
+    expectNoDifference(model.rejectedReplyExcerpt, nil)
+  }
+
+  @Test func replyFromALowerPriorityFailureIsNotShown() {
+    let fixture = SuggestionRunFixture()
+    let model = fixture.reopened(failures: [
+      fixture.failure(.badResponse, rejectedResponse: "{"), fixture.failure(.credits),
+    ])
+    expectNoDifference(model.rejectedReplyExcerpt, nil)
+  }
+
+  @Test func copyFullReplyCopiesTheWholeReply() {
+    let fixture = SuggestionRunFixture()
+    let reply = String(repeating: "d", count: 1_000)
+    let copied = LockIsolated<[String]>([])
+    let model = withDependencies {
+      $0.workspace.copyToClipboard = { text in copied.withValue { $0.append(text) } }
+    } operation: {
+      fixture.reopened(failures: [
+        fixture.failure(.badResponse, rejectedResponse: reply, rejectedAt: 500)
+      ])
+    }
+    model.copyFullReplyTapped()
+    expectNoDifference(copied.value, [reply])
   }
 
   @Test func equalPriorityFailuresUseTheFirstOne() {

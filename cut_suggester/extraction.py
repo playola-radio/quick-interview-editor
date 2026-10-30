@@ -48,6 +48,26 @@ class ExtractionPlan:
     input_size_diagnostics: tuple[InputSizeDiagnostic, ...]
 
 
+_FIELD_SCHEMA = {
+    "type": "object",
+    "properties": {"field_id": {"type": "string"}, "value": {"anyOf": [{"type": "string"}, {"type": "null"}]}},
+    "required": ["field_id", "value"],
+    "additionalProperties": False,
+}
+_RESULT_SCHEMA = {
+    "type": "object",
+    "properties": {"candidate_id": {"type": "string"}, "fields": {"type": "array", "items": _FIELD_SCHEMA}},
+    "required": ["candidate_id", "fields"],
+    "additionalProperties": False,
+}
+EXTRACTION_RESPONSE_SCHEMA = {
+    "type": "object",
+    "properties": {"results": {"type": "array", "items": _RESULT_SCHEMA}},
+    "required": ["results"],
+    "additionalProperties": False,
+}
+
+
 def _no_duplicate_object_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
     result: dict[str, object] = {}
     for key, value in pairs:

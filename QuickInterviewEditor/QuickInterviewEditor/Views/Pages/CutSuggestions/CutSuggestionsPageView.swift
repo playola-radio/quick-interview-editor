@@ -89,6 +89,17 @@ struct CutSuggestionsPageView: View {
           .textSelection(.enabled)
       }
 
+      if let excerpt = model.run.rejectedReplyExcerpt {
+        DisclosureGroup(model.run.rejectedReplyHeading) {
+          VStack(alignment: .leading) {
+            Text(excerpt)
+              .font(.system(.caption, design: .monospaced))
+              .textSelection(.enabled)
+            Button(model.run.copyFullReplyButtonTitle) { model.run.copyFullReplyTapped() }
+          }
+        }
+      }
+
       if model.showsOnboarding {
         onboarding
       } else if model.showsEmptyState {
