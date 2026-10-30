@@ -5,6 +5,8 @@ focus on changes that affect editing work rather than internal implementation.
 
 ## [Unreleased]
 
+## [2.6.1] - 2026-10-23
+
 - When the app can't read a transcription, marker, or suggestion result, the
   error no longer shows the start of that result, which could contain words
   from your interview.
