@@ -5,6 +5,15 @@ focus on changes that affect editing work rather than internal implementation.
 
 ## [Unreleased]
 
+## [2.6.2] - 2026-10-30
+
+- AI clip suggestions no longer get stuck when Anthropic sends back a reply the
+  app can't read. Clip naming now asks for a reply in a fixed format, so
+  choosing Resume no longer fails on the same batch again.
+- When a suggestion search does stop on an unreadable reply, the error now has
+  a disclosure showing the part of the reply where it broke, plus a Copy Full
+  Reply button so you can send it along with a bug report.
+
 ## [2.6.1] - 2026-10-23
 
 - When the app can't read a transcription, marker, or suggestion result, the
