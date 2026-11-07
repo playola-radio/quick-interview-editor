@@ -30,21 +30,21 @@ final class PlayolaWebAuthSession: NSObject, ASWebAuthenticationPresentationCont
 
   private var session: ASWebAuthenticationSession?
   private var continuation: CheckedContinuation<URL, Error>?
-  private var anchor = ASPresentationAnchor()
+  private var anchor: ASPresentationAnchor?
   private var attempt = 0
 
   func authenticate(url: URL, callbackScheme: String) async throws -> URL {
     finish(.failure(PlayolaBrowserAuthError.canceled))
     attempt += 1
     let thisAttempt = attempt
-    anchor = NSApp.keyWindow ?? NSApp.windows.first ?? ASPresentationAnchor()
+    anchor = NSApp.keyWindow ?? NSApp.windows.first
 
     return try await withCheckedThrowingContinuation { continuation in
       self.continuation = continuation
 
       let session = ASWebAuthenticationSession(
         url: url, callback: .customScheme(callbackScheme)
-      ) { [weak self] callbackURL, error in
+      ) { @Sendable [weak self] callbackURL, error in
         Task { @MainActor in
           self?.completed(attempt: thisAttempt, callbackURL: callbackURL, error: error)
         }
@@ -66,7 +66,7 @@ final class PlayolaWebAuthSession: NSObject, ASWebAuthenticationPresentationCont
   nonisolated func presentationAnchor(for session: ASWebAuthenticationSession)
     -> ASPresentationAnchor
   {
-    MainActor.assumeIsolated { anchor }
+    MainActor.assumeIsolated { anchor ?? ASPresentationAnchor() }
   }
 
   // MARK: - Private Helpers
