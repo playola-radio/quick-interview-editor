@@ -52,10 +52,12 @@ struct QuickInterviewEditorApp: App {
   @State private var clipSettings = ClipBoundarySettingsModel()
   @State private var playbackLatencySettings = PlaybackLatencySettingsModel()
   @State private var session: PlayolaSessionModel
+  @State private var playolaSettings: PlayolaSettingsModel
 
   init() {
     let session = PlayolaSessionModel()
     _session = State(initialValue: session)
+    _playolaSettings = State(initialValue: PlayolaSettingsModel(session: session))
     if !isRunningUnitTests {
       Task { await session.appLaunched() }
     }
@@ -93,6 +95,8 @@ struct QuickInterviewEditorApp: App {
           .tabItem { Label("Editing", systemImage: "slider.horizontal.3") }
         PlaybackLatencySettingsView(model: playbackLatencySettings)
           .tabItem { Label("Playback Latency", systemImage: "wave.3.right") }
+        PlayolaSettingsView(model: playolaSettings)
+          .tabItem { Label(playolaSettings.tabTitle, systemImage: playolaSettings.tabSystemImage) }
       }
       .preferredColorScheme(.dark)
     }
