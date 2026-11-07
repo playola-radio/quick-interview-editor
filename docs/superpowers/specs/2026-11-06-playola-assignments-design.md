@@ -805,6 +805,6 @@ PRs 2–5 are built and reviewed against fixtures while the server work lands. T
 
 ## Design deliverables
 
-- Screens: pending — `screens.md` with pen.dev exports is blocked until a new `assignments.pen` canvas is open in pen.dev (see hand-off note)
+- Screens: [screens.md](../../../design/features/playola-assignments/screens.md)
 - Endpoints: [endpoints.md](../../../design/features/playola-assignments/endpoints.md)
 - Models: [models.md](../../../design/features/playola-assignments/models.md)
