@@ -67,7 +67,7 @@ final class PlayolaSessionModel: ViewModel {
       guard isCurrent(environment, generation) else { return }
       try await tokenStore.save(newToken, environment)
       guard isCurrent(environment, generation) else {
-        await discardCanceledSignIn(environment)
+        await discardCanceledSignIn(newToken, environment)
         return
       }
       setStatus(.signedIn(nil))
@@ -176,9 +176,9 @@ final class PlayolaSessionModel: ViewModel {
     browserAuth.cancel()
   }
 
-  private func discardCanceledSignIn(_ environment: PlayolaEnvironment) async {
+  private func discardCanceledSignIn(_ token: String, _ environment: PlayolaEnvironment) async {
     do {
-      try await tokenStore.delete(environment)
+      try await tokenStore.deleteIfMatching(token, environment)
     } catch {
       AppLog.playola.error(
         "Couldn't delete the canceled Playola sign-in: \(String(describing: error), privacy: .public)"

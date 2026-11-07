@@ -12,6 +12,7 @@ struct PlayolaTokenStore: Sendable {
   var save: @Sendable (String, PlayolaEnvironment) async throws -> Void
   /// Removes the token for the server (a no-op when none exists).
   var delete: @Sendable (PlayolaEnvironment) async throws -> Void
+  var deleteIfMatching: @Sendable (String, PlayolaEnvironment) async throws -> Void
 }
 
 extension PlayolaTokenStore: DependencyKey {
@@ -35,6 +36,12 @@ extension PlayolaTokenStore: DependencyKey {
       },
       delete: { environment in
         try await onQueue { try PlayolaKeychain.delete(environment: environment) }
+      },
+      deleteIfMatching: { token, environment in
+        try await onQueue {
+          guard try PlayolaKeychain.load(environment: environment) == token else { return }
+          try PlayolaKeychain.delete(environment: environment)
+        }
       }
     )
   }
@@ -53,7 +60,13 @@ extension PlayolaTokenStore {
     return PlayolaTokenStore(
       load: { environment in storage.withLock { $0[environment] } },
       save: { token, environment in storage.withLock { $0[environment] = token } },
-      delete: { environment in storage.withLock { $0[environment] = nil } }
+      delete: { environment in storage.withLock { $0[environment] = nil } },
+      deleteIfMatching: { token, environment in
+        storage.withLock {
+          guard $0[environment] == token else { return }
+          $0[environment] = nil
+        }
+      }
     )
   }
 }

@@ -243,6 +243,53 @@ struct PlayolaSessionModelTests {
     }
   }
 
+  @Test func canceledSaveDoesNotDeleteNewerSignIn() async throws {
+    let gate = Gate()
+    let inMemory = PlayolaTokenStore.inMemory()
+    let exchanges = LockIsolated(0)
+    var store = inMemory
+    store.save = { token, environment in
+      try await inMemory.save(token, environment)
+      if token == "A" { await gate.pass() }
+    }
+    try await withDependencies {
+      Self.base(&$0)
+      $0.playolaTokenStore = store
+      $0.playolaBrowserAuth = .returning(Self.successCallback)
+      $0.playolaAPI = PlayolaAPIClient(
+        exchangeCode: { _, _, _ in
+          exchanges.withValue {
+            $0 += 1
+            return $0 == 1 ? "A" : "B"
+          }
+        },
+        currentUser: { _, token in
+          PlayolaUser(firstName: token, lastName: "User", email: "\(token)@example.com")
+        })
+    } operation: {
+      let model = PlayolaSessionModel()
+      @Shared(.playolaAccount) var account
+      await model.appLaunched()
+
+      let canceledTask = Task { await model.signInTapped() }
+      await gate.waitUntilStarted()
+      model.cancelSignInTapped()
+      await model.signInTapped()
+      gate.open()
+      await canceledTask.value
+
+      let saved = try await inMemory.load(.production)
+      expectNoDifference(saved, "B")
+      expectNoDifference(
+        account,
+        PlayolaAccount(
+          environment: .production,
+          status: .signedIn(
+            PlayolaUser(firstName: "B", lastName: "User", email: "B@example.com"))))
+      expectNoDifference(model.attempt, .idle)
+    }
+  }
+
   @Test func cancelDuringExchangeDropsLateSuccessAndSavesNothing() async throws {
     let gate = Gate()
     let store = PlayolaTokenStore.inMemory()
@@ -463,7 +510,8 @@ struct PlayolaSessionModelTests {
         return "P"
       },
       save: { _, _ in },
-      delete: { _ in })
+      delete: { _ in },
+      deleteIfMatching: { _, _ in })
     await withDependencies {
       Self.base(&$0)
       $0.playolaTokenStore = store
