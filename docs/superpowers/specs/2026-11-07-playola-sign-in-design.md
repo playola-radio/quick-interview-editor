@@ -250,15 +250,12 @@ works exactly as today; a Release build shows no server picker.
 This repo has no `develop` branch (checked `origin`); `main` is the integration
 branch, as for every recent PR.
 
-1. **`feature: sign in to Playola from Settings`** — environment, token store, API
-   client, browser auth, session model, and the Settings ▸ Playola tab. Usable on its
-   own; nothing else in the app changes. Must compile and pass on Xcode 16.4 (CI).
-2. **`feature: welcome screen that invites you to sign in to Playola`** — the Welcome
-   trio and the host gate.
-
-PR 1 can merge before the server endpoints ship (sign-in would just fail, and only
-from Settings). PR 2 stays in draft until desktop auth works end to end on staging,
-so a signed-out editor is never shown a button that can't work yet.
+One PR: **`feature: sign in to Playola`** — environment, token store, API client,
+browser auth, session model, the Settings ▸ Playola tab, the Welcome screen and its
+host gate. Must compile and pass on Xcode 16.4 (CI). It stays a draft until desktop
+auth works end to end on staging, so a signed-out editor is never shown a button that
+can't work yet. (A Settings-only first PR was considered; it would land code early but
+give no one anything usable before the server is ready.)
 
 ## Roadmap (agreed direction, not part of this design)
 
