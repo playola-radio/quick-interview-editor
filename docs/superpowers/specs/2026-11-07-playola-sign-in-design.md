@@ -1,6 +1,6 @@
 # Playola Sign-in — Design (Step 1 of the Playola work)
 
-Status: draft, awaiting Brian's approval. No product code until approved.
+Status: approved by Brian, 2026-11-07 (decisions D1–D3 below).
 Supersedes: `2026-11-06-playola-assignments-design.md` (removed in the same commit).
 That design put assignments in a separate window with its own look; it was rejected
 because it didn't match the app. The direction also changed (see Roadmap).
@@ -47,13 +47,13 @@ and see who you're signed in as.**
 - New look-and-feel. Every screen is built from the existing app's components (see
   `design/interview-editor.pen`, section 09).
 
-## Decisions that need your call
+## Decisions
 
-| # | Question | My recommendation |
+| # | Question | Decision |
 |---|---|---|
-| D1 | Is sign-in **forced** in step 1? | **No.** Welcome offers "Use a Local Audio File", which drops into today's import screen in that window. Forcing sign-in can come later, once Playola tapes reach the app (step 2), so no one is locked out of the only thing the app can do today. |
-| D2 | One "Sign In with Playola…" button, or separate Google and Apple buttons? | **One button.** The authorize URL is sent without `provider`, and Playola's server shows its own "Continue with Google / Apple" page in the browser. This needs the server to accept a missing `provider` (see `endpoints.md`). If the server team says no, the fallback is two buttons on Welcome and in Settings, each sending `provider`; nothing else changes. |
-| D3 | Does "Use a Local Audio File" stick? | **Per window only.** The next new window shows Welcome again while signed out. It nudges toward Playola, matching the direction. If it gets annoying before step 2 lands, a "don't show again" is a small follow-up. |
+| D1 | Is sign-in **forced**? | **No (Brian, 2026-11-07).** Local editing never requires sign-in. Signing in is required only for the Playola download and, later, upload features. Welcome offers "Use a Local Audio File", which goes to today's import screen in that window. |
+| D2 | One "Sign In with Playola…" button, or separate Google and Apple buttons? | **One button (Brian, 2026-11-07).** The authorize URL is sent without `provider`, and Playola's server shows its own "Continue with Google / Apple" page in the browser. This needs the server to accept a missing `provider` (see `endpoints.md`). If the server team says no, the fallback is two buttons on Welcome and in Settings, each sending `provider`; nothing else changes. |
+| D3 | Does "Use a Local Audio File" stick? | **Per window only (Brian, 2026-11-07).** The next new window shows Welcome again while signed out. It nudges toward Playola, matching the direction. If it gets annoying before step 2 lands, a "don't show again" is a small follow-up. |
 
 ## Constraints (verified)
 
