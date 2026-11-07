@@ -66,7 +66,10 @@ final class PlayolaSessionModel: ViewModel {
       let newToken = try await api.exchangeCode(environment, code, authAttempt.verifier)
       guard isCurrent(environment, generation) else { return }
       try await tokenStore.save(newToken, environment)
-      guard isCurrent(environment, generation) else { return }
+      guard isCurrent(environment, generation) else {
+        await discardCanceledSignIn(environment)
+        return
+      }
       setStatus(.signedIn(nil))
       attempt = .idle
       signOutFailed = false
@@ -88,7 +91,6 @@ final class PlayolaSessionModel: ViewModel {
   }
 
   func signOutTapped() async {
-    abortBrowserSignIn()
     guard case .signedIn = account.status else { return }
     generation += 1
     let environment = account.environment
@@ -172,6 +174,16 @@ final class PlayolaSessionModel: ViewModel {
     generation += 1
     attempt = .idle
     browserAuth.cancel()
+  }
+
+  private func discardCanceledSignIn(_ environment: PlayolaEnvironment) async {
+    do {
+      try await tokenStore.delete(environment)
+    } catch {
+      AppLog.playola.error(
+        "Couldn't delete the canceled Playola sign-in: \(String(describing: error), privacy: .public)"
+      )
+    }
   }
 
   private func isCurrent(_ environment: PlayolaEnvironment, _ generation: Int) -> Bool {

@@ -76,7 +76,7 @@ struct PlayolaAPIClientTests {
     let user = try JSONDecoder().decode(PlayolaUser.self, from: Data(json.utf8))
 
     expectNoDifference(
-      user, PlayolaUser(id: "u1", firstName: "Ana", lastName: nil, email: "a@p.fm"))
+      user, PlayolaUser(firstName: "Ana", lastName: nil, email: "a@p.fm"))
   }
 
   @Test func tokenResponseDecodes() throws {

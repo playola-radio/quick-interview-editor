@@ -185,6 +185,7 @@ struct WelcomePageTests {
         [URL(fileURLWithPath: "/doc.pdf")], modelSetupRequired: false)
 
       #expect(!taken)
+      expectNoDifference(model.gate, .welcome)
       expectNoDifference(project.phase, .empty)
     }
   }

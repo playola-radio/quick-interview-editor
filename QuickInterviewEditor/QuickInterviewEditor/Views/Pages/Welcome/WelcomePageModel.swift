@@ -81,9 +81,13 @@ final class WelcomePageModel: ViewModel {
   }
 
   func fileDropped(_ urls: [URL], modelSetupRequired: Bool) -> Bool {
-    choseLocalFile = true
-    guard !modelSetupRequired else { return false }
-    return project.fileDropped(urls)
+    guard !modelSetupRequired else {
+      choseLocalFile = true
+      return false
+    }
+    let taken = project.fileDropped(urls)
+    if taken { choseLocalFile = true }
+    return taken
   }
 
   // MARK: - Private Helpers

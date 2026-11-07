@@ -12,7 +12,7 @@ import Testing
 struct PlayolaSettingsModelTests {
   nonisolated static let randomBytes = Data(repeating: 7, count: 32)
   nonisolated static let user = PlayolaUser(
-    id: "user-1", firstName: "Ada", lastName: "Lovelace", email: "ada@example.com")
+    firstName: "Ada", lastName: "Lovelace", email: "ada@example.com")
 
   static func base(_ values: inout DependencyValues) {
     values.defaultInMemoryStorage = InMemoryStorage()

@@ -13,7 +13,7 @@ struct PlayolaSessionModelTests {
   nonisolated static let randomBytes = Data(repeating: 7, count: 32)
   nonisolated static let state = PlayolaPKCE.base64URL(randomBytes)
   nonisolated static let user = PlayolaUser(
-    id: "user-1", firstName: "Ada", lastName: "Lovelace", email: "ada@example.com")
+    firstName: "Ada", lastName: "Lovelace", email: "ada@example.com")
   nonisolated static let successCallback = callback("code=C&state=\(state)")
   nonisolated static let exchangeErrors: [any Error] = [
     PlayolaAPIError.badStatus(400), PlayolaAPIError.unauthorized,
@@ -212,7 +212,7 @@ struct PlayolaSessionModelTests {
     }
   }
 
-  @Test func cancelDuringSaveDoesNotSignIn() async {
+  @Test func cancelDuringSaveDoesNotSignInAndDeletesTheSavedToken() async throws {
     let gate = Gate()
     let inMemory = PlayolaTokenStore.inMemory()
     var store = inMemory
@@ -220,7 +220,7 @@ struct PlayolaSessionModelTests {
       await gate.pass()
       try await inMemory.save(token, environment)
     }
-    await withDependencies {
+    try await withDependencies {
       Self.base(&$0)
       $0.playolaTokenStore = store
       $0.playolaBrowserAuth = .returning(Self.successCallback)
@@ -236,6 +236,8 @@ struct PlayolaSessionModelTests {
       gate.open()
       await task.value
 
+      let saved = try await inMemory.load(.production)
+      expectNoDifference(saved, nil)
       expectNoDifference(account, PlayolaAccount(environment: .production, status: .signedOut(nil)))
       expectNoDifference(model.attempt, .idle)
     }
@@ -601,41 +603,6 @@ struct PlayolaSessionModelTests {
       expectNoDifference(
         account, PlayolaAccount(environment: .production, status: .signedIn(Self.user)))
       expectNoDifference(model.signOutFailed, true)
-    }
-  }
-
-  @Test func signOutWhileWaitingCancelsTheBrowser() async throws {
-    let gate = Gate()
-    let store = PlayolaTokenStore.inMemory()
-    let cancels = LockIsolated(0)
-    try await withDependencies {
-      Self.base(&$0)
-      $0.playolaTokenStore = store
-      $0.playolaBrowserAuth = PlayolaBrowserAuthClient(
-        authenticate: { _, _ in
-          await gate.pass()
-          return Self.successCallback
-        },
-        cancel: { cancels.withValue { $0 += 1 } })
-    } operation: {
-      let model = PlayolaSessionModel()
-      @Shared(.playolaAccount) var account
-      await model.appLaunched()
-
-      let task = Task { await model.signInTapped() }
-      await gate.waitUntilStarted()
-      await model.signOutTapped()
-
-      expectNoDifference(cancels.value, 1)
-      expectNoDifference(model.attempt, .idle)
-
-      gate.open()
-      await task.value
-
-      let saved = try await store.load(.production)
-      expectNoDifference(saved, nil)
-      expectNoDifference(model.attempt, .idle)
-      expectNoDifference(account, PlayolaAccount(environment: .production, status: .signedOut(nil)))
     }
   }
 }

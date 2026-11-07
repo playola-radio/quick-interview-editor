@@ -23,19 +23,19 @@ struct PlayolaEnvironmentTests {
 
   @Test func displayNameJoinsFirstAndLastName() {
     expectNoDifference(
-      PlayolaUser(id: "u", firstName: "Brian", lastName: "Keane", email: "b@p.fm").displayName,
+      PlayolaUser(firstName: "Brian", lastName: "Keane", email: "b@p.fm").displayName,
       "Brian Keane")
     expectNoDifference(
-      PlayolaUser(id: "u", firstName: "Brian", lastName: nil, email: "b@p.fm").displayName,
+      PlayolaUser(firstName: "Brian", lastName: nil, email: "b@p.fm").displayName,
       "Brian")
   }
 
   @Test func displayNameSkipsEmptyNameParts() {
     expectNoDifference(
-      PlayolaUser(id: "u", firstName: "Brian", lastName: "", email: "b@p.fm").displayName,
+      PlayolaUser(firstName: "Brian", lastName: "", email: "b@p.fm").displayName,
       "Brian")
     expectNoDifference(
-      PlayolaUser(id: "u", firstName: "", lastName: "Keane", email: "b@p.fm").displayName,
+      PlayolaUser(firstName: "", lastName: "Keane", email: "b@p.fm").displayName,
       "Keane")
   }
 }
