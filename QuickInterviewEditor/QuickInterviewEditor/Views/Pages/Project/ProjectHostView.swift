@@ -8,21 +8,23 @@ struct ProjectHostView: View {
   let document: ProjectDocument
   let fileURL: URL?
   @State private var model: ProjectModel
+  @State private var welcome: WelcomePageModel
   @Environment(\.undoManager) private var undoManager
   @Environment(AppLaunchModel.self) private var launch
   @Environment(SuggestionSettingsModel.self) private var suggestionSettings
   @Environment(\.appearsActive) private var appearsActive
 
-  init(document: ProjectDocument, fileURL: URL?) {
+  init(document: ProjectDocument, fileURL: URL?, session: PlayolaSessionModel) {
     self.document = document
     self.fileURL = fileURL
     let content = document.content
-    _model = State(
-      initialValue: ProjectModel(
-        file: content?.file, plan: content?.plan, audio: content?.audio, packageURL: fileURL,
-        sink: document.sink, recoveryArchive: content?.recoveryArchive,
-        masteringStaged: content?.masteringStaged ?? [:],
-        masteringStagingError: content?.masteringStagingError))
+    let project = ProjectModel(
+      file: content?.file, plan: content?.plan, audio: content?.audio, packageURL: fileURL,
+      sink: document.sink, recoveryArchive: content?.recoveryArchive,
+      masteringStaged: content?.masteringStaged ?? [:],
+      masteringStagingError: content?.masteringStagingError)
+    _model = State(initialValue: project)
+    _welcome = State(initialValue: WelcomePageModel(session: session, project: project))
   }
 
   var body: some View {
@@ -57,10 +59,17 @@ struct ProjectHostView: View {
   }
 
   @ViewBuilder private var content: some View {
-    if launch.showsModelSetup, let setup = launch.modelSetup {
-      ModelSetupView(model: setup)
-    } else {
-      ProjectView(model: model)
+    switch welcome.gate {
+    case .waitingForRestore:
+      Color.clear
+    case .welcome:
+      WelcomePageView(model: welcome)
+    case .passThrough:
+      if launch.showsModelSetup, let setup = launch.modelSetup {
+        ModelSetupView(model: setup)
+      } else {
+        ProjectView(model: model)
+      }
     }
   }
 }
