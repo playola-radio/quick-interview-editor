@@ -51,8 +51,7 @@ final class PlayolaSessionModel: ViewModel {
   }
 
   func signInTapped() async {
-    guard attempt != .waiting else { return }
-    if case .signedIn = account.status { return }
+    guard attempt != .waiting, account.isSignedOut else { return }
     generation += 1
     attempt = .waiting
     let environment = account.environment
@@ -87,14 +86,13 @@ final class PlayolaSessionModel: ViewModel {
   }
 
   func cancelSignInTapped() {
-    guard attempt == .waiting else { return }
-    generation += 1
     abortBrowserSignIn()
   }
 
   func signOutTapped() async {
-    generation += 1
     abortBrowserSignIn()
+    guard case .signedIn = account.status else { return }
+    generation += 1
     let environment = account.environment
     let generation = generation
     do {
@@ -177,6 +175,7 @@ final class PlayolaSessionModel: ViewModel {
   /// while waiting has to close it explicitly.
   private func abortBrowserSignIn() {
     guard attempt == .waiting else { return }
+    generation += 1
     attempt = .idle
     browserAuth.cancel()
   }

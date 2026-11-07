@@ -8,6 +8,7 @@ import Testing
 @testable import PlayolaInterviewEditor
 
 @MainActor
+@Suite(.timeLimit(.minutes(1)))
 struct PlayolaSessionModelTests {
   nonisolated static let randomBytes = Data(repeating: 7, count: 32)
   nonisolated static let state = PlayolaPKCE.base64URL(randomBytes)
@@ -50,6 +51,7 @@ struct PlayolaSessionModelTests {
     } operation: {
       let model = PlayolaSessionModel()
       @Shared(.playolaAccount) var account
+      await model.appLaunched()
 
       await model.signInTapped()
 
@@ -171,8 +173,11 @@ struct PlayolaSessionModelTests {
       $0.playolaTokenStore = .inMemory()
       $0.playolaBrowserAuth = PlayolaBrowserAuthClient(
         authenticate: { _, _ in
-          authenticateCalls.withValue { $0 += 1 }
-          await gate.pass()
+          let call = authenticateCalls.withValue {
+            $0 += 1
+            return $0
+          }
+          if call == 1 { await gate.pass() }
           return Self.successCallback
         },
         cancel: {})
@@ -189,6 +194,50 @@ struct PlayolaSessionModelTests {
       await task.value
 
       expectNoDifference(authenticateCalls.value, 1)
+    }
+  }
+
+  @Test func signInIgnoredWhileRestoring() async {
+    await withDependencies {
+      Self.base(&$0)
+      $0.playolaTokenStore = .inMemory()
+    } operation: {
+      let model = PlayolaSessionModel()
+      @Shared(.playolaAccount) var account
+
+      await model.signInTapped()
+
+      expectNoDifference(model.attempt, .idle)
+      expectNoDifference(account, PlayolaAccount(environment: .production, status: .restoring))
+    }
+  }
+
+  @Test func cancelDuringSaveDoesNotSignIn() async {
+    let gate = Gate()
+    let inMemory = PlayolaTokenStore.inMemory()
+    var store = inMemory
+    store.save = { token, environment in
+      await gate.pass()
+      try await inMemory.save(token, environment)
+    }
+    await withDependencies {
+      Self.base(&$0)
+      $0.playolaTokenStore = store
+      $0.playolaBrowserAuth = .returning(Self.successCallback)
+      $0.playolaAPI.exchangeCode = { _, _, _ in "T" }
+    } operation: {
+      let model = PlayolaSessionModel()
+      @Shared(.playolaAccount) var account
+      await model.appLaunched()
+
+      let task = Task { await model.signInTapped() }
+      await gate.waitUntilStarted()
+      model.cancelSignInTapped()
+      gate.open()
+      await task.value
+
+      expectNoDifference(account, PlayolaAccount(environment: .production, status: .signedOut(nil)))
+      expectNoDifference(model.attempt, .idle)
     }
   }
 
@@ -459,6 +508,38 @@ struct PlayolaSessionModelTests {
         ])
       expectNoDifference(
         account, PlayolaAccount(environment: .staging, status: .signedIn(Self.user)))
+    }
+  }
+
+  @Test func serverSwitchWhileWaitingCancelsTheBrowser() async {
+    let gate = Gate()
+    let cancels = LockIsolated(0)
+    await withDependencies {
+      Self.base(&$0)
+      $0.playolaTokenStore = .inMemory()
+      $0.playolaBrowserAuth = PlayolaBrowserAuthClient(
+        authenticate: { _, _ in
+          await gate.pass()
+          return Self.successCallback
+        },
+        cancel: { cancels.withValue { $0 += 1 } })
+    } operation: {
+      let model = PlayolaSessionModel(allowsServerSwitching: true)
+      @Shared(.playolaAccount) var account
+      await model.appLaunched()
+
+      let task = Task { await model.signInTapped() }
+      await gate.waitUntilStarted()
+      await model.environmentPicked(.staging)
+
+      expectNoDifference(cancels.value, 1)
+      expectNoDifference(model.attempt, .idle)
+
+      gate.open()
+      await task.value
+
+      expectNoDifference(model.attempt, .idle)
+      expectNoDifference(account, PlayolaAccount(environment: .staging, status: .signedOut(nil)))
     }
   }
 
