@@ -1,3 +1,4 @@
+import Foundation
 import Observation
 import Sharing
 
@@ -77,6 +78,12 @@ final class WelcomePageModel: ViewModel {
 
   func useLocalFileTapped() {
     choseLocalFile = true
+  }
+
+  func fileDropped(_ urls: [URL], modelSetupRequired: Bool) -> Bool {
+    choseLocalFile = true
+    guard !modelSetupRequired else { return false }
+    return project.fileDropped(urls)
   }
 
   // MARK: - Private Helpers

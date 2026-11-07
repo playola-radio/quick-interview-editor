@@ -63,7 +63,7 @@ struct ProjectHostView: View {
     case .waitingForRestore:
       Color.clear
     case .welcome:
-      WelcomePageView(model: welcome)
+      WelcomePageView(model: welcome, modelSetupRequired: launch.showsModelSetup)
     case .passThrough:
       if launch.showsModelSetup, let setup = launch.modelSetup {
         ModelSetupView(model: setup)

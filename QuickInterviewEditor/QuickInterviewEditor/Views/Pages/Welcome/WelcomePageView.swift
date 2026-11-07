@@ -2,6 +2,7 @@ import SwiftUI
 
 struct WelcomePageView: View {
   @State var model: WelcomePageModel
+  let modelSetupRequired: Bool
 
   var body: some View {
     VStack(spacing: 20) {
@@ -66,5 +67,8 @@ struct WelcomePageView: View {
     .padding(40)
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .frame(minWidth: 520, minHeight: 360)
+    .dropDestination(for: URL.self) { urls, _ in
+      model.fileDropped(urls, modelSetupRequired: modelSetupRequired)
+    }
   }
 }

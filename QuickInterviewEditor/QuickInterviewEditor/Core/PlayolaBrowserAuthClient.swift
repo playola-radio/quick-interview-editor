@@ -89,6 +89,7 @@ final class PlayolaWebAuthSession: NSObject, ASWebAuthenticationPresentationCont
     let session = session
     self.continuation = nil
     self.session = nil
+    anchor = nil
     attempt += 1
     session?.cancel()
     continuation?.resume(with: result)

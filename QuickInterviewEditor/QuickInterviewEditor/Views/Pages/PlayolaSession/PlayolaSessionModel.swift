@@ -39,7 +39,6 @@ final class PlayolaSessionModel: ViewModel {
   let allowsServerSwitching: Bool
   private(set) var attempt: Attempt = .idle
   private(set) var signOutFailed = false
-  private var token: String?
   private var generation = 0
   private var didLaunch = false
 
@@ -68,7 +67,6 @@ final class PlayolaSessionModel: ViewModel {
       guard isCurrent(environment, generation) else { return }
       try await tokenStore.save(newToken, environment)
       guard isCurrent(environment, generation) else { return }
-      token = newToken
       setStatus(.signedIn(nil))
       attempt = .idle
       signOutFailed = false
@@ -105,7 +103,6 @@ final class PlayolaSessionModel: ViewModel {
       return
     }
     guard isCurrent(environment, generation) else { return }
-    token = nil
     setStatus(.signedOut(nil))
     signOutFailed = false
   }
@@ -117,7 +114,6 @@ final class PlayolaSessionModel: ViewModel {
     attempt = .idle
     signOutFailed = false
     $environmentSetting.withLock { $0 = environment }
-    token = nil
     $account.withLock { $0 = PlayolaAccount(environment: environment, status: .restoring) }
     await restore()
   }
@@ -141,7 +137,6 @@ final class PlayolaSessionModel: ViewModel {
       setStatus(.signedOut(nil))
       return
     }
-    token = loaded
     setStatus(.signedIn(nil))
     await loadCurrentUser(token: loaded, environment: environment, generation: generation)
   }
@@ -163,7 +158,6 @@ final class PlayolaSessionModel: ViewModel {
         )
       }
       guard isCurrent(environment, generation) else { return }
-      self.token = nil
       setStatus(.signedOut(.rejectedByPlayola))
     } catch {
       AppLog.playola.error(

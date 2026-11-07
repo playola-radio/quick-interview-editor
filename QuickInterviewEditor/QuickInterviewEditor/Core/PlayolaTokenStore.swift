@@ -15,8 +15,8 @@ struct PlayolaTokenStore: Sendable {
 }
 
 extension PlayolaTokenStore: DependencyKey {
-  /// Every call runs on ONE private serial queue so calls execute in the order they were
-  /// made. An actor would not guarantee that: its job order is not FIFO.
+  /// Every call runs on ONE private serial queue so calls execute in the order they reach
+  /// the queue. An actor would not guarantee that: its job order is not FIFO.
   static var liveValue: PlayolaTokenStore {
     let queue = DispatchQueue(label: "fm.playola.PlayolaInterviewEditor.playolaTokenStore")
     @Sendable func onQueue<T: Sendable>(

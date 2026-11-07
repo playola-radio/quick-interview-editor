@@ -112,10 +112,30 @@ struct PlayolaSettingsModelTests {
     } operation: {
       let model = Self.makeModel(status: .signedOut(.rejectedByPlayola))
 
+      expectNoDifference(model.accountRowLabel, "Status:")
       expectNoDifference(model.accountValue, "Not signed in")
       expectNoDifference(
         model.accountDetail, "You were signed out of Playola. Sign in again to continue.")
       expectNoDifference(model.accountDetailIsError, false)
+      expectNoDifference(model.showsAccountButton, true)
+      expectNoDifference(model.accountButtonTitle, "Sign In with Playola…")
+      expectNoDifference(model.accountButtonIsProminent, true)
+    }
+  }
+
+  @Test func tappingTheButtonWhileRestoringDoesNothing() async {
+    await withDependencies {
+      Self.base(&$0)
+    } operation: {
+      let model = Self.makeModel(status: .restoring)
+      @Shared(.playolaAccount) var account
+
+      expectNoDifference(model.accountButtonTitle, "Sign In with Playola…")
+      expectNoDifference(model.accountButtonIsProminent, false)
+
+      await model.accountButtonTapped()
+
+      expectNoDifference(account.status, .restoring)
     }
   }
 

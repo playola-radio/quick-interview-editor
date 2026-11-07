@@ -112,6 +112,83 @@ struct WelcomePageTests {
     }
   }
 
+  @Test func gateMovesToPassThroughWhenSignInCompletesWhileAlive() async {
+    await withDependencies {
+      Self.base(&$0)
+    } operation: {
+      let session = await Self.signedOutSession()
+      let model = WelcomePageModel(session: session, project: Self.emptyProject())
+      expectNoDifference(model.gate, .welcome)
+
+      @Shared(.playolaAccount) var account
+      $account.withLock { $0.status = .signedIn(nil) }
+
+      expectNoDifference(model.gate, .passThrough)
+    }
+  }
+
+  // MARK: - Drop
+
+  @Test func fileDroppedImportsAndPassesThrough() async {
+    let picked = LockIsolated<URL?>(nil)
+    await withDependencies {
+      Self.base(&$0)
+      $0.continuousClock = TestClock()
+      $0.date = .constant(Date(timeIntervalSince1970: 1_700_000_000))
+      $0.transcription.transcribe = { url, _, _ in
+        picked.setValue(url)
+        return neverCompletingEngineEvents()
+      }
+    } operation: {
+      let session = await Self.signedOutSession()
+      let project = Self.emptyProject()
+      let model = WelcomePageModel(session: session, project: project)
+
+      let taken = model.fileDropped(
+        [URL(fileURLWithPath: "/song.m4a")], modelSetupRequired: false)
+
+      #expect(taken)
+      expectNoDifference(model.gate, .passThrough)
+      for _ in 0..<1000 where picked.value == nil { await Task.yield() }
+      expectNoDifference(picked.value?.path, "/song.m4a")
+      #expect(project.showsProgress)
+      project.cancelTranscriptionTapped()
+    }
+  }
+
+  @Test func fileDroppedWhileModelSetupIsRequiredPassesThroughWithoutImporting() async {
+    await withDependencies {
+      Self.base(&$0)
+    } operation: {
+      let session = await Self.signedOutSession()
+      let project = Self.emptyProject()
+      let model = WelcomePageModel(session: session, project: project)
+
+      let taken = model.fileDropped(
+        [URL(fileURLWithPath: "/song.m4a")], modelSetupRequired: true)
+
+      #expect(!taken)
+      expectNoDifference(model.gate, .passThrough)
+      expectNoDifference(project.phase, .empty)
+    }
+  }
+
+  @Test func fileDroppedIgnoresNonAudioFiles() async {
+    await withDependencies {
+      Self.base(&$0)
+    } operation: {
+      let session = await Self.signedOutSession()
+      let project = Self.emptyProject()
+      let model = WelcomePageModel(session: session, project: project)
+
+      let taken = model.fileDropped(
+        [URL(fileURLWithPath: "/doc.pdf")], modelSetupRequired: false)
+
+      #expect(!taken)
+      expectNoDifference(project.phase, .empty)
+    }
+  }
+
   // MARK: - Copy
 
   @Test func signedOutStateCopy() async {
@@ -225,6 +302,25 @@ struct WelcomePageTests {
         model.notice, .warning("You were signed out of Playola. Sign in again to continue."))
       expectNoDifference(model.signInButtonTitle, "Sign In with Playola…")
       expectNoDifference(model.gate, .welcome)
+    }
+  }
+
+  @Test func failedNoticeWinsOverRejectedWarning() async {
+    await withDependencies {
+      Self.base(&$0)
+      $0.playolaBrowserAuth = PlayolaBrowserAuthClient(
+        authenticate: { _, _ in throw URLError(.notConnectedToInternet) }, cancel: {})
+    } operation: {
+      let session = await Self.signedOutSession()
+      @Shared(.playolaAccount) var account
+      $account.withLock { $0.status = .signedOut(.rejectedByPlayola) }
+      let model = WelcomePageModel(session: session, project: Self.emptyProject())
+
+      await model.signInTapped()
+
+      expectNoDifference(
+        model.notice,
+        .error("Couldn't sign in to Playola. Check your connection and try again."))
     }
   }
 

@@ -29,4 +29,13 @@ struct PlayolaEnvironmentTests {
       PlayolaUser(id: "u", firstName: "Brian", lastName: nil, email: "b@p.fm").displayName,
       "Brian")
   }
+
+  @Test func displayNameSkipsEmptyNameParts() {
+    expectNoDifference(
+      PlayolaUser(id: "u", firstName: "Brian", lastName: "", email: "b@p.fm").displayName,
+      "Brian")
+    expectNoDifference(
+      PlayolaUser(id: "u", firstName: "", lastName: "Keane", email: "b@p.fm").displayName,
+      "Keane")
+  }
 }

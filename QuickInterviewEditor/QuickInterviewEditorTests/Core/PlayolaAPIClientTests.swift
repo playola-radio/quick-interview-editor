@@ -100,4 +100,8 @@ struct PlayolaAPIClientTests {
 
     #expect(followed == nil)
   }
+
+  @Test func liveSessionUsesTheNoRedirectDelegate() {
+    #expect(PlayolaAPIClient.makeSession().delegate is PlayolaNoRedirectDelegate)
+  }
 }

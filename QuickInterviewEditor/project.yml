@@ -77,8 +77,9 @@ targets:
             UTTypeTagSpecification:
               public.filename-extension:
                 - pie
-        # Scoped ATS exception so debug builds can reach the local Playola server
-        # (http://localhost:10020). Not arbitrary loads.
+        # Scoped ATS exception so the Local server option can reach the local Playola
+        # server (http://localhost:10020). Applies to all builds (this Info.plist is not
+        # config-split); local-network-only, not arbitrary loads.
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
         CFBundleDocumentTypes:

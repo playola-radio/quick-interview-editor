@@ -27,6 +27,6 @@ struct PlayolaUser: Equatable, Sendable, Decodable {
   var email: String
 
   var displayName: String {
-    [firstName, lastName].compactMap { $0 }.joined(separator: " ")
+    [firstName, lastName ?? ""].filter { !$0.isEmpty }.joined(separator: " ")
   }
 }

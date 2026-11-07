@@ -77,9 +77,13 @@ final class PlayolaNoRedirectDelegate: NSObject, URLSessionTaskDelegate, Sendabl
 // MARK: - Dependency
 
 extension PlayolaAPIClient: DependencyKey {
-  static var liveValue: PlayolaAPIClient {
-    let session = URLSession(
+  static func makeSession() -> URLSession {
+    URLSession(
       configuration: .ephemeral, delegate: PlayolaNoRedirectDelegate(), delegateQueue: nil)
+  }
+
+  static var liveValue: PlayolaAPIClient {
+    let session = makeSession()
 
     @Sendable func send<Value: Decodable>(
       _ request: URLRequest, as type: Value.Type
@@ -100,7 +104,8 @@ extension PlayolaAPIClient: DependencyKey {
           }
         } else {
           AppLog.playola.error(
-            "Playola request failed: \(String(describing: Swift.type(of: error)))")
+            "Playola request failed: \(String(describing: Swift.type(of: error)), privacy: .public)"
+          )
         }
         throw error
       }

@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct PlayolaSettingsView: View {
-  @Bindable var model: PlayolaSettingsModel
+  let model: PlayolaSettingsModel
 
   var body: some View {
     Form {
@@ -17,12 +17,8 @@ struct PlayolaSettingsView: View {
           }
         }
         if model.showsAccountButton {
-          if model.accountButtonIsProminent {
-            Button(model.accountButtonTitle) { Task { await model.accountButtonTapped() } }
-              .buttonStyle(.borderedProminent)
-          } else {
-            Button(model.accountButtonTitle) { Task { await model.accountButtonTapped() } }
-          }
+          Button(model.accountButtonTitle) { Task { await model.accountButtonTapped() } }
+            .keyboardShortcut(model.accountButtonIsProminent ? .defaultAction : nil)
         }
       } header: {
         Text(model.accountHeader)
