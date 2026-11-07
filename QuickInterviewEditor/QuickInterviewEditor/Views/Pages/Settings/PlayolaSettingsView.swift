@@ -17,8 +17,12 @@ struct PlayolaSettingsView: View {
           }
         }
         if model.showsAccountButton {
-          Button(model.accountButtonTitle) { Task { await model.accountButtonTapped() } }
-            .keyboardShortcut(model.accountButtonIsProminent ? .defaultAction : nil)
+          if model.accountButtonIsProminent {
+            Button(model.accountButtonTitle) { Task { await model.accountButtonTapped() } }
+              .buttonStyle(.borderedProminent)
+          } else {
+            Button(model.accountButtonTitle) { Task { await model.accountButtonTapped() } }
+          }
         }
       } header: {
         Text(model.accountHeader)
