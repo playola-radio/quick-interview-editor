@@ -77,6 +77,10 @@ targets:
             UTTypeTagSpecification:
               public.filename-extension:
                 - pie
+        # Scoped ATS exception so debug builds can reach the local Playola server
+        # (http://localhost:10020). Not arbitrary loads.
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
         CFBundleDocumentTypes:
           - CFBundleTypeName: Playola Interview Editor Project
             CFBundleTypeRole: Editor

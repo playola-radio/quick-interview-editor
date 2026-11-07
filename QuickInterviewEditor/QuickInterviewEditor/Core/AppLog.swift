@@ -14,4 +14,5 @@ enum AppLog {
   static let mastering = Logger(subsystem: subsystem, category: "mastering")
   static let document = Logger(subsystem: subsystem, category: "document")
   static let suggestions = Logger(subsystem: subsystem, category: "suggestions")
+  static let playola = Logger(subsystem: subsystem, category: "playola")
 }
