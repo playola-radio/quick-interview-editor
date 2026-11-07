@@ -5,6 +5,10 @@ focus on changes that affect editing work rather than internal implementation.
 
 ## [Unreleased]
 
+- Sign in to your Playola account from Settings → Playola or the welcome screen
+  in an empty window. The app stays signed in between launches, and everything
+  that works without an account still works without one.
+
 ## [2.6.2] - 2026-10-30
 
 - AI clip suggestions no longer get stuck when Anthropic sends back a reply the
