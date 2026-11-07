@@ -12008,7 +12008,8 @@
                       "fill": "$label",
                       "content": "Spotlight",
                       "fontFamily": "$font",
-                      "fontSize": 13
+                      "fontSize": 13,
+                      "fontWeight": "normal"
                     },
                     {
                       "type": "text",
@@ -12017,7 +12018,8 @@
                       "fill": "$label",
                       "content": "ID Image",
                       "fontFamily": "$font",
-                      "fontSize": 13
+                      "fontSize": 13,
+                      "fontWeight": "normal"
                     },
                     {
                       "type": "text",
@@ -12026,7 +12028,8 @@
                       "fill": "$label",
                       "content": "Pre-commercial Image",
                       "fontFamily": "$font",
-                      "fontSize": 13
+                      "fontSize": 13,
+                      "fontWeight": "normal"
                     },
                     {
                       "type": "text",
@@ -12035,7 +12038,8 @@
                       "fill": "$label",
                       "content": "Post-commercial Image",
                       "fontFamily": "$font",
-                      "fontSize": 13
+                      "fontSize": 13,
+                      "fontWeight": "normal"
                     },
                     {
                       "type": "text",
@@ -12044,7 +12048,8 @@
                       "fill": "$label",
                       "content": "Promo Image",
                       "fontFamily": "$font",
-                      "fontSize": 13
+                      "fontSize": 13,
+                      "fontWeight": "normal"
                     },
                     {
                       "type": "frame",
@@ -13234,7 +13239,8 @@
               "fill": "$label",
               "content": "File",
               "fontFamily": "$font",
-              "fontSize": 13
+              "fontSize": 13,
+              "fontWeight": "normal"
             },
             {
               "type": "text",
@@ -13243,7 +13249,8 @@
               "fill": "$label",
               "content": "Edit",
               "fontFamily": "$font",
-              "fontSize": 13
+              "fontSize": 13,
+              "fontWeight": "normal"
             },
             {
               "type": "text",
@@ -13252,7 +13259,8 @@
               "fill": "$label",
               "content": "View",
               "fontFamily": "$font",
-              "fontSize": 13
+              "fontSize": 13,
+              "fontWeight": "normal"
             },
             {
               "type": "text",
@@ -13261,7 +13269,8 @@
               "fill": "$label",
               "content": "Window",
               "fontFamily": "$font",
-              "fontSize": 13
+              "fontSize": 13,
+              "fontWeight": "normal"
             },
             {
               "type": "text",
@@ -13270,7 +13279,8 @@
               "fill": "$label",
               "content": "Help",
               "fontFamily": "$font",
-              "fontSize": 13
+              "fontSize": 13,
+              "fontWeight": "normal"
             }
           ]
         },
@@ -13353,7 +13363,8 @@
                           "fill": "$label",
                           "content": "About Playola Interview Editor",
                           "fontFamily": "$font",
-                          "fontSize": 13
+                          "fontSize": 13,
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "frame",
@@ -13459,7 +13470,8 @@
                           "fill": "$label",
                           "content": "Settings…",
                           "fontFamily": "$font",
-                          "fontSize": 13
+                          "fontSize": 13,
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "frame",
@@ -13532,7 +13544,8 @@
                           "fill": "$label",
                           "content": "Services",
                           "fontFamily": "$font",
-                          "fontSize": 13
+                          "fontSize": 13,
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "frame",
@@ -13605,7 +13618,8 @@
                           "fill": "$label",
                           "content": "Hide Playola Interview Editor",
                           "fontFamily": "$font",
-                          "fontSize": 13
+                          "fontSize": 13,
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "frame",
@@ -13658,7 +13672,8 @@
                           "fill": "$label",
                           "content": "Hide Others",
                           "fontFamily": "$font",
-                          "fontSize": 13
+                          "fontSize": 13,
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "frame",
@@ -13711,7 +13726,8 @@
                           "fill": "$label",
                           "content": "Show All",
                           "fontFamily": "$font",
-                          "fontSize": 13
+                          "fontSize": 13,
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "frame",
@@ -13774,7 +13790,8 @@
                           "fill": "$label",
                           "content": "Quit Playola Interview Editor",
                           "fontFamily": "$font",
-                          "fontSize": 13
+                          "fontSize": 13,
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "frame",
@@ -13883,7 +13900,8 @@
                           "fill": "$label",
                           "content": "New",
                           "fontFamily": "$font",
-                          "fontSize": 13
+                          "fontSize": 13,
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "frame",
@@ -13936,7 +13954,8 @@
                           "fill": "$label",
                           "content": "Open…",
                           "fontFamily": "$font",
-                          "fontSize": 13
+                          "fontSize": 13,
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "frame",
@@ -13989,7 +14008,8 @@
                           "fill": "$label",
                           "content": "Open Recent",
                           "fontFamily": "$font",
-                          "fontSize": 13
+                          "fontSize": 13,
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "frame",
@@ -14115,7 +14135,8 @@
                           "fill": "$label",
                           "content": "Close",
                           "fontFamily": "$font",
-                          "fontSize": 13
+                          "fontSize": 13,
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "frame",
@@ -14168,7 +14189,8 @@
                           "fill": "$label",
                           "content": "Save",
                           "fontFamily": "$font",
-                          "fontSize": 13
+                          "fontSize": 13,
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "text",
@@ -14231,7 +14253,8 @@
                           "fill": "$label",
                           "content": "Duplicate",
                           "fontFamily": "$font",
-                          "fontSize": 13
+                          "fontSize": 13,
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "frame",
@@ -14284,7 +14307,8 @@
                           "fill": "$label",
                           "content": "Rename…",
                           "fontFamily": "$font",
-                          "fontSize": 13
+                          "fontSize": 13,
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "frame",
@@ -14327,7 +14351,8 @@
                           "fill": "$label",
                           "content": "Move To…",
                           "fontFamily": "$font",
-                          "fontSize": 13
+                          "fontSize": 13,
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "frame",
@@ -14370,7 +14395,8 @@
                           "fill": "$label",
                           "content": "Revert To",
                           "fontFamily": "$font",
-                          "fontSize": 13
+                          "fontSize": 13,
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "frame",
@@ -14605,7 +14631,8 @@
                           "fill": "$label",
                           "content": "Cut",
                           "fontFamily": "$font",
-                          "fontSize": 13
+                          "fontSize": 13,
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "frame",
@@ -14658,7 +14685,8 @@
                           "fill": "$label",
                           "content": "Copy",
                           "fontFamily": "$font",
-                          "fontSize": 13
+                          "fontSize": 13,
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "frame",
@@ -14711,7 +14739,8 @@
                           "fill": "$label",
                           "content": "Paste",
                           "fontFamily": "$font",
-                          "fontSize": 13
+                          "fontSize": 13,
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "frame",
@@ -14764,7 +14793,8 @@
                           "fill": "$label",
                           "content": "Delete",
                           "fontFamily": "$font",
-                          "fontSize": 13
+                          "fontSize": 13,
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "frame",
@@ -14807,7 +14837,8 @@
                           "fill": "$label",
                           "content": "Select All",
                           "fontFamily": "$font",
-                          "fontSize": 13
+                          "fontSize": 13,
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "frame",
@@ -14915,7 +14946,8 @@
                           "fill": "$label",
                           "content": "0.5×",
                           "fontFamily": "$font",
-                          "fontSize": 13
+                          "fontSize": 13,
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "frame",
@@ -14957,7 +14989,8 @@
                           "fill": "$label",
                           "content": "0.75×",
                           "fontFamily": "$font",
-                          "fontSize": 13
+                          "fontSize": 13,
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "frame",
@@ -15011,7 +15044,8 @@
                           "fill": "$label",
                           "content": "1.0×",
                           "fontFamily": "$font",
-                          "fontSize": 13
+                          "fontSize": 13,
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "frame",
@@ -15053,7 +15087,8 @@
                           "fill": "$label",
                           "content": "1.25×",
                           "fontFamily": "$font",
-                          "fontSize": 13
+                          "fontSize": 13,
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "frame",
@@ -15095,7 +15130,8 @@
                           "fill": "$label",
                           "content": "1.5×",
                           "fontFamily": "$font",
-                          "fontSize": 13
+                          "fontSize": 13,
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "frame",
@@ -15137,7 +15173,8 @@
                           "fill": "$label",
                           "content": "2.0×",
                           "fontFamily": "$font",
-                          "fontSize": 13
+                          "fontSize": 13,
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "frame",
@@ -15179,7 +15216,8 @@
                           "fill": "$label",
                           "content": "2.5×",
                           "fontFamily": "$font",
-                          "fontSize": 13
+                          "fontSize": 13,
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "frame",
@@ -15221,7 +15259,8 @@
                           "fill": "$label",
                           "content": "3.0×",
                           "fontFamily": "$font",
-                          "fontSize": 13
+                          "fontSize": 13,
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "frame",
@@ -15319,7 +15358,8 @@
                           "fill": "$label",
                           "content": "Export as WAV…",
                           "fontFamily": "$font",
-                          "fontSize": 13
+                          "fontSize": 13,
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "frame",
@@ -15361,7 +15401,8 @@
                           "fill": "$label",
                           "content": "Export as M4A…",
                           "fontFamily": "$font",
-                          "fontSize": 13
+                          "fontSize": 13,
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "frame",
@@ -15403,7 +15444,8 @@
                           "fill": "$label",
                           "content": "Export as AIFF…",
                           "fontFamily": "$font",
-                          "fontSize": 13
+                          "fontSize": 13,
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "frame",
@@ -15501,7 +15543,8 @@
                           "fill": "$label",
                           "content": "ID Image",
                           "fontFamily": "$font",
-                          "fontSize": 13
+                          "fontSize": 13,
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "frame",
@@ -15543,7 +15586,8 @@
                           "fill": "$label",
                           "content": "Promo Image",
                           "fontFamily": "$font",
-                          "fontSize": 13
+                          "fontSize": 13,
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "frame",
@@ -15641,7 +15685,8 @@
                           "fill": "$label",
                           "content": "Song Title",
                           "fontFamily": "$font",
-                          "fontSize": 13
+                          "fontSize": 13,
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "frame",
@@ -15683,7 +15728,8 @@
                           "fill": "$label",
                           "content": "Artist Name",
                           "fontFamily": "$font",
-                          "fontSize": 13
+                          "fontSize": 13,
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "frame",
@@ -15725,7 +15771,8 @@
                           "fill": "$label",
                           "content": "Descriptive Title",
                           "fontFamily": "$font",
-                          "fontSize": 13
+                          "fontSize": 13,
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "frame",
@@ -21927,6 +21974,1721 @@
           "fontFamily": "$font",
           "fontSize": 14,
           "fontWeight": "normal"
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "Yt7Cq",
+      "x": 0,
+      "y": 11500,
+      "name": "Section 09 — PROPOSED — Playola sign-in",
+      "width": 5160,
+      "fill": "#111111",
+      "cornerRadius": 12,
+      "layout": "vertical",
+      "gap": 6,
+      "padding": [
+        20,
+        28
+      ],
+      "children": [
+        {
+          "type": "frame",
+          "id": "s1yTzp",
+          "name": "Title Row",
+          "gap": 14,
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "v5tia",
+              "name": "Number",
+              "fill": "$accent",
+              "content": "09",
+              "fontFamily": "$mono",
+              "fontSize": 28,
+              "fontWeight": "700"
+            },
+            {
+              "type": "text",
+              "id": "qegLP",
+              "name": "Title",
+              "fill": "$label",
+              "content": "PROPOSED · Playola sign-in (not built yet)",
+              "fontFamily": "$font",
+              "fontSize": 28,
+              "fontWeight": "700"
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "id": "E8lcH",
+          "name": "Subtitle",
+          "fill": "$secondary",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "Step 1 of the Playola work. While signed out, an EMPTY project window (the one that would show the drop target, 02.1.2) shows Welcome instead — same host gate as Model Setup (02.1.1), so the window is still titled “Untitled”. Sign In with Playola… opens the browser (ASWebAuthenticationSession, PKCE); on success the window continues to Model Setup if models are missing, else the drop target. Use a Local Audio File shows the drop target in that window. Opening an existing .pie is never blocked. If Playola rejects the saved sign-in (401), the app signs out and empty windows show 09.4. Account lives in a new Settings ▸ Playola tab (09.5–09.6).",
+          "fontFamily": "$font",
+          "fontSize": 14,
+          "fontWeight": "normal"
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "kzSyI",
+      "x": 0,
+      "y": 11650,
+      "name": "09.1 · Welcome — signed out (first launch)",
+      "clip": true,
+      "width": 1200,
+      "height": 800,
+      "fill": "#000000",
+      "cornerRadius": 10,
+      "stroke": "#FFFFFF33",
+      "strokeWidth": 1,
+      "layout": "vertical",
+      "children": [
+        {
+          "id": "bdBo6",
+          "type": "ref",
+          "ref": "CDEoK",
+          "name": "Title Bar",
+          "width": "fill_container",
+          "descendants": {
+            "oFOM8": {
+              "content": "Untitled"
+            },
+            "Dzuvw": {
+              "enabled": false
+            }
+          }
+        },
+        {
+          "type": "frame",
+          "id": "d4psM",
+          "name": "Content",
+          "width": "fill_container",
+          "height": "fill_container",
+          "layout": "vertical",
+          "gap": 20,
+          "justifyContent": "center",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "frame",
+              "id": "qL46k",
+              "name": "ModelSetupView (min 520×360, padding 40)",
+              "width": 520,
+              "layout": "vertical",
+              "gap": 20,
+              "padding": 40,
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "eVeZs",
+                  "name": "waveform.badge.magnifyingglass",
+                  "width": 48,
+                  "height": 48,
+                  "icon": "radio",
+                  "library": "lucide",
+                  "fill": "$accent"
+                },
+                {
+                  "type": "text",
+                  "id": "WgSb1",
+                  "name": "Title",
+                  "fill": "#FFFFFF",
+                  "content": "Welcome to Playola Interview Editor",
+                  "fontFamily": "$font",
+                  "fontSize": 17,
+                  "fontWeight": "700"
+                },
+                {
+                  "type": "text",
+                  "id": "CXAjV",
+                  "name": "Subtitle",
+                  "fill": "$secondary",
+                  "textGrowth": "fixed-width",
+                  "width": 420,
+                  "content": "Sign in with your Playola account to get the interviews assigned to you.",
+                  "textAlign": "center",
+                  "fontFamily": "$font",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "Y5WZG8",
+                  "x": 80,
+                  "y": 184,
+                  "name": "Linear ProgressView",
+                  "enabled": false,
+                  "width": 360,
+                  "height": 6,
+                  "fill": "#FFFFFF1F",
+                  "cornerRadius": 3,
+                  "layout": "none",
+                  "children": [
+                    {
+                      "type": "rectangle",
+                      "cornerRadius": 3,
+                      "id": "rIA8w",
+                      "x": 0,
+                      "y": 0,
+                      "name": "Fill",
+                      "fill": "$accent",
+                      "width": 130,
+                      "height": 6
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "id": "MoIFT",
+                  "x": 149.5,
+                  "y": 210,
+                  "name": "Status",
+                  "enabled": false,
+                  "fill": "$secondary",
+                  "content": "Downloading 2 of 5 (36%) · pytorch_model.bin",
+                  "fontFamily": "$font",
+                  "fontSize": 10,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "Yl6Pj",
+                  "name": "Buttons",
+                  "gap": 12,
+                  "children": [
+                    {
+                      "id": "MwbxW",
+                      "type": "ref",
+                      "ref": "x1SfwR",
+                      "name": "Sign In with Playola…",
+                      "descendants": {
+                        "Y5VII": {
+                          "content": "Sign In with Playola…"
+                        }
+                      }
+                    },
+                    {
+                      "id": "P4PriP",
+                      "type": "ref",
+                      "ref": "Lq5dG",
+                      "name": "Use a Local Audio File",
+                      "descendants": {
+                        "vDWKk": {
+                          "content": "Use a Local Audio File"
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "MZ0rl",
+      "x": 1320,
+      "y": 11650,
+      "name": "09.2 · Welcome — waiting for browser",
+      "clip": true,
+      "width": 1200,
+      "height": 800,
+      "fill": "#000000",
+      "cornerRadius": 10,
+      "stroke": "#FFFFFF33",
+      "strokeWidth": 1,
+      "layout": "vertical",
+      "children": [
+        {
+          "id": "TvOVs",
+          "type": "ref",
+          "ref": "CDEoK",
+          "name": "Title Bar",
+          "width": "fill_container",
+          "descendants": {
+            "oFOM8": {
+              "content": "Untitled"
+            },
+            "Dzuvw": {
+              "enabled": false
+            }
+          }
+        },
+        {
+          "type": "frame",
+          "id": "Tkhu4",
+          "name": "Content",
+          "width": "fill_container",
+          "height": "fill_container",
+          "layout": "vertical",
+          "gap": 20,
+          "justifyContent": "center",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "frame",
+              "id": "nbRXU",
+              "name": "ModelSetupView (min 520×360, padding 40)",
+              "width": 520,
+              "layout": "vertical",
+              "gap": 20,
+              "padding": 40,
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "VgcBR",
+                  "name": "waveform.badge.magnifyingglass",
+                  "width": 48,
+                  "height": 48,
+                  "icon": "radio",
+                  "library": "lucide",
+                  "fill": "$accent"
+                },
+                {
+                  "type": "text",
+                  "id": "Dp7qi",
+                  "name": "Title",
+                  "fill": "#FFFFFF",
+                  "content": "Welcome to Playola Interview Editor",
+                  "fontFamily": "$font",
+                  "fontSize": 17,
+                  "fontWeight": "700"
+                },
+                {
+                  "type": "text",
+                  "id": "V69HP",
+                  "name": "Subtitle",
+                  "fill": "$secondary",
+                  "textGrowth": "fixed-width",
+                  "width": 420,
+                  "content": "Finish signing in in your browser. This window continues on its own when you're done.",
+                  "textAlign": "center",
+                  "fontFamily": "$font",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "j7UFP",
+                  "name": "Linear ProgressView",
+                  "width": 360,
+                  "height": 6,
+                  "fill": "#FFFFFF1F",
+                  "cornerRadius": 3,
+                  "layout": "none",
+                  "children": [
+                    {
+                      "type": "rectangle",
+                      "cornerRadius": 3,
+                      "id": "D6ZOS",
+                      "x": 0,
+                      "y": 0,
+                      "name": "Fill",
+                      "fill": "$accent",
+                      "width": 110,
+                      "height": 6
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "id": "B3GJNm",
+                  "name": "Status",
+                  "fill": "$secondary",
+                  "textGrowth": "fixed-width",
+                  "width": 420,
+                  "content": "Waiting for Playola…",
+                  "textAlign": "center",
+                  "fontFamily": "$font",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "LFNC6",
+                  "name": "Buttons",
+                  "gap": 12,
+                  "children": [
+                    {
+                      "id": "aCCxy",
+                      "type": "ref",
+                      "ref": "x1SfwR",
+                      "name": "Try Again",
+                      "enabled": false,
+                      "descendants": {
+                        "Y5VII": {
+                          "content": "Try Again"
+                        }
+                      }
+                    },
+                    {
+                      "id": "ihFTh",
+                      "type": "ref",
+                      "ref": "Lq5dG",
+                      "name": "Cancel",
+                      "descendants": {
+                        "vDWKk": {
+                          "content": "Cancel"
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "xdK6E",
+      "x": 2640,
+      "y": 11650,
+      "name": "09.3 · Welcome — sign-in failed",
+      "clip": true,
+      "width": 1200,
+      "height": 800,
+      "fill": "#000000",
+      "cornerRadius": 10,
+      "stroke": "#FFFFFF33",
+      "strokeWidth": 1,
+      "layout": "vertical",
+      "children": [
+        {
+          "id": "Wcsus",
+          "type": "ref",
+          "ref": "CDEoK",
+          "name": "Title Bar",
+          "width": "fill_container",
+          "descendants": {
+            "oFOM8": {
+              "content": "Untitled"
+            },
+            "Dzuvw": {
+              "enabled": false
+            }
+          }
+        },
+        {
+          "type": "frame",
+          "id": "cx0Z0",
+          "name": "Content",
+          "width": "fill_container",
+          "height": "fill_container",
+          "layout": "vertical",
+          "gap": 20,
+          "justifyContent": "center",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "frame",
+              "id": "L4vPWG",
+              "name": "ModelSetupView (min 520×360, padding 40)",
+              "width": 520,
+              "layout": "vertical",
+              "gap": 20,
+              "padding": 40,
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "Q4d8Ru",
+                  "name": "waveform.badge.magnifyingglass",
+                  "width": 48,
+                  "height": 48,
+                  "icon": "radio",
+                  "library": "lucide",
+                  "fill": "$accent"
+                },
+                {
+                  "type": "text",
+                  "id": "y2Kvp",
+                  "name": "Title",
+                  "fill": "#FFFFFF",
+                  "content": "Welcome to Playola Interview Editor",
+                  "fontFamily": "$font",
+                  "fontSize": 17,
+                  "fontWeight": "700"
+                },
+                {
+                  "type": "text",
+                  "id": "G6qNu2",
+                  "name": "Subtitle",
+                  "fill": "$secondary",
+                  "textGrowth": "fixed-width",
+                  "width": 420,
+                  "content": "Sign in with your Playola account to get the interviews assigned to you.",
+                  "textAlign": "center",
+                  "fontFamily": "$font",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "HNJhZ",
+                  "x": 80,
+                  "y": 184,
+                  "name": "Linear ProgressView",
+                  "enabled": false,
+                  "width": 360,
+                  "height": 6,
+                  "fill": "#FFFFFF1F",
+                  "cornerRadius": 3,
+                  "layout": "none",
+                  "children": [
+                    {
+                      "type": "rectangle",
+                      "cornerRadius": 3,
+                      "id": "jTmsk",
+                      "x": 0,
+                      "y": 0,
+                      "name": "Fill",
+                      "fill": "$accent",
+                      "width": 130,
+                      "height": 6
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "id": "q4PNiH",
+                  "name": "Status",
+                  "fill": "$err",
+                  "textGrowth": "fixed-width",
+                  "width": 420,
+                  "content": "Couldn't sign in to Playola. Check your connection and try again.",
+                  "textAlign": "center",
+                  "fontFamily": "$font",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "yrDoV",
+                  "name": "Buttons",
+                  "gap": 12,
+                  "children": [
+                    {
+                      "id": "m8aMQ7",
+                      "type": "ref",
+                      "ref": "x1SfwR",
+                      "name": "Try Again",
+                      "descendants": {
+                        "Y5VII": {
+                          "content": "Try Again"
+                        }
+                      }
+                    },
+                    {
+                      "id": "PYeK3",
+                      "type": "ref",
+                      "ref": "Lq5dG",
+                      "name": "Use a Local Audio File",
+                      "descendants": {
+                        "vDWKk": {
+                          "content": "Use a Local Audio File"
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "BcAW9",
+      "x": 3960,
+      "y": 11650,
+      "name": "09.4 · Welcome — signed out by Playola (401)",
+      "clip": true,
+      "width": 1200,
+      "height": 800,
+      "fill": "#000000",
+      "cornerRadius": 10,
+      "stroke": "#FFFFFF33",
+      "strokeWidth": 1,
+      "layout": "vertical",
+      "children": [
+        {
+          "id": "AzKaW",
+          "type": "ref",
+          "ref": "CDEoK",
+          "name": "Title Bar",
+          "width": "fill_container",
+          "descendants": {
+            "oFOM8": {
+              "content": "Untitled"
+            },
+            "Dzuvw": {
+              "enabled": false
+            }
+          }
+        },
+        {
+          "type": "frame",
+          "id": "RiK4G",
+          "name": "Content",
+          "width": "fill_container",
+          "height": "fill_container",
+          "layout": "vertical",
+          "gap": 20,
+          "justifyContent": "center",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "frame",
+              "id": "Qag7n",
+              "name": "ModelSetupView (min 520×360, padding 40)",
+              "width": 520,
+              "layout": "vertical",
+              "gap": 20,
+              "padding": 40,
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "VOK3v",
+                  "name": "waveform.badge.magnifyingglass",
+                  "width": 48,
+                  "height": 48,
+                  "icon": "radio",
+                  "library": "lucide",
+                  "fill": "$accent"
+                },
+                {
+                  "type": "text",
+                  "id": "t231Bd",
+                  "name": "Title",
+                  "fill": "#FFFFFF",
+                  "content": "Welcome to Playola Interview Editor",
+                  "fontFamily": "$font",
+                  "fontSize": 17,
+                  "fontWeight": "700"
+                },
+                {
+                  "type": "text",
+                  "id": "v8uDl",
+                  "name": "Subtitle",
+                  "fill": "$secondary",
+                  "textGrowth": "fixed-width",
+                  "width": 420,
+                  "content": "Sign in with your Playola account to get the interviews assigned to you.",
+                  "textAlign": "center",
+                  "fontFamily": "$font",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "fpF7i",
+                  "x": 80,
+                  "y": 184,
+                  "name": "Linear ProgressView",
+                  "enabled": false,
+                  "width": 360,
+                  "height": 6,
+                  "fill": "#FFFFFF1F",
+                  "cornerRadius": 3,
+                  "layout": "none",
+                  "children": [
+                    {
+                      "type": "rectangle",
+                      "cornerRadius": 3,
+                      "id": "S6fHz0",
+                      "x": 0,
+                      "y": 0,
+                      "name": "Fill",
+                      "fill": "$accent",
+                      "width": 130,
+                      "height": 6
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "id": "AMeZs",
+                  "name": "Status",
+                  "fill": "$sys-orange",
+                  "textGrowth": "fixed-width",
+                  "width": 420,
+                  "content": "You were signed out of Playola. Sign in again to continue.",
+                  "textAlign": "center",
+                  "fontFamily": "$font",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "yl2vV",
+                  "name": "Buttons",
+                  "gap": 12,
+                  "children": [
+                    {
+                      "id": "GMyMh",
+                      "type": "ref",
+                      "ref": "x1SfwR",
+                      "name": "Sign In with Playola…",
+                      "descendants": {
+                        "Y5VII": {
+                          "content": "Sign In with Playola…"
+                        }
+                      }
+                    },
+                    {
+                      "id": "oKyko",
+                      "type": "ref",
+                      "ref": "Lq5dG",
+                      "name": "Use a Local Audio File",
+                      "descendants": {
+                        "vDWKk": {
+                          "content": "Use a Local Audio File"
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "wrB3j",
+      "x": 0,
+      "y": 12600,
+      "name": "09.5 · Settings — Playola tab (signed in)",
+      "clip": true,
+      "width": 580,
+      "fill": "$sheet",
+      "cornerRadius": 10,
+      "stroke": "#FFFFFF33",
+      "strokeWidth": 1,
+      "layout": "vertical",
+      "children": [
+        {
+          "type": "frame",
+          "id": "rBwAV",
+          "name": "Settings Toolbar (TabView tabs)",
+          "width": "fill_container",
+          "fill": "$chrome",
+          "layout": "vertical",
+          "padding": [
+            0,
+            0,
+            6,
+            0
+          ],
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "frame",
+              "id": "zWDUN",
+              "name": "Title Row",
+              "width": "fill_container",
+              "height": 28,
+              "padding": [
+                0,
+                12
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "u7kHkh",
+                  "name": "Traffic Lights",
+                  "width": 60,
+                  "gap": 8,
+                  "children": [
+                    {
+                      "type": "ellipse",
+                      "id": "nNfI3",
+                      "name": "Light",
+                      "fill": "#FF5F57",
+                      "width": 12,
+                      "height": 12
+                    },
+                    {
+                      "type": "ellipse",
+                      "id": "FSYN8",
+                      "name": "Light",
+                      "fill": "#4A4A4C",
+                      "width": 12,
+                      "height": 12
+                    },
+                    {
+                      "type": "ellipse",
+                      "id": "yOg07",
+                      "name": "Light",
+                      "fill": "#4A4A4C",
+                      "width": 12,
+                      "height": 12
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "hMsQG",
+                  "name": "Spacer",
+                  "width": "fill_container",
+                  "height": 1
+                },
+                {
+                  "type": "text",
+                  "id": "S67ZpP",
+                  "name": "Window Title",
+                  "fill": "$label",
+                  "content": "Playola",
+                  "fontFamily": "$font",
+                  "fontSize": 13,
+                  "fontWeight": "700"
+                },
+                {
+                  "type": "frame",
+                  "id": "FSU3X",
+                  "name": "Spacer",
+                  "width": "fill_container",
+                  "height": 1
+                },
+                {
+                  "type": "frame",
+                  "id": "vncDu",
+                  "name": "Balance",
+                  "width": 60,
+                  "height": 1
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "SO6hO",
+              "name": "Tab Items",
+              "gap": 2,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "NhGas",
+                  "name": "Tab — Cut Suggestions",
+                  "fill": "#00000000",
+                  "cornerRadius": 6,
+                  "layout": "vertical",
+                  "gap": 2,
+                  "padding": [
+                    4,
+                    8
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "EQlWP",
+                      "name": "content_cut",
+                      "width": 22,
+                      "height": 22,
+                      "icon": "content_cut",
+                      "library": "Material Symbols Rounded",
+                      "fill": "#FFFFFFB3"
+                    },
+                    {
+                      "type": "text",
+                      "id": "c68AOy",
+                      "name": "Label",
+                      "fill": "#FFFFFFB3",
+                      "content": "Cut Suggestions",
+                      "fontFamily": "$font",
+                      "fontSize": 11,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "M5Lzv",
+                  "name": "Tab — Configure Suggestions",
+                  "fill": "#00000000",
+                  "cornerRadius": 6,
+                  "layout": "vertical",
+                  "gap": 2,
+                  "padding": [
+                    4,
+                    8
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "m9p9Im",
+                      "name": "list_alt",
+                      "width": 22,
+                      "height": 22,
+                      "icon": "list_alt",
+                      "library": "Material Symbols Rounded",
+                      "fill": "#FFFFFFB3"
+                    },
+                    {
+                      "type": "text",
+                      "id": "NflOd",
+                      "name": "Label",
+                      "fill": "#FFFFFFB3",
+                      "content": "Configure Suggestions",
+                      "fontFamily": "$font",
+                      "fontSize": 11,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "b5zEX",
+                  "name": "Tab — Editing",
+                  "fill": "#00000000",
+                  "cornerRadius": 6,
+                  "layout": "vertical",
+                  "gap": 2,
+                  "padding": [
+                    4,
+                    8
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "xCGE1",
+                      "name": "tune",
+                      "width": 22,
+                      "height": 22,
+                      "icon": "tune",
+                      "library": "Material Symbols Rounded",
+                      "fill": "#FFFFFFB3"
+                    },
+                    {
+                      "type": "text",
+                      "id": "DiDG8",
+                      "name": "Label",
+                      "fill": "#FFFFFFB3",
+                      "content": "Editing",
+                      "fontFamily": "$font",
+                      "fontSize": 11,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "O1xeW",
+                  "name": "Tab — Playback Latency",
+                  "fill": "#00000000",
+                  "cornerRadius": 6,
+                  "layout": "vertical",
+                  "gap": 2,
+                  "padding": [
+                    4,
+                    8
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "PEaZE",
+                      "name": "sensors",
+                      "width": 22,
+                      "height": 22,
+                      "icon": "sensors",
+                      "library": "Material Symbols Rounded",
+                      "fill": "#FFFFFFB3"
+                    },
+                    {
+                      "type": "text",
+                      "id": "To85A",
+                      "name": "Label",
+                      "fill": "#FFFFFFB3",
+                      "content": "Playback Latency",
+                      "fontFamily": "$font",
+                      "fontSize": 11,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "lQ5Zw",
+                  "name": "Tab — Playola (selected)",
+                  "fill": "#FFFFFF1A",
+                  "cornerRadius": 6,
+                  "layout": "vertical",
+                  "gap": 2,
+                  "padding": [
+                    4,
+                    8
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "AdEuP",
+                      "name": "account_circle",
+                      "width": 22,
+                      "height": 22,
+                      "icon": "account_circle",
+                      "library": "Material Symbols Rounded",
+                      "fill": "$accent"
+                    },
+                    {
+                      "type": "text",
+                      "id": "xyF16",
+                      "name": "Label",
+                      "fill": "$accent",
+                      "content": "Playola",
+                      "fontFamily": "$font",
+                      "fontSize": 11,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "rectangle",
+          "id": "ExEvZ",
+          "name": "Toolbar Divider",
+          "fill": "#000000",
+          "width": "fill_container",
+          "height": 1
+        },
+        {
+          "type": "frame",
+          "id": "ZB431",
+          "name": "Form (.columns, width 460, padding 16)",
+          "width": "fill_container",
+          "layout": "vertical",
+          "gap": 10,
+          "padding": [
+            16,
+            16,
+            20,
+            16
+          ],
+          "children": [
+            {
+              "type": "text",
+              "id": "BI8tl",
+              "name": "Section Header",
+              "fill": "$label",
+              "content": "Account",
+              "fontFamily": "$font",
+              "fontSize": 13,
+              "fontWeight": "700"
+            },
+            {
+              "type": "frame",
+              "id": "Srmky",
+              "name": "Form Row",
+              "width": "fill_container",
+              "gap": 8,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "CHe9D",
+                  "name": "Label Column (trailing)",
+                  "width": 120,
+                  "height": 16,
+                  "justifyContent": "end",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "Qmo9r",
+                      "name": "Label",
+                      "fill": "$label",
+                      "content": "Signed in as:",
+                      "fontFamily": "$font",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "Dm0j2",
+                  "name": "Control Column",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 6,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "EP4eL",
+                      "name": "Name",
+                      "fill": "$label",
+                      "content": "Brian Keane",
+                      "fontFamily": "$font",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "Uv2ln",
+                      "name": "Email",
+                      "fill": "$secondary",
+                      "content": "brian@playola.fm",
+                      "fontFamily": "$font",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "oClxu",
+              "name": "Form Row",
+              "width": "fill_container",
+              "gap": 8,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "A0a5bx",
+                  "name": "Label Column (trailing)",
+                  "width": 120,
+                  "height": 16,
+                  "justifyContent": "end"
+                },
+                {
+                  "type": "frame",
+                  "id": "lq7dS",
+                  "name": "Control Column",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 6,
+                  "children": [
+                    {
+                      "id": "vwlC1",
+                      "type": "ref",
+                      "ref": "Lq5dG",
+                      "name": "Sign Out",
+                      "descendants": {
+                        "vDWKk": {
+                          "content": "Sign Out"
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "rectangle",
+              "id": "Pz8Bz",
+              "name": "Spacer",
+              "fill": "#00000000",
+              "width": 1,
+              "height": 6
+            },
+            {
+              "type": "text",
+              "id": "fnuWP",
+              "name": "Section Header",
+              "fill": "$label",
+              "content": "Server (debug builds only)",
+              "fontFamily": "$font",
+              "fontSize": 13,
+              "fontWeight": "700"
+            },
+            {
+              "type": "frame",
+              "id": "Xc3dV",
+              "name": "Form Row",
+              "width": "fill_container",
+              "gap": 8,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "hgSGX",
+                  "name": "Label Column (trailing)",
+                  "width": 120,
+                  "height": 16,
+                  "justifyContent": "end",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "JqtjJ",
+                      "name": "Label",
+                      "fill": "$label",
+                      "content": "Server:",
+                      "fontFamily": "$font",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "fww7M",
+                  "name": "Control Column",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 6,
+                  "children": [
+                    {
+                      "id": "dP58s",
+                      "type": "ref",
+                      "ref": "ZZw2x",
+                      "name": "Server Picker",
+                      "descendants": {
+                        "g1s7kF": {
+                          "content": "Production"
+                        }
+                      }
+                    },
+                    {
+                      "type": "text",
+                      "id": "xy0M3",
+                      "name": "Help (.callout secondary)",
+                      "fill": "$secondary",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "Production, Staging, or Local. Each server keeps its own sign-in.",
+                      "fontFamily": "$font",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "PP6TU",
+      "x": 700,
+      "y": 12600,
+      "name": "09.6 · Settings — Playola tab (signed out)",
+      "clip": true,
+      "width": 580,
+      "fill": "$sheet",
+      "cornerRadius": 10,
+      "stroke": "#FFFFFF33",
+      "strokeWidth": 1,
+      "layout": "vertical",
+      "children": [
+        {
+          "type": "frame",
+          "id": "f8ABiV",
+          "name": "Settings Toolbar (TabView tabs)",
+          "width": "fill_container",
+          "fill": "$chrome",
+          "layout": "vertical",
+          "padding": [
+            0,
+            0,
+            6,
+            0
+          ],
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "frame",
+              "id": "NEl9D",
+              "name": "Title Row",
+              "width": "fill_container",
+              "height": 28,
+              "padding": [
+                0,
+                12
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "y9ZJnL",
+                  "name": "Traffic Lights",
+                  "width": 60,
+                  "gap": 8,
+                  "children": [
+                    {
+                      "type": "ellipse",
+                      "id": "e22uJ",
+                      "name": "Light",
+                      "fill": "#FF5F57",
+                      "width": 12,
+                      "height": 12
+                    },
+                    {
+                      "type": "ellipse",
+                      "id": "x37hOd",
+                      "name": "Light",
+                      "fill": "#4A4A4C",
+                      "width": 12,
+                      "height": 12
+                    },
+                    {
+                      "type": "ellipse",
+                      "id": "EX2vy",
+                      "name": "Light",
+                      "fill": "#4A4A4C",
+                      "width": 12,
+                      "height": 12
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "EHE65",
+                  "name": "Spacer",
+                  "width": "fill_container",
+                  "height": 1
+                },
+                {
+                  "type": "text",
+                  "id": "t02TLT",
+                  "name": "Window Title",
+                  "fill": "$label",
+                  "content": "Playola",
+                  "fontFamily": "$font",
+                  "fontSize": 13,
+                  "fontWeight": "700"
+                },
+                {
+                  "type": "frame",
+                  "id": "nxFLE",
+                  "name": "Spacer",
+                  "width": "fill_container",
+                  "height": 1
+                },
+                {
+                  "type": "frame",
+                  "id": "WiNAE",
+                  "name": "Balance",
+                  "width": 60,
+                  "height": 1
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "U6Spu",
+              "name": "Tab Items",
+              "gap": 2,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "nE2rW",
+                  "name": "Tab — Cut Suggestions",
+                  "fill": "#00000000",
+                  "cornerRadius": 6,
+                  "layout": "vertical",
+                  "gap": 2,
+                  "padding": [
+                    4,
+                    8
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "dQRRU",
+                      "name": "content_cut",
+                      "width": 22,
+                      "height": 22,
+                      "icon": "content_cut",
+                      "library": "Material Symbols Rounded",
+                      "fill": "#FFFFFFB3"
+                    },
+                    {
+                      "type": "text",
+                      "id": "TNPUK",
+                      "name": "Label",
+                      "fill": "#FFFFFFB3",
+                      "content": "Cut Suggestions",
+                      "fontFamily": "$font",
+                      "fontSize": 11,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "FueDz",
+                  "name": "Tab — Configure Suggestions",
+                  "fill": "#00000000",
+                  "cornerRadius": 6,
+                  "layout": "vertical",
+                  "gap": 2,
+                  "padding": [
+                    4,
+                    8
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "E3OQL6",
+                      "name": "list_alt",
+                      "width": 22,
+                      "height": 22,
+                      "icon": "list_alt",
+                      "library": "Material Symbols Rounded",
+                      "fill": "#FFFFFFB3"
+                    },
+                    {
+                      "type": "text",
+                      "id": "DDII1",
+                      "name": "Label",
+                      "fill": "#FFFFFFB3",
+                      "content": "Configure Suggestions",
+                      "fontFamily": "$font",
+                      "fontSize": 11,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "PqWvG",
+                  "name": "Tab — Editing",
+                  "fill": "#00000000",
+                  "cornerRadius": 6,
+                  "layout": "vertical",
+                  "gap": 2,
+                  "padding": [
+                    4,
+                    8
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "QzfsZ",
+                      "name": "tune",
+                      "width": 22,
+                      "height": 22,
+                      "icon": "tune",
+                      "library": "Material Symbols Rounded",
+                      "fill": "#FFFFFFB3"
+                    },
+                    {
+                      "type": "text",
+                      "id": "N9NfeQ",
+                      "name": "Label",
+                      "fill": "#FFFFFFB3",
+                      "content": "Editing",
+                      "fontFamily": "$font",
+                      "fontSize": 11,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "lQo5Z",
+                  "name": "Tab — Playback Latency",
+                  "fill": "#00000000",
+                  "cornerRadius": 6,
+                  "layout": "vertical",
+                  "gap": 2,
+                  "padding": [
+                    4,
+                    8
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "PxXAg",
+                      "name": "sensors",
+                      "width": 22,
+                      "height": 22,
+                      "icon": "sensors",
+                      "library": "Material Symbols Rounded",
+                      "fill": "#FFFFFFB3"
+                    },
+                    {
+                      "type": "text",
+                      "id": "fHZag",
+                      "name": "Label",
+                      "fill": "#FFFFFFB3",
+                      "content": "Playback Latency",
+                      "fontFamily": "$font",
+                      "fontSize": 11,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "hIqTV",
+                  "name": "Tab — Playola (selected)",
+                  "fill": "#FFFFFF1A",
+                  "cornerRadius": 6,
+                  "layout": "vertical",
+                  "gap": 2,
+                  "padding": [
+                    4,
+                    8
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "Rgz1o",
+                      "name": "account_circle",
+                      "width": 22,
+                      "height": 22,
+                      "icon": "account_circle",
+                      "library": "Material Symbols Rounded",
+                      "fill": "$accent"
+                    },
+                    {
+                      "type": "text",
+                      "id": "fo57b",
+                      "name": "Label",
+                      "fill": "$accent",
+                      "content": "Playola",
+                      "fontFamily": "$font",
+                      "fontSize": 11,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "rectangle",
+          "id": "E6rop",
+          "name": "Toolbar Divider",
+          "fill": "#000000",
+          "width": "fill_container",
+          "height": 1
+        },
+        {
+          "type": "frame",
+          "id": "Z6b3m5",
+          "name": "Form (.columns, width 460, padding 16)",
+          "width": "fill_container",
+          "layout": "vertical",
+          "gap": 10,
+          "padding": [
+            16,
+            16,
+            20,
+            16
+          ],
+          "children": [
+            {
+              "type": "text",
+              "id": "CinGa",
+              "name": "Section Header",
+              "fill": "$label",
+              "content": "Account",
+              "fontFamily": "$font",
+              "fontSize": 13,
+              "fontWeight": "700"
+            },
+            {
+              "type": "frame",
+              "id": "e4xhKo",
+              "name": "Form Row",
+              "width": "fill_container",
+              "gap": 8,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "jEb0I",
+                  "name": "Label Column (trailing)",
+                  "width": 120,
+                  "height": 16,
+                  "justifyContent": "end",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "S5xTPO",
+                      "name": "Label",
+                      "fill": "$label",
+                      "content": "Status:",
+                      "fontFamily": "$font",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "nbLci",
+                  "name": "Control Column",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 6,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "PT6Gs",
+                      "name": "Status",
+                      "fill": "$label",
+                      "content": "Not signed in",
+                      "fontFamily": "$font",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "SxYDG",
+                      "name": "Help (.callout secondary)",
+                      "fill": "$secondary",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "Sign in to get the interviews assigned to you on Playola.",
+                      "fontFamily": "$font",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "m7NvKB",
+              "name": "Form Row",
+              "width": "fill_container",
+              "gap": 8,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "d0jN3",
+                  "name": "Label Column (trailing)",
+                  "width": 120,
+                  "height": 16,
+                  "justifyContent": "end"
+                },
+                {
+                  "type": "frame",
+                  "id": "ES2S4",
+                  "name": "Control Column",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 6,
+                  "children": [
+                    {
+                      "id": "m6VntT",
+                      "type": "ref",
+                      "ref": "x1SfwR",
+                      "name": "Sign In with Playola…",
+                      "descendants": {
+                        "Y5VII": {
+                          "content": "Sign In with Playola…"
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "rectangle",
+              "id": "xFSYM",
+              "name": "Spacer",
+              "fill": "#00000000",
+              "width": 1,
+              "height": 6
+            },
+            {
+              "type": "text",
+              "id": "d2xleZ",
+              "name": "Section Header",
+              "fill": "$label",
+              "content": "Server (debug builds only)",
+              "fontFamily": "$font",
+              "fontSize": 13,
+              "fontWeight": "700"
+            },
+            {
+              "type": "frame",
+              "id": "OtW0y",
+              "name": "Form Row",
+              "width": "fill_container",
+              "gap": 8,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "GGJua",
+                  "name": "Label Column (trailing)",
+                  "width": 120,
+                  "height": 16,
+                  "justifyContent": "end",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "pf29d",
+                      "name": "Label",
+                      "fill": "$label",
+                      "content": "Server:",
+                      "fontFamily": "$font",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "A6HKYc",
+                  "name": "Control Column",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 6,
+                  "children": [
+                    {
+                      "id": "jIMdm",
+                      "type": "ref",
+                      "ref": "ZZw2x",
+                      "name": "Server Picker",
+                      "descendants": {
+                        "g1s7kF": {
+                          "content": "Production"
+                        }
+                      }
+                    },
+                    {
+                      "type": "text",
+                      "id": "OMGGJ",
+                      "name": "Help (.callout secondary)",
+                      "fill": "$secondary",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "Production, Staging, or Local. Each server keeps its own sign-in.",
+                      "fontFamily": "$font",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
         }
       ]
     }
