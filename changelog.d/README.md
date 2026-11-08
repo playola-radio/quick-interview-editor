@@ -21,6 +21,8 @@ Name the file after the change, in short kebab-case: `changelog.d/<short-descrip
   interview, not for engineers. A long bullet may wrap onto indented lines that
   directly follow it.
 - Single-line `<!-- ... -->` comments and blank lines are fine.
+- `.DS_Store` and `.gitkeep` are ignored as directory metadata; every other file
+  must be a Markdown release-note fragment.
 - Anything else is an error, and so is a file with no bullets.
 
 These bullets ship as-is in the in-app update notes (Sparkle), so keep them

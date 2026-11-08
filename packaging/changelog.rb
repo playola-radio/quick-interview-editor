@@ -20,6 +20,7 @@ module Changelog
     "<!-- Don't add notes here. Add a file to changelog.d/ instead (see changelog.d/README.md). -->"
   SECTION_HEADING = "### Changes"
   README = "README.md"
+  METADATA_FILES = [".DS_Store", ".gitkeep"].freeze
   USAGE = <<~USAGE.strip
     usage:
       changelog.rb roll <changelog> <fragments_dir> <version>
@@ -97,7 +98,7 @@ module Changelog
   def self.fragment_paths(directory)
     raise Error, "#{directory} is not a directory" unless File.directory?(directory)
 
-    Dir.children(directory).sort.reject { |name| name == README }.map do |name|
+    Dir.children(directory).sort.reject { |name| name == README || METADATA_FILES.include?(name) }.map do |name|
       path = File.join(directory, name)
       raise Error, "#{path}: not a .md fragment file" unless name.end_with?(".md") && File.file?(path)
 

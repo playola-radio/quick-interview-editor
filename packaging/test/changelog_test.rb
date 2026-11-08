@@ -219,6 +219,16 @@ class ChangelogTest < Minitest::Test
     end
   end
 
+  def test_fragment_paths_ignores_directory_metadata
+    in_repo do |_changelog, directory|
+      File.write(File.join(directory, ".DS_Store"), "")
+      File.write(File.join(directory, ".gitkeep"), "")
+      File.write(File.join(directory, "a.md"), "- First.\n")
+
+      assert_equal [File.join(directory, "a.md")], Changelog.fragment_paths(directory)
+    end
+  end
+
   def test_cli_rolls_and_reports_failures
     in_repo do |changelog, directory|
       File.write(File.join(directory, "a.md"), FRAGMENT)
