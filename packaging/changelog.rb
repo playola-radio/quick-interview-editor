@@ -1,6 +1,6 @@
 #!/usr/bin/env ruby
 # Roll release notes into CHANGELOG.md at release time.
-#   packaging/changelog.rb roll <changelog> <fragments_dir> <version> [<date>]
+#   packaging/changelog.rb roll <changelog> <fragments_dir> <version>
 # Pull requests add one small file to changelog.d/ instead of editing CHANGELOG.md
 # (see changelog.d/README.md). Rolling reads any bullets still under
 # ## [Unreleased], then every fragment in filename order, writes them as one dated
@@ -14,13 +14,13 @@ module Changelog
   class Error < StandardError; end
 
   VERSION = /\A\d+\.\d+\.\d+\z/
-  DATE = /\A\d{4}-\d{2}-\d{2}\z/
+  COMMENT = /\A<!--((?!-->).)*-->\z/
   UNRELEASED_HEADING = "## [Unreleased]"
   UNRELEASED_COMMENT =
     "<!-- Don't add notes here. Add a file to changelog.d/ instead (see changelog.d/README.md). -->"
   SECTION_HEADING = "### Changes"
   README = "README.md"
-  USAGE = "usage: changelog.rb roll <changelog> <fragments_dir> <version> [<date>]"
+  USAGE = "usage: changelog.rb roll <changelog> <fragments_dir> <version>"
 
   # Returns the bullets in `lines` (each an array of output lines). `first_line`
   # is the 1-based line number of lines[0] in `source`, for error messages.
@@ -32,11 +32,11 @@ module Changelog
       location = "#{source}:#{first_line + index}"
       if line.empty?
         open_bullet = nil
-      elsif line.start_with?("<!--") && line.end_with?("-->")
+      elsif COMMENT.match?(line)
         open_bullet = nil
       elsif line == SECTION_HEADING
         open_bullet = nil
-      elsif line.start_with?("#")
+      elsif line.lstrip.start_with?("#")
         raise Error, "#{location}: unexpected heading #{line.inspect} (only #{SECTION_HEADING.inspect} is allowed)"
       elsif line.start_with?("- ") && !line[2..-1].strip.empty?
         open_bullet = ["- #{line[2..-1].strip}"]
@@ -62,7 +62,6 @@ module Changelog
   # [source, text] pairs.
   def self.roll(changelog, fragments, version, date)
     raise Error, "version must be semantic version X.Y.Z, got #{version.inspect}" unless VERSION.match?(version.to_s)
-    raise Error, "date must be YYYY-MM-DD, got #{date.inspect}" unless DATE.match?(date.to_s)
 
     lines = changelog.lines
     headings = lines.each_index.select { |index| lines[index].rstrip == UNRELEASED_HEADING }
@@ -73,7 +72,7 @@ module Changelog
     end
 
     start = headings.first + 1
-    finish = (start...lines.length).find { |index| lines[index].start_with?("## ") } || lines.length
+    finish = (start...lines.length).find { |index| lines[index].start_with?("## [") } || lines.length
     bullets = parse_notes(lines[start...finish], "CHANGELOG.md", start + 1)
     fragments.each { |source, text| bullets.concat(parse_fragment(text, source)) }
     raise Error, "no release notes: add a file to changelog.d/ (see changelog.d/README.md)" if bullets.empty?
@@ -126,10 +125,10 @@ module Changelog
 
   def self.run_cli(arguments)
     command = arguments.shift
-    raise Error, USAGE unless command == "roll" && [3, 4].include?(arguments.length)
+    raise Error, USAGE unless command == "roll" && arguments.length == 3
 
-    changelog_path, directory, version, date = arguments
-    date ||= Date.today.iso8601
+    changelog_path, directory, version = arguments
+    date = Date.today.iso8601
     paths = roll_files(changelog_path, directory, version, date)
     puts "Rolled #{paths.length} changelog.d fragment(s) into [#{version}] - #{date}"
   end

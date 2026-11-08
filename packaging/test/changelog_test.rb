@@ -93,6 +93,32 @@ class ChangelogTest < Minitest::Test
     assert_match(/\Aa.md:3:/, error.message)
   end
 
+  def test_rejects_visible_text_between_comments
+    error = assert_raises(Changelog::Error) do
+      Changelog.roll(CHANGELOG, [["a.md", "- Fine.\n<!-- a --> Hidden note. <!-- b -->\n"]], "2.7.0", "2026-11-07")
+    end
+
+    assert_match(/\Aa.md:2:/, error.message)
+  end
+
+  def test_rejects_an_indented_heading_after_a_bullet
+    error = assert_raises(Changelog::Error) do
+      Changelog.roll(CHANGELOG, [["a.md", "- Fine.\n  ### Ops\n"]], "2.7.0", "2026-11-07")
+    end
+
+    assert_match(/\Aa.md:2: unexpected heading/, error.message)
+  end
+
+  def test_rejects_a_non_version_level_two_heading_under_unreleased
+    changelog = CHANGELOG.sub("## [2.6.2]", "## Changes\n\n- Stranded note.\n\n## [2.6.2]")
+
+    error = assert_raises(Changelog::Error) do
+      Changelog.roll(changelog, [], "2.7.0", "2026-11-07")
+    end
+
+    assert_match(/\ACHANGELOG.md:10: unexpected heading "## Changes"/, error.message)
+  end
+
   def test_rejects_an_empty_bullet
     error = assert_raises(Changelog::Error) do
       Changelog.roll(CHANGELOG, [["a.md", "- \n"]], "2.7.0", "2026-11-07")
