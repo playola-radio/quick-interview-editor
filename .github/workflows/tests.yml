@@ -94,9 +94,13 @@ jobs:
         run: |
           ruby -c packaging/appcast.rb
           ruby -c packaging/release_notes.rb
+          ruby -c packaging/changelog.rb
 
       - name: Test release notes and appcast mutation
         run: ruby packaging/test/release_notes_test.rb
+
+      - name: Test the changelog roll
+        run: ruby packaging/test/changelog_test.rb
 
       - name: Bash syntax-check the packaging scripts
         run: bash -n packaging/make-dmg.sh packaging/sign-app.sh

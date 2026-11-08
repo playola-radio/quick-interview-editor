@@ -76,10 +76,11 @@ platform :mac do
 
   # Bump the version single-source (project.yml), regenerate the Xcode project, and
   # commit — so `release` starts from a clean tree with a fresh, never-reused
-  # CFBundleVersion. Usage:
+  # CFBundleVersion. A new marketing version also rolls the changelog.d/ fragments
+  # into a dated CHANGELOG.md section (and deletes them) in the same commit. Usage:
   #   bundle exec fastlane mac bump                 # increment the build integer only
-  #   bundle exec fastlane mac bump version:1.1.0   # + set the marketing version
-  desc "Bump MARKETING_VERSION / integer CURRENT_PROJECT_VERSION, regenerate, commit"
+  #   bundle exec fastlane mac bump version:1.1.0   # + set the marketing version, roll notes
+  desc "Bump MARKETING_VERSION / integer CURRENT_PROJECT_VERSION, roll changelog, regenerate, commit"
   lane :bump do |options|
     project_yml = File.expand_path("../project.yml", __dir__)
     text = File.read(project_yml)
@@ -91,6 +92,9 @@ platform :mac do
     if (new_marketing = options[:version])
       UI.user_error!("version must be semver X.Y.Z") unless new_marketing =~ /\A\d+\.\d+\.\d+\z/
       text = text.sub(/MARKETING_VERSION:\s*"[^"]*"/, %(MARKETING_VERSION: "#{new_marketing}"))
+      # Roll first: a malformed note aborts before project.yml is touched.
+      sh("cd ../.. && ruby packaging/changelog.rb roll CHANGELOG.md changelog.d '#{new_marketing}'")
+      sh("cd ../.. && git add CHANGELOG.md changelog.d")
     end
     File.write(project_yml, text)
     marketing = text[/MARKETING_VERSION:\s*"([^"]*)"/, 1]
