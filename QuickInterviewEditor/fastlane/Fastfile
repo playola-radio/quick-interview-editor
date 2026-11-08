@@ -82,6 +82,7 @@ platform :mac do
   #   bundle exec fastlane mac bump version:1.1.0   # + set the marketing version, roll notes
   desc "Bump MARKETING_VERSION / integer CURRENT_PROJECT_VERSION, roll changelog, regenerate, commit"
   lane :bump do |options|
+    ensure_git_status_clean
     project_yml = File.expand_path("../project.yml", __dir__)
     text = File.read(project_yml)
     current_build = text[/CURRENT_PROJECT_VERSION:\s*"(\d+)"/, 1]

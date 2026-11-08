@@ -102,6 +102,9 @@ jobs:
       - name: Test the changelog roll
         run: ruby packaging/test/changelog_test.rb
 
+      - name: Validate checked-in changelog fragments
+        run: ruby packaging/changelog.rb validate changelog.d
+
       - name: Bash syntax-check the packaging scripts
         run: bash -n packaging/make-dmg.sh packaging/sign-app.sh
 

@@ -20,7 +20,11 @@ module Changelog
     "<!-- Don't add notes here. Add a file to changelog.d/ instead (see changelog.d/README.md). -->"
   SECTION_HEADING = "### Changes"
   README = "README.md"
-  USAGE = "usage: changelog.rb roll <changelog> <fragments_dir> <version>"
+  USAGE = <<~USAGE.strip
+    usage:
+      changelog.rb roll <changelog> <fragments_dir> <version>
+      changelog.rb validate <fragments_dir>
+  USAGE
 
   # Returns the bullets in `lines` (each an array of output lines). `first_line`
   # is the 1-based line number of lines[0] in `source`, for error messages.
@@ -110,6 +114,13 @@ module Changelog
     paths
   end
 
+  # Parses every checked-in fragment without changing the changelog or fragments.
+  def self.validate_fragments(directory)
+    paths = fragment_paths(directory)
+    paths.each { |path| parse_fragment(File.read(path), path) }
+    paths
+  end
+
   def self.replace_file(path, contents)
     Tempfile.create(["changelog-", ".md"], File.dirname(path)) do |file|
       file.write(contents)
@@ -125,12 +136,22 @@ module Changelog
 
   def self.run_cli(arguments)
     command = arguments.shift
-    raise Error, USAGE unless command == "roll" && arguments.length == 3
+    case command
+    when "roll"
+      raise Error, USAGE unless arguments.length == 3
 
-    changelog_path, directory, version = arguments
-    date = Date.today.iso8601
-    paths = roll_files(changelog_path, directory, version, date)
-    puts "Rolled #{paths.length} changelog.d fragment(s) into [#{version}] - #{date}"
+      changelog_path, directory, version = arguments
+      date = Date.today.iso8601
+      paths = roll_files(changelog_path, directory, version, date)
+      puts "Rolled #{paths.length} changelog.d fragment(s) into [#{version}] - #{date}"
+    when "validate"
+      raise Error, USAGE unless arguments.length == 1
+
+      paths = validate_fragments(arguments.first)
+      puts "Validated #{paths.length} changelog.d fragment(s)"
+    else
+      raise Error, USAGE
+    end
   end
 end
 

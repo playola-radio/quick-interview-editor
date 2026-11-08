@@ -234,6 +234,25 @@ class ChangelogTest < Minitest::Test
     end
   end
 
+  def test_cli_validates_fragments_without_rolling_or_deleting_them
+    in_repo do |_changelog, directory|
+      fragment = File.join(directory, "a.md")
+      File.write(fragment, "### Changes\n- Fine.\n")
+
+      _stdout, stderr, status = Open3.capture3(RbConfig.ruby, SCRIPT, "validate", directory)
+
+      assert status.success?, stderr
+      assert_equal "### Changes\n- Fine.\n", File.read(fragment)
+
+      File.write(fragment, "Not a bullet.\n")
+      _stdout, stderr, status = Open3.capture3(RbConfig.ruby, SCRIPT, "validate", directory)
+
+      refute status.success?
+      assert_match(/a\.md:1: expected a "- " bullet/, stderr)
+      assert_equal "Not a bullet.\n", File.read(fragment)
+    end
+  end
+
   private
 
   def in_repo

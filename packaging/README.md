@@ -214,7 +214,9 @@ bundle exec fastlane mac release              # build → sign → notarize → 
 cd ..
 ```
 
-`bump` edits the version single-source in `project.yml`
+Start `bump` from a clean working tree, including no untracked files. This makes
+every fragment and release input committed before the roll can delete anything.
+`bump` enforces that precondition, then edits the version single-source in `project.yml`
 (`MARKETING_VERSION` + the integer `CURRENT_PROJECT_VERSION` = `sparkle:version`),
 regenerates the Xcode project, and commits — so `release` starts from a clean
 tree with a never-reused `CFBundleVersion`. With `version:`, it first runs
@@ -226,7 +228,8 @@ at all aborts `bump` before anything changes. Review the rolled section before
 running `release`. If `bump` fails after rolling (say, `xcodegen` errors), undo
 it from the repository root with
 `git restore --staged --worktree CHANGELOG.md changelog.d QuickInterviewEditor`
-before rerunning; the fragments are committed, so nothing is lost. Env overrides (defaults shown):
+before rerunning; the clean-tree precondition means the fragments are recoverable
+from HEAD. Env overrides (defaults shown):
 `RELEASE_S3_BUCKET=playola-static`,
 `RELEASE_S3_PREFIX=downloads/PlayolaInterviewEditor`,
 `RELEASE_DOWNLOAD_HOST=https://playola-static.s3.amazonaws.com`,
