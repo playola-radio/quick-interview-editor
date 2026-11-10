@@ -1,13 +1,13 @@
 # Changelog
 
+Don't edit this file in a pull request; add a file to changelog.d/ (see changelog.d/README.md).
+
 Notable changes to Playola Interview Editor are documented here. Release notes
 focus on changes that affect editing work rather than internal implementation.
 
 ## [Unreleased]
 
-- Sign in to your Playola account from Settings → Playola or the welcome screen
-  in an empty window. The app stays signed in between launches, and everything
-  that works without an account still works without one.
+<!-- Don't add notes here. Add a file to changelog.d/ instead (see changelog.d/README.md). -->
 
 ## [2.6.2] - 2026-10-30
 

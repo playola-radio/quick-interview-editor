@@ -201,18 +201,10 @@ via Sparkle (the appcast points at the versioned DMG, not `latest`).
 
 ### One-command release
 
-Before bumping, move finished entries from `Unreleased` in the root
-`CHANGELOG.md` into an exact dated heading:
-
-```markdown
-## [2.0.1] - 2026-09-09
-
-- Describe a meaningful user-facing change.
-```
-
-Commit that changelog section before releasing, then run from the repository
-root. Fastlane changes into its own directory while it runs, so invoke it from
-`QuickInterviewEditor`, where the Gemfile lives:
+Release notes accumulate as one file per pull request in `changelog.d/` (format
+in `changelog.d/README.md`); nobody edits `CHANGELOG.md` by hand. Fastlane changes
+into its own directory while it runs, so invoke it from `QuickInterviewEditor`,
+where the Gemfile lives:
 
 ```bash
 cd QuickInterviewEditor
@@ -222,10 +214,22 @@ bundle exec fastlane mac release              # build → sign → notarize → 
 cd ..
 ```
 
-`bump` edits the version single-source in `project.yml`
+Start `bump` from a clean working tree, including no untracked files. This makes
+every fragment and release input committed before the roll can delete anything.
+`bump` enforces that precondition, then edits the version single-source in `project.yml`
 (`MARKETING_VERSION` + the integer `CURRENT_PROJECT_VERSION` = `sparkle:version`),
 regenerates the Xcode project, and commits — so `release` starts from a clean
-tree with a never-reused `CFBundleVersion`. Env overrides (defaults shown):
+tree with a never-reused `CFBundleVersion`. With `version:`, it first runs
+`packaging/changelog.rb roll`, which moves any bullets left under `Unreleased` plus
+every `changelog.d/` fragment into a `## [X.Y.Z] - <today>` section of
+`CHANGELOG.md` and deletes those fragments, all in the same commit. A malformed
+note (reported as `file:line`), an existing section for that version, or no notes
+at all aborts `bump` before anything changes. Review the rolled section before
+running `release`. If `bump` fails after rolling (say, `xcodegen` errors), undo
+it from the repository root with
+`git restore --staged --worktree CHANGELOG.md changelog.d QuickInterviewEditor`
+before rerunning; the clean-tree precondition means the fragments are recoverable
+from HEAD. Env overrides (defaults shown):
 `RELEASE_S3_BUCKET=playola-static`,
 `RELEASE_S3_PREFIX=downloads/PlayolaInterviewEditor`,
 `RELEASE_DOWNLOAD_HOST=https://playola-static.s3.amazonaws.com`,
