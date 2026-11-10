@@ -156,7 +156,7 @@ final class PlayolaSessionModel: ViewModel {
     } catch PlayolaAPIError.unauthorized {
       guard isCurrent(environment, generation) else { return }
       do {
-        try await tokenStore.delete(environment)
+        try await tokenStore.deleteIfMatching(token, environment)
       } catch {
         AppLog.playola.error(
           "Couldn't delete the rejected Playola sign-in: \(String(describing: error), privacy: .public)"

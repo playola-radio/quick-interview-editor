@@ -493,6 +493,30 @@ struct PlayolaSessionModelTests {
     }
   }
 
+  @Test func staleMeUnauthorizedDoesNotDeleteANewerToken() async throws {
+    let gate = Gate()
+    let store = PlayolaTokenStore.inMemory([.production: "P"])
+    try await withDependencies {
+      Self.base(&$0)
+      $0.playolaTokenStore = store
+      $0.playolaAPI.currentUser = { _, _ in
+        await gate.pass()
+        throw PlayolaAPIError.unauthorized
+      }
+    } operation: {
+      let model = PlayolaSessionModel()
+
+      let task = Task { await model.appLaunched() }
+      await gate.waitUntilStarted()
+      try await store.save("N", .production)
+      gate.open()
+      await task.value
+
+      let saved = try await store.load(.production)
+      expectNoDifference(saved, "N")
+    }
+  }
+
   @Test func switchingAwayAndBackMidRestoreRestoresTheRightToken() async {
     let gate = Gate()
     let productionLoads = LockIsolated(0)
