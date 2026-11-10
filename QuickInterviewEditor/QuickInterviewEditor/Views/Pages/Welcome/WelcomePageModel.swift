@@ -44,7 +44,7 @@ final class WelcomePageModel: ViewModel {
   var message: String {
     isWaiting
       ? "Finish signing in in your browser. This window continues on its own when you're done."
-      : "Sign in with your Playola account to get the interviews assigned to you."
+      : "Sign in with your Playola account to get ready for future assigned interviews."
   }
 
   var notice: Notice? {
@@ -82,6 +82,7 @@ final class WelcomePageModel: ViewModel {
 
   func fileDropped(_ urls: [URL], modelSetupRequired: Bool) -> Bool {
     guard !modelSetupRequired else {
+      guard urls.contains(where: ProjectModel.isAudioFile) else { return false }
       choseLocalFile = true
       return false
     }

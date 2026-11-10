@@ -353,7 +353,7 @@ final class ProjectModel: ViewModel {
   func prepareForMasteringTapped() { isMasteringSheetPresented = true }
 
   // MARK: - Private Helpers
-  private static func isAudioFile(_ url: URL) -> Bool {
+  static func isAudioFile(_ url: URL) -> Bool {
     guard url.isFileURL else { return false }
     return UTType(filenameExtension: url.pathExtension)?.conforms(to: .audio) ?? false
   }

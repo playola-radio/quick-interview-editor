@@ -47,7 +47,7 @@ final class PlayolaSettingsModel: ViewModel {
       if reason == .rejectedByPlayola {
         return "You were signed out of Playola. Sign in again to continue."
       }
-      return "Sign in to get the interviews assigned to you on Playola."
+      return "Sign in to get ready for future assigned interviews on Playola."
     }
   }
 

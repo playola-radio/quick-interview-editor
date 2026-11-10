@@ -72,7 +72,6 @@ struct PlayolaAccount: Equatable, Sendable {
 
 | `PlayolaUser` field | Type | Null | Notes |
 |---|---|---|---|
-| `id` | String | no | |
 | `firstName` | String | no | |
 | `lastName` | String | yes | Optional, matching the iOS `LoggedInUser` |
 | `email` | String | no | |

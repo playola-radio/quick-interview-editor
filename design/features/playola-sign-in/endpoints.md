@@ -77,7 +77,7 @@ and its live implementation.
 - **Response `200`** (the fields the app reads; it ignores the rest):
   ```json
   {
-    "id": "7c2e…", "firstName": "Brian", "lastName": "Keane", "email": "brian@playola.fm"
+    "firstName": "Brian", "lastName": "Keane", "email": "brian@playola.fm"
   }
   ```
 - **Errors:**

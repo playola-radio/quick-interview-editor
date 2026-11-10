@@ -98,7 +98,7 @@ struct PlayolaSettingsModelTests {
       expectNoDifference(model.accountRowLabel, "Status:")
       expectNoDifference(model.accountValue, "Not signed in")
       expectNoDifference(
-        model.accountDetail, "Sign in to get the interviews assigned to you on Playola.")
+        model.accountDetail, "Sign in to get ready for future assigned interviews on Playola.")
       expectNoDifference(model.accountDetailIsError, false)
       expectNoDifference(model.showsAccountButton, true)
       expectNoDifference(model.accountButtonTitle, "Sign In with Playola…")

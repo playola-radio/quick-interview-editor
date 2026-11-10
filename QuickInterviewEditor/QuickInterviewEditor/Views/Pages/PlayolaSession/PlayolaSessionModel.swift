@@ -41,6 +41,7 @@ final class PlayolaSessionModel: ViewModel {
   private(set) var signOutFailed = false
   private var generation = 0
   private var didLaunch = false
+  private var signOutInProgress = false
 
   // MARK: - User Actions
   func appLaunched() async {
@@ -91,7 +92,9 @@ final class PlayolaSessionModel: ViewModel {
   }
 
   func signOutTapped() async {
-    guard case .signedIn = account.status else { return }
+    guard case .signedIn = account.status, !signOutInProgress else { return }
+    signOutInProgress = true
+    defer { signOutInProgress = false }
     generation += 1
     let environment = account.environment
     let generation = generation

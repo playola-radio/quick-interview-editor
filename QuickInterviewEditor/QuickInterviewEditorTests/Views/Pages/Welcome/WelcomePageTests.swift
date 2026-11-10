@@ -97,6 +97,20 @@ struct WelcomePageTests {
     }
   }
 
+  @Test func gateIsPassThroughForAnOpenedProjectWithMissingAudio() async {
+    await withDependencies {
+      Self.base(&$0)
+    } operation: {
+      let session = await Self.signedOutSession()
+      let (sink, _) = ProjectDocumentSink.recorder()
+      let project = ProjectModel(file: Fixtures.projectFile(), plan: nil, audio: nil, sink: sink)
+      let model = WelcomePageModel(session: session, project: project)
+
+      expectNoDifference(project.phase, .queued)
+      expectNoDifference(model.gate, .passThrough)
+    }
+  }
+
   @Test func useLocalFileTappedPassesThroughForThisWindowOnly() async {
     await withDependencies {
       Self.base(&$0)
@@ -173,6 +187,23 @@ struct WelcomePageTests {
     }
   }
 
+  @Test func nonAudioDropWhileModelSetupIsRequiredKeepsWelcomeVisible() async {
+    await withDependencies {
+      Self.base(&$0)
+    } operation: {
+      let session = await Self.signedOutSession()
+      let project = Self.emptyProject()
+      let model = WelcomePageModel(session: session, project: project)
+
+      let taken = model.fileDropped(
+        [URL(fileURLWithPath: "/doc.pdf")], modelSetupRequired: true)
+
+      #expect(!taken)
+      expectNoDifference(model.gate, .welcome)
+      expectNoDifference(project.phase, .empty)
+    }
+  }
+
   @Test func fileDroppedIgnoresNonAudioFiles() async {
     await withDependencies {
       Self.base(&$0)
@@ -201,7 +232,8 @@ struct WelcomePageTests {
 
       expectNoDifference(model.title, "Welcome to Playola Interview Editor")
       expectNoDifference(
-        model.message, "Sign in with your Playola account to get the interviews assigned to you.")
+        model.message,
+        "Sign in with your Playola account to get ready for future assigned interviews.")
       expectNoDifference(model.notice, nil)
       expectNoDifference(model.showsProgress, false)
       expectNoDifference(model.showsSignInButtons, true)

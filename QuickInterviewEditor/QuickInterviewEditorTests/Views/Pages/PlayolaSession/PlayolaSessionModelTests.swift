@@ -653,6 +653,33 @@ struct PlayolaSessionModelTests {
       expectNoDifference(model.signOutFailed, true)
     }
   }
+
+  @Test func secondSignOutIsIgnoredWhileTheFirstDeletionIsPending() async throws {
+    let gate = Gate()
+    let deletes = LockIsolated(0)
+    var store = PlayolaTokenStore.inMemory([.production: "T"])
+    store.delete = { _ in
+      deletes.withValue { $0 += 1 }
+      await gate.pass()
+    }
+    try await withDependencies {
+      Self.base(&$0)
+      $0.playolaTokenStore = store
+      $0.playolaAPI.currentUser = { _, _ in Self.user }
+    } operation: {
+      let model = PlayolaSessionModel()
+      await model.appLaunched()
+
+      let first = Task { await model.signOutTapped() }
+      await gate.waitUntilStarted()
+      let second = Task { await model.signOutTapped() }
+
+      expectNoDifference(deletes.value, 1)
+      gate.open()
+      await first.value
+      await second.value
+    }
+  }
 }
 
 // MARK: - Test doubles
