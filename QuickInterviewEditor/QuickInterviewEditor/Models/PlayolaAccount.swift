@@ -1,0 +1,31 @@
+import Foundation
+
+struct PlayolaAccount: Equatable, Sendable {
+  var environment: PlayolaEnvironment
+  var status: Status
+
+  enum Status: Equatable, Sendable {
+    case restoring
+    case signedOut(SignedOutReason?)
+    case signedIn(PlayolaUser?)
+  }
+
+  enum SignedOutReason: Equatable, Sendable {
+    case rejectedByPlayola
+  }
+
+  var isSignedOut: Bool {
+    if case .signedOut = status { return true }
+    return false
+  }
+}
+
+struct PlayolaUser: Equatable, Sendable, Decodable {
+  var firstName: String
+  var lastName: String?
+  var email: String
+
+  var displayName: String {
+    [firstName, lastName ?? ""].filter { !$0.isEmpty }.joined(separator: " ")
+  }
+}

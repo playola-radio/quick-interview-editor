@@ -1,6 +1,11 @@
 import AppKit
 import SwiftUI
 
+var isRunningUnitTests: Bool {
+  NSClassFromString("XCTestCase") != nil
+    || ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+}
+
 /// Drops the plain File ▸ Save (⌘S) command `DocumentGroup` installs, which deadlocks the main
 /// thread against autosave-in-place (see `SaveMenuSurgery`). Autosave already persists everything.
 ///
@@ -20,11 +25,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       name: NSMenu.didAddItemNotification,
       object: nil)
     removePlainSave()
-  }
-
-  private var isRunningUnitTests: Bool {
-    NSClassFromString("XCTestCase") != nil
-      || ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
   }
 
   @objc private func menuDidAddItem(_ note: Notification) {
@@ -51,18 +51,31 @@ struct QuickInterviewEditorApp: App {
   @State private var suggestionSettings = SuggestionSettingsModel(isSettingsTab: true)
   @State private var clipSettings = ClipBoundarySettingsModel()
   @State private var playbackLatencySettings = PlaybackLatencySettingsModel()
+  @State private var session: PlayolaSessionModel
+  @State private var playolaSettings: PlayolaSettingsModel
+
+  init() {
+    let session = PlayolaSessionModel()
+    _session = State(initialValue: session)
+    _playolaSettings = State(initialValue: PlayolaSettingsModel(session: session))
+    if !isRunningUnitTests {
+      Task { await session.appLaunched() }
+    }
+  }
 
   var body: some Scene {
     DocumentGroup(
       newDocument: { ProjectDocument() },
       editor: { configuration in
-        ProjectHostView(document: configuration.document, fileURL: configuration.fileURL)
-          // One model per document instance: a Revert/Duplicate that swaps the document
-          // object rebuilds the host rather than reusing a model bound to the old one.
-          .id(ObjectIdentifier(configuration.document))
-          .environment(launch)
-          .environment(suggestionSettings)
-          .preferredColorScheme(.dark)
+        ProjectHostView(
+          document: configuration.document, fileURL: configuration.fileURL, session: session
+        )
+        // One model per document instance: a Revert/Duplicate that swaps the document
+        // object rebuilds the host rather than reusing a model bound to the old one.
+        .id(ObjectIdentifier(configuration.document))
+        .environment(launch)
+        .environment(suggestionSettings)
+        .preferredColorScheme(.dark)
       }
     )
     .defaultSize(width: 1200, height: 800)
@@ -82,6 +95,8 @@ struct QuickInterviewEditorApp: App {
           .tabItem { Label("Editing", systemImage: "slider.horizontal.3") }
         PlaybackLatencySettingsView(model: playbackLatencySettings)
           .tabItem { Label("Playback Latency", systemImage: "wave.3.right") }
+        PlayolaSettingsView(model: playolaSettings)
+          .tabItem { Label(playolaSettings.tabTitle, systemImage: playolaSettings.tabSystemImage) }
       }
       .preferredColorScheme(.dark)
     }
